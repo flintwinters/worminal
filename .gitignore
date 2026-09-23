@@ -1,6 +1,5 @@
-node_modules/
-dist/
-src-tauri/target/
-src-tauri/gen/
-.tools/
+worminal
+*.o
 __pycache__/
+.checks/
+.tools/
