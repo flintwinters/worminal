@@ -257,6 +257,7 @@ static char *opt_io    = NULL;
 static char *opt_line  = NULL;
 static char *opt_name  = NULL;
 static char *opt_title = NULL;
+static int startup_ttyfd;
 
 static uint buttons; /* bit field of pressed buttons */
 
@@ -265,6 +266,18 @@ xstartupevent(const char *event, int value)
 {
 	if (getenv("WORMINAL_TRACE_STARTUP"))
 		fprintf(stderr, "worminal-startup %s %d\n", event, value);
+}
+
+static void
+xstartuptime(const char *event)
+{
+	struct timespec now;
+
+	if (!getenv("WORMINAL_TRACE_TIMING"))
+		return;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	fprintf(stderr, "worminal-timing %s %lld\n", event,
+	        (long long)now.tv_sec * 1000000000LL + now.tv_nsec);
 }
 
 void
@@ -1195,18 +1208,43 @@ xinit(int cols, int rows)
 
 	if (!(xw.dpy = XOpenDisplay(NULL)))
 		die("can't open display\n");
+	xstartuptime("display");
 	xw.scr = XDefaultScreen(xw.dpy);
 	xw.vis = XDefaultVisual(xw.dpy, xw.scr);
+	xw.cmap = XDefaultColormap(xw.dpy, xw.scr);
+	root = XRootWindow(xw.dpy, xw.scr);
+	if (!(opt_embed && (parent = strtol(opt_embed, NULL, 0))))
+		parent = root;
+
+	/* The unmapped window supplies WINDOWID while the shell and font setup
+	 * proceed together. Give the PTY its initial cell size before exec. */
+	xw.attrs.background_pixel = BlackPixel(xw.dpy, xw.scr);
+	xw.attrs.border_pixel = xw.attrs.background_pixel;
+	xw.attrs.bit_gravity = NorthWestGravity;
+	xw.attrs.event_mask = FocusChangeMask | KeyPressMask | KeyReleaseMask
+		| ExposureMask | VisibilityChangeMask | StructureNotifyMask
+		| ButtonMotionMask | ButtonPressMask | ButtonReleaseMask;
+	xw.attrs.colormap = xw.cmap;
+	xw.win = XCreateWindow(xw.dpy, root, xw.l, xw.t,
+			1, 1, 0, XDefaultDepth(xw.dpy, xw.scr), InputOutput,
+			xw.vis, CWBackPixel | CWBorderPixel | CWBitGravity
+			| CWEventMask | CWColormap, &xw.attrs);
+	if (parent != root)
+		XReparentWindow(xw.dpy, xw.win, parent, xw.l, xw.t);
+	xsetenv();
+	startup_ttyfd = ttynew(opt_line, shell, opt_io, opt_cmd);
+	xstartuptime("pty");
 
 	/* font */
 	if (!FcInit())
 		die("could not init fontconfig.\n");
+	xstartuptime("fontconfig");
 
 	usedfont = (opt_font == NULL)? font : opt_font;
 	xloadfonts(usedfont, 0);
+	xstartuptime("font");
 
 	/* colors */
-	xw.cmap = XDefaultColormap(xw.dpy, xw.scr);
 	xloadcols();
 
 	/* adjust fixed window geometry */
@@ -1217,24 +1255,9 @@ xinit(int cols, int rows)
 	if (xw.gm & YNegative)
 		xw.t += DisplayHeight(xw.dpy, xw.scr) - win.h - 2;
 
-	/* Events */
-	xw.attrs.background_pixel = dc.col[defaultbg].pixel;
-	xw.attrs.border_pixel = dc.col[defaultbg].pixel;
-	xw.attrs.bit_gravity = NorthWestGravity;
-	xw.attrs.event_mask = FocusChangeMask | KeyPressMask | KeyReleaseMask
-		| ExposureMask | VisibilityChangeMask | StructureNotifyMask
-		| ButtonMotionMask | ButtonPressMask | ButtonReleaseMask;
-	xw.attrs.colormap = xw.cmap;
-
-	root = XRootWindow(xw.dpy, xw.scr);
-	if (!(opt_embed && (parent = strtol(opt_embed, NULL, 0))))
-		parent = root;
-	xw.win = XCreateWindow(xw.dpy, root, xw.l, xw.t,
-			win.w, win.h, 0, XDefaultDepth(xw.dpy, xw.scr), InputOutput,
-			xw.vis, CWBackPixel | CWBorderPixel | CWBitGravity
-			| CWEventMask | CWColormap, &xw.attrs);
-	if (parent != root)
-		XReparentWindow(xw.dpy, xw.win, parent, xw.l, xw.t);
+	XMoveResizeWindow(xw.dpy, xw.win, xw.l, xw.t, win.w, win.h);
+	XSetWindowBackground(xw.dpy, xw.win, dc.col[defaultbg].pixel);
+	XSetWindowBorder(xw.dpy, xw.win, dc.col[defaultbg].pixel);
 
 	memset(&gcvalues, 0, sizeof(gcvalues));
 	gcvalues.graphics_exposures = False;
@@ -1289,7 +1312,8 @@ xinit(int cols, int rows)
 	resettitle();
 	xhints();
 	XMapWindow(xw.dpy, xw.win);
-	XSync(xw.dpy, False);
+	/* run() waits for MapNotify; XNextEvent flushes the map request. */
+	xstartuptime("map-request");
 
 	clock_gettime(CLOCK_MONOTONIC, &xsel.tclick1);
 	clock_gettime(CLOCK_MONOTONIC, &xsel.tclick2);
@@ -1894,6 +1918,7 @@ kmap(KeySym k, uint state)
 void
 kpress(XEvent *ev)
 {
+	static int firstkey = 1;
 	XKeyEvent *e = &ev->xkey;
 	KeySym ksym = NoSymbol;
 	char buf[64], *customkey;
@@ -1904,6 +1929,10 @@ kpress(XEvent *ev)
 
 	if (IS_SET(MODE_KBDLOCK))
 		return;
+	if (firstkey) {
+		firstkey = 0;
+		xstartuptime("key");
+	}
 
 	if (xw.ime.xic) {
 		len = XmbLookupString(xw.ime.xic, e, buf, sizeof buf, &ksym, &status);
@@ -1979,7 +2008,7 @@ run(void)
 	XEvent ev;
 	int w = win.w, h = win.h;
 	fd_set rfd;
-	int xfd = XConnectionNumber(xw.dpy), ttyfd, xev, drawing;
+	int xfd = XConnectionNumber(xw.dpy), ttyfd = startup_ttyfd, xev, drawing;
 	struct timespec seltv, *tv, now, lastblink, trigger;
 	double timeout;
 
@@ -1999,9 +2028,10 @@ run(void)
 		}
 	} while (ev.type != MapNotify);
 	xstartupevent("mapped", 0);
+	xstartuptime("mapped");
 
-	ttyfd = ttynew(opt_line, shell, opt_io, opt_cmd);
 	cresize(w, h);
+	xstartuptime("resize");
 
 	for (timeout = -1, drawing = 0, lastblink = (struct timespec){0};;) {
 		FD_ZERO(&rfd);
@@ -2093,6 +2123,7 @@ usage(void)
 int
 main(int argc, char *argv[])
 {
+	xstartuptime("main");
 	xw.l = xw.t = 0;
 	xw.isfixed = False;
 	xsetcursor(cursorshape);
@@ -2154,7 +2185,6 @@ run:
 	rows = MAX(rows, 1);
 	tnew(cols, rows);
 	xinit(cols, rows);
-	xsetenv();
 	selinit();
 	run();
 

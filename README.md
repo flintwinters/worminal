@@ -18,9 +18,11 @@ python3 manage.py run
 
 The build uses `-O3` by default. `python3 manage.py check` builds and runs native
 checks. `python3 manage.py latency` reports median and 95th percentile launch to
-first key echo across 20 runs. Both commands need `Xvfb` and `xdotool`, and use a
-private Xvfb display so no windows or keystrokes reach your desktop. The latency
-probe uses `/bin/cat` to avoid shell startup and does not include Xvfb startup.
+first key echo across 20 runs. `python3 manage.py latency-shell` measures when
+your interactive shell reads that input. These commands use a private Xvfb
+display, so no windows or keystrokes reach your desktop. Checks and benchmarks
+need `Xvfb`, `xdotool`, and the XTest development library (`libxtst-dev` on
+Debian). The `/bin/cat` probe excludes shell startup; both exclude Xvfb startup.
 `make install` installs the binary and the `st-256color` terminfo entry.
 The installed `stterm` package also supplies that entry.
 
