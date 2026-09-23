@@ -22,6 +22,9 @@ def main():
         if subprocess.run(["make", "-s", ".checks/key_injector"]).returncode:
             return 1
     if command == "check":
+        if subprocess.run(["make", "-s", ".checks/placement_wm"]).returncode:
+            return 1
+    if command == "check":
         return subprocess.run(
             [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-q"]
         ).returncode
