@@ -1,7 +1,7 @@
 # Worminal
 
-Worminal is a small desktop terminal. Prioritize the path from launch to usable shell input, compact text rows, and familiar Alacritty colors over interface chrome.
+Worminal is a deliberately small terminal. Favor cold launch to usable input and low memory over interface features; measure both before adding complexity.
 
-The app is Tauri 2 with a Rust PTY backend and a static xterm.js frontend. Rust starts one shell on a worker after app setup; early input and resize requests queue until it is ready, and initial output is buffered until the webview attaches. The frontend owns rendering, resize, and the persisted line height setting. Theme colors come from Alacritty TOML files and their imports.
+The app is an X11-native fork of st 0.9.3. Its C source handles the window, terminal state, and PTY directly. `config.h` is the single configuration source, `config.mk` selects the default `-O3` build, and `manage.py` is the root build and check entrypoint. The upstream source and license remain in the repository.
 
-Current job: measure launch to usable input on a real desktop, then optimize the remaining delay before adding features.
+Current job: verify launch and keyboard input on a real desktop, measure cold startup and proportional memory, then address the largest observed cost.
