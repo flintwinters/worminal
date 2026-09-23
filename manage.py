@@ -36,6 +36,11 @@ def main():
     if command == "check":
         if subprocess.run(["make", "-s", ".checks/placement_wm"]).returncode:
             return 1
+        if subprocess.run(["make", "-s", ".checks/scrollback_test"]).returncode:
+            return 1
+        if subprocess.run([".checks/scrollback_test"],
+                          env={**os.environ, "ASAN_OPTIONS": "detect_leaks=0"}).returncode:
+            return 1
     if command == "check":
         return subprocess.run(
             [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-q"]
