@@ -18,8 +18,10 @@ python3 manage.py run
 
 The build uses `-O3` by default. `python3 manage.py check` builds and runs native
 checks. `python3 manage.py latency` reports median and 95th percentile launch to
-first key echo across 20 runs. `python3 manage.py latency-shell` measures when
-your interactive shell reads that input. These commands use a private Xvfb
+the first key queued by X and then echoed across 20 runs.
+`python3 manage.py latency-shell` measures when your interactive shell reads
+that input. Worminal maps a blank, provisional window before loading fonts, so X can queue early
+keystrokes until the terminal processes them. These commands use a private Xvfb
 display, so no windows or keystrokes reach your desktop. Checks and benchmarks
 need `Xvfb`, `xdotool`, and the XTest development library (`libxtst-dev` on
 Debian). The `/bin/cat` probe excludes shell startup; both exclude Xvfb startup.

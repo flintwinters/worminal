@@ -21,7 +21,7 @@ from x11 import isolated_display
 ROOT = Path(__file__).resolve().parent.parent
 TRIALS = 20
 TIMEOUT = 5
-PHASES = ("main", "display", "pty", "fontconfig", "font", "map-request", "mapped", "resize", "key", "echo")
+PHASES = ("main", "display", "pty", "map-request", "fontconfig", "font", "map-observed", "resize", "key", "echo")
 SHELL_MARKER = b"__WORMINAL_SHELL_READY__"
 
 
@@ -31,6 +31,7 @@ def measure_one(env, index, shell=False):
     injector = None
     trace = b""
     injector_error = b""
+    injector_output = b""
     injector_status = None
     finished = None
     started = None
@@ -88,10 +89,10 @@ def measure_one(env, index, shell=False):
             if injector.poll() is None:
                 injector.terminate()
             try:
-                _, injector_error = injector.communicate(timeout=2)
+                injector_output, injector_error = injector.communicate(timeout=2)
             except subprocess.TimeoutExpired:
                 injector.kill()
-                _, injector_error = injector.communicate()
+                injector_output, injector_error = injector.communicate()
             injector_status = injector.returncode
 
     if finished is None:
@@ -101,14 +102,19 @@ def measure_one(env, index, shell=False):
             f"injector={injector_error.decode()} trace={trace.decode()}"
         )
     points = {"start": started, "echo": finished}
+    for line in injector_output.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0] == b"captured":
+            points["captured"] = int(parts[1])
     for line in trace.splitlines():
         parts = line.split()
         if len(parts) == 3 and parts[0] == b"worminal-timing":
             points[parts[1].decode()] = int(parts[2])
-    missing = set(PHASES) - points.keys()
+    missing = (set(PHASES) | {"captured"}) - points.keys()
     if missing:
         raise RuntimeError(f"Trial {index}: missing timing phases {sorted(missing)}: {trace.decode()}")
-    return {phase: (points[phase] - started) / 1_000_000 for phase in PHASES}
+    return {phase: (points[phase] - started) / 1_000_000
+            for phase in (*PHASES, "captured")}
 
 
 def main():
@@ -117,14 +123,12 @@ def main():
         raise SystemExit("Usage: latency.py [--shell]")
     with isolated_display() as env:
         samples = [measure_one(env, index, shell=shell) for index in range(TRIALS)]
-    ordered = sorted(sample["echo"] for sample in samples)
-    p95 = ordered[(95 * TRIALS + 99) // 100 - 1]
-    print(
-        f"Launch to {'shell input read' if shell else 'first key echo'}: "
-        f"median {statistics.median(ordered):.1f} ms, "
-        f"p95 {p95:.1f} ms (n={TRIALS}, private Xvfb, "
-        f"{os.environ.get('SHELL', '/bin/sh') if shell else '/bin/cat'})"
-    )
+    for phase, label in (("captured", "key queued by X"),
+                         ("echo", "shell input read" if shell else "first key echo")):
+        ordered = sorted(sample[phase] for sample in samples)
+        p95 = ordered[(95 * TRIALS + 99) // 100 - 1]
+        print(f"Launch to {label}: median {statistics.median(ordered):.1f} ms, "
+              f"p95 {p95:.1f} ms (n={TRIALS}, private Xvfb)")
     previous = "start"
     for phase in PHASES:
         duration = statistics.median(sample[phase] - sample.get(previous, 0) for sample in samples)

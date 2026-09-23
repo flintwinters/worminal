@@ -96,3 +96,5 @@ class NativeTerminalTest(unittest.TestCase):
         with isolated_display() as env:
             sample = measure_one(env, 0)
             self.assertGreater(sample["echo"], sample["key"])
+            self.assertLess(sample["map-request"], sample["fontconfig"])
+            self.assertLess(sample["captured"], sample["echo"])

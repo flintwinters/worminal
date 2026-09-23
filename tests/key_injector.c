@@ -1,6 +1,8 @@
 /* Wait for the benchmark window on a private X display, then send one key. */
+#define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
@@ -14,6 +16,7 @@ main(int argc, char **argv)
 	Window root;
 	KeyCode key;
 	XTextProperty title;
+	struct timespec now;
 
 	if ((argc != 2 && argc != 3) || !(display = XOpenDisplay(NULL)))
 		return 1;
@@ -51,6 +54,10 @@ main(int argc, char **argv)
 		XTestFakeKeyEvent(display, key, False, CurrentTime);
 	}
 	XSync(display, False);
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	printf("captured %lld\n",
+	       (long long)now.tv_sec * 1000000000LL + now.tv_nsec);
+	fflush(stdout);
 	XCloseDisplay(display);
 	return 0;
 }
