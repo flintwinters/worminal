@@ -14,6 +14,59 @@ from latency import measure_one
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def check_placement(env, geometry, expected):
+    title = f"Worminal placement {os.getpid()} {'explicit' if geometry else 'default'}"
+    manager = subprocess.Popen(
+        [str(ROOT / ".checks/placement_wm")], env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
+    )
+    terminal = None
+    try:
+        ready, _, _ = select.select([manager.stdout], [], [], 5)
+        if not ready or manager.stdout.readline() != b"ready\n":
+            raise AssertionError("Private test window manager did not start")
+        command = [str(ROOT / "worminal"), "-T", title]
+        if geometry:
+            command += ["-g", geometry]
+        command += ["-e", "/bin/cat"]
+        terminal = subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.PIPE)
+
+        events = b""
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not all(
+            event in events for event in (b"mapped\n", b"configured\n")
+        ):
+            ready, _, _ = select.select([manager.stdout], [], [], 0.1)
+            if ready:
+                events += os.read(manager.stdout.fileno(), 4096)
+            if terminal.poll() is not None:
+                raise AssertionError(f"Worminal exited: {terminal.communicate()[1].decode()}")
+        if not all(event in events for event in (b"mapped\n", b"configured\n")):
+            raise AssertionError(f"Window manager did not see mapping and resize: {events!r}")
+
+        window = subprocess.check_output(
+            ["xdotool", "search", "--onlyvisible", "--name", title],
+            env=env, text=True,
+        ).splitlines()[0]
+        lines = subprocess.check_output(
+            ["xdotool", "getwindowgeometry", "--shell", window], env=env, text=True,
+        ).splitlines()
+        position = {key: int(value) for key, value in (line.split("=", 1) for line in lines)}
+        if (position["X"], position["Y"]) != expected:
+            raise AssertionError(f"Window placed at {position['X']}, {position['Y']}; expected {expected}")
+    finally:
+        for process in (terminal, manager):
+            if process is not None:
+                if process.poll() is None:
+                    process.terminate()
+                try:
+                    process.communicate(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.communicate()
+
+
 def smoke_x11(env):
     result_path = ROOT / ".checks" / "input"
     result_path.parent.mkdir(exist_ok=True)
@@ -98,3 +151,8 @@ class NativeTerminalTest(unittest.TestCase):
             self.assertGreater(sample["echo"], sample["key"])
             self.assertLess(sample["map-request"], sample["fontconfig"])
             self.assertLess(sample["captured"], sample["echo"])
+
+    def test_window_manager_placement(self):
+        for geometry, expected in ((None, (100, 80)), ("80x24+37+53", (37, 53))):
+            with self.subTest(geometry=geometry), isolated_display() as env:
+                check_placement(env, geometry, expected)
