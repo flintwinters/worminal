@@ -4,6 +4,8 @@
 #include <limits.h>
 #include <locale.h>
 #include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <sys/select.h>
 #include <time.h>
 #include <unistd.h>
@@ -135,6 +137,7 @@ typedef struct {
 /* Drawing Context */
 typedef struct {
 	Color *col;
+	unsigned char *colloaded;
 	size_t collen;
 	Font font, bfont, ifont, ibfont;
 	GC gc;
@@ -155,7 +158,9 @@ static void cresize(int, int);
 static void xresize(int, int);
 static void xhints(void);
 static int xloadcolor(int, const char *, Color *);
+static Color *xcolor(int);
 static int xloadfont(Font *, FcPattern *);
+static Font *xgetfont(ushort);
 static void xloadfonts(const char *, double);
 static void xunloadfont(Font *);
 static void xunloadfonts(void);
@@ -240,6 +245,7 @@ static Fontcache *frc = NULL;
 static int frclen = 0;
 static int frccap = 0;
 static char *usedfont = NULL;
+static FcPattern *stylepattern = NULL;
 static double usedfontsize = 0;
 static double defaultfontsize = 0;
 
@@ -253,6 +259,13 @@ static char *opt_name  = NULL;
 static char *opt_title = NULL;
 
 static uint buttons; /* bit field of pressed buttons */
+
+static void
+xstartupevent(const char *event, int value)
+{
+	if (getenv("WORMINAL_TRACE_STARTUP"))
+		fprintf(stderr, "worminal-startup %s %d\n", event, value);
+}
 
 void
 clipcopy(const Arg *dummy)
@@ -770,60 +783,75 @@ int
 xloadcolor(int i, const char *name, Color *ncolor)
 {
 	XRenderColor color = { .alpha = 0xffff };
+	int loaded;
 
-	if (!name) {
-		if (BETWEEN(i, 16, 255)) { /* 256 color */
-			if (i < 6*6*6+16) { /* same colors as xterm */
-				color.red   = sixd_to_16bit( ((i-16)/36)%6 );
-				color.green = sixd_to_16bit( ((i-16)/6) %6 );
-				color.blue  = sixd_to_16bit( ((i-16)/1) %6 );
-			} else { /* greyscale */
-				color.red = 0x0808 + 0x0a0a * (i - (6*6*6+16));
-				color.green = color.blue = color.red;
-			}
-			return XftColorAllocValue(xw.dpy, xw.vis,
-			                          xw.cmap, &color, ncolor);
-		} else
+	if (!name && BETWEEN(i, 16, 255)) { /* 256 color */
+		if (i < 6*6*6+16) { /* same colors as xterm */
+			color.red   = sixd_to_16bit( ((i-16)/36)%6 );
+			color.green = sixd_to_16bit( ((i-16)/6) %6 );
+			color.blue  = sixd_to_16bit( ((i-16)/1) %6 );
+		} else { /* greyscale */
+			color.red = 0x0808 + 0x0a0a * (i - (6*6*6+16));
+			color.green = color.blue = color.red;
+		}
+		loaded = XftColorAllocValue(xw.dpy, xw.vis,
+		                            xw.cmap, &color, ncolor);
+	} else {
+		if (!name)
 			name = colorname[i];
+		loaded = XftColorAllocName(xw.dpy, xw.vis, xw.cmap,
+				name, ncolor);
 	}
+	if (loaded)
+		xstartupevent(i == defaultbg ? "background" : "color", i);
+	return loaded;
+}
 
-	return XftColorAllocName(xw.dpy, xw.vis, xw.cmap, name, ncolor);
+static Color *
+xcolor(int i)
+{
+	if (!dc.colloaded[i]) {
+		if (!xloadcolor(i, NULL, &dc.col[i]))
+			die("could not allocate color %d\n", i);
+		dc.colloaded[i] = 1;
+	}
+	return &dc.col[i];
 }
 
 void
 xloadcols(void)
 {
-	int i;
-	static int loaded;
-	Color *cp;
+	size_t i;
 
-	if (loaded) {
-		for (cp = dc.col; cp < &dc.col[dc.collen]; ++cp)
-			XftColorFree(xw.dpy, xw.vis, xw.cmap, cp);
+	if (dc.col) {
+		for (i = 0; i < dc.collen; ++i)
+			if (dc.colloaded[i])
+				XftColorFree(xw.dpy, xw.vis, xw.cmap, &dc.col[i]);
+		memset(dc.colloaded, 0, dc.collen);
 	} else {
 		dc.collen = MAX(LEN(colorname), 256);
 		dc.col = xmalloc(dc.collen * sizeof(Color));
+		dc.colloaded = xmalloc(dc.collen);
+		memset(dc.colloaded, 0, dc.collen);
 	}
 
-	for (i = 0; i < dc.collen; i++)
-		if (!xloadcolor(i, NULL, &dc.col[i])) {
-			if (colorname[i])
-				die("could not allocate color '%s'\n", colorname[i]);
-			else
-				die("could not allocate color %d\n", i);
-		}
-	loaded = 1;
+	/* The X window needs only its background before mapping. Other colors
+	 * are allocated by xcolor when terminal output uses them. */
+	xcolor(defaultbg);
 }
 
 int
 xgetcolor(int x, unsigned char *r, unsigned char *g, unsigned char *b)
 {
+	Color *color;
+
 	if (!BETWEEN(x, 0, dc.collen - 1))
 		return 1;
 
-	*r = dc.col[x].color.red >> 8;
-	*g = dc.col[x].color.green >> 8;
-	*b = dc.col[x].color.blue >> 8;
+	color = xcolor(x);
+	*r = color->color.red >> 8;
+	*g = color->color.green >> 8;
+	*b = color->color.blue >> 8;
 
 	return 0;
 }
@@ -839,8 +867,10 @@ xsetcolorname(int x, const char *name)
 	if (!xloadcolor(x, name, &ncolor))
 		return 1;
 
-	XftColorFree(xw.dpy, xw.vis, xw.cmap, &dc.col[x]);
+	if (dc.colloaded[x])
+		XftColorFree(xw.dpy, xw.vis, xw.cmap, &dc.col[x]);
 	dc.col[x] = ncolor;
+	dc.colloaded[x] = 1;
 
 	return 0;
 }
@@ -852,7 +882,7 @@ void
 xclear(int x1, int y1, int x2, int y2)
 {
 	XftDrawRect(xw.draw,
-			&dc.col[IS_SET(MODE_REVERSE)? defaultfg : defaultbg],
+			xcolor(IS_SET(MODE_REVERSE)? defaultfg : defaultbg),
 			x1, y1, x2-x1, y2-y1);
 }
 
@@ -1032,31 +1062,57 @@ xloadfonts(const char *fontstr, double fontsize)
 	win.cw = ceilf(dc.font.width * cwscale);
 	win.ch = ceilf(dc.font.height * chscale);
 
+	/* Preserve the original pattern so styled fonts can be opened when a
+	 * styled glyph is first drawn, after the window has mapped. */
+	stylepattern = pattern;
+}
+
+static Font *
+xgetfont(ushort mode)
+{
+	Font *font;
+	FcPattern *pattern;
+
+	if ((mode & (ATTR_ITALIC | ATTR_BOLD)) ==
+			(ATTR_ITALIC | ATTR_BOLD))
+		font = &dc.ibfont;
+	else if (mode & ATTR_ITALIC)
+		font = &dc.ifont;
+	else if (mode & ATTR_BOLD)
+		font = &dc.bfont;
+	else
+		return &dc.font;
+
+	if (font->match)
+		return font;
+
+	pattern = FcPatternDuplicate(stylepattern);
+	if (!pattern)
+		die("could not duplicate font pattern\n");
 	FcPatternDel(pattern, FC_SLANT);
-	FcPatternAddInteger(pattern, FC_SLANT, FC_SLANT_ITALIC);
-	if (xloadfont(&dc.ifont, pattern))
-		die("can't open font %s\n", fontstr);
-
-	FcPatternDel(pattern, FC_WEIGHT);
-	FcPatternAddInteger(pattern, FC_WEIGHT, FC_WEIGHT_BOLD);
-	if (xloadfont(&dc.ibfont, pattern))
-		die("can't open font %s\n", fontstr);
-
-	FcPatternDel(pattern, FC_SLANT);
-	FcPatternAddInteger(pattern, FC_SLANT, FC_SLANT_ROMAN);
-	if (xloadfont(&dc.bfont, pattern))
-		die("can't open font %s\n", fontstr);
-
+	FcPatternAddInteger(pattern, FC_SLANT,
+			(mode & ATTR_ITALIC) ? FC_SLANT_ITALIC : FC_SLANT_ROMAN);
+	if (mode & ATTR_BOLD) {
+		FcPatternDel(pattern, FC_WEIGHT);
+		FcPatternAddInteger(pattern, FC_WEIGHT, FC_WEIGHT_BOLD);
+	}
+	if (xloadfont(font, pattern))
+		die("can't open styled font %s\n", usedfont);
 	FcPatternDestroy(pattern);
+	xstartupevent("style", mode & (ATTR_ITALIC | ATTR_BOLD));
+	return font;
 }
 
 void
 xunloadfont(Font *f)
 {
+	if (!f->match)
+		return;
 	XftFontClose(xw.dpy, f->match);
 	FcPatternDestroy(f->pattern);
 	if (f->set)
 		FcFontSetDestroy(f->set);
+	memset(f, 0, sizeof(*f));
 }
 
 void
@@ -1070,6 +1126,8 @@ xunloadfonts(void)
 	xunloadfont(&dc.bfont);
 	xunloadfont(&dc.ifont);
 	xunloadfont(&dc.ibfont);
+	FcPatternDestroy(stylepattern);
+	stylepattern = NULL;
 }
 
 int
@@ -1270,17 +1328,14 @@ xmakeglyphfontspecs(XftGlyphFontSpec *specs, const Glyph *glyphs, int len, int x
 		/* Determine font for glyph if different from previous glyph. */
 		if (prevmode != mode) {
 			prevmode = mode;
-			font = &dc.font;
+			font = xgetfont(mode);
 			frcflags = FRC_NORMAL;
 			runewidth = win.cw * ((mode & ATTR_WIDE) ? 2.0f : 1.0f);
 			if ((mode & ATTR_ITALIC) && (mode & ATTR_BOLD)) {
-				font = &dc.ibfont;
 				frcflags = FRC_ITALICBOLD;
 			} else if (mode & ATTR_ITALIC) {
-				font = &dc.ifont;
 				frcflags = FRC_ITALIC;
 			} else if (mode & ATTR_BOLD) {
-				font = &dc.bfont;
 				frcflags = FRC_BOLD;
 			}
 			yp = winy + font->ascent;
@@ -1381,15 +1436,13 @@ xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len, int x, i
 	int winx = borderpx + x * win.cw, winy = borderpx + y * win.ch,
 	    width = charlen * win.cw;
 	Color *fg, *bg, *temp, revfg, revbg, truefg, truebg;
+	Font *font = xgetfont(base.mode);
 	XRenderColor colfg, colbg;
 	XRectangle r;
 
 	/* Fallback on color display for attributes not supported by the font */
-	if (base.mode & ATTR_ITALIC && base.mode & ATTR_BOLD) {
-		if (dc.ibfont.badslant || dc.ibfont.badweight)
-			base.fg = defaultattr;
-	} else if ((base.mode & ATTR_ITALIC && dc.ifont.badslant) ||
-	    (base.mode & ATTR_BOLD && dc.bfont.badweight)) {
+	if ((base.mode & ATTR_ITALIC && font->badslant) ||
+	    (base.mode & ATTR_BOLD && font->badweight)) {
 		base.fg = defaultattr;
 	}
 
@@ -1401,7 +1454,7 @@ xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len, int x, i
 		XftColorAllocValue(xw.dpy, xw.vis, xw.cmap, &colfg, &truefg);
 		fg = &truefg;
 	} else {
-		fg = &dc.col[base.fg];
+		fg = xcolor(base.fg);
 	}
 
 	if (IS_TRUECOL(base.bg)) {
@@ -1412,16 +1465,16 @@ xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len, int x, i
 		XftColorAllocValue(xw.dpy, xw.vis, xw.cmap, &colbg, &truebg);
 		bg = &truebg;
 	} else {
-		bg = &dc.col[base.bg];
+		bg = xcolor(base.bg);
 	}
 
 	/* Change basic system colors [0-7] to bright system colors [8-15] */
 	if ((base.mode & ATTR_BOLD_FAINT) == ATTR_BOLD && BETWEEN(base.fg, 0, 7))
-		fg = &dc.col[base.fg + 8];
+		fg = xcolor(base.fg + 8);
 
 	if (IS_SET(MODE_REVERSE)) {
 		if (fg == &dc.col[defaultfg]) {
-			fg = &dc.col[defaultbg];
+			fg = xcolor(defaultbg);
 		} else {
 			colfg.red = ~fg->color.red;
 			colfg.green = ~fg->color.green;
@@ -1433,7 +1486,7 @@ xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len, int x, i
 		}
 
 		if (bg == &dc.col[defaultbg]) {
-			bg = &dc.col[defaultfg];
+			bg = xcolor(defaultfg);
 		} else {
 			colbg.red = ~bg->color.red;
 			colbg.green = ~bg->color.green;
@@ -1541,10 +1594,10 @@ xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 		g.mode |= ATTR_REVERSE;
 		g.bg = defaultfg;
 		if (selected(cx, cy)) {
-			drawcol = dc.col[defaultcs];
+			drawcol = *xcolor(defaultcs);
 			g.fg = defaultrcs;
 		} else {
-			drawcol = dc.col[defaultrcs];
+			drawcol = *xcolor(defaultrcs);
 			g.fg = defaultcs;
 		}
 	} else {
@@ -1555,7 +1608,7 @@ xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 			g.fg = defaultbg;
 			g.bg = defaultcs;
 		}
-		drawcol = dc.col[g.bg];
+		drawcol = *xcolor(g.bg);
 	}
 
 	/* draw the new one */
@@ -1691,8 +1744,8 @@ xfinishdraw(void)
 	XCopyArea(xw.dpy, xw.buf, xw.win, dc.gc, 0, 0, win.w,
 			win.h, 0, 0);
 	XSetForeground(xw.dpy, dc.gc,
-			dc.col[IS_SET(MODE_REVERSE)?
-				defaultfg : defaultbg].pixel);
+			xcolor(IS_SET(MODE_REVERSE)?
+				defaultfg : defaultbg)->pixel);
 }
 
 void
@@ -1945,6 +1998,7 @@ run(void)
 			h = ev.xconfigure.height;
 		}
 	} while (ev.type != MapNotify);
+	xstartupevent("mapped", 0);
 
 	ttyfd = ttynew(opt_line, shell, opt_io, opt_cmd);
 	cresize(w, h);
