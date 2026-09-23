@@ -3,7 +3,7 @@
 mod theme;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize, PtySystem};
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
 use std::{collections::VecDeque, io::Write, sync::{Arc, Mutex}};
 use tauri::{Emitter, Manager};
