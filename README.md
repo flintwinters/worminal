@@ -7,7 +7,7 @@ webview or JavaScript runtime.
 
 ## Build and run
 
-Install a C compiler, `make`, `pkg-config`, and the development headers for X11,
+Install Python 3.11+, a C compiler, `make`, `pkg-config`, and the development headers for X11,
 Xft, Fontconfig, and FreeType. On Debian, these are provided by `build-essential`,
 `pkg-config`, `libx11-dev`, `libxft-dev`, `libfontconfig-dev`, and `libfreetype-dev`.
 
@@ -15,6 +15,21 @@ Xft, Fontconfig, and FreeType. On Debian, these are provided by `build-essential
 python3 manage.py build
 python3 manage.py run
 ```
+
+`build` reads `~/.config/alacritty/alacritty.toml` (or the usual XDG Alacritty
+config path), follows `[general].import` in order, and compiles its colors into
+the binary. The importing file overrides imported colors. Set
+`WORMINAL_ALACRITTY_CONFIG=/path/to/theme.toml` while building to choose another
+file. Rebuild after theme changes; Worminal reads no TOML at launch. `run` starts
+the already-built binary without rebuilding. Launch `./worminal` directly to
+avoid Python startup time.
+
+Supported color settings are primary foreground/background, normal, bright,
+explicit dim and indexed colors, cursor colors, and
+`draw_bold_text_with_bright_colors`. Both `#RRGGBB` and `0xRRGGBB` are accepted.
+Missing colors use Alacritty defaults, including derived dim colors.
+`CellForeground` and `CellBackground` cursor references resolve to the primary
+colors. Selection colors and opacity retain st behavior.
 
 The build uses `-O3` by default. `python3 manage.py check` builds and runs native
 checks. `python3 manage.py latency` reports median and 95th percentile launch to
@@ -28,6 +43,6 @@ Debian). The `/bin/cat` probe excludes shell startup; both exclude Xvfb startup.
 `make install` installs the binary and the `st-256color` terminfo entry.
 The installed `stterm` package also supplies that entry.
 
-Edit [config.h](config.h) to customize st and rebuild. This first native slice
+Edit [config.h](config.h) for non-theme st settings and rebuild. This first native slice
 uses upstream st behavior, including its lack of scrollback. The previous Tauri
 implementation remains in Git history.
