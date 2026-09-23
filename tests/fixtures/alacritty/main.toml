@@ -3,3 +3,13 @@ import = ["theme.toml", "missing.toml"]
 
 [colors.primary]
 foreground = "#EEEEEE"
+
+[font]
+size = 9
+
+[font.offset]
+y = -3
+
+[scrolling]
+history = 64
+multiplier = 5

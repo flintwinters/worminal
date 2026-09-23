@@ -1045,6 +1045,13 @@ xloadfonts(const char *fontstr, double fontsize)
 	if (!pattern)
 		die("can't open font %s\n", fontstr);
 
+	/* The configured Alacritty point size sets the base font before cell spacing. */
+	if (fontsize == 0 && theme_font_size > 0) {
+		FcPatternDel(pattern, FC_PIXEL_SIZE);
+		FcPatternDel(pattern, FC_SIZE);
+		FcPatternAddDouble(pattern, FC_SIZE, theme_font_size);
+	}
+
 	if (fontsize > 1) {
 		FcPatternDel(pattern, FC_PIXEL_SIZE);
 		FcPatternDel(pattern, FC_SIZE);
@@ -1081,7 +1088,7 @@ xloadfonts(const char *fontstr, double fontsize)
 
 	/* Setting character width and height. */
 	win.cw = ceilf(dc.font.width * cwscale);
-	win.ch = ceilf(dc.font.height * chscale);
+	win.ch = MAX(1, (int)ceilf(dc.font.height * chscale) + theme_font_offset_y);
 
 	/* Preserve the original pattern so styled fonts can be opened when a
 	 * styled glyph is first drawn, after the window has mapped. */
