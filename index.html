@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Worminal</title>
+  </head>
+  <body>
+    <main id="terminal" aria-label="Terminal"></main>
+    <button id="settings-toggle" type="button" aria-label="Terminal settings" title="Terminal settings">⚙</button>
+    <section id="settings" hidden aria-label="Terminal settings">
+      <label for="line-height">Line height <output id="line-height-value"></output></label>
+      <input id="line-height" type="range" min="0.5" max="1.5" step="0.05" />
+      <p>Theme: Alacritty config and imports. Restart to reload.</p>
+    </section>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
