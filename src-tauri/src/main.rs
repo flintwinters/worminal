@@ -3,9 +3,9 @@
 mod theme;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::Serialize;
-use std::{collections::VecDeque, io::Write, sync::{Arc, Mutex}};
+use std::{collections::VecDeque, io::Write, sync::{mpsc, Arc, Mutex}};
 use tauri::{Emitter, Manager};
 
 #[derive(Clone, Serialize)]
@@ -24,10 +24,13 @@ struct OutputState {
 }
 
 struct PtyState {
-    master: Mutex<Box<dyn MasterPty + Send>>,
-    writer: Mutex<Box<dyn Write + Send>>,
+    commands: mpsc::Sender<PtyCommand>,
     output: Arc<Mutex<OutputState>>,
-    _child: Mutex<Box<dyn portable_pty::Child + Send + Sync>>,
+}
+
+enum PtyCommand {
+    Write(String),
+    Resize { cols: u16, rows: u16 },
 }
 
 #[derive(Serialize)]
@@ -36,7 +39,28 @@ struct Snapshot {
     next_sequence: u64,
 }
 
-fn spawn_terminal(app: tauri::AppHandle) -> Result<PtyState, String> {
+fn publish_output(app: &tauri::AppHandle, output: &Mutex<OutputState>, bytes: &[u8]) {
+    let (chunk, attached) = {
+        let mut state = output.lock().unwrap();
+        let chunk = OutputChunk {
+            sequence: state.next_sequence,
+            data: STANDARD.encode(bytes),
+            bytes: bytes.len(),
+        };
+        state.next_sequence += 1;
+        state.bytes += bytes.len();
+        state.chunks.push_back(chunk.clone());
+        while state.bytes > 1024 * 1024 {
+            if let Some(old) = state.chunks.pop_front() {
+                state.bytes -= old.bytes;
+            }
+        }
+        (chunk, state.attached)
+    };
+    if attached { let _ = app.emit("pty-output", chunk); }
+}
+
+fn run_terminal(app: tauri::AppHandle, output: Arc<Mutex<OutputState>>, commands: mpsc::Receiver<PtyCommand>) -> Result<(), String> {
     let pair = native_pty_system().openpty(PtySize {
         rows: 24, cols: 80, pixel_width: 0, pixel_height: 0,
     }).map_err(|e| e.to_string())?;
@@ -46,43 +70,34 @@ fn spawn_terminal(app: tauri::AppHandle) -> Result<PtyState, String> {
     let mut command = CommandBuilder::new(shell);
     command.env("TERM", "xterm-256color");
     command.env("COLORTERM", "truecolor");
-    let child = pair.slave.spawn_command(command).map_err(|e| e.to_string())?;
+    let _child = pair.slave.spawn_command(command).map_err(|e| e.to_string())?;
     drop(pair.slave);
     let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
-    let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
-    let output = Arc::new(Mutex::new(OutputState {
-        chunks: VecDeque::new(), bytes: 0, next_sequence: 0, attached: false,
-    }));
+    let mut writer = pair.master.take_writer().map_err(|e| e.to_string())?;
     let output_for_reader = output.clone();
+    let app_for_reader = app.clone();
     std::thread::spawn(move || {
         let mut reader = reader;
         let mut buffer = [0; 8192];
         while let Ok(count) = std::io::Read::read(&mut reader, &mut buffer) {
             if count == 0 { break; }
-            let (chunk, attached) = {
-                let mut state = output_for_reader.lock().unwrap();
-                let chunk = OutputChunk {
-                    sequence: state.next_sequence,
-                    data: STANDARD.encode(&buffer[..count]),
-                    bytes: count,
-                };
-                state.next_sequence += 1;
-                state.bytes += count;
-                state.chunks.push_back(chunk.clone());
-                while state.bytes > 1024 * 1024 {
-                    if let Some(old) = state.chunks.pop_front() {
-                        state.bytes -= old.bytes;
-                    }
-                }
-                (chunk, state.attached)
-            };
-            if attached { let _ = app.emit("pty-output", chunk); }
+            publish_output(&app_for_reader, &output_for_reader, &buffer[..count]);
         }
     });
-    Ok(PtyState {
-        master: Mutex::new(pair.master), writer: Mutex::new(writer),
-        output, _child: Mutex::new(child),
-    })
+
+    // The channel retains keystrokes and resize requests sent while the shell starts.
+    // One worker owns the PTY so those requests reach it in their original order.
+    for command in commands {
+        match command {
+            PtyCommand::Write(data) => writer.write_all(data.as_bytes()).map_err(|e| e.to_string())?,
+            PtyCommand::Resize { cols, rows } if cols > 0 && rows > 0 => {
+                pair.master.resize(PtySize { cols, rows, pixel_width: 0, pixel_height: 0 })
+                    .map_err(|e| e.to_string())?;
+            }
+            PtyCommand::Resize { .. } => {}
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -97,16 +112,12 @@ fn attach(state: tauri::State<'_, PtyState>) -> Snapshot {
 
 #[tauri::command]
 fn write_pty(state: tauri::State<'_, PtyState>, data: String) -> Result<(), String> {
-    state.writer.lock().map_err(|e| e.to_string())?
-        .write_all(data.as_bytes()).map_err(|e| e.to_string())
+    state.commands.send(PtyCommand::Write(data)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn resize_pty(state: tauri::State<'_, PtyState>, cols: u16, rows: u16) -> Result<(), String> {
-    if cols == 0 || rows == 0 { return Ok(()); }
-    state.master.lock().map_err(|e| e.to_string())?
-        .resize(PtySize { cols, rows, pixel_width: 0, pixel_height: 0 })
-        .map_err(|e| e.to_string())
+    state.commands.send(PtyCommand::Resize { cols, rows }).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -117,9 +128,17 @@ fn load_theme() -> serde_json::Value {
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
-            let terminal = spawn_terminal(app.handle().clone())
-                .map_err(std::io::Error::other)?;
-            app.manage(terminal);
+            let (commands, receiver) = mpsc::channel();
+            let output = Arc::new(Mutex::new(OutputState {
+                chunks: VecDeque::new(), bytes: 0, next_sequence: 0, attached: false,
+            }));
+            app.manage(PtyState { commands, output: output.clone() });
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                if let Err(error) = run_terminal(handle.clone(), output.clone(), receiver) {
+                    publish_output(&handle, &output, format!("\r\n\x1b[31mWorminal: {error}\x1b[0m\r\n").as_bytes());
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![attach, write_pty, resize_pty, load_theme])

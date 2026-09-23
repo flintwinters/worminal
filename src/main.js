@@ -84,19 +84,20 @@ function drain() {
 term.onData((data) => invoke('write_pty', { data }).catch(showError));
 async function connect() {
   try {
+    resizePty();
     await listen('pty-output', ({ payload }) => receive(payload));
     const snapshot = await invoke('attach');
     nextSequence = snapshot.chunks.length ? snapshot.chunks[0].sequence : snapshot.next_sequence;
     snapshot.chunks.forEach(receive);
     for (const [sequence] of pending) if (sequence < nextSequence) pending.delete(sequence);
     drain();
-    const theme = await invoke('load_theme');
-    term.options.theme = theme;
-    document.documentElement.style.background = theme.background || '#181818';
-    resizePty();
-    term.focus();
   } catch (error) {
     showError(error);
   }
 }
 connect();
+
+invoke('load_theme').then((theme) => {
+  term.options.theme = theme;
+  document.documentElement.style.background = theme.background || '#181818';
+}).catch(showError);
