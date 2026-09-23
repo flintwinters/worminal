@@ -3,17 +3,18 @@
 import os
 from pathlib import Path
 import select
-import shutil
 import subprocess
-import sys
 import time
 import unittest
+
+from x11 import isolated_display
+from latency import measure_one
 
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def smoke_x11():
+def smoke_x11(env):
     result_path = ROOT / ".checks" / "input"
     result_path.parent.mkdir(exist_ok=True)
     result_path.unlink(missing_ok=True)
@@ -23,7 +24,7 @@ def smoke_x11():
         r"\033[38;5;196mC\033[0m\n'; "
         'IFS= read -r value; [ "$value" = ready ] && printf yes > "$1"'
     )
-    env = os.environ.copy()
+    env = env.copy()
     env["WORMINAL_TRACE_STARTUP"] = "1"
     process = subprocess.Popen(
         [str(ROOT / "worminal"), "-T", title, "-e", "/bin/sh", "-c", script, "sh", str(result_path)],
@@ -36,7 +37,7 @@ def smoke_x11():
         deadline = time.monotonic() + 15
         window = None
         while time.monotonic() < deadline:
-            search = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", title], capture_output=True, text=True)
+            search = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", title], env=env, capture_output=True, text=True)
             if search.returncode == 0:
                 window = search.stdout.splitlines()[0]
                 break
@@ -66,9 +67,9 @@ def smoke_x11():
         if any(event in {"style", "color"} for event, _ in events[:mapped]):
             raise AssertionError(f"Palette or font styles loaded before mapping: {events}")
 
-        subprocess.run(["xdotool", "windowfocus", "--sync", window], check=True)
-        subprocess.run(["xdotool", "type", "--clearmodifiers", "--delay", "0", "ready"], check=True)
-        subprocess.run(["xdotool", "key", "Return"], check=True)
+        subprocess.run(["xdotool", "windowfocus", "--sync", window], env=env, check=True)
+        subprocess.run(["xdotool", "type", "--clearmodifiers", "--delay", "0", "ready"], env=env, check=True)
+        subprocess.run(["xdotool", "key", "Return"], env=env, check=True)
         process.communicate(timeout=10)
         if result_path.read_text() != "yes":
             raise AssertionError("The first typed command did not reach the shell")
@@ -87,17 +88,9 @@ class NativeTerminalTest(unittest.TestCase):
         self.assertTrue(all("-O3" in line.split() for line in compile_commands))
 
     def test_first_keystroke_reaches_shell(self):
-        for tool in ("xvfb-run", "xdotool"):
-            self.assertIsNotNone(shutil.which(tool), f"Install {tool} to run the X11 smoke check")
-        result = subprocess.run(
-            ["xvfb-run", "-a", sys.executable, str(Path(__file__).resolve()), "--smoke-x11"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        with isolated_display() as env:
+            smoke_x11(env)
 
-
-if __name__ == "__main__" and sys.argv[1:] == ["--smoke-x11"]:
-    smoke_x11()
+    def test_first_keystroke_latency_probe(self):
+        with isolated_display() as env:
+            self.assertGreater(measure_one(env, 0), 0)
