@@ -799,7 +799,7 @@ xloadcolor(int i, const char *name, Color *ncolor)
 	XRenderColor color = { .alpha = 0xffff };
 	int loaded;
 
-	if (!name && BETWEEN(i, 16, 255)) { /* 256 color */
+	if (!name && BETWEEN(i, 16, 255) && !colorname[i]) { /* 256 color */
 		if (i < 6*6*6+16) { /* same colors as xterm */
 			color.red   = sixd_to_16bit( ((i-16)/36)%6 );
 			color.green = sixd_to_16bit( ((i-16)/6) %6 );
@@ -1515,9 +1515,14 @@ xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len, int x, i
 		bg = xcolor(base.bg);
 	}
 
-	/* Change basic system colors [0-7] to bright system colors [8-15] */
-	if ((base.mode & ATTR_BOLD_FAINT) == ATTR_BOLD && BETWEEN(base.fg, 0, 7))
+	/* Use bright system colors for bold text when the theme requests it. */
+	if (theme_bold_bright && (base.mode & ATTR_BOLD_FAINT) == ATTR_BOLD &&
+	    BETWEEN(base.fg, 0, 7))
 		fg = xcolor(base.fg + 8);
+	else if (theme_bold_bright &&
+	         (base.mode & ATTR_BOLD_FAINT) == ATTR_BOLD &&
+	         base.fg == defaultfg)
+		fg = xcolor(260);
 
 	if (IS_SET(MODE_REVERSE)) {
 		if (fg == &dc.col[defaultfg]) {
@@ -1546,12 +1551,18 @@ xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len, int x, i
 	}
 
 	if ((base.mode & ATTR_BOLD_FAINT) == ATTR_FAINT) {
-		colfg.red = fg->color.red / 2;
-		colfg.green = fg->color.green / 2;
-		colfg.blue = fg->color.blue / 2;
-		colfg.alpha = fg->color.alpha;
-		XftColorAllocValue(xw.dpy, xw.vis, xw.cmap, &colfg, &revfg);
-		fg = &revfg;
+		if (BETWEEN(base.fg, 0, 7) && colorname[261 + base.fg]) {
+			fg = xcolor(261 + base.fg);
+		} else if (base.fg == defaultfg && colorname[269]) {
+			fg = xcolor(269);
+		} else {
+			colfg.red = fg->color.red / 2;
+			colfg.green = fg->color.green / 2;
+			colfg.blue = fg->color.blue / 2;
+			colfg.alpha = fg->color.alpha;
+			XftColorAllocValue(xw.dpy, xw.vis, xw.cmap, &colfg, &revfg);
+			fg = &revfg;
+		}
 	}
 
 	if (base.mode & ATTR_REVERSE) {

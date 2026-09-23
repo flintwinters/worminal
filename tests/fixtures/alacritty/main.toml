@@ -1,0 +1,5 @@
+[general]
+import = ["theme.toml", "missing.toml"]
+
+[colors.primary]
+foreground = "#EEEEEE"
