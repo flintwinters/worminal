@@ -761,6 +761,7 @@ int
 ttynew(const char *line, char *cmd, const char *out, char **args)
 {
 	int m, s;
+	struct winsize w = { .ws_row = term.row, .ws_col = term.col };
 
 	if (out) {
 		term.mode |= MODE_PRINT;
@@ -782,7 +783,8 @@ ttynew(const char *line, char *cmd, const char *out, char **args)
 	}
 
 	/* seems to work fine on linux, openbsd and freebsd */
-	if (openpty(&m, &s, NULL, NULL, NULL) < 0)
+	/* The child may exec before the parent reaches its first resize. */
+	if (openpty(&m, &s, NULL, NULL, &w) < 0)
 		die("openpty failed: %s\n", strerror(errno));
 
 	switch (pid = fork()) {

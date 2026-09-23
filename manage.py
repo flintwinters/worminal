@@ -7,9 +7,10 @@ import sys
 
 
 def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in {"build", "check", "latency", "run", "clean"}:
-        print("Usage: python3 manage.py [build|check|latency|run|clean]")
-        print("check runs native tests; latency measures launch to first key in private Xvfb.")
+    if len(sys.argv) != 2 or sys.argv[1] not in {"build", "check", "latency", "latency-shell", "run", "clean"}:
+        print("Usage: python3 manage.py [build|check|latency|latency-shell|run|clean]")
+        print("latency measures /bin/cat; latency-shell measures your interactive shell.")
+        print("Both run on private Xvfb, away from your desktop.")
         return 2
 
     command = sys.argv[1]
@@ -17,12 +18,18 @@ def main():
         return subprocess.run(["make", "-s", "clean"]).returncode
     if subprocess.run(["make", "-s"]).returncode:
         return 1
+    if command in {"check", "latency", "latency-shell"}:
+        if subprocess.run(["make", "-s", ".checks/key_injector"]).returncode:
+            return 1
     if command == "check":
         return subprocess.run(
             [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-q"]
         ).returncode
-    if command == "latency":
-        return subprocess.run([sys.executable, "tests/latency.py"]).returncode
+    if command in {"latency", "latency-shell"}:
+        args = [sys.executable, "tests/latency.py"]
+        if command == "latency-shell":
+            args.append("--shell")
+        return subprocess.run(args).returncode
     if command == "run":
         os.execv("./worminal", ["./worminal"])
     return 0
