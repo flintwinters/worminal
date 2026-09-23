@@ -16,9 +16,12 @@ python3 manage.py build
 python3 manage.py run
 ```
 
-The build uses `-O3` by default. `python3 manage.py check` builds and runs a native
-smoke test; the check also needs `xvfb-run` and `xdotool`. `make install` installs
-the binary and the `st-256color` terminfo entry.
+The build uses `-O3` by default. `python3 manage.py check` builds and runs native
+checks. `python3 manage.py latency` reports median and 95th percentile launch to
+first key echo across 20 runs. Both commands need `Xvfb` and `xdotool`, and use a
+private Xvfb display so no windows or keystrokes reach your desktop. The latency
+probe uses `/bin/cat` to avoid shell startup and does not include Xvfb startup.
+`make install` installs the binary and the `st-256color` terminfo entry.
 The installed `stterm` package also supplies that entry.
 
 Edit [config.h](config.h) to customize st and rebuild. This first native slice
