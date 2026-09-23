@@ -5,6 +5,8 @@ import os
 import subprocess
 import sys
 
+from tools.theme import generate_theme
+
 
 def main():
     if len(sys.argv) != 2 or sys.argv[1] not in {"build", "check", "latency", "latency-shell", "run", "clean"}:
@@ -16,6 +18,16 @@ def main():
     command = sys.argv[1]
     if command == "clean":
         return subprocess.run(["make", "-s", "clean"]).returncode
+    if command == "run":
+        if not os.path.isfile("./worminal"):
+            print("Build Worminal first with: python3 manage.py build")
+            return 1
+        os.execv("./worminal", ["./worminal"])
+    try:
+        generate_theme()
+    except (OSError, ValueError) as error:
+        print(f"Theme error: {error}", file=sys.stderr)
+        return 1
     if subprocess.run(["make", "-s"]).returncode:
         return 1
     if command in {"check", "latency", "latency-shell"}:
@@ -33,8 +45,6 @@ def main():
         if command == "latency-shell":
             args.append("--shell")
         return subprocess.run(args).returncode
-    if command == "run":
-        os.execv("./worminal", ["./worminal"])
     return 0
 
 

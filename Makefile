@@ -12,7 +12,10 @@ all: worminal
 	$(CC) $(STCFLAGS) -c $<
 
 st.o: config.h st.h win.h
-x.o: arg.h config.h st.h win.h
+x.o: arg.h config.h .checks/theme.h st.h win.h
+
+.checks/theme.h: tools/theme.py
+	python3 -c 'from tools.theme import generate_theme; generate_theme()'
 
 $(OBJ): config.mk
 
@@ -28,7 +31,7 @@ worminal: $(OBJ)
 	$(CC) -O2 -o $@ $< `$(PKG_CONFIG) --cflags --libs x11`
 
 clean:
-	rm -f worminal $(OBJ) .checks/key_injector .checks/placement_wm
+	rm -f worminal $(OBJ) .checks/theme.h .checks/key_injector .checks/placement_wm
 
 install: worminal
 	mkdir -p $(DESTDIR)$(PREFIX)/bin
