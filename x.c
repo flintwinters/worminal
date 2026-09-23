@@ -157,6 +157,7 @@ static void xinit(int, int);
 static void cresize(int, int);
 static void xresize(int, int);
 static void xhints(void);
+static void xidentityhints(void);
 static int xloadcolor(int, const char *, Color *);
 static Color *xcolor(int);
 static int xloadfont(Font *, FcPattern *);
@@ -902,9 +903,6 @@ xclear(int x1, int y1, int x2, int y2)
 void
 xhints(void)
 {
-	XClassHint class = {opt_name ? opt_name : termname,
-	                    opt_class ? opt_class : termname};
-	XWMHints wm = {.flags = InputHint, .input = 1};
 	XSizeHints *sizeh;
 
 	sizeh = XAllocSizeHints();
@@ -930,9 +928,19 @@ xhints(void)
 		sizeh->win_gravity = xgeommasktogravity(xw.gm);
 	}
 
-	XSetWMProperties(xw.dpy, xw.win, NULL, NULL, NULL, 0, sizeh, &wm,
-			&class);
+	XSetWMNormalHints(xw.dpy, xw.win, sizeh);
 	XFree(sizeh);
+}
+
+void
+xidentityhints(void)
+{
+	XClassHint class = {opt_name ? opt_name : termname,
+	                    opt_class ? opt_class : termname};
+	XWMHints wm = {.flags = InputHint, .input = 1};
+
+	XSetClassHint(xw.dpy, xw.win, &class);
+	XSetWMHints(xw.dpy, xw.win, &wm);
 }
 
 int
@@ -1226,7 +1234,8 @@ xinit(int cols, int rows)
 		| ButtonMotionMask | ButtonPressMask | ButtonReleaseMask;
 	xw.attrs.colormap = xw.cmap;
 	xw.win = XCreateWindow(xw.dpy, root, xw.l, xw.t,
-			1, 1, 0, XDefaultDepth(xw.dpy, xw.scr), InputOutput,
+			cols * 8 + 2 * borderpx, rows * 16 + 2 * borderpx,
+			0, XDefaultDepth(xw.dpy, xw.scr), InputOutput,
 			xw.vis, CWBackPixel | CWBorderPixel | CWBitGravity
 			| CWEventMask | CWColormap, &xw.attrs);
 	if (parent != root)
@@ -1234,6 +1243,23 @@ xinit(int cols, int rows)
 	xsetenv();
 	startup_ttyfd = ttynew(opt_line, shell, opt_io, opt_cmd);
 	xstartuptime("pty");
+
+	/* Mapping this placeholder lets X queue early keys while font setup runs.
+	 * Final font metrics replace its provisional pixel geometry below. */
+	xw.xembed = XInternAtom(xw.dpy, "_XEMBED", False);
+	xw.wmdeletewin = XInternAtom(xw.dpy, "WM_DELETE_WINDOW", False);
+	xw.netwmname = XInternAtom(xw.dpy, "_NET_WM_NAME", False);
+	xw.netwmiconname = XInternAtom(xw.dpy, "_NET_WM_ICON_NAME", False);
+	XSetWMProtocols(xw.dpy, xw.win, &xw.wmdeletewin, 1);
+	xw.netwmpid = XInternAtom(xw.dpy, "_NET_WM_PID", False);
+	XChangeProperty(xw.dpy, xw.win, xw.netwmpid, XA_CARDINAL, 32,
+			PropModeReplace, (uchar *)&thispid, 1);
+	win.mode = MODE_NUMLOCK;
+	resettitle();
+	xidentityhints();
+	XMapWindow(xw.dpy, xw.win);
+	XFlush(xw.dpy);
+	xstartuptime("map-request");
 
 	/* font */
 	if (!FcInit())
@@ -1298,22 +1324,7 @@ xinit(int cols, int rows)
 
 	XRecolorCursor(xw.dpy, cursor, &xmousefg, &xmousebg);
 
-	xw.xembed = XInternAtom(xw.dpy, "_XEMBED", False);
-	xw.wmdeletewin = XInternAtom(xw.dpy, "WM_DELETE_WINDOW", False);
-	xw.netwmname = XInternAtom(xw.dpy, "_NET_WM_NAME", False);
-	xw.netwmiconname = XInternAtom(xw.dpy, "_NET_WM_ICON_NAME", False);
-	XSetWMProtocols(xw.dpy, xw.win, &xw.wmdeletewin, 1);
-
-	xw.netwmpid = XInternAtom(xw.dpy, "_NET_WM_PID", False);
-	XChangeProperty(xw.dpy, xw.win, xw.netwmpid, XA_CARDINAL, 32,
-			PropModeReplace, (uchar *)&thispid, 1);
-
-	win.mode = MODE_NUMLOCK;
-	resettitle();
 	xhints();
-	XMapWindow(xw.dpy, xw.win);
-	/* run() waits for MapNotify; XNextEvent flushes the map request. */
-	xstartuptime("map-request");
 
 	clock_gettime(CLOCK_MONOTONIC, &xsel.tclick1);
 	clock_gettime(CLOCK_MONOTONIC, &xsel.tclick2);
@@ -2006,7 +2017,7 @@ void
 run(void)
 {
 	XEvent ev;
-	int w = win.w, h = win.h;
+	XWindowAttributes attrs;
 	fd_set rfd;
 	int xfd = XConnectionNumber(xw.dpy), ttyfd = startup_ttyfd, xev, drawing;
 	struct timespec seltv, *tv, now, lastblink, trigger;
@@ -2022,15 +2033,14 @@ run(void)
 		 */
 		if (XFilterEvent(&ev, None))
 			continue;
-		if (ev.type == ConfigureNotify) {
-			w = ev.xconfigure.width;
-			h = ev.xconfigure.height;
-		}
 	} while (ev.type != MapNotify);
 	xstartupevent("mapped", 0);
-	xstartuptime("mapped");
+	xstartuptime("map-observed");
 
-	cresize(w, h);
+	/* Mapping precedes the final resize; query the actual server geometry. */
+	if (!XGetWindowAttributes(xw.dpy, xw.win, &attrs))
+		die("could not read window geometry\n");
+	cresize(attrs.width, attrs.height);
 	xstartuptime("resize");
 
 	for (timeout = -1, drawing = 0, lastblink = (struct timespec){0};;) {
