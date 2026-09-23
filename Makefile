@@ -19,8 +19,12 @@ $(OBJ): config.mk
 worminal: $(OBJ)
 	$(CC) -o $@ $(OBJ) $(STLDFLAGS)
 
+.checks/key_injector: tests/key_injector.c
+	mkdir -p .checks
+	$(CC) -O2 -o $@ $< `$(PKG_CONFIG) --cflags --libs x11 xtst`
+
 clean:
-	rm -f worminal $(OBJ)
+	rm -f worminal $(OBJ) .checks/key_injector
 
 install: worminal
 	mkdir -p $(DESTDIR)$(PREFIX)/bin
