@@ -20,6 +20,10 @@ class ThemeTest(unittest.TestCase):
         self.assertIn('[261] = "#0f0f0f"', header)
         self.assertIn('[269] = "#8e8e8e"', header)
         self.assertIn("theme_bold_bright = 0", header)
+        self.assertIn("theme_font_offset_y = 0", header)
+        self.assertIn("theme_font_size = 0.0", header)
+        self.assertIn("theme_history_size = 10000", header)
+        self.assertIn("theme_scroll_multiplier = 3", header)
 
     def test_imports_override_by_color_key(self):
         header = theme_header(read_config(FIXTURES / "main.toml"))
@@ -31,6 +35,10 @@ class ThemeTest(unittest.TestCase):
             '[261] = "#0f0f0f"', '[263] = "#556677"',
             '[264] = "#a17e4d"', '[269] = "#808080"',
             "theme_bold_bright = 1",
+            "theme_font_offset_y = -3",
+            "theme_font_size = 9.0",
+            "theme_history_size = 64",
+            "theme_scroll_multiplier = 5",
         ):
             self.assertIn(entry, header)
 
@@ -48,3 +56,11 @@ class ThemeTest(unittest.TestCase):
             theme_header({"colors": {"normal": {"red": "red; }"}}})
         with self.assertRaisesRegex(ValueError, "import cycle"):
             read_config(FIXTURES / "cycle_a.toml")
+
+    def test_invalid_line_offset_and_history_fail_build(self):
+        with self.assertRaisesRegex(ValueError, "font.offset.y"):
+            theme_header({"font": {"offset": {"y": 1.5}}})
+        with self.assertRaisesRegex(ValueError, "font.size"):
+            theme_header({"font": {"size": -1}})
+        with self.assertRaisesRegex(ValueError, "scrolling.history"):
+            theme_header({"scrolling": {"history": 100001}})

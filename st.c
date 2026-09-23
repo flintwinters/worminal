@@ -19,6 +19,7 @@
 
 #include "st.h"
 #include "win.h"
+#include ".checks/theme.h"
 
 #if   defined(__linux)
  #include <pty.h>
@@ -115,6 +116,10 @@ typedef struct {
 	int col;      /* nb col */
 	Line *line;   /* screen */
 	Line *alt;    /* alternate screen */
+	Line *hist;   /* lazily allocated ring of main-screen lines */
+	int histlen;  /* number of retained lines */
+	int histi;    /* next history slot to write */
+	int scr;      /* lines above the live screen */
 	int *dirty;   /* dirtyness of lines */
 	TCursor c;    /* cursor */
 	int ocx;      /* old cursor col */
@@ -195,6 +200,8 @@ static void tswapscreen(void);
 static void tsetmode(int, int, const int *, int);
 static int twrite(const char *, int, int);
 static void tfulldirt(void);
+static Line tline(int);
+static Line thistorypush(Line);
 static void tcontrolcode(uchar );
 static void tdectest(char );
 static void tdefutf8(char);
@@ -408,11 +415,12 @@ int
 tlinelen(int y)
 {
 	int i = term.col;
+	Line line = tline(y);
 
-	if (term.line[y][i - 1].mode & ATTR_WRAP)
+	if (line[i - 1].mode & ATTR_WRAP)
 		return i;
 
-	while (i > 0 && term.line[y][i - 1].u == ' ')
+	while (i > 0 && line[i - 1].u == ' ')
 		--i;
 
 	return i;
@@ -521,7 +529,7 @@ selsnap(int *x, int *y, int direction)
 		 * Snap around if the word wraps around at the end or
 		 * beginning of a line.
 		 */
-		prevgp = &term.line[*y][*x];
+		prevgp = &tline(*y)[*x];
 		prevdelim = ISDELIM(prevgp->u);
 		for (;;) {
 			newx = *x + direction;
@@ -536,14 +544,14 @@ selsnap(int *x, int *y, int direction)
 					yt = *y, xt = *x;
 				else
 					yt = newy, xt = newx;
-				if (!(term.line[yt][xt].mode & ATTR_WRAP))
+				if (!(tline(yt)[xt].mode & ATTR_WRAP))
 					break;
 			}
 
 			if (newx >= tlinelen(newy))
 				break;
 
-			gp = &term.line[newy][newx];
+			gp = &tline(newy)[newx];
 			delim = ISDELIM(gp->u);
 			if (!(gp->mode & ATTR_WDUMMY) && (delim != prevdelim
 					|| (delim && gp->u != prevgp->u)))
@@ -564,14 +572,14 @@ selsnap(int *x, int *y, int direction)
 		*x = (direction < 0) ? 0 : term.col - 1;
 		if (direction < 0) {
 			for (; *y > 0; *y += direction) {
-				if (!(term.line[*y-1][term.col-1].mode
+				if (!(tline(*y-1)[term.col-1].mode
 						& ATTR_WRAP)) {
 					break;
 				}
 			}
 		} else if (direction > 0) {
 			for (; *y < term.row-1; *y += direction) {
-				if (!(term.line[*y][term.col-1].mode
+				if (!(tline(*y)[term.col-1].mode
 						& ATTR_WRAP)) {
 					break;
 				}
@@ -602,13 +610,13 @@ getsel(void)
 		}
 
 		if (sel.type == SEL_RECTANGULAR) {
-			gp = &term.line[y][sel.nb.x];
+			gp = &tline(y)[sel.nb.x];
 			lastx = sel.ne.x;
 		} else {
-			gp = &term.line[y][sel.nb.y == y ? sel.nb.x : 0];
+			gp = &tline(y)[sel.nb.y == y ? sel.nb.x : 0];
 			lastx = (sel.ne.y == y) ? sel.ne.x : term.col-1;
 		}
-		last = &term.line[y][MIN(lastx, linelen-1)];
+		last = &tline(y)[MIN(lastx, linelen-1)];
 		while (last >= gp && last->u == ' ')
 			--last;
 
@@ -852,6 +860,12 @@ ttywrite(const char *s, size_t n, int may_echo)
 {
 	const char *next;
 
+	if (term.scr) {
+		selclear();
+		term.scr = 0;
+		tfulldirt();
+	}
+
 	if (may_echo && IS_SET(MODE_ECHO))
 		twrite(s, n, 1);
 
@@ -1053,11 +1067,81 @@ tnew(int col, int row)
 	treset();
 }
 
+/* The viewport uses history only for rows above the live screen. */
+Line
+tline(int y)
+{
+	if (y < term.scr) {
+		if (!term.hist || theme_history_size <= 0)
+			die("invalid scrollback viewport\n");
+		return term.hist[(term.histi - term.scr + y + theme_history_size)
+		                 % theme_history_size];
+	}
+	return term.line[y - term.scr];
+}
+
+/* Store a row without copying glyphs; reuse the evicted row as scratch space. */
+Line
+thistorypush(Line line)
+{
+	Line recycled;
+
+	if (theme_history_size <= 0)
+		die("history is disabled\n");
+	if (!term.hist) {
+		term.hist = xmalloc(theme_history_size * sizeof(Line));
+		memset(term.hist, 0, theme_history_size * sizeof(Line));
+	}
+	recycled = term.hist[term.histi];
+	term.hist[term.histi] = line;
+	term.histi = (term.histi + 1) % theme_history_size;
+	if (term.histlen < theme_history_size)
+		term.histlen++;
+	if (term.scr)
+		term.scr = MIN(term.scr + 1, term.histlen);
+	return recycled;
+}
+
+void
+kscrollup(const Arg *arg)
+{
+	int n;
+
+	if (IS_SET(MODE_ALTSCREEN) || !term.histlen)
+		return;
+	n = arg->i < 0 ? term.row + arg->i : arg->i ? arg->i : theme_scroll_multiplier;
+	LIMIT(n, 0, term.histlen - term.scr);
+	if (n) {
+		selclear();
+		term.scr += n;
+		tfulldirt();
+	}
+}
+
+void
+kscrolldown(const Arg *arg)
+{
+	int n;
+
+	if (IS_SET(MODE_ALTSCREEN) || !term.scr)
+		return;
+	n = arg->i < 0 ? term.row + arg->i : arg->i ? arg->i : theme_scroll_multiplier;
+	LIMIT(n, 0, term.scr);
+	if (n) {
+		selclear();
+		term.scr -= n;
+		tfulldirt();
+	}
+}
+
 void
 tswapscreen(void)
 {
 	Line *tmp = term.line;
 
+	if (term.scr)
+		selclear();
+	term.scr = 0;
 	term.line = term.alt;
 	term.alt = tmp;
 	term.mode ^= MODE_ALTSCREEN;
@@ -1087,10 +1171,25 @@ tscrolldown(int orig, int n)
 void
 tscrollup(int orig, int n)
 {
-	int i;
+	int i, j;
 	Line temp;
 
 	LIMIT(n, 0, term.bot-orig+1);
+	if (!n)
+		return;
+	/* Only a full main-screen scroll contributes to command history. */
+	if (!IS_SET(MODE_ALTSCREEN) && orig == 0 &&
+	    term.top == 0 && term.bot == term.row - 1 && theme_history_size) {
+		if (term.scr)
+			selclear();
+		for (j = 0; j < n; j++) {
+			temp = thistorypush(term.line[j]);
+			term.line[j] = temp ? temp : xmalloc(term.col * sizeof(Glyph));
+		}
+		if (term.scr) {
+			tfulldirt();
+		}
+	}
 
 	tclearregion(0, orig, term.col-1, orig+n-1);
 	tsetdirt(orig+n, term.bot);
@@ -2582,6 +2681,7 @@ tresize(int col, int row)
 	int i;
 	int minrow = MIN(row, term.row);
 	int mincol = MIN(col, term.col);
+	int scr;
 	int *bp;
 	TCursor c;
 
@@ -2591,13 +2691,14 @@ tresize(int col, int row)
 		return;
 	}
 
-	/*
-	 * slide screen to keep cursor where we expect it -
-	 * tscrollup would work here, but we can optimize to
-	 * memmove because we're freeing the earlier lines
-	 */
+	if (term.scr)
+		selclear();
+	/* Slide the screen to keep the cursor visible; retain displaced main rows. */
 	for (i = 0; i <= term.c.y - row; i++) {
-		free(term.line[i]);
+		if (theme_history_size && !IS_SET(MODE_ALTSCREEN))
+			free(thistorypush(term.line[i]));
+		else
+			free(term.line[i]);
 		free(term.alt[i]);
 	}
 	/* ensure that both src and dst are not NULL */
@@ -2617,6 +2718,16 @@ tresize(int col, int row)
 	term.tabs = xrealloc(term.tabs, col * sizeof(*term.tabs));
 
 	/* resize each row to new width, zero-pad if needed */
+	if (col != term.col) {
+		Glyph blank = { .u = ' ', .fg = defaultfg, .bg = defaultbg };
+		for (i = 0; i < theme_history_size && term.hist; i++) {
+			if (!term.hist[i])
+				continue;
+			term.hist[i] = xrealloc(term.hist[i], col * sizeof(Glyph));
+			for (int j = term.col; j < col; j++)
+				term.hist[i][j] = blank;
+		}
+	}
 	for (i = 0; i < minrow; i++) {
 		term.line[i] = xrealloc(term.line[i], col * sizeof(Glyph));
 		term.alt[i]  = xrealloc(term.alt[i],  col * sizeof(Glyph));
@@ -2645,6 +2756,7 @@ tresize(int col, int row)
 	tmoveto(term.c.x, term.c.y);
 	/* Clearing both screens (it makes dirty all lines) */
 	c = term.c;
+	scr = term.scr;
 	for (i = 0; i < 2; i++) {
 		if (mincol < col && 0 < minrow) {
 			tclearregion(mincol, 0, col - 1, minrow - 1);
@@ -2656,6 +2768,9 @@ tresize(int col, int row)
 		tcursor(CURSOR_LOAD);
 	}
 	term.c = c;
+	term.scr = scr;
+	if (scr)
+		tfulldirt();
 }
 
 void
@@ -2674,7 +2789,7 @@ drawregion(int x1, int y1, int x2, int y2)
 			continue;
 
 		term.dirty[y] = 0;
-		xdrawline(term.line[y], x1, y, x2);
+		xdrawline(tline(y), x1, y, x2);
 	}
 }
 
@@ -2695,8 +2810,9 @@ draw(void)
 		cx--;
 
 	drawregion(0, 0, term.col, term.row);
-	xdrawcursor(cx, term.c.y, term.line[term.c.y][cx],
-			term.ocx, term.ocy, term.line[term.ocy][term.ocx]);
+	if (!term.scr)
+		xdrawcursor(cx, term.c.y, term.line[term.c.y][cx],
+				term.ocx, term.ocy, term.line[term.ocy][term.ocx]);
 	term.ocx = cx;
 	term.ocy = term.c.y;
 	xfinishdraw();

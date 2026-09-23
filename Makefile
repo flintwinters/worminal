@@ -11,7 +11,7 @@ all: worminal
 .c.o:
 	$(CC) $(STCFLAGS) -c $<
 
-st.o: config.h st.h win.h
+st.o: config.h .checks/theme.h st.h win.h
 x.o: arg.h config.h .checks/theme.h st.h win.h
 
 .checks/theme.h: tools/theme.py
@@ -30,8 +30,12 @@ worminal: $(OBJ)
 	mkdir -p .checks
 	$(CC) -O2 -o $@ $< `$(PKG_CONFIG) --cflags --libs x11`
 
+.checks/scrollback_test: tests/scrollback.c st.c st.h win.h .checks/theme.h
+	mkdir -p .checks
+	$(CC) -O1 -g -fsanitize=address,undefined -ffunction-sections -fdata-sections $(STCPPFLAGS) -Wl,--gc-sections -o $@ $< -lm
+
 clean:
-	rm -f worminal $(OBJ) .checks/theme.h .checks/key_injector .checks/placement_wm
+	rm -f worminal $(OBJ) .checks/theme.h .checks/key_injector .checks/placement_wm .checks/scrollback_test
 
 install: worminal
 	mkdir -p $(DESTDIR)$(PREFIX)/bin
