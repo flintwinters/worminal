@@ -23,8 +23,12 @@ worminal: $(OBJ)
 	mkdir -p .checks
 	$(CC) -O2 -o $@ $< `$(PKG_CONFIG) --cflags --libs x11 xtst`
 
+.checks/placement_wm: tests/placement_wm.c
+	mkdir -p .checks
+	$(CC) -O2 -o $@ $< `$(PKG_CONFIG) --cflags --libs x11`
+
 clean:
-	rm -f worminal $(OBJ) .checks/key_injector
+	rm -f worminal $(OBJ) .checks/key_injector .checks/placement_wm
 
 install: worminal
 	mkdir -p $(DESTDIR)$(PREFIX)/bin

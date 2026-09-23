@@ -1209,10 +1209,12 @@ void
 xinit(int cols, int rows)
 {
 	XGCValues gcvalues;
+	XWindowChanges changes;
 	Cursor cursor;
 	Window parent, root;
 	pid_t thispid = getpid();
 	XColor xmousefg, xmousebg;
+	unsigned int geometrymask;
 
 	if (!(xw.dpy = XOpenDisplay(NULL)))
 		die("can't open display\n");
@@ -1281,7 +1283,17 @@ xinit(int cols, int rows)
 	if (xw.gm & YNegative)
 		xw.t += DisplayHeight(xw.dpy, xw.scr) - win.h - 2;
 
-	XMoveResizeWindow(xw.dpy, xw.win, xw.l, xw.t, win.w, win.h);
+	/* Keep the window manager's placement unless -g supplied that axis. */
+	changes.x = xw.l;
+	changes.y = xw.t;
+	changes.width = win.w;
+	changes.height = win.h;
+	geometrymask = CWWidth | CWHeight;
+	if (xw.gm & XValue)
+		geometrymask |= CWX;
+	if (xw.gm & YValue)
+		geometrymask |= CWY;
+	XConfigureWindow(xw.dpy, xw.win, geometrymask, &changes);
 	XSetWindowBackground(xw.dpy, xw.win, dc.col[defaultbg].pixel);
 	XSetWindowBorder(xw.dpy, xw.win, dc.col[defaultbg].pixel);
 
