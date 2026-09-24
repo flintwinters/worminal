@@ -121,6 +121,16 @@ def smoke_x11(env):
         if any(event in {"style", "color"} for event, _ in events[:mapped]):
             raise AssertionError(f"Palette or font styles loaded before mapping: {events}")
 
+        border_deadline = time.monotonic() + 2
+        while time.monotonic() < border_deadline:
+            border = subprocess.run([str(ROOT / ".checks/border_probe"), window],
+                                    env=env, capture_output=True, text=True)
+            if border.returncode == 0:
+                break
+            time.sleep(0.05)
+        else:
+            raise AssertionError(f"Window border was not drawn: {border.stderr}")
+
         subprocess.run(["xdotool", "windowfocus", "--sync", window], env=env, check=True)
         subprocess.run(["xdotool", "type", "--clearmodifiers", "--delay", "0", "ready"], env=env, check=True)
         subprocess.run(["xdotool", "key", "Return"], env=env, check=True)
