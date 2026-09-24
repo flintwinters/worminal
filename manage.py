@@ -1,95 +1,157 @@
 #!/usr/bin/env python3
-"""Build, check, benchmark, or run Worminal: run `python3 manage.py` for help."""
+"""Build, check, measure, and prove Worminal: run `python3 manage.py --help`."""
 
 import os
+from pathlib import Path
 import subprocess
 import sys
 
-from tools.theme import generate_theme
+try:
+    import typer
+except ModuleNotFoundError as error:
+    raise SystemExit("Install Typer to use manage.py: python3 -m pip install typer") from error
+
 from tools.icon import generate_icon
+from tools.theme import generate_theme
 
 
-def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in {"build", "check", "latency", "latency-shell", "run", "clean", "icon", "proof-desktop", "proof-plasma", "proof-cinnamon"}:
-        print("Usage: python3 manage.py [build|check|latency|latency-shell|run|clean|icon|proof-desktop|proof-plasma|proof-cinnamon]")
-        print("latency measures /bin/cat; latency-shell measures your interactive shell.")
-        print("Both run on private Xvfb, away from your desktop.")
-        print("icon regenerates the embedded X11 icon from worminal.svg (needs Inkscape and Pillow).")
-        print("proof-desktop briefly opens two test views on your current X11 desktop.")
-        print("proof-plasma runs the shared-view proof under KWin on private Xvfb.")
-        print("proof-cinnamon runs it with Cinnamon from felix@192.168.32.193 on private Xvfb.")
-        return 2
+ROOT = Path(__file__).resolve().parent
+app = typer.Typer(no_args_is_help=True, help="Build and test Worminal.")
+proof_app = typer.Typer(help="Run proofs on private Xvfb displays.")
+app.add_typer(proof_app, name="proof")
 
-    command = sys.argv[1]
-    if command == "icon":
-        try:
-            generate_icon()
-        except (OSError, ImportError, subprocess.CalledProcessError) as error:
-            print(f"Icon error: {error}", file=sys.stderr)
-            return 1
-        return 0
-    if command == "clean":
-        return subprocess.run(["make", "-s", "clean"]).returncode
-    if command == "run":
-        if not os.path.isfile("./worminal"):
-            print("Build Worminal first with: python3 manage.py build")
-            return 1
-        os.execv("./worminal", ["./worminal"])
+
+@app.callback()
+def root():
+    os.chdir(ROOT)
+
+
+def run(args, *, env=None):
+    return subprocess.run(args, env=env).returncode
+
+
+def make(*targets):
+    code = run(["make", "-s", *targets])
+    if code:
+        raise typer.Exit(code)
+
+
+def prepare(*targets):
     try:
         generate_theme()
     except (OSError, ValueError) as error:
-        print(f"Theme error: {error}", file=sys.stderr)
-        return 1
-    if subprocess.run(["make", "-s"]).returncode:
-        return 1
-    if command == "proof-desktop":
-        if subprocess.run(["make", "-s", ".checks/view_state_test"]).returncode:
-            return 1
-        return subprocess.run(
-            [".checks/view_state_test"],
-            env={**os.environ, "WORMINAL_PROOF_REQUIRE_IM": "1"},
-        ).returncode
-    if command == "proof-plasma":
-        if subprocess.run(["make", "-s", ".checks/view_state_test"]).returncode:
-            return 1
-        return subprocess.run([sys.executable, "tests/proof_plasma.py"]).returncode
-    if command == "proof-cinnamon":
-        if subprocess.run(["make", "-s", ".checks/view_state_test"]).returncode:
-            return 1
-        return subprocess.run([sys.executable, "tests/proof_cinnamon.py"]).returncode
-    if command in {"check", "latency", "latency-shell"}:
-        if subprocess.run(["make", "-s", ".checks/key_injector"]).returncode:
-            return 1
-    if command == "check":
-        if subprocess.run(["make", "-s", ".checks/placement_wm"]).returncode:
-            return 1
-        if subprocess.run(["make", "-s", ".checks/compact-worminal", ".checks/overlap_probe"]).returncode:
-            return 1
-        if subprocess.run(["make", "-s", ".checks/border_probe"]).returncode:
-            return 1
-        if subprocess.run(["make", "-s", ".checks/icon_probe"]).returncode:
-            return 1
-        if subprocess.run(["make", "-s", ".checks/view_state_test"]).returncode:
-            return 1
-        if subprocess.run(["make", "-s", ".checks/scrollback_test"]).returncode:
-            return 1
-        if subprocess.run([".checks/scrollback_test"],
-                          env={**os.environ, "ASAN_OPTIONS": "detect_leaks=0"}).returncode:
-            return 1
-    if command == "check":
-        return subprocess.run(
-            [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-q"]
-        ).returncode
-    if command in {"latency", "latency-shell"}:
-        args = [sys.executable, "tests/latency.py"]
-        if command == "latency-shell":
-            args.append("--shell")
-        return subprocess.run(args).returncode
-    return 0
+        typer.echo(f"Theme error: {error}", err=True)
+        raise typer.Exit(1) from error
+    make()
+    if targets:
+        make(*targets)
+
+
+def run_checks():
+    prepare(".checks/key_injector", ".checks/placement_wm",
+            ".checks/compact-worminal", ".checks/overlap_probe",
+            ".checks/border_probe", ".checks/icon_probe",
+            ".checks/view_state_test", ".checks/scrollback_test")
+    code = run([".checks/scrollback_test"],
+               env={**os.environ, "ASAN_OPTIONS": "detect_leaks=0"})
+    if code:
+        return code
+    return run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-q"])
+
+
+def run_proof_script(path):
+    return run([sys.executable, str(path)])
+
+
+@app.command()
+def build():
+    """Compile Worminal with the current Alacritty theme."""
+    prepare()
+
+
+@app.command()
+def check():
+    """Run the local native and private-display regression suite."""
+    raise typer.Exit(run_checks())
+
+
+@app.command()
+def clean():
+    """Remove generated binaries and headers."""
+    raise typer.Exit(run(["make", "-s", "clean"]))
+
+
+@app.command()
+def icon():
+    """Regenerate the embedded icon from worminal.svg."""
+    try:
+        generate_icon()
+    except (OSError, ImportError, subprocess.CalledProcessError) as error:
+        typer.echo(f"Icon error: {error}", err=True)
+        raise typer.Exit(1) from error
+
+
+@app.command()
+def latency():
+    """Measure launch to usable input with /bin/cat on private Xvfb."""
+    prepare(".checks/key_injector")
+    raise typer.Exit(run([sys.executable, "tests/latency.py"]))
+
+
+@app.command("latency-shell")
+def latency_shell():
+    """Measure when the interactive shell receives early input."""
+    prepare(".checks/key_injector")
+    raise typer.Exit(run([sys.executable, "tests/latency.py", "--shell"]))
+
+
+@app.command("run")
+def run_window():
+    """Run the already-built Worminal binary."""
+    if not (ROOT / "worminal").is_file():
+        typer.echo("Build Worminal first with: python3 manage.py build", err=True)
+        raise typer.Exit(1)
+    os.execv("./worminal", ["./worminal"])
+
+
+@proof_app.callback(invoke_without_command=True)
+def proof(ctx: typer.Context):
+    """Run every local and private-display proof when no child is specified."""
+    if ctx.invoked_subcommand is not None:
+        return
+    typer.echo("Proof: check")
+    failures = []
+    if run_checks():
+        failures.append("check")
+    # Every proof_*.py script is an isolated display proof with a main entrypoint.
+    # Discovery makes new proofs part of this route without another registry.
+    for path in sorted((ROOT / "tests").glob("proof_*.py")):
+        name = path.stem.removeprefix("proof_")
+        typer.echo(f"Proof: {name}")
+        if run_proof_script(path):
+            failures.append(name)
+    if failures:
+        typer.echo(f"Failed: {', '.join(failures)}", err=True)
+        raise typer.Exit(1)
+    typer.echo("All proofs passed.")
+
+
+@proof_app.command()
+def plasma():
+    """Prove shared views and tabs under isolated KWin."""
+    prepare(".checks/view_state_test")
+    raise typer.Exit(run_proof_script(ROOT / "tests/proof_plasma.py"))
+
+
+@proof_app.command()
+def cinnamon():
+    """Prove shared views and tabs under remote Cinnamon on private Xvfb."""
+    prepare(".checks/view_state_test")
+    raise typer.Exit(run_proof_script(ROOT / "tests/proof_cinnamon.py"))
 
 
 if __name__ == "__main__":
     try:
-        sys.exit(main())
+        app()
     except KeyboardInterrupt:
-        sys.exit(130)
+        raise SystemExit(130)
