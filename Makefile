@@ -43,8 +43,11 @@ worminal: $(OBJ)
 .checks/overlap_probe: tests/overlap_probe.c
 	$(CC) -O2 -o $@ $< `$(PKG_CONFIG) --cflags --libs x11`
 
+.checks/border_probe: tests/border_probe.c
+	$(CC) -O2 -o $@ $< `$(PKG_CONFIG) --cflags --libs x11`
+
 clean:
-	rm -f worminal $(OBJ) .checks/theme.h .checks/key_injector .checks/placement_wm .checks/scrollback_test .checks/compact_theme.h .checks/compact-worminal .checks/overlap_probe
+	rm -f worminal $(OBJ) .checks/theme.h .checks/key_injector .checks/placement_wm .checks/scrollback_test .checks/compact_theme.h .checks/compact-worminal .checks/overlap_probe .checks/border_probe
 
 install: worminal
 	mkdir -p $(DESTDIR)$(PREFIX)/bin
