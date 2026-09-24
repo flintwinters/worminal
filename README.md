@@ -33,8 +33,9 @@ Every `./worminal` launch joins the owner for the same executable build, user,
 and X11 `DISPLAY`, opening a new window on a new tab. Rebuilding starts a new
 owner on the next launch; existing windows and tabs keep running in the old
 owner until closed. Each owner has its own tab list. Every
-window shows that list above the terminal and selects a tab independently. The
-selected label is reversed; click a label to select it. Ctrl+T creates a tab,
+window shows that list above the terminal and selects a tab independently. Each
+label shows the final segment of its tab's working directory. The selected
+label is reversed; click a label to select it. Ctrl+T creates a tab,
 Ctrl+W closes the selected tab in every window, Ctrl+Tab and Ctrl+Shift+Tab
 cycle, Ctrl+1 through Ctrl+8 select by position, Ctrl+9 selects the last tab,
 Alt+1 through Alt+9 select exact tab slots, Alt+0 selects slot 10, and Ctrl+N
