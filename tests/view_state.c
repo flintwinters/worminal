@@ -17,6 +17,15 @@ ttywrite(const char *data, size_t len, int echo)
 	die("unexpected PTY focus report\n");
 }
 
+void *
+xrealloc(void *pointer, size_t size)
+{
+	void *result = realloc(pointer, size);
+	if (!result)
+		die("proof allocation failed\n");
+	return result;
+}
+
 static void
 setup_view(XView *target, Display *display, int x, unsigned long color)
 {
@@ -200,6 +209,29 @@ main(void)
 		        first_im, first_ic, second_im, second_ic);
 		return 1;
 	}
+
+	/* Reloading one view's fonts must leave the other view drawable. */
+	if (!FcInit())
+		die("fontconfig did not initialize\n");
+	view = &first;
+	usedfont = font;
+	xloadfonts(usedfont, 0);
+	view = &second;
+	usedfont = font;
+	xloadfonts(usedfont, 0);
+	FcPattern *second_pattern = stylepattern;
+	XftFont *second_font = dc.font.match;
+	view = &first;
+	xunloadfonts();
+	xloadfonts(usedfont, 0);
+	view = &second;
+	if (stylepattern != second_pattern || dc.font.match != second_font)
+		die("font resources leaked between views\n");
+	Glyph glyph = {.u = 'A', .fg = defaultfg, .bg = defaultbg};
+	XftGlyphFontSpec spec;
+	if (xmakeglyphfontspecs(&spec, &glyph, 1, 0, 0) != 1 ||
+	    spec.font != second_font)
+		die("second view could not shape text after first reloaded fonts\n");
 	if (previous_focus != None && previous_focus != PointerRoot)
 		XSetInputFocus(display, previous_focus, revert_to, CurrentTime);
 	XSync(display, False);

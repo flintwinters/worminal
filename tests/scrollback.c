@@ -131,5 +131,18 @@ main(void)
 	session = &second;
 	assert(term.line[0][0].u == 'S' && term.c.x == 2);
 	assert(second.saved[0].x == 2 && csiescseq.narg == 2);
+
+	/* The active view's resize must reach the same PTY as its screen. */
+	int master, slave;
+	struct winsize size;
+	assert(openpty(&master, &slave, NULL, NULL, NULL) == 0);
+	cmdfd = master;
+	tresize(11, 4);
+	ttyresize(110, 40);
+	assert(ioctl(slave, TIOCGWINSZ, &size) == 0);
+	assert(size.ws_col == 11 && size.ws_row == 4);
+	assert(size.ws_xpixel == 110 && size.ws_ypixel == 40);
+	close(master);
+	close(slave);
 	return 0;
 }
