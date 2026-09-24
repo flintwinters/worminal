@@ -5,8 +5,24 @@
 
 unsigned int defaultfg = 258;
 unsigned int defaultbg = 259;
+unsigned int defaultcs = 257;
 unsigned int tabspaces = 8;
 wchar_t *worddelimiters = L" ";
+int allowaltscreen = 1;
+int allowwindowops = 0;
+char *vtiden = "\033[?6c";
+
+void xsetmode(int set, unsigned int flags) {}
+void xsetpointermotion(int set) {}
+void xsettitle(char *title) {}
+void xseticontitle(char *title) {}
+void xbell(void) {}
+int xsetcursor(int cursor) { return 0; }
+void xloadcols(void) {}
+int xgetcolor(int index, unsigned char *red, unsigned char *green, unsigned char *blue) { return 1; }
+int xsetcolorname(int index, const char *name) { return 0; }
+void xsetsel(char *selection) {}
+void xclipcopy(void) {}
 
 int
 main(void)
@@ -110,14 +126,10 @@ main(void)
 
 	/* Tab parser and history state must survive work on another tab. */
 	TermSession *first = session;
-	TermSession second = {0};
 	first->ttybuf[0] = 'a';
 	first->ttybuflen = 1;
 	csiescseq.narg = 1;
-	session = &second;
-	iofd = 1;
-	selinit();
-	tnew(3, 2);
+	TermSession *second = tsessionnew(3, 2);
 	term.line[0][0].u = 'S';
 	term.c.x = 2;
 	tcursor(CURSOR_SAVE);
@@ -128,9 +140,9 @@ main(void)
 	assert(tlineat(0, 1)[0].u == 'X');
 	assert(first->ttybuflen == 1 && first->ttybuf[0] == 'a');
 	assert(csiescseq.narg == 1);
-	session = &second;
+	session = second;
 	assert(term.line[0][0].u == 'S' && term.c.x == 2);
-	assert(second.saved[0].x == 2 && csiescseq.narg == 2);
+	assert(second->saved[0].x == 2 && csiescseq.narg == 2);
 
 	/* The active view's resize must reach the same PTY as its screen. */
 	int master, slave;
@@ -144,5 +156,30 @@ main(void)
 	assert(size.ws_xpixel == 110 && size.ws_ypixel == 40);
 	close(master);
 	close(slave);
+
+	/* Interleaved reads cannot mix the two tabs' UTF-8 parser buffers. */
+	int firstmaster, firstslave, secondmaster, secondslave;
+	assert(openpty(&firstmaster, &firstslave, NULL, NULL, NULL) == 0);
+	assert(openpty(&secondmaster, &secondslave, NULL, NULL, NULL) == 0);
+	cmdfd = firstmaster;
+	tmoveto(0, 0);
+	TermSession *third = tsessionnew(3, 2);
+	cmdfd = secondmaster;
+	assert(tsessionnext(NULL) == third && tsessionnext(third) == second);
+	assert(tsessionfd(third) == secondmaster);
+	assert(write(firstslave, "\xc3", 1) == 1);
+	tsessionuse(second);
+	assert(ttyread() == 1 && second->ttybuflen == 1);
+	assert(write(secondslave, "B", 1) == 1);
+	tsessionuse(third);
+	assert(ttyread() == 1 && term.line[0][0].u == 'B');
+	assert(write(firstslave, "\xa9", 1) == 1);
+	tsessionuse(second);
+	assert(ttyread() == 1 && term.line[0][0].u == 0xe9);
+	assert(second->ttybuflen == 0);
+	close(firstmaster);
+	close(firstslave);
+	close(secondmaster);
+	close(secondslave);
 	return 0;
 }

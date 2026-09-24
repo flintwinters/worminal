@@ -148,21 +148,82 @@ def smoke_x11(env):
 
 
 class NativeTerminalTest(unittest.TestCase):
+    def test_shared_owner_election_and_restart(self):
+        with isolated_display() as env:
+            env = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"race-{os.getpid()}"}
+            title = f"Worminal race {os.getpid()}"
+            command = [str(ROOT / "worminal"), "-S", "-T", title,
+                       "-e", "/bin/cat"]
+            launchers = [subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL,
+                                          stderr=subprocess.PIPE) for _ in range(2)]
+            try:
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    search = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", title],
+                                            env=env, capture_output=True, text=True)
+                    windows = search.stdout.splitlines() if search.returncode == 0 else []
+                    running = [p for p in launchers if p.poll() is None]
+                    exited = [p for p in launchers if p.poll() is not None]
+                    if len(windows) == 2 and len(running) == len(exited) == 1:
+                        break
+                    time.sleep(.05)
+                else:
+                    self.fail(f"Concurrent launch did not elect one owner: windows={windows}, "
+                              f"statuses={[p.poll() for p in launchers]}")
+                self.assertEqual(exited[0].returncode, 0)
+                for window in windows:
+                    subprocess.run(["xdotool", "windowclose", window], env=env, check=True)
+                running[0].wait(timeout=3)
+                self.assertEqual(running[0].returncode, 0)
+
+                restarted = subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL,
+                                             stderr=subprocess.PIPE)
+                launchers.append(restarted)
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    search = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", title],
+                                            env=env, capture_output=True, text=True)
+                    if search.returncode == 0:
+                        break
+                    time.sleep(.05)
+                else:
+                    self.fail("Owner could not restart after last-window shutdown")
+                subprocess.run(["xdotool", "windowclose", search.stdout.splitlines()[0]],
+                               env=env, check=True)
+                restarted.wait(timeout=3)
+                self.assertEqual(restarted.returncode, 0)
+            finally:
+                for process in launchers:
+                    if process.poll() is None:
+                        process.terminate()
+                    process.wait(timeout=2)
+                    process.stderr.close()
+
     def test_shared_view_end_to_end(self):
         with isolated_display() as env:
             env = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"proof-{os.getpid()}"}
             title = f"Worminal shared {os.getpid()}"
             received = ROOT / ".checks" / "shared_input"
+            sizes = ROOT / ".checks" / "shared_sizes"
+            drained = ROOT / ".checks" / "shared_drained"
             received.unlink(missing_ok=True)
+            sizes.unlink(missing_ok=True)
+            drained.unlink(missing_ok=True)
             script = (
                 "printf '\033[?25l'; "
                 'while IFS= read -r line; do '
+                'case "$line" in '
+                'size) stty size >> "$2";; '
+                "alt) printf '\\033[?1049h[ALT]\\n';; "
+                "leave) printf '\\033[?1049l';; "
+                "bulk) yes '0123456789abcdefghijklmnopqrstuvwxyz' | head -c 1048576; "
+                'printf done > "$3";; esac; '
                 'printf "[%s]\\n" "$line"; '
                 'printf "%s\\n" "$line" >> "$1"; done'
             )
             owner = subprocess.Popen(
                 [str(ROOT / "worminal"), "-S", "-T", title, "-e", "/bin/sh",
-                 "-c", script, "sh", str(received)],
+                 "-c", script, "sh", str(received), str(sizes), str(drained)],
                 env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
             )
 
@@ -200,6 +261,15 @@ class NativeTerminalTest(unittest.TestCase):
                 pixels = subprocess.check_output(["xwd", "-id", window, "-silent"], env=env)
                 return hashlib.sha256(pixels).digest()
 
+            def size_count(count):
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline:
+                    lines = sizes.read_text().splitlines() if sizes.exists() else []
+                    if len(lines) >= count:
+                        return lines
+                    time.sleep(.05)
+                self.fail(f"PTY did not report {count} sizes: {lines}")
+
             try:
                 first = windows(1)[0]
                 subprocess.run([str(ROOT / "worminal"), "-S"], env=env,
@@ -215,12 +285,43 @@ class NativeTerminalTest(unittest.TestCase):
                 self.assertNotEqual(image_hash(second), before,
                                     "reactivated view did not catch up")
                 typed("beta")
+                subprocess.run(["xdotool", "windowsize", second, "600", "300"],
+                               env=env, check=True)
+                focus(second)
+                typed("size")
+                second_size = size_count(1)[-1]
+                focus(first)
+                typed("size")
+                first_size = size_count(2)[-1]
+                self.assertNotEqual(first_size, second_size,
+                                    "live-view handoff did not resize the PTY")
+                focus(second)
+                typed("size")
+                self.assertEqual(size_count(3)[-1], second_size)
+                typed("alt")
+                focus(first)
+                focus(second)
+                typed("leave")
+                focus(first)
+                frozen = image_hash(second)
+                typed("bulk")
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline and not drained.exists():
+                    time.sleep(.05)
+                self.assertEqual(drained.read_text() if drained.exists() else None, "done")
+                self.assertEqual(image_hash(second), frozen,
+                                 "inactive view repainted during a large PTY write")
+                focus(second)
+                self.assertNotEqual(image_hash(second), frozen,
+                                    "inactive view did not catch up after bulk output")
                 subprocess.run(["xdotool", "windowclose", first], env=env, check=True)
                 self.assertEqual(windows(1), [second], "first view did not close")
                 self.assertIsNone(owner.poll(), "first close ended the shared owner")
                 focus(second)
                 typed("gamma")
-                self.assertEqual(received.read_text().splitlines(), ["alpha", "beta", "gamma"])
+                self.assertEqual(received.read_text().splitlines(),
+                                 ["alpha", "beta", "size", "size", "size",
+                                  "alt", "leave", "bulk", "gamma"])
                 subprocess.run(["xdotool", "windowclose", second], env=env, check=True)
                 try:
                     owner.wait(timeout=3)
@@ -239,6 +340,8 @@ class NativeTerminalTest(unittest.TestCase):
                 owner.wait(timeout=2)
                 owner.stderr.close()
                 received.unlink(missing_ok=True)
+                sizes.unlink(missing_ok=True)
+                drained.unlink(missing_ok=True)
 
     def test_view_contexts_draw_independently(self):
         with isolated_display() as env:
