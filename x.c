@@ -2555,8 +2555,9 @@ xdrawtabs(void)
 	int baseline = borderpx + (current_window.ch - dc.font.height) / 2 + dc.font.ascent;
 	XRectangle clip = {.x = borderpx, .y = borderpx,
 	                   .width = MAX(0, right - borderpx), .height = current_window.ch};
-	XftDrawRect(xw.draw, xcolor(defaultbg), 0, 0,
-	            current_window.w, borderpx + current_window.ch);
+	/* Tab refreshes copy this strip without redrawing the window outline. */
+	XftDrawRect(xw.draw, xcolor(defaultbg), borderpx, borderpx,
+	            MAX(0, right - borderpx), current_window.ch);
 	XftDrawSetClipRectangles(xw.draw, 0, 0, &clip, 1);
 	for (tab = xfirsttab(); tab && x < right; tab = tab->next) {
 		int width = xtabwidth(tab), selected = tab->terminal == view->terminal;
