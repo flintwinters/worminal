@@ -49,8 +49,11 @@ worminal: $(OBJ)
 .checks/icon_probe: tests/icon_probe.c
 	$(CC) -O2 -o $@ $< `$(PKG_CONFIG) --cflags --libs x11`
 
+.checks/view_state_test: tests/view_state.c x.c config.h icon.h .checks/theme.h
+	$(CC) $(STCFLAGS) -ffunction-sections -fdata-sections -Wl,--gc-sections -o $@ $< $(STLDFLAGS) `$(PKG_CONFIG) --libs xtst`
+
 clean:
-	rm -f worminal $(OBJ) .checks/theme.h .checks/key_injector .checks/placement_wm .checks/scrollback_test .checks/compact_theme.h .checks/compact-worminal .checks/overlap_probe .checks/border_probe .checks/icon_probe
+	rm -f worminal $(OBJ) .checks/theme.h .checks/key_injector .checks/placement_wm .checks/scrollback_test .checks/compact_theme.h .checks/compact-worminal .checks/overlap_probe .checks/border_probe .checks/icon_probe .checks/view_state_test
 
 install: worminal
 	mkdir -p $(DESTDIR)$(PREFIX)/bin
