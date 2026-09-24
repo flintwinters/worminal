@@ -6,16 +6,25 @@ import subprocess
 import sys
 
 from tools.theme import generate_theme
+from tools.icon import generate_icon
 
 
 def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in {"build", "check", "latency", "latency-shell", "run", "clean"}:
-        print("Usage: python3 manage.py [build|check|latency|latency-shell|run|clean]")
+    if len(sys.argv) != 2 or sys.argv[1] not in {"build", "check", "latency", "latency-shell", "run", "clean", "icon"}:
+        print("Usage: python3 manage.py [build|check|latency|latency-shell|run|clean|icon]")
         print("latency measures /bin/cat; latency-shell measures your interactive shell.")
         print("Both run on private Xvfb, away from your desktop.")
+        print("icon regenerates the embedded X11 icon from worminal.svg (needs Inkscape and Pillow).")
         return 2
 
     command = sys.argv[1]
+    if command == "icon":
+        try:
+            generate_icon()
+        except (OSError, ImportError, subprocess.CalledProcessError) as error:
+            print(f"Icon error: {error}", file=sys.stderr)
+            return 1
+        return 0
     if command == "clean":
         return subprocess.run(["make", "-s", "clean"]).returncode
     if command == "run":
@@ -39,6 +48,8 @@ def main():
         if subprocess.run(["make", "-s", ".checks/compact-worminal", ".checks/overlap_probe"]).returncode:
             return 1
         if subprocess.run(["make", "-s", ".checks/border_probe"]).returncode:
+            return 1
+        if subprocess.run(["make", "-s", ".checks/icon_probe"]).returncode:
             return 1
         if subprocess.run(["make", "-s", ".checks/scrollback_test"]).returncode:
             return 1

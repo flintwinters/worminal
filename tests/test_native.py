@@ -101,6 +101,8 @@ def smoke_x11(env):
         if window is None:
             raise AssertionError("Worminal did not open an X11 window")
 
+        subprocess.run([str(ROOT / ".checks/icon_probe"), window], env=env, check=True)
+
         events = []
         trace_buffer = b""
         expected = {("style", 1), ("style", 4), ("style", 5), ("color", 196)}
