@@ -10,6 +10,8 @@ webview or JavaScript runtime.
 Install Python 3.11+, a C compiler, `make`, `pkg-config`, and the development headers for X11,
 Xft, Fontconfig, and FreeType. On Debian, these are provided by `build-essential`,
 `pkg-config`, `libx11-dev`, `libxft-dev`, `libfontconfig-dev`, and `libfreetype-dev`.
+The management CLI also needs Typer (`requirements-dev.txt`); the compiled
+terminal does not.
 
 ```sh
 python3 manage.py build
@@ -48,11 +50,14 @@ Worminal still uses its configured Xft font, so exact pixel heights can differ
 from Alacritty's renderer.
 
 The build uses `-O3` by default. `python3 manage.py check` builds and runs native
-checks. `python3 manage.py latency` reports median and 95th percentile launch to
+checks. `python3 manage.py proof` runs those checks and every private-display
+proof in `tests/proof_*.py`, including isolated KWin and remote Cinnamon.
+Use `python3 manage.py proof plasma` or `python3 manage.py proof cinnamon`
+to run one managed proof. `python3 manage.py latency` reports median and 95th percentile launch to
 the first key queued by X and then echoed across 20 runs.
 `python3 manage.py latency-shell` measures when your interactive shell reads
 that input. Worminal maps a blank, provisional window before loading fonts, so X can queue early
-keystrokes until the terminal processes them. These commands use a private Xvfb
+keystrokes until the terminal processes them. Tests and benchmarks use a private Xvfb
 display, so no windows or keystrokes reach your desktop. Checks and benchmarks
 need `Xvfb`, `xdotool`, and the XTest development library (`libxtst-dev` on
 Debian). The `/bin/cat` probe excludes shell startup; both exclude Xvfb startup.
