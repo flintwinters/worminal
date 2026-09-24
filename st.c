@@ -227,27 +227,69 @@ static char base64dec_getc(const char **);
 static ssize_t xwrite(int, const char *, size_t);
 
 /* A tab owns the parser, PTY, selection, and screen together. */
-typedef struct {
+struct TermSession {
 	Term term;
 	Selection sel;
 	CSIEscape csiescseq;
 	STREscape strescseq;
-	int iofd, cmdfd;
+	int output_fd, pty_fd;
 	pid_t pid;
 	char ttybuf[BUFSIZ];
 	int ttybuflen;
 	TCursor saved[2];
-} TermSession;
+	struct TermSession *next;
+};
 
-static TermSession primarysession = {.iofd = 1};
+static TermSession primarysession = {.output_fd = 1};
 static TermSession *session = &primarysession;
+static TermSession *sessions = &primarysession;
 #define term (session->term)
 #define sel (session->sel)
 #define csiescseq (session->csiescseq)
 #define strescseq (session->strescseq)
-#define iofd (session->iofd)
-#define cmdfd (session->cmdfd)
+#define iofd (session->output_fd)
+#define cmdfd (session->pty_fd)
 #define pid (session->pid)
+
+TermSession *
+tsessioncurrent(void)
+{
+	return session;
+}
+
+TermSession *
+tsessionnew(int cols, int rows)
+{
+	TermSession *created = xmalloc(sizeof(*created));
+	memset(created, 0, sizeof(*created));
+	created->output_fd = 1;
+	created->next = sessions;
+	sessions = created;
+	session = created;
+	tnew(cols, rows);
+	selinit();
+	return created;
+}
+
+TermSession *
+tsessionnext(TermSession *current)
+{
+	return current ? current->next : sessions;
+}
+
+void
+tsessionuse(TermSession *chosen)
+{
+	if (!chosen)
+		die("missing terminal session\n");
+	session = chosen;
+}
+
+int
+tsessionfd(TermSession *chosen)
+{
+	return chosen->pty_fd;
+}
 
 static const uchar utfbyte[UTF_SIZ + 1] = {0x80,    0, 0xC0, 0xE0, 0xF0};
 static const uchar utfmask[UTF_SIZ + 1] = {0xC0, 0x80, 0xE0, 0xF0, 0xF8};

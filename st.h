@@ -81,6 +81,13 @@ typedef union {
 	const char *s;
 } Arg;
 
+typedef struct TermSession TermSession;
+TermSession *tsessioncurrent(void);
+TermSession *tsessionnew(int, int);
+TermSession *tsessionnext(TermSession *);
+void tsessionuse(TermSession *);
+int tsessionfd(TermSession *);
+
 void die(const char *, ...);
 void redraw(void);
 void draw(void);
