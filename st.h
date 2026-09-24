@@ -1,6 +1,7 @@
 /* See LICENSE for license details. */
 
 #include <stdint.h>
+#include <sys/select.h>
 #include <sys/types.h>
 
 /* macros */
@@ -87,6 +88,10 @@ TermSession *tsessionnew(int, int);
 TermSession *tsessionnext(TermSession *);
 void tsessionuse(TermSession *);
 int tsessionfd(TermSession *);
+void tsessionreap(void);
+int tsessionexitstatus(void);
+void tsessionhangupall(void);
+void tsessionstop(TermSession *);
 
 void die(const char *, ...);
 void redraw(void);

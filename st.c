@@ -233,23 +233,24 @@ struct TermSession {
 	CSIEscape csiescseq;
 	STREscape strescseq;
 	int output_fd, pty_fd;
-	pid_t pid;
+	pid_t child_pid;
 	char ttybuf[BUFSIZ];
 	int ttybuflen;
 	TCursor saved[2];
 	struct TermSession *next;
 };
 
-static TermSession primarysession = {.output_fd = 1};
+static TermSession primarysession = {.output_fd = 1, .pty_fd = -1};
 static TermSession *session = &primarysession;
 static TermSession *sessions = &primarysession;
+static int last_child_status;
 #define term (session->term)
 #define sel (session->sel)
 #define csiescseq (session->csiescseq)
 #define strescseq (session->strescseq)
 #define iofd (session->output_fd)
 #define cmdfd (session->pty_fd)
-#define pid (session->pid)
+#define pid (session->child_pid)
 
 TermSession *
 tsessioncurrent(void)
@@ -263,6 +264,7 @@ tsessionnew(int cols, int rows)
 	TermSession *created = xmalloc(sizeof(*created));
 	memset(created, 0, sizeof(*created));
 	created->output_fd = 1;
+	created->pty_fd = -1;
 	created->next = sessions;
 	sessions = created;
 	session = created;
@@ -289,6 +291,52 @@ int
 tsessionfd(TermSession *chosen)
 {
 	return chosen->pty_fd;
+}
+
+void
+tsessionreap(void)
+{
+	TermSession *candidate;
+	int status;
+	pid_t child;
+
+	while ((child = waitpid(-1, &status, WNOHANG)) > 0) {
+		for (candidate = sessions; candidate; candidate = candidate->next)
+			if (candidate->child_pid == child) {
+				candidate->child_pid = 0;
+				last_child_status = WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+				break;
+			}
+	}
+}
+
+int
+tsessionexitstatus(void)
+{
+	return last_child_status;
+}
+
+void
+tsessionhangupall(void)
+{
+	TermSession *previous = session, *candidate;
+
+	for (candidate = sessions; candidate; candidate = candidate->next) {
+		session = candidate;
+		ttyhangup();
+	}
+	session = previous;
+}
+
+void
+tsessionstop(TermSession *chosen)
+{
+	if (chosen->child_pid > 0)
+		kill(chosen->child_pid, SIGHUP);
+	if (chosen->pty_fd >= 0) {
+		close(chosen->pty_fd);
+		chosen->pty_fd = -1;
+	}
 }
 
 static const uchar utfbyte[UTF_SIZ + 1] = {0x80,    0, 0xC0, 0xE0, 0xF0};
@@ -777,25 +825,8 @@ execsh(char *cmd, char **args)
 void
 sigchld(int a)
 {
-	int stat, olderrno;
-	pid_t p;
-
-	olderrno = errno;
-	do {
-		p = waitpid(pid, &stat, WNOHANG);
-	} while (p < 0 && errno == EINTR);
-
-	if (p < 0)
-		_exit(1);
-
-	if (pid != p) {
-		errno = olderrno;
-		return;
-	}
-
-	if ((WIFEXITED(stat) && WEXITSTATUS(stat)) || WIFSIGNALED(stat))
-		_exit(1);
-	_exit(0);
+	/* Interrupt pselect; the owner loop reaps every session child. */
+	(void)a;
 }
 
 void
@@ -898,8 +929,17 @@ ttyread(void)
 
 	switch (ret) {
 	case 0:
-		exit(0);
+		close(cmdfd);
+		cmdfd = -1;
+		return 0;
 	case -1:
+		if (errno == EINTR)
+			return 0;
+		if (errno == EIO) {
+			close(cmdfd);
+			cmdfd = -1;
+			return 0;
+		}
 		die("couldn't read from shell: %s\n", strerror(errno));
 	default:
 		buflen += ret;
@@ -917,6 +957,9 @@ void
 ttywrite(const char *s, size_t n, int may_echo)
 {
 	const char *next;
+
+	if (cmdfd < 0)
+		return;
 
 	if (term.scr) {
 		selclear();
@@ -978,8 +1021,15 @@ ttywriteraw(const char *s, size_t n)
 			 * default of 256. This seems to be a reasonable value
 			 * for a serial line. Bigger values might clog the I/O.
 			 */
-			if ((r = write(cmdfd, s, (n < lim)? n : lim)) < 0)
+			if ((r = write(cmdfd, s, (n < lim)? n : lim)) <= 0) {
+				if (r < 0 && errno == EINTR)
+					continue;
+				if (r == 0 || errno == EIO || errno == EBADF) {
+					tsessionstop(session);
+					return;
+				}
 				goto write_error;
+			}
 			if (r < n) {
 				/*
 				 * We weren't able to write out everything.
@@ -988,6 +1038,8 @@ ttywriteraw(const char *s, size_t n)
 				 */
 				if (n < lim)
 					lim = ttyread();
+				if (cmdfd < 0)
+					return;
 				n -= r;
 				s += r;
 			} else {
@@ -997,6 +1049,8 @@ ttywriteraw(const char *s, size_t n)
 		}
 		if (FD_ISSET(cmdfd, &rfd))
 			lim = ttyread();
+		if (cmdfd < 0)
+			return;
 	}
 	return;
 
@@ -1008,6 +1062,9 @@ void
 ttyresize(int tw, int th)
 {
 	struct winsize w;
+
+	if (cmdfd < 0)
+		return;
 
 	w.ws_row = term.row;
 	w.ws_col = term.col;
@@ -1021,7 +1078,8 @@ void
 ttyhangup(void)
 {
 	/* Send SIGHUP to shell */
-	kill(pid, SIGHUP);
+	if (pid > 0)
+		kill(pid, SIGHUP);
 }
 
 int

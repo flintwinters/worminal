@@ -17,6 +17,31 @@ from latency import measure_one
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def focus_window(env, window):
+    if env.get("WORMINAL_PROOF_PRIVATE_DISPLAY"):
+        subprocess.run(["xdotool", "windowactivate", "--sync", window],
+                       env=env, check=True)
+    subprocess.run(["xdotool", "windowfocus", "--sync", window],
+                   env=env, check=True)
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        focused = subprocess.check_output(
+            ["xdotool", "getwindowfocus"], env=env, text=True).strip()
+        if focused == window:
+            time.sleep(.05)
+            if subprocess.check_output(
+                    ["xdotool", "getwindowfocus"], env=env,
+                    text=True).strip() == window:
+                return
+        time.sleep(.05)
+    raise AssertionError(f"window {window} did not retain X focus")
+
+
+def window_hash(env, window):
+    pixels = subprocess.check_output(["xwd", "-id", window, "-silent"], env=env)
+    return hashlib.sha256(pixels).digest()
+
+
 def check_placement(env, geometry, expected):
     title = f"Worminal placement {os.getpid()} {'explicit' if geometry else 'default'}"
     manager = subprocess.Popen(
@@ -150,6 +175,117 @@ def smoke_x11(env):
 
 
 class NativeTerminalTest(unittest.TestCase):
+    def test_independent_tabs_share_one_owner(self):
+        display = (nullcontext(os.environ.copy())
+                   if os.environ.get("WORMINAL_PROOF_PRIVATE_DISPLAY") else isolated_display())
+        with display as env:
+            env = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"tabs-{os.getpid()}"}
+            title = f"Worminal tabs {os.getpid()}"
+            first_tty = ROOT / ".checks" / "tab_first_tty"
+            first_input = ROOT / ".checks" / "tab_first_input"
+            second_tty = ROOT / ".checks" / "tab_second_tty"
+            second_input = ROOT / ".checks" / "tab_second_input"
+            second_window = ROOT / ".checks" / "tab_second_window"
+            paths = (first_tty, first_input, second_tty, second_input, second_window)
+            for path in paths:
+                path.unlink(missing_ok=True)
+            script = ('tty > "$1"; while IFS= read -r line; do '
+                      'printf "%s\\n" "$line" >> "$2"; '
+                      'printf "[%s]\\n" "$line"; done')
+            owner = subprocess.Popen(
+                [str(ROOT / "worminal"), "-S", "-T", title, "-e", "/bin/sh",
+                 "-c", script, "sh", str(first_tty), str(first_input)],
+                env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            )
+
+            def windows(count):
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    found = subprocess.run(
+                        ["xdotool", "search", "--onlyvisible", "--pid", str(owner.pid)],
+                        env=env, capture_output=True, text=True)
+                    ids = found.stdout.splitlines() if found.returncode == 0 else []
+                    if len(ids) == count:
+                        return ids
+                    if owner.poll() is not None:
+                        self.fail(f"owner exited: {owner.communicate()[1].decode()}")
+                    time.sleep(.05)
+                self.fail(f"expected {count} tab windows; saw {ids}")
+
+            def focus(window):
+                focus_window(env, window)
+
+            def type_line(line):
+                subprocess.run(["xdotool", "type", "--clearmodifiers", "--delay", "10", line],
+                               env=env, check=True)
+                subprocess.run(["xdotool", "key", "Return"], env=env, check=True)
+
+            def wait_file(path, expected=None):
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    if path.exists():
+                        content = path.read_text()
+                        if content and (expected is None or content == expected):
+                            return content
+                    time.sleep(.05)
+                self.fail(f"tab did not write {expected!r} to {path.name}")
+
+            def image_hash(window):
+                return window_hash(env, window)
+
+            try:
+                first = windows(1)[0]
+                wait_file(first_tty)
+                subprocess.run([str(ROOT / "worminal"), "-S", "-A"],
+                               env=env, capture_output=True, check=True, timeout=5)
+                second = next(window for window in windows(2) if window != first)
+                if os.environ.get("WORMINAL_PROOF_PRIVATE_DISPLAY"):
+                    for window, x in ((first, "20"), (second, "380")):
+                        subprocess.run(["xdotool", "windowsize", window, "300", "250"],
+                                       env=env, check=True)
+                        subprocess.run(["xdotool", "windowmove", window, x, "20"],
+                                       env=env, check=True)
+                focus(second)
+                type_line(f"tty > {second_tty}; printf second > {second_input}; "
+                          f"printf %s \"$WINDOWID\" > {second_window}")
+                self.assertEqual(wait_file(second_input), "second")
+                self.assertNotEqual(first_tty.read_text(), wait_file(second_tty),
+                                    "tabs used the same PTY")
+                self.assertEqual(wait_file(second_window), second,
+                                 "second shell inherited the wrong window")
+                focus(first)
+                second_before = image_hash(second)
+                type_line("alpha")
+                self.assertEqual(wait_file(first_input, "alpha\n"), "alpha\n")
+                self.assertEqual(image_hash(second), second_before,
+                                 "first tab output changed the second tab")
+                focus(second)
+                first_before = image_hash(first)
+                type_line(f"printf more >> {second_input}")
+                self.assertEqual(wait_file(second_input, "secondmore"), "secondmore")
+                self.assertEqual(image_hash(first), first_before,
+                                 "second tab output changed the first tab")
+                type_line("exit")
+                time.sleep(.2)
+                self.assertIsNone(owner.poll(), "second shell exit ended the owner")
+                subprocess.run(["xdotool", "windowclose", second], env=env, check=True)
+                self.assertEqual(windows(1), [first])
+                self.assertIsNone(owner.poll(), "closing one tab ended the owner")
+                focus(first)
+                type_line("after")
+                self.assertEqual(wait_file(first_input, "alpha\nafter\n"),
+                                 "alpha\nafter\n")
+                subprocess.run(["xdotool", "windowclose", first], env=env, check=True)
+                owner.wait(timeout=3)
+                self.assertEqual(owner.returncode, 0)
+            finally:
+                if owner.poll() is None:
+                    owner.terminate()
+                owner.wait(timeout=2)
+                owner.stderr.close()
+                for path in paths:
+                    path.unlink(missing_ok=True)
+
     def test_close_during_early_map(self):
         with isolated_display() as env:
             manager = subprocess.Popen(
@@ -291,14 +427,10 @@ class NativeTerminalTest(unittest.TestCase):
                 self.fail(f"Expected {count} shared windows; saw {ids}")
 
             def focus(window):
-                if os.environ.get("WORMINAL_PROOF_PRIVATE_DISPLAY"):
-                    subprocess.run(["xdotool", "windowactivate", "--sync", window],
-                                   env=env, check=True)
-                subprocess.run(["xdotool", "windowfocus", "--sync", window], env=env, check=True)
-                time.sleep(.1)
+                focus_window(env, window)
 
             def typed(value):
-                subprocess.run(["xdotool", "type", "--clearmodifiers", "--delay", "0", value],
+                subprocess.run(["xdotool", "type", "--clearmodifiers", "--delay", "10", value],
                                env=env, check=True)
                 subprocess.run(["xdotool", "key", "Return"], env=env, check=True)
                 deadline = time.monotonic() + 3
@@ -309,8 +441,7 @@ class NativeTerminalTest(unittest.TestCase):
                 self.fail(f"Input {value!r} did not reach the shared shell")
 
             def image_hash(window):
-                pixels = subprocess.check_output(["xwd", "-id", window, "-silent"], env=env)
-                return hashlib.sha256(pixels).digest()
+                return window_hash(env, window)
 
             def geometry(window):
                 lines = subprocess.check_output(

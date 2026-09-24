@@ -14,6 +14,8 @@ worminal \- simple terminal based on st
 .IR name ]
 .RB [ \-o
 .IR iofile ]
+.RB [ \-S
+.RB [ \-A ]]
 .RB [ \-T
 .IR title ]
 .RB [ \-t
@@ -80,6 +82,16 @@ writes all the I/O to
 .I iofile.
 This feature is useful when recording worminal sessions. A value of "-" means
 standard output.
+.TP
+.B \-S
+Join the owner for this X display and open another view of an existing terminal.
+If there is no owner, start one.
+.TP
+.B \-A
+With
+.BR \-S ,
+open a new terminal session in the owner instead of another view of the
+existing session. This shared-tab interface is experimental.
 .TP
 .BI \-T " title"
 defines the window title (default 'Worminal').

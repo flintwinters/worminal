@@ -35,6 +35,18 @@ def main():
                 else:
                     raise RuntimeError("private KWin did not become ready")
 
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    supported = subprocess.run(["xprop", "-root", "_NET_SUPPORTED"],
+                                               env=env, capture_output=True, text=True)
+                    if "_NET_ACTIVE_WINDOW" in supported.stdout:
+                        break
+                    if manager.poll() is not None:
+                        raise RuntimeError("private KWin exited during startup")
+                    time.sleep(.05)
+                else:
+                    raise RuntimeError("private KWin did not advertise window activation")
+
                 deadline = time.monotonic() + 5
                 while time.monotonic() < deadline:
                     xim = subprocess.run(["xprop", "-root", "_XIM_SERVERS"],
@@ -54,7 +66,8 @@ def main():
                 if not code:
                     code = subprocess.run(
                         [sys.executable, "-m", "unittest", "discover", "-s", "tests",
-                         "-p", "test_native.py", "-k", "shared_view_end_to_end", "-q"],
+                         "-p", "test_native.py", "-k", "shared_view_end_to_end",
+                         "-k", "independent_tabs_share_one_owner", "-q"],
                         cwd=ROOT,
                         env={**env, "WORMINAL_PROOF_PRIVATE_DISPLAY": "1"},
                     ).returncode
