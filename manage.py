@@ -76,6 +76,12 @@ def check():
 
 
 @app.command()
+def lint():
+    """Run Clang static analysis on the C sources (requires clang-tidy)."""
+    prepare("lint")
+
+
+@app.command()
 def clean():
     """Remove generated binaries and headers."""
     raise typer.Exit(run(["make", "-s", "clean"]))
