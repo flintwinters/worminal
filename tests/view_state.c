@@ -24,6 +24,17 @@ tsessionuse(TermSession *chosen)
 	/* This fixture checks view routing without constructing a PTY session. */
 }
 
+TermSession *tsessioncurrent(void) { return view->terminal; }
+
+char *
+xstrdup(const char *value)
+{
+	char *copy = strdup(value);
+	if (!copy)
+		die("proof allocation failed\n");
+	return copy;
+}
+
 void tresize(int cols, int rows) { die("unexpected terminal resize\n"); }
 void ttyresize(int width, int height) { die("unexpected PTY resize\n"); }
 void redraw(void) { die("unexpected terminal redraw\n"); }
@@ -349,8 +360,7 @@ main(void)
 	    spec.font != second_font)
 		die("second view could not shape text after first reloaded fonts\n");
 
-	/* A tab's OSC palette changes reach every view of that tab, and a
-	 * newly attached view can copy the current colors. */
+	/* A tab's OSC palette changes reach every selected view. */
 	first.terminal = second.terminal = (TermSession *)1;
 	view = &first;
 	if (xsetcolorname(1, "#ff0000"))
@@ -371,9 +381,6 @@ main(void)
 	view = &second;
 	if (dc.col[1].color.green != 0)
 		die("tab color leaked across sessions\n");
-	xcopycolors(&first, &second);
-	if (dc.col[1].color.green < 0xf000)
-		die("new view did not inherit tab colors\n");
 	if (previous_focus != None && previous_focus != PointerRoot)
 		XSetInputFocus(display, previous_focus, revert_to, CurrentTime);
 	XSync(display, False);

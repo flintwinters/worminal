@@ -1,4 +1,4 @@
-"""Run shared-view checks against remote Cinnamon on a private local Xvfb display."""
+"""Run shared-tab checks against remote Cinnamon on a private local Xvfb display."""
 
 from pathlib import Path
 import select

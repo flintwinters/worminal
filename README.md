@@ -27,6 +27,27 @@ file. Rebuild after theme changes; Worminal reads no TOML at launch. `run` start
 the already-built binary without rebuilding. Launch `./worminal` directly to
 avoid Python startup time.
 
+## Shared tabs
+
+Every `./worminal` launch joins the owner for the same user and X11 `DISPLAY`,
+opening a new window on a new tab. Each display has its own tab list. Every
+window shows that list above the terminal and selects a tab independently. The
+selected label is reversed; click a label to select it. Ctrl+T creates a tab,
+Ctrl+W closes the selected tab in every window, Ctrl+Tab and Ctrl+Shift+Tab
+cycle, Ctrl+1 through Ctrl+8 select by position, Ctrl+9 selects the last tab,
+and Ctrl+N opens a new window and tab.
+
+The focused or input-receiving window paints its selected tab. Other windows
+selecting that tab keep their terminal pixels until they become live; tab-line
+changes still appear. A tab keeps running without a selected window while any
+Worminal window remains. Closing the final window ends the owner and all tabs.
+Scrollback belongs to the tab, so switching windows preserves its position.
+The former `-S` and `-A` prototype flags are retired. Launch options, command,
+working directory, and environment are forwarded to the new shell.
+
+The [shared-tab design and proof ledger](docs/shared-tabs.md) records the state
+and limits of the X11 proofs.
+
 Supported color settings are primary foreground/background, normal, bright,
 explicit dim and indexed colors, cursor colors, and
 `draw_bold_text_with_bright_colors`. Both `#RRGGBB` and `0xRRGGBB` are accepted.

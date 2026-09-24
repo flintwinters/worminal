@@ -1,4 +1,4 @@
-"""Run shared-view checks under KWin on a private Xvfb display."""
+"""Run shared-tab checks under KWin on a private Xvfb display."""
 
 from pathlib import Path
 import subprocess
