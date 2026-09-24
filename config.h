@@ -94,7 +94,7 @@ char *termname = "st-256color";
 unsigned int tabspaces = 8;
 
 /* Alacritty settings are resolved at build time; no theme file is read at launch. */
-#include ".checks/theme.h"
+#include WORMINAL_THEME_HEADER
 
 
 /*
