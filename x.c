@@ -2543,13 +2543,32 @@ xsettitle(char *p)
 	tsessionuse(terminal);
 }
 
+static const char *
+xtablabel(const char *directory, int *length)
+{
+	size_t end = strlen(directory), start;
+
+	while (end > 1 && directory[end - 1] == '/')
+		end--;
+	if (end == 1 && directory[0] == '/') {
+		*length = 1;
+		return directory;
+	}
+	start = end;
+	while (start > 0 && directory[start - 1] != '/')
+		start--;
+	*length = end - start;
+	return directory + start;
+}
+
 static int
 xtabwidth(Tab *tab)
 {
 	XGlyphInfo extents;
-	const char *title = tab->directory;
+	int length;
+	const char *title = xtablabel(tab->directory, &length);
 	XftTextExtentsUtf8(xw.dpy, dc.font.match, (const FcChar8 *)title,
-	                    strlen(title), &extents);
+	                    length, &extents);
 	return extents.xOff + 2 * current_window.cw;
 }
 
@@ -2588,14 +2607,15 @@ xdrawtabs(void)
 	XftDrawSetClipRectangles(xw.draw, 0, 0, &clip, 1);
 	for (tab = xfirsttab(); tab && x < right; tab = tab->next) {
 		int width = xtabwidth(tab), selected = tab->terminal == view->terminal;
-		const char *title = tab->directory;
+		int length;
+		const char *title = xtablabel(tab->directory, &length);
 		Color *ink = xcolor(selected ? defaultbg : defaultfg);
 		if (selected)
 			XftDrawRect(xw.draw, xcolor(defaultfg), x, borderpx,
 			            MIN(width, right - x), current_window.ch);
 		XftDrawStringUtf8(xw.draw, ink,
 		                  dc.font.match, x + current_window.cw, baseline,
-		                  (const FcChar8 *)title, strlen(title));
+		                  (const FcChar8 *)title, length);
 		XftDrawRect(xw.draw, ink, x + current_window.cw,
 		            MIN(baseline + 2, borderpx + current_window.ch - 2),
 		            MAX(0, width - 2 * current_window.cw), 1);
