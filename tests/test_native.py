@@ -205,10 +205,13 @@ def smoke_x11(env):
 class NativeTerminalTest(unittest.TestCase):
     def test_tab_label_tracks_child_directory(self):
         with isolated_display() as env:
-            env = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"directory-{os.getpid()}"}
+            env = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"directory-{os.getpid()}",
+                   "SHELL": "/bin/sh"}
             title = f"Worminal directory {os.getpid()}"
             marker = ROOT / ".checks" / f"directory-ready-{os.getpid()}"
+            new_tab_pwd = ROOT / ".checks" / f"new-tab-pwd-{os.getpid()}"
             marker.unlink(missing_ok=True)
+            new_tab_pwd.unlink(missing_ok=True)
             process = subprocess.Popen(
                 [str(ROOT / "worminal"), "-T", title, "-e", "/bin/sh", "-c",
                  'while IFS= read -r command; do eval "$command"; done'],
@@ -261,11 +264,19 @@ class NativeTerminalTest(unittest.TestCase):
                 self.assertEqual(subprocess.check_output(
                     ["xdotool", "getwindowname", window], env=env,
                     text=True).strip(), title)
+                subprocess.run(["xdotool", "key", "ctrl+t"], env=env, check=True)
+                subprocess.run(["xdotool", "type", "--clearmodifiers", "--delay", "0",
+                                f"pwd > {new_tab_pwd}"], env=env, check=True)
+                subprocess.run(["xdotool", "key", "Return"], env=env, check=True)
+                wait_for(new_tab_pwd.exists, "new tab did not run pwd")
+                self.assertEqual(new_tab_pwd.read_text().strip(), str(ROOT / ".checks"),
+                                 "new tab did not inherit the selected tab's directory")
             finally:
                 if process.poll() is None:
                     process.terminate()
                 process.communicate(timeout=2)
                 marker.unlink(missing_ok=True)
+                new_tab_pwd.unlink(missing_ok=True)
 
     def test_forwarded_line_keeps_owner_stdin(self):
         with isolated_display() as env:
