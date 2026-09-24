@@ -6,6 +6,7 @@ import pty
 import hashlib
 from pathlib import Path
 import select
+import shutil
 import signal
 import struct
 import subprocess
@@ -203,6 +204,38 @@ def smoke_x11(env):
 
 
 class NativeTerminalTest(unittest.TestCase):
+    def test_new_executable_keeps_old_owner_tabs(self):
+        with isolated_display() as env:
+            env = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"build-{os.getpid()}"}
+            copy = ROOT / ".checks" / f"worminal-copy-{os.getpid()}"
+            shutil.copy2(ROOT / "worminal", copy)
+            owners = []
+            try:
+                for binary in (ROOT / "worminal", copy):
+                    owner = subprocess.Popen(
+                        [str(binary), "-e", "/bin/cat"], env=env,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                    owners.append(owner)
+                    deadline = time.monotonic() + 5
+                    while time.monotonic() < deadline:
+                        result = subprocess.run(
+                            ["xdotool", "search", "--onlyvisible", "--pid", str(owner.pid)],
+                            env=env, capture_output=True, text=True)
+                        if result.returncode == 0:
+                            break
+                        if owner.poll() is not None:
+                            self.fail("new executable forwarded to the old owner")
+                        time.sleep(.05)
+                    else:
+                        self.fail("new executable did not create its own window")
+                self.assertTrue(all(owner.poll() is None for owner in owners))
+            finally:
+                for owner in owners:
+                    if owner.poll() is None:
+                        owner.terminate()
+                    owner.communicate(timeout=2)
+                copy.unlink(missing_ok=True)
+
     def test_tab_label_tracks_child_directory(self):
         with isolated_display() as env:
             env = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"directory-{os.getpid()}",
