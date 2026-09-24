@@ -1,9 +1,11 @@
 """Build settings and a real keyboard-to-PTY smoke check."""
 
+from contextlib import nullcontext
 import os
 import hashlib
 from pathlib import Path
 import select
+import signal
 import subprocess
 import time
 import unittest
@@ -148,12 +150,45 @@ def smoke_x11(env):
 
 
 class NativeTerminalTest(unittest.TestCase):
+    def test_close_during_early_map(self):
+        with isolated_display() as env:
+            manager = subprocess.Popen(
+                [str(ROOT / ".checks/placement_wm")],
+                env={**env, "WORMINAL_CLOSE_ON_MAP": "1"},
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            terminal = None
+            try:
+                ready, _, _ = select.select([manager.stdout], [], [], 5)
+                self.assertTrue(ready and manager.stdout.readline() == b"ready\n")
+                terminal = subprocess.Popen(
+                    [str(ROOT / "worminal"), "-e", "/bin/cat"],
+                    env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                )
+                ready, _, _ = select.select([manager.stdout], [], [], 5)
+                self.assertTrue(ready and manager.stdout.readline() == b"closed\n")
+                terminal.wait(timeout=3)
+                self.assertEqual(terminal.returncode, 0, terminal.stderr.read().decode())
+            finally:
+                for process in (terminal, manager):
+                    if process is not None:
+                        if process.poll() is None:
+                            process.terminate()
+                        process.wait(timeout=2)
+                        for stream in (process.stdout, process.stderr):
+                            if stream is not None:
+                                stream.close()
+
     def test_shared_owner_election_and_restart(self):
         with isolated_display() as env:
             env = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"race-{os.getpid()}"}
             title = f"Worminal race {os.getpid()}"
+            child_pids = ROOT / ".checks" / f"shared-race-pids-{os.getpid()}"
+            child_pids.unlink(missing_ok=True)
             command = [str(ROOT / "worminal"), "-S", "-T", title,
-                       "-e", "/bin/cat"]
+                       "-e", "/bin/sh", "-c",
+                       'trap "" HUP; printf "%s\\n" "$$" >> "$1"; exec sleep 30',
+                       "sh", str(child_pids)]
             launchers = [subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL,
                                           stderr=subprocess.PIPE) for _ in range(2)]
             try:
@@ -174,7 +209,9 @@ class NativeTerminalTest(unittest.TestCase):
                 for window in windows:
                     subprocess.run(["xdotool", "windowclose", window], env=env, check=True)
                 running[0].wait(timeout=3)
-                self.assertEqual(running[0].returncode, 0)
+                ready, _, _ = select.select([running[0].stderr], [], [], 0)
+                self.assertEqual(running[0].returncode, 0,
+                                 os.read(running[0].stderr.fileno(), 4096).decode() if ready else "")
 
                 restarted = subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL,
                                              stderr=subprocess.PIPE)
@@ -191,16 +228,27 @@ class NativeTerminalTest(unittest.TestCase):
                 subprocess.run(["xdotool", "windowclose", search.stdout.splitlines()[0]],
                                env=env, check=True)
                 restarted.wait(timeout=3)
-                self.assertEqual(restarted.returncode, 0)
+                ready, _, _ = select.select([restarted.stderr], [], [], 0)
+                self.assertEqual(restarted.returncode, 0,
+                                 os.read(restarted.stderr.fileno(), 4096).decode() if ready else "")
             finally:
                 for process in launchers:
                     if process.poll() is None:
                         process.terminate()
                     process.wait(timeout=2)
                     process.stderr.close()
+                if child_pids.exists():
+                    for line in child_pids.read_text().splitlines():
+                        try:
+                            os.kill(int(line), signal.SIGTERM)
+                        except ProcessLookupError:
+                            pass
+                    child_pids.unlink()
 
     def test_shared_view_end_to_end(self):
-        with isolated_display() as env:
+        display = (nullcontext(os.environ.copy())
+                   if os.environ.get("WORMINAL_PROOF_PRIVATE_DISPLAY") else isolated_display())
+        with display as env:
             env = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"proof-{os.getpid()}"}
             title = f"Worminal shared {os.getpid()}"
             received = ROOT / ".checks" / "shared_input"
@@ -243,6 +291,9 @@ class NativeTerminalTest(unittest.TestCase):
                 self.fail(f"Expected {count} shared windows; saw {ids}")
 
             def focus(window):
+                if os.environ.get("WORMINAL_PROOF_PRIVATE_DISPLAY"):
+                    subprocess.run(["xdotool", "windowactivate", "--sync", window],
+                                   env=env, check=True)
                 subprocess.run(["xdotool", "windowfocus", "--sync", window], env=env, check=True)
                 time.sleep(.1)
 
@@ -275,6 +326,12 @@ class NativeTerminalTest(unittest.TestCase):
                 subprocess.run([str(ROOT / "worminal"), "-S"], env=env,
                                capture_output=True, check=True, timeout=5)
                 first, second = windows(2)
+                if os.environ.get("WORMINAL_PROOF_PRIVATE_DISPLAY"):
+                    for window, x in ((first, "20"), (second, "380")):
+                        subprocess.run(["xdotool", "windowsize", window, "300", "250"],
+                                       env=env, check=True)
+                        subprocess.run(["xdotool", "windowmove", window, x, "20"],
+                                       env=env, check=True)
                 focus(second)
                 before = image_hash(second)
                 focus(first)

@@ -312,6 +312,24 @@ static int startup_ttyfd;
 static TermSession *startup_terminal;
 static int sharedserver = -1;
 static int shared_requested;
+static Window initializing_window;
+static int initializing_window_gone;
+static int (*previous_xerror)(Display *, XErrorEvent *);
+
+static int
+xinitialerror(Display *display, XErrorEvent *error)
+{
+	if (error->resourceid == initializing_window &&
+	    (error->error_code == BadWindow || error->error_code == BadDrawable)) {
+		initializing_window_gone = 1;
+		return 0;
+	}
+	if (previous_xerror)
+		return previous_xerror(display, error);
+	die("unexpected X error during window initialization: %d\n",
+	    error->error_code);
+	return 0;
+}
 
 /* Linux abstract sockets disappear with their owner, so a crashed owner
  * cannot leave a stale pathname that prevents a new owner from starting. */
@@ -333,7 +351,7 @@ xsharedstart(void)
 	if (size < 0 || size >= sizeof(addr.sun_path) - 1)
 		die("DISPLAY is too long for shared-view socket\n");
 	for (attempt = 0; attempt < 100; attempt++) {
-		fd = socket(AF_UNIX, SOCK_STREAM, 0);
+		fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
 		if (fd < 0)
 			die("shared-view socket failed: %s\n", strerror(errno));
 		if (connect(fd, (struct sockaddr *)&addr,
@@ -345,7 +363,9 @@ xsharedstart(void)
 			exit(0);
 		}
 		close(fd);
-		fd = socket(AF_UNIX, SOCK_STREAM, 0);
+		/* ttynew forks after this bind; the shell must not inherit the
+		 * listener or a restart can connect to an owner that has exited. */
+		fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
 		if (fd < 0)
 			die("shared-view socket failed: %s\n", strerror(errno));
 		if (bind(fd, (struct sockaddr *)&addr,
@@ -946,8 +966,8 @@ xcolor(int i)
 	return &dc.col[i];
 }
 
-void
-xloadcols(void)
+static void
+xloadcolsone(void)
 {
 	size_t i;
 
@@ -968,6 +988,19 @@ xloadcols(void)
 	xcolor(defaultbg);
 }
 
+void
+xloadcols(void)
+{
+	XView *previous = view, *candidate;
+
+	for (candidate = views; candidate; candidate = candidate->next)
+		if (candidate->terminal == previous->terminal) {
+			xsetview(candidate);
+			xloadcolsone();
+		}
+	xsetview(previous);
+}
+
 int
 xgetcolor(int x, unsigned char *r, unsigned char *g, unsigned char *b)
 {
@@ -984,8 +1017,8 @@ xgetcolor(int x, unsigned char *r, unsigned char *g, unsigned char *b)
 	return 0;
 }
 
-int
-xsetcolorname(int x, const char *name)
+static int
+xsetcolornameone(int x, const char *name)
 {
 	Color ncolor;
 
@@ -1001,6 +1034,21 @@ xsetcolorname(int x, const char *name)
 	dc.colloaded[x] = 1;
 
 	return 0;
+}
+
+int
+xsetcolorname(int x, const char *name)
+{
+	XView *previous = view, *candidate;
+	int failed = 0;
+
+	for (candidate = views; candidate; candidate = candidate->next)
+		if (candidate->terminal == previous->terminal) {
+			xsetview(candidate);
+			failed |= xsetcolornameone(x, name);
+		}
+	xsetview(previous);
+	return failed;
 }
 
 /*
@@ -1400,6 +1448,9 @@ xinitview(int cols, int rows, int startpty)
 			0, XDefaultDepth(xw.dpy, xw.scr), InputOutput,
 			xw.vis, CWBackPixel | CWBorderPixel | CWBitGravity
 			| CWEventMask | CWColormap, &xw.attrs);
+	initializing_window = xw.win;
+	initializing_window_gone = 0;
+	previous_xerror = XSetErrorHandler(xinitialerror);
 	if (parent != root)
 		XReparentWindow(xw.dpy, xw.win, parent, xw.l, xw.t);
 	if (startpty) {
@@ -1425,10 +1476,11 @@ xinitview(int cols, int rows, int startpty)
 	current_window.mode = MODE_NUMLOCK;
 	resettitle();
 	xidentityhints();
-	XMapWindow(xw.dpy, xw.win);
-	XFlush(xw.dpy);
-	if (startpty)
+	if (startpty) {
+		XMapWindow(xw.dpy, xw.win);
+		XFlush(xw.dpy);
 		xstartuptime("map-request");
+	}
 
 	/* font */
 	if (!FcInit())
@@ -1442,7 +1494,7 @@ xinitview(int cols, int rows, int startpty)
 		xstartuptime("font");
 
 	/* colors */
-	xloadcols();
+	xloadcolsone();
 	if (!XftColorAllocValue(xw.dpy, xw.vis, xw.cmap, &bordergray, &dc.border))
 		die("could not allocate border color\n");
 
@@ -1469,9 +1521,9 @@ xinitview(int cols, int rows, int startpty)
 
 	memset(&gcvalues, 0, sizeof(gcvalues));
 	gcvalues.graphics_exposures = False;
-	dc.gc = XCreateGC(xw.dpy, xw.win, GCGraphicsExposures,
+	dc.gc = XCreateGC(xw.dpy, root, GCGraphicsExposures,
 			&gcvalues);
-	xw.buf = XCreatePixmap(xw.dpy, xw.win, current_window.w, current_window.h,
+	xw.buf = XCreatePixmap(xw.dpy, root, current_window.w, current_window.h,
 			DefaultDepth(xw.dpy, xw.scr));
 	XSetForeground(xw.dpy, dc.gc, dc.col[defaultbg].pixel);
 	XFillRectangle(xw.dpy, xw.buf, dc.gc, 0, 0, current_window.w, current_window.h);
@@ -1516,6 +1568,20 @@ xinitview(int cols, int rows, int startpty)
 	xsel.xtarget = XInternAtom(xw.dpy, "UTF8_STRING", 0);
 	if (xsel.xtarget == None)
 		xsel.xtarget = XA_STRING;
+	if (!startpty) {
+		XMapWindow(xw.dpy, xw.win);
+		XFlush(xw.dpy);
+	}
+	/* A provisional window can be destroyed while fonts load. Drain any
+	 * pending BadWindow before restoring the normal X error policy. */
+	XSync(xw.dpy, False);
+	XSetErrorHandler(previous_xerror);
+	initializing_window = None;
+	if (initializing_window_gone) {
+		signal(SIGCHLD, SIG_IGN);
+		ttyhangup();
+		exit(0);
+	}
 }
 
 void
@@ -1523,6 +1589,32 @@ xinit(int cols, int rows)
 {
 	xinitview(cols, rows, 1);
 	view->live = 1;
+}
+
+static void
+xcopycolors(XView *source, XView *target)
+{
+	XView *previous = view;
+	XRenderColor color;
+	Color copy;
+	size_t i, count;
+
+	xsetview(source);
+	count = dc.collen;
+	for (i = 0; i < count; i++) {
+		if (!dc.colloaded[i])
+			continue;
+		color = dc.col[i].color;
+		xsetview(target);
+		if (!XftColorAllocValue(xw.dpy, xw.vis, xw.cmap, &color, &copy))
+			die("could not copy tab color %zu\n", i);
+		if (dc.colloaded[i])
+			XftColorFree(xw.dpy, xw.vis, xw.cmap, &dc.col[i]);
+		dc.col[i] = copy;
+		dc.colloaded[i] = 1;
+		xsetview(source);
+	}
+	xsetview(previous);
 }
 
 static void
@@ -1540,6 +1632,7 @@ xaddview(void)
 	rows = MAX(1, (views->win.h - 2 * borderpx) / views->win.ch);
 	xsetview(created);
 	xinitview(cols, rows, 0);
+	xcopycolors(previous, created);
 	xsetview(previous);
 }
 

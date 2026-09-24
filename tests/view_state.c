@@ -21,12 +21,21 @@ ttywrite(const char *data, size_t len, int echo)
 void
 tsessionuse(TermSession *chosen)
 {
-	die("unexpected terminal session switch\n");
+	/* This fixture checks view routing without constructing a PTY session. */
 }
 
 void tresize(int cols, int rows) { die("unexpected terminal resize\n"); }
 void ttyresize(int width, int height) { die("unexpected PTY resize\n"); }
 void redraw(void) { die("unexpected terminal redraw\n"); }
+
+void *
+xmalloc(size_t size)
+{
+	void *result = malloc(size);
+	if (!result)
+		die("proof allocation failed\n");
+	return result;
+}
 
 void *
 xrealloc(void *pointer, size_t size)
@@ -60,10 +69,7 @@ setup_view(XView *target, Display *display, int x, unsigned long color)
 	xw.buf = XCreatePixmap(display, xw.win, 100, 60,
 	                      DefaultDepth(display, xw.scr));
 	dc.gc = XCreateGC(display, xw.win, 0, NULL);
-	dc.col = calloc(defaultbg + 1, sizeof(Color));
-	dc.colloaded = calloc(defaultbg + 1, 1);
-	dc.col[defaultbg].pixel = BlackPixel(display, xw.scr);
-	dc.colloaded[defaultbg] = 1;
+	xloadcolsone();
 	dc.border.pixel = WhitePixel(display, xw.scr);
 	XSetForeground(display, dc.gc, color);
 	XFillRectangle(display, xw.buf, dc.gc, 0, 0, 100, 60);
@@ -266,6 +272,32 @@ main(void)
 	if (xmakeglyphfontspecs(&spec, &glyph, 1, 0, 0) != 1 ||
 	    spec.font != second_font)
 		die("second view could not shape text after first reloaded fonts\n");
+
+	/* A tab's OSC palette changes reach every view of that tab, and a
+	 * newly attached view can copy the current colors. */
+	first.terminal = second.terminal = (TermSession *)1;
+	view = &first;
+	if (xsetcolorname(1, "#ff0000"))
+		die("tab color change failed\n");
+	if (dc.col[1].color.red < 0xf000) {
+		fprintf(stderr, "first red=%u\n", dc.col[1].color.red);
+		return 1;
+	}
+	view = &second;
+	if (dc.col[1].color.red < 0xf000)
+		die("tab color did not reach both views\n");
+	second.terminal = (TermSession *)2;
+	view = &first;
+	if (xsetcolorname(1, "#00ff00"))
+		die("isolated tab color change failed\n");
+	if (dc.col[1].color.green < 0xf000)
+		die("tab color did not change first view\n");
+	view = &second;
+	if (dc.col[1].color.green != 0)
+		die("tab color leaked across sessions\n");
+	xcopycolors(&first, &second);
+	if (dc.col[1].color.green < 0xf000)
+		die("new view did not inherit tab colors\n");
 	if (previous_focus != None && previous_focus != PointerRoot)
 		XSetInputFocus(display, previous_focus, revert_to, CurrentTime);
 	XSync(display, False);
