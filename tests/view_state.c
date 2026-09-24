@@ -214,6 +214,11 @@ interior_pixel(Display *display, Window window)
 int
 main(void)
 {
+	const struct { const char *path, *label; } cases[] = {
+		{"/home/felix/projects/worminal/", "worminal"},
+		{"/home/felix/projects/.checks", ".checks"},
+		{"/", "/"},
+	};
 	Display *display = XOpenDisplay(NULL);
 	XView first = {0}, second = {0};
 	unsigned long black, white;
@@ -221,6 +226,13 @@ main(void)
 	Window previous_focus;
 	int revert_to;
 	XColor gray = {.red = 0x7777, .green = 0x7777, .blue = 0x7777};
+	for (size_t i = 0; i < LEN(cases); i++) {
+		int length;
+		const char *label = xtablabel(cases[i].path, &length);
+		if (length != strlen(cases[i].label) ||
+		    strncmp(label, cases[i].label, length) != 0)
+			die("tab label is not the final directory segment\n");
+	}
 
 	if (!display)
 		return 2;
