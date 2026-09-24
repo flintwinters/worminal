@@ -222,12 +222,31 @@ static void (*handler[LASTEvent])(XEvent *) = {
 	[SelectionRequest] = selrequest,
 };
 
-/* A view owns its X window, drawing context, and selection. */
+/* Font Ring Cache */
+enum {
+	FRC_NORMAL,
+	FRC_ITALIC,
+	FRC_BOLD,
+	FRC_ITALICBOLD
+};
+
+typedef struct {
+	XftFont *font;
+	int flags;
+	Rune unicodep;
+} Fontcache;
+
+/* A view owns its window, drawing state, font cache, and selection. */
 typedef struct XView {
 	DC dc;
 	XWindow xw;
 	XSelection xsel;
 	TermWindow win;
+	Fontcache *fallback_fonts;
+	int fallback_len, fallback_cap;
+	char *font_name;
+	FcPattern *style_pattern;
+	double font_size, default_font_size;
 	uint buttons;
 	struct XView *next;
 } XView;
@@ -254,29 +273,13 @@ xviewfor(Window window)
 #define xsel (view->xsel)
 #define current_window (view->win)
 #define buttons (view->buttons)
-
-/* Font Ring Cache */
-enum {
-	FRC_NORMAL,
-	FRC_ITALIC,
-	FRC_BOLD,
-	FRC_ITALICBOLD
-};
-
-typedef struct {
-	XftFont *font;
-	int flags;
-	Rune unicodep;
-} Fontcache;
-
-/* Fontcache is an array now. A new font will be appended to the array. */
-static Fontcache *frc = NULL;
-static int frclen = 0;
-static int frccap = 0;
-static char *usedfont = NULL;
-static FcPattern *stylepattern = NULL;
-static double usedfontsize = 0;
-static double defaultfontsize = 0;
+#define frc (view->fallback_fonts)
+#define frclen (view->fallback_len)
+#define frccap (view->fallback_cap)
+#define usedfont (view->font_name)
+#define stylepattern (view->style_pattern)
+#define usedfontsize (view->font_size)
+#define defaultfontsize (view->default_font_size)
 
 static char *opt_class = NULL;
 static char **opt_cmd  = NULL;
