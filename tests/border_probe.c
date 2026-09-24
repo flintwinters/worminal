@@ -11,7 +11,7 @@ main(int argc, char **argv)
 	Window window;
 	XWindowAttributes attrs;
 	XImage *image;
-	unsigned long white;
+	XColor gray = {.red = 0x9999, .green = 0x9999, .blue = 0x9999};
 	int ok;
 
 	if (argc != 2 || !(display = XOpenDisplay(NULL)))
@@ -24,15 +24,19 @@ main(int argc, char **argv)
 		XCloseDisplay(display);
 		return 2;
 	}
-	white = WhitePixel(display, DefaultScreen(display));
+	if (!XAllocColor(display, attrs.colormap, &gray)) {
+		XDestroyImage(image);
+		XCloseDisplay(display);
+		return 2;
+	}
 	ok = attrs.border_width == 0 &&
-	     XGetPixel(image, 0, 0) == white &&
-	     XGetPixel(image, 1, 0) == white &&
-	     XGetPixel(image, 0, 1) == white &&
-	     XGetPixel(image, 1, 1) != white;
+	     XGetPixel(image, 0, 0) == gray.pixel &&
+	     XGetPixel(image, 1, 0) == gray.pixel &&
+	     XGetPixel(image, 0, 1) == gray.pixel &&
+	     XGetPixel(image, 1, 1) != gray.pixel;
 	XDestroyImage(image);
 	XCloseDisplay(display);
 	if (!ok)
-		fputs("client edge is not a one-pixel white border\n", stderr);
+		fputs("client edge is not a one-pixel #999999 border\n", stderr);
 	return ok ? 0 : 1;
 }
