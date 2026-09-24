@@ -375,6 +375,7 @@ static int xupdatedirectory(Tab *);
 static Tab *xfirsttab(void);
 static int xtabwidth(Tab *);
 static void xselecttab(Tab *);
+static Tab *xtabslot(int);
 static void xclosetab(Tab *);
 static void xaddview(void);
 static XView *xlivefor(TermSession *);
@@ -1942,6 +1943,15 @@ xselecttab(Tab *tab)
 	xrefreshtabs();
 }
 
+static Tab *
+xtabslot(int slot)
+{
+	Tab *tab = tabs;
+	while (tab && --slot > 0)
+		tab = tab->next;
+	return tab;
+}
+
 static void
 xclosetab(Tab *tab)
 {
@@ -2884,7 +2894,6 @@ kpress(XEvent *ev)
 	}
 	if (e->state & ControlMask) {
 		Tab *tab, *selected = xtabfor(view->terminal), *previous = NULL;
-		int index;
 		switch (ksym) {
 		case XK_t: case XK_T:
 			xnewtab(); return;
@@ -2914,14 +2923,15 @@ kpress(XEvent *ev)
 			return;
 		default:
 			if (BETWEEN(ksym, XK_1, XK_9)) {
-				index = ksym == XK_9 ? INT_MAX : ksym - XK_1;
-				for (tab = tabs; tab && index > 0 && tab->next;
-				     tab = tab->next)
-					index--;
-				xselecttab(tab);
+				tab = ksym == XK_9 ? lasttab : xtabslot(ksym - XK_0);
+				xselecttab(tab ? tab : lasttab);
 				return;
 			}
 		}
+	}
+	if (e->state & Mod1Mask && BETWEEN(ksym, XK_0, XK_9)) {
+		xselecttab(xtabslot(ksym == XK_0 ? 10 : ksym - XK_0));
+		return;
 	}
 	/* 1. shortcuts */
 	for (bp = shortcuts; bp < shortcuts + LEN(shortcuts); bp++) {
