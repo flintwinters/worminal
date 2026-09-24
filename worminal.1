@@ -50,7 +50,9 @@ worminal \- simple terminal based on st
 .SH DESCRIPTION
 .B worminal
 is a simple terminal emulator.
-Each launch opens a new window and tab in the owner for the same user and X11 display.
+Each launch opens a new window and tab in the owner for the same executable build,
+user, and X11 display. Rebuilding starts a new owner on the next launch; existing
+tabs keep running in the old owner until closed.
 Tabs remain alive without a selected window while another Worminal window is open.
 .SH OPTIONS
 .TP

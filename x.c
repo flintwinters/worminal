@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
@@ -461,6 +462,7 @@ static void
 xsharedstart(void)
 {
 	struct sockaddr_un addr = {.sun_family = AF_UNIX};
+	struct stat executable;
 	const char *display = getenv("DISPLAY");
 	const char *scope = getenv("WORMINAL_SHARED_SOCKET_SCOPE");
 	int size, fd, attempt;
@@ -469,8 +471,14 @@ xsharedstart(void)
 
 	if (!display)
 		die("shared tabs require DISPLAY\n");
+	/* Replacing a running binary leaves its owner and PTYs alive. A new
+	 * executable must not forward launches to that owner's older code. */
+	if (stat("/proc/self/exe", &executable) < 0)
+		die("could not identify Worminal executable: %s\n", strerror(errno));
 	size = snprintf(addr.sun_path + 1, sizeof(addr.sun_path) - 1,
-	                "worminal-%lu-%s-%s", (unsigned long)getuid(), display,
+	                "worminal-%lu-%s-%llx-%llx-%s", (unsigned long)getuid(), display,
+	                (unsigned long long)executable.st_dev,
+	                (unsigned long long)executable.st_ino,
 	                scope ? scope : "");
 	if (size < 0 || size >= sizeof(addr.sun_path) - 1)
 		die("DISPLAY is too long for shared-tab socket\n");

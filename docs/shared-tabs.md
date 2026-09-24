@@ -1,7 +1,9 @@
 # Shared tabs: design and proof ledger
 
-One owner process serves one user and X11 `DISPLAY`. Ordinary launches send a
-bounded, versioned request to that owner and open a new window on a new tab.
+One owner process serves one executable build, user, and X11 `DISPLAY`.
+Ordinary launches send a bounded, versioned request to that owner and open a
+new window on a new tab. A rebuild starts a new owner; the earlier owner keeps
+its windows and PTYs until they close.
 The request carries the launcher options, command, working directory, and
 environment. The new child uses those values without changing the owner's
 lasting environment or directory. A separate display elects a separate owner.
