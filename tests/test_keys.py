@@ -70,7 +70,11 @@ class NavigationKeysTest(unittest.TestCase):
                         status = terminal.poll()
                         ready, _, _ = select.select([terminal.stderr], [], [], 0)
                         detail = os.read(terminal.stderr.fileno(), 4096).decode() if ready else ""
-                        self.fail(f"Worminal did not open an X11 window: exit={status}, stderr={detail!r}")
+                        display = subprocess.run(["xdotool", "getdisplaygeometry"], env=env,
+                                                 capture_output=True, text=True)
+                        self.fail(f"Worminal did not open an X11 window: exit={status}, "
+                                  f"display={env['DISPLAY']} server={display.returncode} "
+                                  f"stderr={detail!r}")
                     self.assertEqual(read_bytes(terminal.stdout, len(mode) + 1), mode + b"R")
                     subprocess.run(["xdotool", "windowfocus", "--sync", window],
                                    env=env, check=True)

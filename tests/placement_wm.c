@@ -1,5 +1,6 @@
 /* Minimal X11 window manager for placement regression checks on Xvfb. */
 #include <stdio.h>
+#include <stdlib.h>
 #include <X11/Xlib.h>
 
 int
@@ -21,6 +22,13 @@ main(void)
 	for (;;) {
 		XNextEvent(display, &event);
 		if (event.type == MapRequest) {
+			if (getenv("WORMINAL_CLOSE_ON_MAP")) {
+				XDestroyWindow(display, event.xmaprequest.window);
+				XSync(display, False);
+				puts("closed");
+				fflush(stdout);
+				continue;
+			}
 			XMoveWindow(display, event.xmaprequest.window, 100, 80);
 			XMapWindow(display, event.xmaprequest.window);
 			XSync(display, False);
