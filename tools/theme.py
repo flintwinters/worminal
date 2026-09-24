@@ -181,10 +181,11 @@ def theme_header(config):
     return "\n".join(lines)
 
 
-def generate_theme():
-    path = find_config()
+def generate_theme(config_path=None, output=OUTPUT):
+    path = config_path if config_path is not None else find_config()
     config = read_config(path) if path else {}
     result = theme_header(config)
-    OUTPUT.parent.mkdir(exist_ok=True)
-    if not OUTPUT.exists() or OUTPUT.read_text() != result:
-        OUTPUT.write_text(result)
+    output = Path(output)
+    output.parent.mkdir(exist_ok=True)
+    if not output.exists() or output.read_text() != result:
+        output.write_text(result)

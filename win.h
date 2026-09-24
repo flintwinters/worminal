@@ -23,10 +23,15 @@ enum win_mode {
 	                  |MODE_MOUSEMANY,
 };
 
+enum draw_pass {
+	DRAW_BACKGROUND = 1,
+	DRAW_FOREGROUND = 2,
+};
+
 void xbell(void);
 void xclipcopy(void);
 void xdrawcursor(int, int, Glyph, int, int, Glyph);
-void xdrawline(Line, int, int, int);
+void xdrawline(Line, int, int, int, int);
 void xfinishdraw(void);
 void xloadcols(void);
 int xsetcolorname(int, const char *);
@@ -38,4 +43,5 @@ void xsetmode(int, unsigned int);
 void xsetpointermotion(int);
 void xsetsel(char *);
 int xstartdraw(void);
+int xoverlap(void);
 void xximspot(int, int);
