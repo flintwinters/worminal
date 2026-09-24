@@ -266,6 +266,7 @@ typedef struct Tab {
 	TermSession *terminal;
 	char *title;
 	char *initial_title;
+	char *directory;
 	char **colors;
 	int mode, cursor;
 	struct Tab *next;
@@ -322,13 +323,15 @@ xtabfor(TermSession *terminal)
 }
 
 static Tab *
-xtabnew(TermSession *terminal, const char *title)
+xtabnew(TermSession *terminal, const char *title, const char *cwd)
 {
 	Tab *tab = xmalloc(sizeof(*tab));
+	char *directory = cwd ? xstrdup(cwd) : getcwd(NULL, 0);
 	memset(tab, 0, sizeof(*tab));
 	tab->terminal = terminal;
 	tab->title = xstrdup(title ? title : "Worminal");
 	tab->initial_title = xstrdup(title ? title : "Worminal");
+	tab->directory = directory ? directory : xstrdup("?");
 	tab->cursor = cursorshape;
 	if (lasttab)
 		lasttab->next = tab;
@@ -368,6 +371,7 @@ static int (*previous_xerror)(Display *, XErrorEvent *);
 static Tab *xtabfor(TermSession *);
 static void xdrawtabs(void);
 static void xrefreshtabs(void);
+static int xupdatedirectory(Tab *);
 static Tab *xfirsttab(void);
 static int xtabwidth(Tab *);
 static void xselecttab(Tab *);
@@ -1780,7 +1784,7 @@ xaddview(void)
 	created->terminal = tsessionnew(cols, rows);
 	tsessionallowalt(created->terminal,
 	                 requested_geometry ? requested_allowalt : 1);
-	xtabnew(created->terminal, opt_title ? opt_title : "Worminal");
+	xtabnew(created->terminal, opt_title ? opt_title : "Worminal", requested_cwd);
 	created->live = 1;
 	created->next = source->next;
 	source->next = created;
@@ -1963,6 +1967,7 @@ xclosetab(Tab *tab)
 	}
 	free(tab->title);
 	free(tab->initial_title);
+	free(tab->directory);
 	if (tab->colors) {
 		for (i = 0; i < MAX(LEN(colorname), 256); i++)
 			free(tab->colors[i]);
@@ -1983,7 +1988,7 @@ xnewtab(void)
 	                  current_window.ch);
 	TermSession *terminal = tsessionnew(cols, rows);
 	tsessionallowalt(terminal, 1);
-	Tab *tab = xtabnew(terminal, "Worminal");
+	Tab *tab = xtabnew(terminal, "Worminal", NULL);
 	xsetview(target);
 	xselecttab(tab);
 	xsetenv();
@@ -2001,6 +2006,31 @@ xlivefor(TermSession *terminal)
 		if (candidate->terminal == terminal && candidate->live)
 			return candidate;
 	return NULL;
+}
+
+static int
+xupdatedirectory(Tab *tab)
+{
+#ifdef __linux__
+	pid_t child = tsessionpid(tab->terminal);
+	char link[64], directory[PATH_MAX];
+	ssize_t length;
+
+	if (child <= 0)
+		return 0;
+	snprintf(link, sizeof(link), "/proc/%ld/cwd", (long)child);
+	length = readlink(link, directory, sizeof(directory) - 1);
+	if (length < 0 || (size_t)length == sizeof(directory) - 1)
+		return 0;
+	directory[length] = '\0';
+	if (strcmp(tab->directory, directory) == 0)
+		return 0;
+	free(tab->directory);
+	tab->directory = xstrdup(directory);
+	return 1;
+#else
+	return 0;
+#endif
 }
 
 static void
@@ -2484,16 +2514,13 @@ xsettitle(char *p)
 	}
 	xsetview(previous);
 	tsessionuse(terminal);
-	if (tab)
-		xrefreshtabs();
-	tsessionuse(terminal);
 }
 
 static int
 xtabwidth(Tab *tab)
 {
 	XGlyphInfo extents;
-	const char *title = tab->title ? tab->title : "Worminal";
+	const char *title = tab->directory;
 	XftTextExtentsUtf8(xw.dpy, dc.font.match, (const FcChar8 *)title,
 	                    strlen(title), &extents);
 	return extents.xOff + 2 * current_window.cw;
@@ -2533,13 +2560,17 @@ xdrawtabs(void)
 	XftDrawSetClipRectangles(xw.draw, 0, 0, &clip, 1);
 	for (tab = xfirsttab(); tab && x < right; tab = tab->next) {
 		int width = xtabwidth(tab), selected = tab->terminal == view->terminal;
-		const char *title = tab->title ? tab->title : "Worminal";
+		const char *title = tab->directory;
+		Color *ink = xcolor(selected ? defaultbg : defaultfg);
 		if (selected)
 			XftDrawRect(xw.draw, xcolor(defaultfg), x, borderpx,
 			            MIN(width, right - x), current_window.ch);
-		XftDrawStringUtf8(xw.draw, xcolor(selected ? defaultbg : defaultfg),
+		XftDrawStringUtf8(xw.draw, ink,
 		                  dc.font.match, x + current_window.cw, baseline,
 		                  (const FcChar8 *)title, strlen(title));
+		XftDrawRect(xw.draw, ink, x + current_window.cw,
+		            MIN(baseline + 2, borderpx + current_window.ch - 2),
+		            MAX(0, width - 2 * current_window.cw), 1);
 		x += width;
 	}
 	XftDrawSetClip(xw.draw, 0);
@@ -3043,6 +3074,8 @@ run(void)
 			else
 				tsessionuse(terminal);
 			ttyread();
+			if (xupdatedirectory(xtabfor(terminal)))
+				xrefreshtabs();
 			ptyevent = 1;
 		}
 		if (sharedserver >= 0 && FD_ISSET(sharedserver, &rfd))
@@ -3190,7 +3223,7 @@ run:
 	tnew(cols, rows);
 	view->terminal = tsessioncurrent();
 	tsessionallowalt(view->terminal, allowaltscreen);
-	xtabnew(view->terminal, opt_title);
+	xtabnew(view->terminal, opt_title, NULL);
 	xinit(cols, rows);
 	selinit();
 	run();

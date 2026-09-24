@@ -300,6 +300,12 @@ tsessionfd(TermSession *chosen)
 	return chosen->pty_fd;
 }
 
+pid_t
+tsessionpid(TermSession *chosen)
+{
+	return chosen->child_pid;
+}
+
 void
 tsessionallowalt(TermSession *chosen, int allowed)
 {
