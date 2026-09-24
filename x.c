@@ -1917,8 +1917,14 @@ xactivate(void)
 static void
 xselecttab(Tab *tab)
 {
-	if (!tab || view->terminal == tab->terminal)
+	if (!tab)
 		return;
+	int changed = xupdatedirectory(tab);
+	if (view->terminal == tab->terminal) {
+		if (changed)
+			xrefreshtabs();
+		return;
+	}
 	view->live = 0;
 	view->terminal = tab->terminal;
 	tsessionuse(tab->terminal);
@@ -1983,15 +1989,18 @@ static void
 xnewtab(void)
 {
 	XView *target = view;
+	Tab *selected = xtabfor(target->terminal);
 	int cols = MAX(1, (current_window.w - 2 * borderpx) / current_window.cw);
 	int rows = MAX(1, (current_window.h - 2 * borderpx - current_window.ch) /
 	                  current_window.ch);
 	TermSession *terminal = tsessionnew(cols, rows);
+	xupdatedirectory(selected);
 	tsessionallowalt(terminal, 1);
-	Tab *tab = xtabnew(terminal, "Worminal", NULL);
+	Tab *tab = xtabnew(terminal, "Worminal", selected->directory);
 	xsetview(target);
 	xselecttab(tab);
 	xsetenv();
+	ttysetlaunch(tab->directory, NULL, launch_windowid);
 	ttynew(NULL, shell, NULL, NULL);
 	ttysetlaunch(NULL, NULL, NULL);
 	xrefreshtabs();
