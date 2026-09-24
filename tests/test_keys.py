@@ -27,7 +27,70 @@ def read_bytes(stream, count):
     return data
 
 
+def read_through(stream, final):
+    data = b""
+    while len(data) < 40 and not data.endswith(final):
+        chunk = read_bytes(stream, 1)
+        if not chunk:
+            break
+        data += chunk
+    return data
+
+
 class NavigationKeysTest(unittest.TestCase):
+    def test_alternate_scroll_sends_cursor_keys(self):
+        with isolated_display() as env:
+            for appcursor, mouse_report in ((False, False), (True, False), (False, True)):
+                title = f"Worminal alternate scroll {os.getpid()} {appcursor} {mouse_report}"
+                mode = b"\033[?1049h\033[?1007h"
+                if appcursor:
+                    mode += b"\033[?1h"
+                if mouse_report:
+                    mode += b"\033[?1000h\033[?1006h"
+                escapes = "".join(f"\\{byte:03o}" for byte in mode)
+                command = f"stty raw -echo; printf '{escapes}R'; exec cat"
+                terminal = subprocess.Popen(
+                    [str(ROOT / "worminal"), "-T", title, "-o", "-",
+                     "-e", "/bin/sh", "-c", command],
+                    env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                )
+                try:
+                    deadline = time.monotonic() + 5
+                    window = None
+                    while time.monotonic() < deadline:
+                        result = subprocess.run(
+                            ["xdotool", "search", "--onlyvisible", "--name", title],
+                            env=env, capture_output=True, text=True,
+                        )
+                        if result.returncode == 0:
+                            window = result.stdout.splitlines()[0]
+                            break
+                        time.sleep(0.05)
+                    self.assertIsNotNone(window, "Worminal did not open an X11 window")
+                    self.assertEqual(read_bytes(terminal.stdout, len(mode) + 1), mode + b"R")
+                    subprocess.run(["xdotool", "windowfocus", "--sync", window],
+                                   env=env, check=True)
+                    subprocess.run(["xdotool", "mousemove", "--window", window, "20", "20"],
+                                   env=env, check=True)
+                    for button, normal, application in (
+                        ("4", b"\033[A", b"\033OA"),
+                        ("5", b"\033[B", b"\033OB"),
+                    ):
+                        with self.subTest(appcursor=appcursor, mouse_report=mouse_report,
+                                          button=button):
+                            subprocess.run(["xdotool", "click", button], env=env, check=True)
+                            if mouse_report:
+                                code = 64 if button == "4" else 65
+                                self.assertRegex(read_through(terminal.stdout, b"M").decode(),
+                                                 rf"^\x1b\[<{code};[0-9]+;[0-9]+M$")
+                            else:
+                                expected = application if appcursor else normal
+                                self.assertEqual(read_bytes(terminal.stdout, len(expected)), expected)
+                finally:
+                    if terminal.poll() is None:
+                        terminal.terminate()
+                    terminal.communicate(timeout=2)
+
     @unittest.skipUnless(shutil.which("micro"), "micro is not installed")
     def test_ctrl_end_in_micro(self):
         path = ROOT / ".checks" / "micro-key-test.txt"

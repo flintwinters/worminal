@@ -1159,6 +1159,12 @@ tswapscreen(void)
 	tfulldirt();
 }
 
+int
+tisaltscr(void)
+{
+	return IS_SET(MODE_ALTSCREEN);
+}
+
 void
 tscrolldown(int orig, int n)
 {
@@ -1651,6 +1657,9 @@ tsetmode(int priv, int set, const int *args, int narg)
 				break;
 			case 1006: /* 1006: extended reporting mode */
 				xsetmode(set, MODE_MOUSESGR);
+				break;
+			case 1007: /* xterm alternate scroll: wheel sends cursor keys */
+				xsetmode(set, MODE_ALTSCROLL);
 				break;
 			case 1034: /* 1034: enable 8-bit mode for keyboard input */
 				xsetmode(set, MODE_8BIT);
@@ -2479,6 +2488,7 @@ eschandle(uchar ascii)
 		xloadcols();
 		xsetmode(0, MODE_HIDE);
 		xsetmode(0, MODE_BRCKTPASTE);
+		xsetmode(0, MODE_ALTSCROLL);
 		break;
 	case '=': /* DECPAM -- Application keypad */
 		xsetmode(1, MODE_APPKEYPAD);
