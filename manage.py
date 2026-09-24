@@ -10,12 +10,13 @@ from tools.icon import generate_icon
 
 
 def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in {"build", "check", "latency", "latency-shell", "run", "clean", "icon", "proof-desktop"}:
-        print("Usage: python3 manage.py [build|check|latency|latency-shell|run|clean|icon|proof-desktop]")
+    if len(sys.argv) != 2 or sys.argv[1] not in {"build", "check", "latency", "latency-shell", "run", "clean", "icon", "proof-desktop", "proof-plasma"}:
+        print("Usage: python3 manage.py [build|check|latency|latency-shell|run|clean|icon|proof-desktop|proof-plasma]")
         print("latency measures /bin/cat; latency-shell measures your interactive shell.")
         print("Both run on private Xvfb, away from your desktop.")
         print("icon regenerates the embedded X11 icon from worminal.svg (needs Inkscape and Pillow).")
         print("proof-desktop briefly opens two test views on your current X11 desktop.")
+        print("proof-plasma runs the shared-view proof under KWin on private Xvfb.")
         return 2
 
     command = sys.argv[1]
@@ -47,6 +48,10 @@ def main():
             [".checks/view_state_test"],
             env={**os.environ, "WORMINAL_PROOF_REQUIRE_IM": "1"},
         ).returncode
+    if command == "proof-plasma":
+        if subprocess.run(["make", "-s", ".checks/view_state_test"]).returncode:
+            return 1
+        return subprocess.run([sys.executable, "tests/proof_plasma.py"]).returncode
     if command in {"check", "latency", "latency-shell"}:
         if subprocess.run(["make", "-s", ".checks/key_injector"]).returncode:
             return 1
