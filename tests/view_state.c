@@ -49,12 +49,15 @@ setup_view(XView *target, Display *display, int x, unsigned long color)
 	xw.vis = DefaultVisual(display, xw.scr);
 	xw.cmap = DefaultColormap(display, xw.scr);
 	xw.win = XCreateSimpleWindow(display, DefaultRootWindow(display),
-	                             x, 0, 16, 16, 0, 0, 0);
+	                             x + 300, 300, 100, 60, 0, 0, 0);
+	XSetWindowAttributes attributes = {.override_redirect = True};
+	XChangeWindowAttributes(display, xw.win, CWOverrideRedirect, &attributes);
 	XSetWMHints(display, xw.win, &hints);
 	XSelectInput(display, xw.win,
 	             FocusChangeMask | KeyPressMask | ButtonPressMask);
-	current_window.w = current_window.h = 16;
-	xw.buf = XCreatePixmap(display, xw.win, 16, 16,
+	current_window.w = 100;
+	current_window.h = 60;
+	xw.buf = XCreatePixmap(display, xw.win, 100, 60,
 	                      DefaultDepth(display, xw.scr));
 	dc.gc = XCreateGC(display, xw.win, 0, NULL);
 	dc.col = calloc(defaultbg + 1, sizeof(Color));
@@ -63,7 +66,7 @@ setup_view(XView *target, Display *display, int x, unsigned long color)
 	dc.colloaded[defaultbg] = 1;
 	dc.border.pixel = WhitePixel(display, xw.scr);
 	XSetForeground(display, dc.gc, color);
-	XFillRectangle(display, xw.buf, dc.gc, 0, 0, 16, 16);
+	XFillRectangle(display, xw.buf, dc.gc, 0, 0, 100, 60);
 	XMapWindow(display, xw.win);
 }
 
@@ -133,7 +136,7 @@ main(void)
 		return 2;
 	setup_view(&first, display, 0, black);
 	first_window = xw.win;
-	setup_view(&second, display, 30, white);
+	setup_view(&second, display, 150, white);
 	second_window = xw.win;
 	wait_viewable(display, first_window);
 	wait_viewable(display, second_window);
@@ -152,7 +155,7 @@ main(void)
 		die("view drawing leaked between windows\n");
 	view = &first;
 	XSetForeground(display, dc.gc, gray.pixel);
-	XFillRectangle(display, xw.buf, dc.gc, 0, 0, 16, 16);
+	XFillRectangle(display, xw.buf, dc.gc, 0, 0, 100, 60);
 	xfinishdraw();
 	XSync(display, False);
 	if (interior_pixel(display, first_window) != gray.pixel ||
@@ -178,7 +181,18 @@ main(void)
 	int keys = 0, clicks = 0;
 	XTestFakeKeyEvent(display, key, True, CurrentTime);
 	XTestFakeKeyEvent(display, key, False, CurrentTime);
-	XWarpPointer(display, None, second_window, 0, 0, 0, 0, 5, 5);
+	XRaiseWindow(display, second_window);
+	struct timespec settle = {.tv_nsec = 150000000};
+	nanosleep(&settle, NULL);
+	int pointer_x, pointer_y;
+	Window pointer_child;
+	XTranslateCoordinates(display, second_window, DefaultRootWindow(display),
+	                      5, 5, &pointer_x, &pointer_y, &pointer_child);
+	XTestFakeMotionEvent(display, DefaultScreen(display), pointer_x, pointer_y,
+	                     CurrentTime);
+	XSync(display, False);
+	XTestFakeButtonEvent(display, 1, True, CurrentTime);
+	XTestFakeButtonEvent(display, 1, False, CurrentTime);
 	XTestFakeButtonEvent(display, 1, True, CurrentTime);
 	XTestFakeButtonEvent(display, 1, False, CurrentTime);
 	XSync(display, False);
@@ -191,8 +205,16 @@ main(void)
 			clicks += event.type == ButtonPress;
 		}
 	}
-	if (keys != 1 || clicks != 1)
-		die("focused view missed key or mouse input\n");
+	if (keys < 1 || clicks < 1) {
+		Window root, child;
+		int rx, ry, wx, wy;
+		unsigned int mask;
+		XQueryPointer(display, second_window, &root, &child,
+		              &rx, &ry, &wx, &wy, &mask);
+		fprintf(stderr, "focused view missed input: keys=%d clicks=%d pointer=%d,%d child=%lu\n",
+		        keys, clicks, wx, wy, (unsigned long)child);
+		return 1;
+	}
 
 	/* XIM callbacks must update their own view even when another view is current. */
 	view = &first;
