@@ -10,11 +10,12 @@ from tools.icon import generate_icon
 
 
 def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in {"build", "check", "latency", "latency-shell", "run", "clean", "icon"}:
-        print("Usage: python3 manage.py [build|check|latency|latency-shell|run|clean|icon]")
+    if len(sys.argv) != 2 or sys.argv[1] not in {"build", "check", "latency", "latency-shell", "run", "clean", "icon", "proof-desktop"}:
+        print("Usage: python3 manage.py [build|check|latency|latency-shell|run|clean|icon|proof-desktop]")
         print("latency measures /bin/cat; latency-shell measures your interactive shell.")
         print("Both run on private Xvfb, away from your desktop.")
         print("icon regenerates the embedded X11 icon from worminal.svg (needs Inkscape and Pillow).")
+        print("proof-desktop briefly opens two test views on your current X11 desktop.")
         return 2
 
     command = sys.argv[1]
@@ -39,6 +40,13 @@ def main():
         return 1
     if subprocess.run(["make", "-s"]).returncode:
         return 1
+    if command == "proof-desktop":
+        if subprocess.run(["make", "-s", ".checks/view_state_test"]).returncode:
+            return 1
+        return subprocess.run(
+            [".checks/view_state_test"],
+            env={**os.environ, "WORMINAL_PROOF_REQUIRE_IM": "1"},
+        ).returncode
     if command in {"check", "latency", "latency-shell"}:
         if subprocess.run(["make", "-s", ".checks/key_injector"]).returncode:
             return 1
@@ -50,6 +58,8 @@ def main():
         if subprocess.run(["make", "-s", ".checks/border_probe"]).returncode:
             return 1
         if subprocess.run(["make", "-s", ".checks/icon_probe"]).returncode:
+            return 1
+        if subprocess.run(["make", "-s", ".checks/view_state_test"]).returncode:
             return 1
         if subprocess.run(["make", "-s", ".checks/scrollback_test"]).returncode:
             return 1

@@ -147,6 +147,58 @@ def smoke_x11(env):
 
 
 class NativeTerminalTest(unittest.TestCase):
+    def test_view_contexts_draw_independently(self):
+        with isolated_display() as env:
+            subprocess.run([str(ROOT / ".checks/view_state_test")], env=env, check=True)
+
+    def test_unmapped_window_keeps_draining_pty(self):
+        with isolated_display() as env:
+            gate = ROOT / ".checks" / "drain_gate"
+            done = ROOT / ".checks" / "drain_done"
+            gate.unlink(missing_ok=True)
+            done.unlink(missing_ok=True)
+            title = f"Worminal drain {os.getpid()}"
+            script = (
+                'while [ ! -e "$1" ]; do sleep .02; done; '
+                "yes '0123456789abcdefghijklmnopqrstuvwxyz' | head -c 1048576; "
+                'printf done > "$2"; sleep 5'
+            )
+            process = subprocess.Popen(
+                [str(ROOT / "worminal"), "-T", title, "-e", "/bin/sh", "-c",
+                 script, "sh", str(gate), str(done)],
+                env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            )
+            try:
+                deadline = time.monotonic() + 5
+                window = None
+                while time.monotonic() < deadline:
+                    search = subprocess.run(
+                        ["xdotool", "search", "--onlyvisible", "--name", title],
+                        env=env, capture_output=True, text=True,
+                    )
+                    if search.returncode == 0:
+                        window = search.stdout.splitlines()[0]
+                        break
+                    if process.poll() is not None:
+                        self.fail(f"Worminal exited: {process.communicate()[1].decode()}")
+                    time.sleep(.05)
+                self.assertIsNotNone(window, "Worminal did not map")
+                subprocess.run(["xdotool", "windowunmap", window], env=env, check=True)
+                gate.touch()
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline and not done.exists():
+                    if process.poll() is not None:
+                        self.fail(f"Worminal exited while hidden: {process.communicate()[1].decode()}")
+                    time.sleep(.05)
+                self.assertEqual(done.read_text() if done.exists() else None, "done",
+                                 "PTY output stopped draining while the view was hidden")
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                process.communicate(timeout=2)
+                gate.unlink(missing_ok=True)
+                done.unlink(missing_ok=True)
+
     def test_default_build_uses_o3(self):
         commands = subprocess.check_output(["make", "-nB"], cwd=ROOT, text=True)
         compile_commands = [line for line in commands.splitlines() if line.endswith(("-c st.c", "-c x.c"))]
