@@ -234,16 +234,20 @@ struct TermSession {
 	STREscape strescseq;
 	int output_fd, pty_fd;
 	pid_t child_pid;
+	int altscreen_allowed;
 	char ttybuf[BUFSIZ];
 	int ttybuflen;
 	TCursor saved[2];
 	struct TermSession *next;
 };
 
-static TermSession primarysession = {.output_fd = 1, .pty_fd = -1};
+static TermSession primarysession = {.output_fd = 1, .pty_fd = -1,
+                                     .altscreen_allowed = 1};
 static TermSession *session = &primarysession;
 static TermSession *sessions = &primarysession;
 static int last_child_status;
+static const char *launch_cwd, *launch_windowid;
+static char **launch_env;
 #define term (session->term)
 #define sel (session->sel)
 #define csiescseq (session->csiescseq)
@@ -262,11 +266,14 @@ TermSession *
 tsessionnew(int cols, int rows)
 {
 	TermSession *created = xmalloc(sizeof(*created));
+	TermSession **tail = &sessions;
 	memset(created, 0, sizeof(*created));
 	created->output_fd = 1;
 	created->pty_fd = -1;
-	created->next = sessions;
-	sessions = created;
+	created->altscreen_allowed = 1;
+	while (*tail)
+		tail = &(*tail)->next;
+	*tail = created;
 	session = created;
 	tnew(cols, rows);
 	selinit();
@@ -291,6 +298,12 @@ int
 tsessionfd(TermSession *chosen)
 {
 	return chosen->pty_fd;
+}
+
+void
+tsessionallowalt(TermSession *chosen, int allowed)
+{
+	chosen->altscreen_allowed = allowed;
 }
 
 void
@@ -337,6 +350,88 @@ tsessionstop(TermSession *chosen)
 		close(chosen->pty_fd);
 		chosen->pty_fd = -1;
 	}
+}
+
+#undef term
+#undef strescseq
+void
+tsessionremove(TermSession *chosen)
+{
+	TermSession **slot = &sessions;
+	int i;
+
+	while (*slot && *slot != chosen)
+		slot = &(*slot)->next;
+	if (!*slot)
+		die("removing an unknown terminal session\n");
+	tsessionstop(chosen);
+	if (chosen->output_fd > 1)
+		close(chosen->output_fd);
+	*slot = chosen->next;
+	for (i = 0; i < chosen->term.row; i++) {
+		free(chosen->term.line[i]);
+		free(chosen->term.alt[i]);
+	}
+	free(chosen->term.line);
+	free(chosen->term.alt);
+	if (chosen->term.hist) {
+		for (i = 0; i < theme_history_size; i++)
+			free(chosen->term.hist[i]);
+	}
+	free(chosen->term.hist);
+	free(chosen->term.dirty);
+	free(chosen->term.tabs);
+	free(chosen->strescseq.buf);
+	if (session == chosen)
+		session = sessions;
+	if (chosen != &primarysession)
+		free(chosen);
+}
+#define term (session->term)
+#define strescseq (session->strescseq)
+
+void
+ttysetlaunch(const char *cwd, char **env, const char *windowid)
+{
+	launch_cwd = cwd;
+	launch_env = env;
+	launch_windowid = windowid;
+}
+
+static void
+applylaunch(void)
+{
+	char **entry;
+	extern char **environ;
+	if (launch_cwd && chdir(launch_cwd) < 0)
+		_exit(1);
+	if (launch_env) {
+		environ = NULL;
+		for (entry = launch_env; *entry; entry++) {
+			char *equal = strchr(*entry, '=');
+			if (equal) {
+				*equal = '\0';
+				setenv(*entry, equal + 1, 1);
+				*equal = '=';
+			}
+		}
+	}
+	if (launch_windowid)
+		setenv("WINDOWID", launch_windowid, 1);
+}
+
+static int
+launchopen(const char *path, int flags, mode_t mode)
+{
+	char *full;
+	int fd;
+	if (!launch_cwd || path[0] == '/')
+		return open(path, flags, mode);
+	full = xmalloc(strlen(launch_cwd) + strlen(path) + 2);
+	sprintf(full, "%s/%s", launch_cwd, path);
+	fd = open(full, flags, mode);
+	free(full);
+	return fd;
 }
 
 static const uchar utfbyte[UTF_SIZ + 1] = {0x80,    0, 0xC0, 0xE0, 0xF0};
@@ -862,7 +957,7 @@ ttynew(const char *line, char *cmd, const char *out, char **args)
 	if (out) {
 		term.mode |= MODE_PRINT;
 		iofd = (!strcmp(out, "-")) ?
-			  1 : open(out, O_WRONLY | O_CREAT, 0666);
+			  1 : launchopen(out, O_WRONLY | O_CREAT, 0666);
 		if (iofd < 0) {
 			fprintf(stderr, "Error opening %s:%s\n",
 				out, strerror(errno));
@@ -870,11 +965,25 @@ ttynew(const char *line, char *cmd, const char *out, char **args)
 	}
 
 	if (line) {
-		if ((cmdfd = open(line, O_RDWR)) < 0)
+		int status;
+		pid_t configurator;
+		if ((cmdfd = launchopen(line, O_RDWR, 0)) < 0)
 			die("open line '%s' failed: %s\n",
 			    line, strerror(errno));
-		dup2(cmdfd, 0);
-		stty(args);
+		/* Configure the line in a child so a forwarded -l never replaces
+		 * the owner's stdin or changes its process environment. */
+		configurator = fork();
+		if (configurator < 0)
+			die("fork for stty failed: %s\n", strerror(errno));
+		if (configurator == 0) {
+			dup2(cmdfd, 0);
+			applylaunch();
+			stty(args);
+			_exit(0);
+		}
+		while (waitpid(configurator, &status, 0) < 0)
+			if (errno != EINTR)
+				die("wait for stty failed: %s\n", strerror(errno));
 		return cmdfd;
 	}
 
@@ -890,6 +999,7 @@ ttynew(const char *line, char *cmd, const char *out, char **args)
 	case 0:
 		close(iofd);
 		close(m);
+		applylaunch();
 		setsid(); /* create a new process group */
 		dup2(s, 0);
 		dup2(s, 1);
@@ -1780,13 +1890,13 @@ tsetmode(int priv, int set, const int *args, int narg)
 				xsetmode(set, MODE_8BIT);
 				break;
 			case 1049: /* swap screen & set/restore cursor as xterm */
-				if (!allowaltscreen)
+				if (!session->altscreen_allowed)
 					break;
 				tcursor((set) ? CURSOR_SAVE : CURSOR_LOAD);
 				/* FALLTHROUGH */
 			case 47: /* swap screen buffer */
 			case 1047: /* swap screen buffer */
-				if (!allowaltscreen)
+				if (!session->altscreen_allowed)
 					break;
 				alt = IS_SET(MODE_ALTSCREEN);
 				if (alt) {

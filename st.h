@@ -92,6 +92,8 @@ void tsessionreap(void);
 int tsessionexitstatus(void);
 void tsessionhangupall(void);
 void tsessionstop(TermSession *);
+void tsessionremove(TermSession *);
+void tsessionallowalt(TermSession *, int);
 
 void die(const char *, ...);
 void redraw(void);
@@ -110,6 +112,7 @@ void tnew(int, int);
 void tresize(int, int);
 void tsetdirtattr(int);
 void ttyhangup(void);
+void ttysetlaunch(const char *, char **, const char *);
 int ttynew(const char *, char *, const char *, char **);
 size_t ttyread(void);
 void ttyresize(int, int);

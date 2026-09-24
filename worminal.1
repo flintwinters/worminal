@@ -14,8 +14,6 @@ worminal \- simple terminal based on st
 .IR name ]
 .RB [ \-o
 .IR iofile ]
-.RB [ \-S
-.RB [ \-A ]]
 .RB [ \-T
 .IR title ]
 .RB [ \-t
@@ -52,13 +50,15 @@ worminal \- simple terminal based on st
 .SH DESCRIPTION
 .B worminal
 is a simple terminal emulator.
+Each launch opens a new window and tab in the owner for the same user and X11 display.
+Tabs remain alive without a selected window while another Worminal window is open.
 .SH OPTIONS
 .TP
 .B \-a
 disable alternate screens in terminal
 .TP
 .BI \-c " class"
-defines the window class (default $TERM).
+defines the window class (default Worminal).
 .TP
 .BI \-f " font"
 defines the
@@ -72,26 +72,16 @@ The form is [=][<cols>{xX}<rows>][{+-}<xoffset>{+-}<yoffset>]. See
 for further details.
 .TP
 .B \-i
-will fixate the position given with the -g option.
+fixes the window size.
 .TP
 .BI \-n " name"
-defines the window instance name (default $TERM).
+defines the window instance name (default worminal).
 .TP
 .BI \-o " iofile"
 writes all the I/O to
 .I iofile.
 This feature is useful when recording worminal sessions. A value of "-" means
 standard output.
-.TP
-.B \-S
-Join the owner for this X display and open another view of an existing terminal.
-If there is no owner, start one.
-.TP
-.B \-A
-With
-.BR \-S ,
-open a new terminal session in the owner instead of another view of the
-existing session. This shared-tab interface is experimental.
 .TP
 .BI \-T " title"
 defines the window title (default 'Worminal').
@@ -171,6 +161,21 @@ Copy the selected text to the clipboard selection.
 .TP
 .B Ctrl-Shift-v
 Paste from the clipboard selection.
+.TP
+.B Ctrl-t
+Create and select a tab.
+.TP
+.B Ctrl-w
+Close the selected tab in all windows.
+.TP
+.B Ctrl-Tab, Ctrl-Shift-Tab
+Cycle tabs in the current window.
+.TP
+.B Ctrl-1 through Ctrl-8, Ctrl-9
+Select a tab by position, or the last tab with Ctrl-9.
+.TP
+.B Ctrl-n
+Open a new window and tab.
 .SH CUSTOMIZATION
 .B worminal
 can be customized by creating a custom config.h and (re)compiling the source

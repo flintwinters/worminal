@@ -165,7 +165,9 @@ main(void)
 	tmoveto(0, 0);
 	TermSession *third = tsessionnew(3, 2);
 	cmdfd = secondmaster;
-	assert(tsessionnext(NULL) == third && tsessionnext(third) == second);
+	assert(tsessionnext(NULL) == &primarysession &&
+	       tsessionnext(&primarysession) == second &&
+	       tsessionnext(second) == third);
 	assert(tsessionfd(third) == secondmaster);
 	assert(write(firstslave, "\xc3", 1) == 1);
 	tsessionuse(second);

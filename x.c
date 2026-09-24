@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <math.h>
 #include <limits.h>
+#include <stdint.h>
 #include <locale.h>
 #include <signal.h>
 #include <stddef.h>
@@ -261,9 +262,19 @@ typedef struct XView {
 	struct XView *next;
 } XView;
 
+typedef struct Tab {
+	TermSession *terminal;
+	char *title;
+	char *initial_title;
+	char **colors;
+	int mode, cursor;
+	struct Tab *next;
+} Tab;
+
 static XView primaryview;
 static XView *views = &primaryview;
 static XView *view = &primaryview;
+static Tab *tabs, *lasttab;
 static Display *shared_display;
 /* One XIM serves the display; each view has its own XIC. Opening a second
  * XIM on the same display fails with the KDE input method in practice. */
@@ -300,6 +311,33 @@ xsetview(XView *chosen)
 		tsessionuse(chosen->terminal);
 }
 
+static Tab *
+xtabfor(TermSession *terminal)
+{
+	Tab *tab;
+	for (tab = tabs; tab; tab = tab->next)
+		if (tab->terminal == terminal)
+			return tab;
+	return NULL;
+}
+
+static Tab *
+xtabnew(TermSession *terminal, const char *title)
+{
+	Tab *tab = xmalloc(sizeof(*tab));
+	memset(tab, 0, sizeof(*tab));
+	tab->terminal = terminal;
+	tab->title = xstrdup(title ? title : "Worminal");
+	tab->initial_title = xstrdup(title ? title : "Worminal");
+	tab->cursor = cursorshape;
+	if (lasttab)
+		lasttab->next = tab;
+	else
+		tabs = tab;
+	lasttab = tab;
+	return tab;
+}
+
 static char *opt_class = NULL;
 static char **opt_cmd  = NULL;
 static char *opt_embed = NULL;
@@ -309,11 +347,93 @@ static char *opt_line  = NULL;
 static char *opt_name  = NULL;
 static char *opt_title = NULL;
 static int sharedserver = -1;
-static int shared_requested;
-static int new_tab_requested;
+static int launch_argc;
+static const char *requested_cwd;
+static char **requested_env;
+static int requested_geometry;
+static int requested_cols, requested_rows, requested_x, requested_y, requested_gm;
+static int requested_fixed;
+static int requested_allowalt = 1;
+static char launch_windowid[32];
+extern char **environ;
+#define LAUNCH_MAGIC 0x574f524dU
+#define LAUNCH_LIMIT (1024 * 1024)
+typedef struct {
+	uint32_t magic, version, bytes, argc, envc, flags;
+	int32_t cols, rows, x, y, gm;
+} LaunchHeader;
 static Window initializing_window;
 static int initializing_window_gone;
 static int (*previous_xerror)(Display *, XErrorEvent *);
+static Tab *xtabfor(TermSession *);
+static void xdrawtabs(void);
+static void xrefreshtabs(void);
+static Tab *xfirsttab(void);
+static int xtabwidth(Tab *);
+static void xselecttab(Tab *);
+static void xclosetab(Tab *);
+static void xaddview(void);
+static XView *xlivefor(TermSession *);
+
+static int
+xtransfer(int fd, void *buffer, size_t length, int send)
+{
+	char *p = buffer;
+	while (length) {
+		ssize_t n = send ? write(fd, p, length) : read(fd, p, length);
+		if (n < 0 && errno == EINTR)
+			continue;
+		if (n <= 0)
+			return 0;
+		p += n;
+		length -= n;
+	}
+	return 1;
+}
+
+static int
+xsendlaunch(int fd)
+{
+	const char *options[] = {opt_class, opt_embed, opt_font, opt_io,
+	                         opt_line, opt_name, opt_title};
+	char *cwd = getcwd(NULL, 0);
+	char **entry;
+	LaunchHeader header = {.magic = LAUNCH_MAGIC, .version = 1,
+	                       .argc = launch_argc, .cols = cols, .rows = rows,
+	                       .x = xw.l, .y = xw.t, .gm = xw.gm,
+	                       .flags = (allowaltscreen ? 1 : 0) | (xw.isfixed ? 2 : 0)};
+	size_t size = 0;
+	int okay;
+	if (!cwd)
+		return 0;
+	for (size_t i = 0; i < LEN(options); i++)
+		size += strlen(options[i] ? options[i] : "") + 1;
+	size += strlen(cwd) + 1;
+	for (int i = 0; i < launch_argc; i++)
+		size += strlen(opt_cmd[i]) + 1;
+	for (entry = environ; *entry; entry++) {
+		size += strlen(*entry) + 1;
+		header.envc++;
+	}
+	if (size > LAUNCH_LIMIT || header.argc > 4096 || header.envc > 16384) {
+		free(cwd);
+		return 0;
+	}
+	header.bytes = size;
+	okay = xtransfer(fd, &header, sizeof(header), 1);
+	for (size_t i = 0; okay && i < LEN(options); i++) {
+		const char *s = options[i] ? options[i] : "";
+		okay = xtransfer(fd, (void *)s, strlen(s) + 1, 1);
+	}
+	if (okay)
+		okay = xtransfer(fd, cwd, strlen(cwd) + 1, 1);
+	for (int i = 0; okay && i < launch_argc; i++)
+		okay = xtransfer(fd, opt_cmd[i], strlen(opt_cmd[i]) + 1, 1);
+	for (entry = environ; okay && *entry; entry++)
+		okay = xtransfer(fd, *entry, strlen(*entry) + 1, 1);
+	free(cwd);
+	return okay;
+}
 
 static int
 xinitialerror(Display *display, XErrorEvent *error)
@@ -343,22 +463,22 @@ xsharedstart(void)
 	struct timespec pause = {.tv_nsec = 10000000};
 
 	if (!display)
-		die("shared views require DISPLAY\n");
+		die("shared tabs require DISPLAY\n");
 	size = snprintf(addr.sun_path + 1, sizeof(addr.sun_path) - 1,
 	                "worminal-%lu-%s-%s", (unsigned long)getuid(), display,
 	                scope ? scope : "");
 	if (size < 0 || size >= sizeof(addr.sun_path) - 1)
-		die("DISPLAY is too long for shared-view socket\n");
+		die("DISPLAY is too long for shared-tab socket\n");
 	for (attempt = 0; attempt < 100; attempt++) {
 		fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
 		if (fd < 0)
-			die("shared-view socket failed: %s\n", strerror(errno));
+			die("shared-tab socket failed: %s\n", strerror(errno));
 		if (connect(fd, (struct sockaddr *)&addr,
 		            offsetof(struct sockaddr_un, sun_path) + 1 + size) == 0) {
-			if (write(fd, new_tab_requested ? "N" : "V", 1) != 1 ||
+			if (!xsendlaunch(fd) ||
 			    read(fd, &reply, 1) != 1 ||
 			    reply != 'Y')
-				die("shared-view owner did not accept a view\n");
+				die("shared-tab owner did not accept a launch\n");
 			close(fd);
 			exit(0);
 		}
@@ -367,21 +487,21 @@ xsharedstart(void)
 		 * listener or a restart can connect to an owner that has exited. */
 		fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
 		if (fd < 0)
-			die("shared-view socket failed: %s\n", strerror(errno));
+			die("shared-tab socket failed: %s\n", strerror(errno));
 		if (bind(fd, (struct sockaddr *)&addr,
 		         offsetof(struct sockaddr_un, sun_path) + 1 + size) == 0) {
 			if (listen(fd, 8) < 0)
-				die("shared-view listen failed: %s\n", strerror(errno));
+				die("shared-tab listen failed: %s\n", strerror(errno));
 			sharedserver = fd;
 			return;
 		}
 		int bind_error = errno;
 		close(fd);
 		if (bind_error != EADDRINUSE)
-			die("shared-view bind failed: %s\n", strerror(bind_error));
+			die("shared-tab bind failed: %s\n", strerror(bind_error));
 		nanosleep(&pause, NULL);
 	}
-	die("shared-view owner did not become available\n");
+	die("shared-tab owner did not become available\n");
 }
 
 static void
@@ -488,7 +608,7 @@ evcol(XEvent *e)
 int
 evrow(XEvent *e)
 {
-	int y = e->xbutton.y - borderpx;
+	int y = e->xbutton.y - borderpx - current_window.ch;
 	LIMIT(y, 0, current_window.th - 1);
 	return y / current_window.ch;
 }
@@ -617,6 +737,25 @@ mouseaction(XEvent *e, uint release)
 void
 bpress(XEvent *e)
 {
+	if (e->xbutton.y >= borderpx &&
+	    e->xbutton.y < borderpx + current_window.ch) {
+		if (e->xbutton.button == Button1) {
+			Tab *tab;
+			int x = borderpx, width;
+			for (tab = xfirsttab(); tab; tab = tab->next) {
+				width = xtabwidth(tab);
+				if (e->xbutton.x >= x &&
+				    e->xbutton.x < MIN(x + width, current_window.w - borderpx)) {
+					xselecttab(tab);
+					break;
+				}
+				x += width;
+				if (x >= current_window.w - borderpx)
+					break;
+			}
+		}
+		return;
+	}
 	xactivate();
 	int btn = e->xbutton.button;
 	char *key;
@@ -896,7 +1035,7 @@ cresize(int width, int height)
 		current_window.h = height;
 
 	col = (current_window.w - 2 * borderpx) / current_window.cw;
-	row = (current_window.h - 2 * borderpx) / current_window.ch;
+	row = (current_window.h - 2 * borderpx - current_window.ch) / current_window.ch;
 	col = MAX(1, col);
 	row = MAX(1, row);
 
@@ -932,6 +1071,9 @@ xloadcolor(int i, const char *name, Color *ncolor)
 {
 	XRenderColor color = { .alpha = 0xffff };
 	int loaded;
+	Tab *tab = xtabfor(tsessioncurrent());
+	if (!name && tab && tab->colors && i < MAX(LEN(colorname), 256))
+		name = tab->colors[i];
 
 	if (!name && BETWEEN(i, 16, 255) && !colorname[i]) { /* 256 color */
 		if (i < 6*6*6+16) { /* same colors as xterm */
@@ -992,27 +1134,38 @@ void
 xloadcols(void)
 {
 	XView *previous = view, *candidate;
+	TermSession *terminal = tsessioncurrent();
 
 	for (candidate = views; candidate; candidate = candidate->next)
-		if (candidate->terminal == previous->terminal) {
+		if (candidate->terminal == terminal) {
 			xsetview(candidate);
 			xloadcolsone();
 		}
 	xsetview(previous);
+	tsessionuse(terminal);
 }
 
 int
 xgetcolor(int x, unsigned char *r, unsigned char *g, unsigned char *b)
 {
 	Color *color;
+	Color temporary;
+	int hidden = xtabfor(tsessioncurrent()) && !xlivefor(tsessioncurrent());
 
 	if (!BETWEEN(x, 0, dc.collen - 1))
 		return 1;
-
-	color = xcolor(x);
+	if (hidden) {
+		if (!xloadcolor(x, NULL, &temporary))
+			return 1;
+		color = &temporary;
+	} else {
+		color = xcolor(x);
+	}
 	*r = color->color.red >> 8;
 	*g = color->color.green >> 8;
 	*b = color->color.blue >> 8;
+	if (hidden)
+		XftColorFree(xw.dpy, xw.vis, xw.cmap, &temporary);
 
 	return 0;
 }
@@ -1040,14 +1193,29 @@ int
 xsetcolorname(int x, const char *name)
 {
 	XView *previous = view, *candidate;
+	TermSession *terminal = tsessioncurrent();
+	Tab *tab = xtabfor(terminal);
 	int failed = 0;
+	Color validated;
+	if (tab && BETWEEN(x, 0, MAX(LEN(colorname), 256) - 1)) {
+		if (!xloadcolor(x, name, &validated))
+			return 1;
+		XftColorFree(xw.dpy, xw.vis, xw.cmap, &validated);
+		if (!tab->colors) {
+			tab->colors = xmalloc(MAX(LEN(colorname), 256) * sizeof(char *));
+			memset(tab->colors, 0, MAX(LEN(colorname), 256) * sizeof(char *));
+		}
+		free(tab->colors[x]);
+		tab->colors[x] = name ? xstrdup(name) : NULL;
+	}
 
 	for (candidate = views; candidate; candidate = candidate->next)
-		if (candidate->terminal == previous->terminal) {
+		if (candidate->terminal == terminal) {
 			xsetview(candidate);
 			failed |= xsetcolornameone(x, name);
 		}
 	xsetview(previous);
+	tsessionuse(terminal);
 	return failed;
 }
 
@@ -1074,9 +1242,9 @@ xhints(void)
 	sizeh->width = current_window.w;
 	sizeh->height_inc = current_window.ch;
 	sizeh->width_inc = current_window.cw;
-	sizeh->base_height = 2 * borderpx;
+	sizeh->base_height = 2 * borderpx + current_window.ch;
 	sizeh->base_width = 2 * borderpx;
-	sizeh->min_height = current_window.ch + 2 * borderpx;
+	sizeh->min_height = 2 * current_window.ch + 2 * borderpx;
 	sizeh->min_width = current_window.cw + 2 * borderpx;
 	if (xw.isfixed) {
 		sizeh->flags |= PMaxSize;
@@ -1444,7 +1612,7 @@ xinitview(int cols, int rows, int first, int spawnpty)
 		| ButtonMotionMask | ButtonPressMask | ButtonReleaseMask;
 	xw.attrs.colormap = xw.cmap;
 	xw.win = XCreateWindow(xw.dpy, root, xw.l, xw.t,
-			cols * 8 + 2 * borderpx, rows * 16 + 2 * borderpx,
+			cols * 8 + 2 * borderpx, (rows + 1) * 16 + 2 * borderpx,
 			0, XDefaultDepth(xw.dpy, xw.scr), InputOutput,
 			xw.vis, CWBackPixel | CWBorderPixel | CWBitGravity
 			| CWEventMask | CWColormap, &xw.attrs);
@@ -1455,8 +1623,8 @@ xinitview(int cols, int rows, int first, int spawnpty)
 		XReparentWindow(xw.dpy, xw.win, parent, xw.l, xw.t);
 	if (spawnpty) {
 		xsetenv();
-		ttynew(first ? opt_line : NULL, shell, first ? opt_io : NULL,
-		       first ? opt_cmd : NULL);
+		ttynew(opt_line, shell, opt_io, opt_cmd);
+		ttysetlaunch(NULL, NULL, NULL);
 		if (first)
 			xstartuptime("pty");
 	}
@@ -1503,7 +1671,7 @@ xinitview(int cols, int rows, int first, int spawnpty)
 
 	/* adjust fixed window geometry */
 	current_window.w = 2 * borderpx + cols * current_window.cw;
-	current_window.h = 2 * borderpx + rows * current_window.ch;
+	current_window.h = 2 * borderpx + (rows + 1) * current_window.ch;
 	if (xw.gm & XNegative)
 		xw.l += DisplayWidth(xw.dpy, xw.scr) - current_window.w - 2;
 	if (xw.gm & YNegative)
@@ -1595,33 +1763,7 @@ xinit(int cols, int rows)
 }
 
 static void
-xcopycolors(XView *source, XView *target)
-{
-	XView *previous = view;
-	XRenderColor color;
-	Color copy;
-	size_t i, count;
-
-	xsetview(source);
-	count = dc.collen;
-	for (i = 0; i < count; i++) {
-		if (!dc.colloaded[i])
-			continue;
-		color = dc.col[i].color;
-		xsetview(target);
-		if (!XftColorAllocValue(xw.dpy, xw.vis, xw.cmap, &color, &copy))
-			die("could not copy tab color %zu\n", i);
-		if (dc.colloaded[i])
-			XftColorFree(xw.dpy, xw.vis, xw.cmap, &dc.col[i]);
-		dc.col[i] = copy;
-		dc.colloaded[i] = 1;
-		xsetview(source);
-	}
-	xsetview(previous);
-}
-
-static void
-xaddview(int newtab)
+xaddview(void)
 {
 	XView *previous = view;
 	XView *source = views;
@@ -1630,16 +1772,28 @@ xaddview(int newtab)
 
 	memset(created, 0, sizeof(*created));
 	cols = MAX(1, (source->win.w - 2 * borderpx) / source->win.cw);
-	rows = MAX(1, (source->win.h - 2 * borderpx) / source->win.ch);
-	created->terminal = newtab ? tsessionnew(cols, rows) : source->terminal;
-	created->live = newtab;
+	rows = MAX(1, (source->win.h - 2 * borderpx - source->win.ch) / source->win.ch);
+	if (requested_geometry) {
+		cols = requested_cols;
+		rows = requested_rows;
+	}
+	created->terminal = tsessionnew(cols, rows);
+	tsessionallowalt(created->terminal,
+	                 requested_geometry ? requested_allowalt : 1);
+	xtabnew(created->terminal, opt_title ? opt_title : "Worminal");
+	created->live = 1;
 	created->next = source->next;
 	source->next = created;
 	xsetview(created);
-	xinitview(cols, rows, 0, newtab);
-	if (!newtab)
-		xcopycolors(source, created);
+	if (requested_geometry) {
+		xw.l = requested_x;
+		xw.t = requested_y;
+		xw.gm = requested_gm;
+		xw.isfixed = requested_fixed;
+	}
+	xinitview(cols, rows, 0, 1);
 	xsetview(previous);
+	xrefreshtabs();
 }
 
 static void
@@ -1649,20 +1803,96 @@ xsharedaccept(void)
 	struct { pid_t pid; uid_t uid; gid_t gid; } peer;
 	socklen_t length = sizeof(peer);
 	struct timeval timeout = {.tv_sec = 2};
-	char command;
+	LaunchHeader header;
+	char *payload = NULL, *cursor, *end, *parts[8], **args = NULL, **env = NULL;
+	char *saved_class = opt_class, *saved_embed = opt_embed;
+	char *saved_font = opt_font, *saved_io = opt_io, *saved_line = opt_line;
+	char *saved_name = opt_name, *saved_title = opt_title;
+	char **saved_cmd = opt_cmd;
+	int valid = 1;
 
 	if (client < 0)
 		return;
 	setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 	if (getsockopt(client, SOL_SOCKET, SO_PEERCRED, &peer, &length) != 0 ||
 	    length != sizeof(peer) || peer.uid != getuid() ||
-	    read(client, &command, 1) != 1 || (command != 'V' && command != 'N')) {
+	    !xtransfer(client, &header, sizeof(header), 0) ||
+	    header.magic != LAUNCH_MAGIC || header.version != 1 ||
+	    header.bytes > LAUNCH_LIMIT || header.argc > 4096 ||
+	    header.envc > 16384 || header.cols < 1 || header.rows < 1) {
 		close(client);
 		return;
 	}
-	xaddview(command == 'N');
+	payload = xmalloc(header.bytes + 1);
+	if (!xtransfer(client, payload, header.bytes, 0)) {
+		free(payload);
+		close(client);
+		return;
+	}
+	payload[header.bytes] = '\0';
+	cursor = payload;
+	end = payload + header.bytes;
+	args = xmalloc((header.argc + 1) * sizeof(char *));
+	env = xmalloc((header.envc + 1) * sizeof(char *));
+	for (size_t i = 0; i < LEN(parts) + header.argc + header.envc; i++) {
+		char *nul = cursor < end ? memchr(cursor, '\0', end - cursor) : NULL;
+		if (!nul) {
+			valid = 0;
+			break;
+		}
+		if (i < LEN(parts))
+			parts[i] = cursor;
+		else if (i < LEN(parts) + header.argc)
+			args[i - LEN(parts)] = cursor;
+		else
+			env[i - LEN(parts) - header.argc] = cursor;
+		cursor = nul + 1;
+	}
+	if (!valid || cursor != end || !parts[7][0]) {
+		free(args);
+		free(env);
+		free(payload);
+		close(client);
+		return;
+	}
+	args[header.argc] = NULL;
+	env[header.envc] = NULL;
+	opt_class = *parts[0] ? parts[0] : NULL;
+	opt_embed = *parts[1] ? parts[1] : NULL;
+	opt_font = *parts[2] ? parts[2] : NULL;
+	opt_io = *parts[3] ? parts[3] : NULL;
+	opt_line = *parts[4] ? parts[4] : NULL;
+	opt_name = *parts[5] ? parts[5] : NULL;
+	opt_title = *parts[6] ? parts[6] : "Worminal";
+	opt_cmd = header.argc ? args : NULL;
+	requested_cwd = parts[7];
+	requested_env = env;
+	requested_geometry = 1;
+	requested_cols = header.cols;
+	requested_rows = header.rows;
+	requested_x = header.x;
+	requested_y = header.y;
+	requested_gm = header.gm;
+	requested_fixed = !!(header.flags & 2);
+	requested_allowalt = !!(header.flags & 1);
+	xaddview();
+	requested_geometry = 0;
+	requested_allowalt = 1;
+	requested_cwd = NULL;
+	requested_env = NULL;
+	opt_class = saved_class;
+	opt_embed = saved_embed;
+	opt_font = saved_font;
+	opt_io = saved_io;
+	opt_line = saved_line;
+	opt_name = saved_name;
+	opt_title = saved_title;
+	opt_cmd = saved_cmd;
 	(void)write(client, "Y", 1);
 	close(client);
+	free(args);
+	free(env);
+	free(payload);
 }
 
 static void
@@ -1678,6 +1908,88 @@ xactivate(void)
 	view->live = 1;
 	cresize(current_window.w, current_window.h);
 	redraw();
+}
+
+static void
+xselecttab(Tab *tab)
+{
+	if (!tab || view->terminal == tab->terminal)
+		return;
+	view->live = 0;
+	view->terminal = tab->terminal;
+	tsessionuse(tab->terminal);
+	current_window.mode = (current_window.mode & (MODE_VISIBLE | MODE_FOCUSED)) |
+	                      tab->mode | MODE_NUMLOCK;
+	current_window.cursor = tab->cursor;
+	MODBIT(xw.attrs.event_mask, tab->mode & MODE_MOUSEMANY,
+	       PointerMotionMask);
+	XChangeWindowAttributes(xw.dpy, xw.win, CWEventMask, &xw.attrs);
+	xloadcolsone();
+	char *title = xstrdup(tab->title);
+	xsettitle(title);
+	free(title);
+	xactivate();
+	xrefreshtabs();
+}
+
+static void
+xclosetab(Tab *tab)
+{
+	Tab **slot = &tabs, *fallback, *preceding = NULL;
+	XView *candidate, *previous = view;
+	size_t i;
+	while (*slot && *slot != tab) {
+		preceding = *slot;
+		slot = &(*slot)->next;
+	}
+	if (!*slot)
+		return;
+	fallback = tab->next ? tab->next : preceding;
+	if (!fallback) {
+		signal(SIGCHLD, SIG_IGN);
+		tsessionhangupall();
+		exit(0);
+	}
+	for (candidate = views; candidate; candidate = candidate->next)
+		if (candidate->terminal == tab->terminal) {
+			xsetview(candidate);
+			xselecttab(fallback);
+		}
+	*slot = tab->next;
+	if (lasttab == tab) {
+		lasttab = tabs;
+		while (lasttab && lasttab->next)
+			lasttab = lasttab->next;
+	}
+	free(tab->title);
+	free(tab->initial_title);
+	if (tab->colors) {
+		for (i = 0; i < MAX(LEN(colorname), 256); i++)
+			free(tab->colors[i]);
+		free(tab->colors);
+	}
+	tsessionremove(tab->terminal);
+	free(tab);
+	xsetview(previous);
+	xrefreshtabs();
+}
+
+static void
+xnewtab(void)
+{
+	XView *target = view;
+	int cols = MAX(1, (current_window.w - 2 * borderpx) / current_window.cw);
+	int rows = MAX(1, (current_window.h - 2 * borderpx - current_window.ch) /
+	                  current_window.ch);
+	TermSession *terminal = tsessionnew(cols, rows);
+	tsessionallowalt(terminal, 1);
+	Tab *tab = xtabnew(terminal, "Worminal");
+	xsetview(target);
+	xselecttab(tab);
+	xsetenv();
+	ttynew(NULL, shell, NULL, NULL);
+	ttysetlaunch(NULL, NULL, NULL);
+	xrefreshtabs();
 }
 
 static XView *
@@ -1739,9 +2051,6 @@ xremoveview(int destroyed)
 		tsessionhangupall();
 		exit(0);
 	}
-	/* A tab without any view has no X context for parser callbacks yet. */
-	if (!nextlive)
-		tsessionstop(removed->terminal);
 	xsetview(views);
 	if (waslive && nextlive) {
 		xsetview(nextlive);
@@ -1752,7 +2061,7 @@ xremoveview(int destroyed)
 int
 xmakeglyphfontspecs(XftGlyphFontSpec *specs, const Glyph *glyphs, int len, int x, int y)
 {
-	float winx = borderpx + x * current_window.cw, winy = borderpx + y * current_window.ch, xp, yp;
+	float winx = borderpx + x * current_window.cw, winy = borderpx + (y + 1) * current_window.ch, xp, yp;
 	ushort mode, prevmode = USHRT_MAX;
 	Font *font = &dc.font;
 	int frcflags = FRC_NORMAL;
@@ -1882,7 +2191,7 @@ void
 xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len, int x, int y, int pass)
 {
 	int charlen = len * ((base.mode & ATTR_WIDE) ? 2 : 1);
-	int winx = borderpx + x * current_window.cw, winy = borderpx + y * current_window.ch,
+	int winx = borderpx + x * current_window.cw, winy = borderpx + (y + 1) * current_window.ch,
 	    width = charlen * current_window.cw;
 	Color *fg, *bg, *temp, revfg, revbg, truefg, truebg;
 	Font *font = xgetfont(base.mode);
@@ -1989,7 +2298,7 @@ xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len, int x, i
 		}
 		if (winx + width >= borderpx + current_window.tw) {
 			xclear(winx + width, (y == 0)? 0 : winy, current_window.w,
-				((winy + current_window.ch >= borderpx + current_window.th)? current_window.h : (winy + current_window.ch)));
+				((winy + current_window.ch >= borderpx + current_window.ch + current_window.th)? current_window.h : (winy + current_window.ch)));
 		}
 		if (y == 0)
 			xclear(winx, 0, winx + width, borderpx);
@@ -2084,7 +2393,7 @@ xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 		case 4: /* Steady Underline */
 			XftDrawRect(xw.draw, &drawcol,
 					borderpx + cx * current_window.cw,
-					borderpx + (cy + 1) * current_window.ch - \
+					borderpx + (cy + 2) * current_window.ch - \
 						cursorthickness,
 					current_window.cw, cursorthickness);
 			break;
@@ -2092,26 +2401,26 @@ xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 		case 6: /* Steady bar */
 			XftDrawRect(xw.draw, &drawcol,
 					borderpx + cx * current_window.cw,
-					borderpx + cy * current_window.ch,
+					borderpx + (cy + 1) * current_window.ch,
 					cursorthickness, current_window.ch);
 			break;
 		}
 	} else {
 		XftDrawRect(xw.draw, &drawcol,
 				borderpx + cx * current_window.cw,
-				borderpx + cy * current_window.ch,
+				borderpx + (cy + 1) * current_window.ch,
 				current_window.cw - 1, 1);
 		XftDrawRect(xw.draw, &drawcol,
 				borderpx + cx * current_window.cw,
-				borderpx + cy * current_window.ch,
+				borderpx + (cy + 1) * current_window.ch,
 				1, current_window.ch - 1);
 		XftDrawRect(xw.draw, &drawcol,
 				borderpx + (cx + 1) * current_window.cw - 1,
-				borderpx + cy * current_window.ch,
+				borderpx + (cy + 1) * current_window.ch,
 				1, current_window.ch - 1);
 		XftDrawRect(xw.draw, &drawcol,
 				borderpx + cx * current_window.cw,
-				borderpx + (cy + 1) * current_window.ch - 1,
+				borderpx + (cy + 2) * current_window.ch - 1,
 				current_window.cw, 1);
 	}
 }
@@ -2119,44 +2428,136 @@ xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 void
 xsetenv(void)
 {
-	char buf[sizeof(long) * 8 + 1];
-
-	snprintf(buf, sizeof(buf), "%lu", xw.win);
-	setenv("WINDOWID", buf, 1);
+	snprintf(launch_windowid, sizeof(launch_windowid), "%lu", xw.win);
+	ttysetlaunch(requested_cwd, requested_env, launch_windowid);
 }
 
 void
 xseticontitle(char *p)
 {
 	XTextProperty prop;
-	DEFAULT(p, opt_title);
+	TermSession *terminal = tsessioncurrent();
+	Tab *tab = xtabfor(terminal);
+	XView *previous = view, *candidate;
+	if (!p || !*p)
+		p = tab ? tab->initial_title : opt_title;
 
-	if (p[0] == '\0')
-		p = opt_title;
-
-	if (Xutf8TextListToTextProperty(xw.dpy, &p, 1, XUTF8StringStyle,
-	                                &prop) != Success)
-		return;
-	XSetWMIconName(xw.dpy, xw.win, &prop);
-	XSetTextProperty(xw.dpy, xw.win, &prop, xw.netwmiconname);
-	XFree(prop.value);
+	for (candidate = views; candidate; candidate = candidate->next) {
+		if (candidate->terminal != terminal)
+			continue;
+		xsetview(candidate);
+		if (Xutf8TextListToTextProperty(xw.dpy, &p, 1, XUTF8StringStyle,
+		                                    &prop) == Success) {
+			XSetWMIconName(xw.dpy, xw.win, &prop);
+			XSetTextProperty(xw.dpy, xw.win, &prop, xw.netwmiconname);
+			XFree(prop.value);
+		}
+	}
+	xsetview(previous);
+	tsessionuse(terminal);
 }
 
 void
 xsettitle(char *p)
 {
 	XTextProperty prop;
-	DEFAULT(p, opt_title);
+	TermSession *terminal = tsessioncurrent();
+	Tab *tab = xtabfor(terminal);
+	XView *previous = view, *candidate;
+	if (!p || !*p)
+		p = tab ? tab->initial_title : opt_title;
 
-	if (p[0] == '\0')
-		p = opt_title;
+	if (tab) {
+		free(tab->title);
+		tab->title = xstrdup(p);
+	}
+	for (candidate = views; candidate; candidate = candidate->next) {
+		if (candidate->terminal != terminal)
+			continue;
+		xsetview(candidate);
+		if (Xutf8TextListToTextProperty(xw.dpy, &p, 1, XUTF8StringStyle,
+		                                    &prop) == Success) {
+			XSetWMName(xw.dpy, xw.win, &prop);
+			XSetTextProperty(xw.dpy, xw.win, &prop, xw.netwmname);
+			XFree(prop.value);
+		}
+	}
+	xsetview(previous);
+	tsessionuse(terminal);
+	if (tab)
+		xrefreshtabs();
+	tsessionuse(terminal);
+}
 
-	if (Xutf8TextListToTextProperty(xw.dpy, &p, 1, XUTF8StringStyle,
-	                                &prop) != Success)
+static int
+xtabwidth(Tab *tab)
+{
+	XGlyphInfo extents;
+	const char *title = tab->title ? tab->title : "Worminal";
+	XftTextExtentsUtf8(xw.dpy, dc.font.match, (const FcChar8 *)title,
+	                    strlen(title), &extents);
+	return extents.xOff + 2 * current_window.cw;
+}
+
+static Tab *
+xfirsttab(void)
+{
+	Tab *first = tabs, *tab;
+	int width;
+	while (first && first->next) {
+		width = borderpx;
+		for (tab = first; tab; tab = tab->next) {
+			width += xtabwidth(tab);
+			if (tab->terminal == view->terminal)
+				break;
+		}
+		if (width <= current_window.w - borderpx)
+			break;
+		first = first->next;
+	}
+	return first;
+}
+
+static void
+xdrawtabs(void)
+{
+	Tab *tab;
+	int x = borderpx, right = current_window.w - borderpx;
+	if (!tabs || !dc.font.match)
 		return;
-	XSetWMName(xw.dpy, xw.win, &prop);
-	XSetTextProperty(xw.dpy, xw.win, &prop, xw.netwmname);
-	XFree(prop.value);
+	int baseline = borderpx + (current_window.ch - dc.font.height) / 2 + dc.font.ascent;
+	XRectangle clip = {.x = borderpx, .y = borderpx,
+	                   .width = MAX(0, right - borderpx), .height = current_window.ch};
+	XftDrawRect(xw.draw, xcolor(defaultbg), 0, 0,
+	            current_window.w, borderpx + current_window.ch);
+	XftDrawSetClipRectangles(xw.draw, 0, 0, &clip, 1);
+	for (tab = xfirsttab(); tab && x < right; tab = tab->next) {
+		int width = xtabwidth(tab), selected = tab->terminal == view->terminal;
+		const char *title = tab->title ? tab->title : "Worminal";
+		if (selected)
+			XftDrawRect(xw.draw, xcolor(defaultfg), x, borderpx,
+			            MIN(width, right - x), current_window.ch);
+		XftDrawStringUtf8(xw.draw, xcolor(selected ? defaultbg : defaultfg),
+		                  dc.font.match, x + current_window.cw, baseline,
+		                  (const FcChar8 *)title, strlen(title));
+		x += width;
+	}
+	XftDrawSetClip(xw.draw, 0);
+}
+
+static void
+xrefreshtabs(void)
+{
+	XView *previous = view, *candidate;
+	for (candidate = views; candidate; candidate = candidate->next) {
+		xsetview(candidate);
+		if (!xw.draw)
+			continue;
+		xdrawtabs();
+		XCopyArea(xw.dpy, xw.buf, xw.win, dc.gc, 0, 0,
+		          current_window.w, borderpx + current_window.ch, 0, 0);
+	}
+	xsetview(previous);
 }
 
 int
@@ -2211,6 +2612,7 @@ xdrawline(Line line, int x1, int y1, int x2, int pass)
 void
 xfinishdraw(void)
 {
+	xdrawtabs();
 	/* The window manager may discard an X window border; draw the outline
 	 * inside the client area after cell backgrounds have been repainted. */
 	XSetForeground(xw.dpy, dc.gc, dc.border.pixel);
@@ -2229,7 +2631,7 @@ xximspot(int x, int y)
 		return;
 
 	xw.ime.spot.x = borderpx + x * current_window.cw;
-	xw.ime.spot.y = borderpx + (y + 1) * current_window.ch;
+	xw.ime.spot.y = borderpx + (y + 2) * current_window.ch;
 
 	XSetICValues(xw.ime.xic, XNPreeditAttributes, xw.ime.spotlist, NULL);
 }
@@ -2266,28 +2668,54 @@ destroy(XEvent *ev)
 void
 xsetpointermotion(int set)
 {
-	MODBIT(xw.attrs.event_mask, set, PointerMotionMask);
-	XChangeWindowAttributes(xw.dpy, xw.win, CWEventMask, &xw.attrs);
+	TermSession *terminal = tsessioncurrent();
+	XView *previous = view, *candidate;
+	for (candidate = views; candidate; candidate = candidate->next) {
+		if (candidate->terminal != terminal)
+			continue;
+		xsetview(candidate);
+		MODBIT(xw.attrs.event_mask, set, PointerMotionMask);
+		XChangeWindowAttributes(xw.dpy, xw.win, CWEventMask, &xw.attrs);
+	}
+	xsetview(previous);
+	tsessionuse(terminal);
 }
 
 void
 xsetmode(int set, unsigned int flags)
 {
 	XView *candidate;
-	int mode = current_window.mode;
+	TermSession *terminal = tsessioncurrent();
+	Tab *tab = xtabfor(terminal);
+	int oldmode = tab ? tab->mode : current_window.mode;
+	if (tab)
+		MODBIT(tab->mode, set, flags);
 	for (candidate = views; candidate; candidate = candidate->next)
-		if (candidate->terminal == view->terminal)
+		if (candidate->terminal == terminal)
 			MODBIT(candidate->win.mode, set, flags);
-	if ((current_window.mode & MODE_REVERSE) != (mode & MODE_REVERSE))
-		redraw();
+	if ((flags & MODE_REVERSE) && tab &&
+	    ((tab->mode ^ oldmode) & MODE_REVERSE)) {
+		candidate = xlivefor(terminal);
+		if (candidate) {
+			XView *previous = view;
+			xsetview(candidate);
+			redraw();
+			xsetview(previous);
+			tsessionuse(terminal);
+		}
+	}
 }
 
 int
 xsetcursor(int cursor)
 {
+	Tab *tab = xtabfor(tsessioncurrent());
 	if (!BETWEEN(cursor, 0, 7)) /* 7: st extension */
 		return 1;
-	current_window.cursor = cursor;
+	if (tab)
+		tab->cursor = cursor;
+	if (xlivefor(tsessioncurrent()))
+		xlivefor(tsessioncurrent())->win.cursor = cursor;
 	return 0;
 }
 
@@ -2304,10 +2732,18 @@ xseturgency(int add)
 void
 xbell(void)
 {
+	XView *live = xlivefor(tsessioncurrent());
+	XView *previous = view;
+	TermSession *terminal = tsessioncurrent();
+	if (!live)
+		return;
+	xsetview(live);
 	if (!(IS_SET(MODE_FOCUSED)))
 		xseturgency(1);
 	if (bellvolume)
 		XkbBell(xw.dpy, xw.win, bellvolume, (Atom)NULL);
+	xsetview(previous);
+	tsessionuse(terminal);
 }
 
 void
@@ -2404,6 +2840,47 @@ kpress(XEvent *ev)
 			return;
 	} else {
 		len = XLookupString(e, buf, sizeof buf, &ksym, NULL);
+	}
+	if (e->state & ControlMask) {
+		Tab *tab, *selected = xtabfor(view->terminal), *previous = NULL;
+		int index;
+		switch (ksym) {
+		case XK_t: case XK_T:
+			xnewtab(); return;
+		case XK_n: case XK_N: {
+			char *old_title = opt_title, *old_line = opt_line, *old_io = opt_io;
+			char **old_cmd = opt_cmd;
+			opt_title = "Worminal";
+			opt_line = opt_io = NULL;
+			opt_cmd = NULL;
+			xaddview();
+			opt_title = old_title;
+			opt_line = old_line;
+			opt_io = old_io;
+			opt_cmd = old_cmd;
+			return;
+		}
+		case XK_w: case XK_W:
+			xclosetab(selected); return;
+		case XK_Tab: case XK_ISO_Left_Tab:
+			if (e->state & ShiftMask || ksym == XK_ISO_Left_Tab) {
+				for (tab = tabs; tab && tab != selected; tab = tab->next)
+					previous = tab;
+				xselecttab(previous ? previous : lasttab);
+			} else {
+				xselecttab(selected->next ? selected->next : tabs);
+			}
+			return;
+		default:
+			if (BETWEEN(ksym, XK_1, XK_9)) {
+				index = ksym == XK_9 ? INT_MAX : ksym - XK_1;
+				for (tab = tabs; tab && index > 0 && tab->next;
+				     tab = tab->next)
+					index--;
+				xselecttab(tab);
+				return;
+			}
+		}
 	}
 	/* 1. shortcuts */
 	for (bp = shortcuts; bp < shortcuts + LEN(shortcuts); bp++) {
@@ -2514,6 +2991,11 @@ run(void)
 
 	for (timeout = -1, drawing = 0, lastblink = (struct timespec){0};;) {
 		tsessionreap();
+		for (Tab *tab = tabs, *next; tab; tab = next) {
+			next = tab->next;
+			if (tsessionfd(tab->terminal) < 0)
+				xclosetab(tab);
+		}
 		FD_ZERO(&rfd);
 		maxfd = MAX(xfd, sharedserver);
 		activepty = 0;
@@ -2556,9 +3038,10 @@ run(void)
 			if (ttyfd < 0 || !FD_ISSET(ttyfd, &rfd))
 				continue;
 			XView *live = xlivefor(terminal);
-			if (!live)
-				die("PTY has no live view\n");
-			xsetview(live);
+			if (live)
+				xsetview(live);
+			else
+				tsessionuse(terminal);
 			ttyread();
 			ptyevent = 1;
 		}
@@ -2630,7 +3113,7 @@ void
 usage(void)
 {
 	die("usage: %s [-aiv] [-c class] [-f font] [-g geometry]"
-	    " [-n name] [-o file] [-S [-A]]\n"
+	    " [-n name] [-o file]\n"
 	    "          [-T title] [-t title] [-w windowid]"
 	    " [[-e] command [args ...]]\n"
 	    "       %s [-aiv] [-c class] [-f font] [-g geometry]"
@@ -2671,12 +3154,6 @@ main(int argc, char *argv[])
 	case 'o':
 		opt_io = EARGF(usage());
 		break;
-	case 'S':
-		shared_requested = 1;
-		break;
-	case 'A':
-		new_tab_requested = 1;
-		break;
 	case 'l':
 		opt_line = EARGF(usage());
 		break;
@@ -2700,6 +3177,7 @@ main(int argc, char *argv[])
 run:
 	if (argc > 0) /* eat all remaining arguments */
 		opt_cmd = argv;
+	launch_argc = argc;
 
 	if (!opt_title)
 		opt_title = (opt_line || !opt_cmd) ? "Worminal" : opt_cmd[0];
@@ -2708,12 +3186,11 @@ run:
 	XSetLocaleModifiers("");
 	cols = MAX(cols, 1);
 	rows = MAX(rows, 1);
-	if (new_tab_requested && !shared_requested)
-		die("-A requires -S\n");
-	if (shared_requested)
-		xsharedstart();
+	xsharedstart();
 	tnew(cols, rows);
 	view->terminal = tsessioncurrent();
+	tsessionallowalt(view->terminal, allowaltscreen);
+	xtabnew(view->terminal, opt_title);
 	xinit(cols, rows);
 	selinit();
 	run();
