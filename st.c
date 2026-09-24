@@ -226,14 +226,28 @@ static char base64dec_getc(const char **);
 
 static ssize_t xwrite(int, const char *, size_t);
 
-/* Globals */
-static Term term;
-static Selection sel;
-static CSIEscape csiescseq;
-static STREscape strescseq;
-static int iofd = 1;
-static int cmdfd;
-static pid_t pid;
+/* A tab owns the parser, PTY, selection, and screen together. */
+typedef struct {
+	Term term;
+	Selection sel;
+	CSIEscape csiescseq;
+	STREscape strescseq;
+	int iofd, cmdfd;
+	pid_t pid;
+	char ttybuf[BUFSIZ];
+	int ttybuflen;
+	TCursor saved[2];
+} TermSession;
+
+static TermSession primarysession = {.iofd = 1};
+static TermSession *session = &primarysession;
+#define term (session->term)
+#define sel (session->sel)
+#define csiescseq (session->csiescseq)
+#define strescseq (session->strescseq)
+#define iofd (session->iofd)
+#define cmdfd (session->cmdfd)
+#define pid (session->pid)
 
 static const uchar utfbyte[UTF_SIZ + 1] = {0x80,    0, 0xC0, 0xE0, 0xF0};
 static const uchar utfmask[UTF_SIZ + 1] = {0xC0, 0x80, 0xE0, 0xF0, 0xF8};
@@ -833,8 +847,8 @@ ttynew(const char *line, char *cmd, const char *out, char **args)
 size_t
 ttyread(void)
 {
-	static char buf[BUFSIZ];
-	static int buflen = 0;
+	char *buf = session->ttybuf;
+	int buflen = session->ttybuflen;
 	int ret, written;
 
 	/* append read bytes to unprocessed bytes */
@@ -852,6 +866,7 @@ ttyread(void)
 		/* keep any incomplete UTF-8 byte sequence for the next call */
 		if (buflen > 0)
 			memmove(buf, buf + written, buflen);
+		session->ttybuflen = buflen;
 		return ret;
 	}
 }
@@ -1021,7 +1036,7 @@ tfulldirt(void)
 void
 tcursor(int mode)
 {
-	static TCursor c[2];
+	TCursor *c = session->saved;
 	int alt = IS_SET(MODE_ALTSCREEN);
 
 	if (mode == CURSOR_SAVE) {

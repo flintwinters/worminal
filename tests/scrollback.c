@@ -107,5 +107,29 @@ main(void)
 	tswapscreen();
 	assert(term.line[0][0].u == 'Q');
 	assert(tlineat(0, 1)[0].u == 'X');
+
+	/* Tab parser and history state must survive work on another tab. */
+	TermSession *first = session;
+	TermSession second = {0};
+	first->ttybuf[0] = 'a';
+	first->ttybuflen = 1;
+	csiescseq.narg = 1;
+	session = &second;
+	iofd = 1;
+	selinit();
+	tnew(3, 2);
+	term.line[0][0].u = 'S';
+	term.c.x = 2;
+	tcursor(CURSOR_SAVE);
+	csiescseq.narg = 2;
+	assert(term.histlen == 0 && term.line[0][0].u == 'S');
+	session = first;
+	assert(term.line[0][0].u == 'Q');
+	assert(tlineat(0, 1)[0].u == 'X');
+	assert(first->ttybuflen == 1 && first->ttybuf[0] == 'a');
+	assert(csiescseq.narg == 1);
+	session = &second;
+	assert(term.line[0][0].u == 'S' && term.c.x == 2);
+	assert(second.saved[0].x == 2 && csiescseq.narg == 2);
 	return 0;
 }
