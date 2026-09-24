@@ -88,6 +88,7 @@ TermSession *tsessionnew(int, int);
 TermSession *tsessionnext(TermSession *);
 void tsessionuse(TermSession *);
 int tsessionfd(TermSession *);
+pid_t tsessionpid(TermSession *);
 void tsessionreap(void);
 int tsessionexitstatus(void);
 void tsessionhangupall(void);

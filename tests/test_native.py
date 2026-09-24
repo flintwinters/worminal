@@ -7,6 +7,7 @@ import hashlib
 from pathlib import Path
 import select
 import signal
+import struct
 import subprocess
 import time
 import unittest
@@ -41,6 +42,32 @@ def focus_window(env, window):
 def window_hash(env, window):
     pixels = subprocess.check_output(["xwd", "-id", window, "-silent"], env=env)
     return hashlib.sha256(pixels).digest()
+
+
+def tab_strip_hash(env, window):
+    image = subprocess.check_output(["xwd", "-id", window, "-silent"], env=env)
+    header = struct.unpack(">25I", image[:100])
+    offset = header[0] + header[19] * 12
+    return hashlib.sha256(image[offset:offset + header[12] * 24]).digest()
+
+
+def tab_has_underline(env, window):
+    image = subprocess.check_output(["xwd", "-id", window, "-silent"], env=env)
+    header = struct.unpack(">25I", image[:100])
+    offset = header[0] + header[19] * 12
+    pixel_size = header[11] // 8
+    stride = header[12]
+    width = header[4]
+    for y in range(4, min(24, header[5])):
+        row = image[offset + y * stride:offset + (y + 1) * stride]
+        background = row[3 * pixel_size:4 * pixel_size]
+        run = 0
+        for x in range(10, width - 10):
+            pixel = row[x * pixel_size:(x + 1) * pixel_size]
+            run = run + 1 if pixel != background else 0
+            if run >= 40:
+                return True
+    return False
 
 
 def check_placement(env, geometry, expected):
@@ -176,6 +203,68 @@ def smoke_x11(env):
 
 
 class NativeTerminalTest(unittest.TestCase):
+    def test_tab_label_tracks_child_directory(self):
+        with isolated_display() as env:
+            env = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"directory-{os.getpid()}"}
+            title = f"Worminal directory {os.getpid()}"
+            marker = ROOT / ".checks" / f"directory-ready-{os.getpid()}"
+            marker.unlink(missing_ok=True)
+            process = subprocess.Popen(
+                [str(ROOT / "worminal"), "-T", title, "-e", "/bin/sh", "-c",
+                 'while IFS= read -r command; do eval "$command"; done'],
+                cwd=ROOT, env=env, stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE)
+
+            def wait_for(predicate, message):
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    result = predicate()
+                    if result:
+                        return result
+                    time.sleep(.05)
+                self.fail(message)
+
+            try:
+                window = wait_for(
+                    lambda: (subprocess.run(
+                        ["xdotool", "search", "--onlyvisible", "--name", title],
+                        env=env, capture_output=True, text=True).stdout.splitlines() or [None])[0],
+                    "directory test window did not open")
+                focus_window(env, window)
+
+                def send(command):
+                    marker.unlink(missing_ok=True)
+                    subprocess.run(["xdotool", "type", "--clearmodifiers", "--delay", "0",
+                                    command], env=env, check=True)
+                    subprocess.run(["xdotool", "key", "Return"], env=env, check=True)
+                    wait_for(marker.exists, "shell did not finish directory command")
+                    previous = None
+                    stable = 0
+                    deadline = time.monotonic() + 3
+                    while stable < 3 and time.monotonic() < deadline:
+                        current = tab_strip_hash(env, window)
+                        stable = stable + 1 if current == previous else 0
+                        previous = current
+                        time.sleep(.05)
+                    self.assertEqual(stable, 3, "tab strip did not settle")
+                    return previous
+
+                clear = f"printf '\\033[2J\\033[H\\033[?25l'; : > {marker}"
+                before = send(clear)
+                self.assertTrue(tab_has_underline(env, window),
+                                "tab label has no visible underline")
+                after = send(f"cd {ROOT / '.checks'}; {clear}")
+                self.assertNotEqual(before, after,
+                                    "tab label did not follow the shell directory")
+                self.assertEqual(subprocess.check_output(
+                    ["xdotool", "getwindowname", window], env=env,
+                    text=True).strip(), title)
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                process.communicate(timeout=2)
+                marker.unlink(missing_ok=True)
+
     def test_forwarded_line_keeps_owner_stdin(self):
         with isolated_display() as env:
             env = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"line-{os.getpid()}"}
