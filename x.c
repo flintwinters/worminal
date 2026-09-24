@@ -1236,7 +1236,7 @@ xinit(int cols, int rows)
 	/* The unmapped window supplies WINDOWID while the shell and font setup
 	 * proceed together. Give the PTY its initial cell size before exec. */
 	xw.attrs.background_pixel = BlackPixel(xw.dpy, xw.scr);
-	xw.attrs.border_pixel = xw.attrs.background_pixel;
+	xw.attrs.border_pixel = WhitePixel(xw.dpy, xw.scr);
 	xw.attrs.bit_gravity = NorthWestGravity;
 	xw.attrs.event_mask = FocusChangeMask | KeyPressMask | KeyReleaseMask
 		| ExposureMask | VisibilityChangeMask | StructureNotifyMask
@@ -1244,7 +1244,7 @@ xinit(int cols, int rows)
 	xw.attrs.colormap = xw.cmap;
 	xw.win = XCreateWindow(xw.dpy, root, xw.l, xw.t,
 			cols * 8 + 2 * borderpx, rows * 16 + 2 * borderpx,
-			0, XDefaultDepth(xw.dpy, xw.scr), InputOutput,
+			1, XDefaultDepth(xw.dpy, xw.scr), InputOutput,
 			xw.vis, CWBackPixel | CWBorderPixel | CWBitGravity
 			| CWEventMask | CWColormap, &xw.attrs);
 	if (parent != root)
@@ -1302,7 +1302,6 @@ xinit(int cols, int rows)
 		geometrymask |= CWY;
 	XConfigureWindow(xw.dpy, xw.win, geometrymask, &changes);
 	XSetWindowBackground(xw.dpy, xw.win, dc.col[defaultbg].pixel);
-	XSetWindowBorder(xw.dpy, xw.win, dc.col[defaultbg].pixel);
 
 	memset(&gcvalues, 0, sizeof(gcvalues));
 	gcvalues.graphics_exposures = False;
