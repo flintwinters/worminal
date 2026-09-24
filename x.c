@@ -159,7 +159,7 @@ static void ximinstantiate(Display *, XPointer, XPointer);
 static void ximdestroy(XIM, XPointer, XPointer);
 static int xicdestroy(XIC, XPointer, XPointer);
 static void xinit(int, int);
-static void xinitview(int, int, int);
+static void xinitview(int, int, int, int);
 static void xactivate(void);
 static void cresize(int, int);
 static void xresize(int, int);
@@ -308,10 +308,9 @@ static char *opt_io    = NULL;
 static char *opt_line  = NULL;
 static char *opt_name  = NULL;
 static char *opt_title = NULL;
-static int startup_ttyfd;
-static TermSession *startup_terminal;
 static int sharedserver = -1;
 static int shared_requested;
+static int new_tab_requested;
 static Window initializing_window;
 static int initializing_window_gone;
 static int (*previous_xerror)(Display *, XErrorEvent *);
@@ -356,7 +355,8 @@ xsharedstart(void)
 			die("shared-view socket failed: %s\n", strerror(errno));
 		if (connect(fd, (struct sockaddr *)&addr,
 		            offsetof(struct sockaddr_un, sun_path) + 1 + size) == 0) {
-			if (write(fd, "V", 1) != 1 || read(fd, &reply, 1) != 1 ||
+			if (write(fd, new_tab_requested ? "N" : "V", 1) != 1 ||
+			    read(fd, &reply, 1) != 1 ||
 			    reply != 'Y')
 				die("shared-view owner did not accept a view\n");
 			close(fd);
@@ -1407,7 +1407,7 @@ xicdestroy(XIC xim, XPointer client, XPointer call)
 }
 
 void
-xinitview(int cols, int rows, int startpty)
+xinitview(int cols, int rows, int first, int spawnpty)
 {
 	XGCValues gcvalues;
 	XWindowChanges changes;
@@ -1419,7 +1419,7 @@ xinitview(int cols, int rows, int startpty)
 	                           .blue = 0x9999, .alpha = 0xffff};
 	unsigned int geometrymask;
 
-	if (startpty) {
+	if (first) {
 		if (!(xw.dpy = XOpenDisplay(NULL)))
 			die("can't open display\n");
 		shared_display = xw.dpy;
@@ -1453,10 +1453,12 @@ xinitview(int cols, int rows, int startpty)
 	previous_xerror = XSetErrorHandler(xinitialerror);
 	if (parent != root)
 		XReparentWindow(xw.dpy, xw.win, parent, xw.l, xw.t);
-	if (startpty) {
+	if (spawnpty) {
 		xsetenv();
-		startup_ttyfd = ttynew(opt_line, shell, opt_io, opt_cmd);
-		xstartuptime("pty");
+		ttynew(first ? opt_line : NULL, shell, first ? opt_io : NULL,
+		       first ? opt_cmd : NULL);
+		if (first)
+			xstartuptime("pty");
 	}
 
 	/* Mapping this placeholder lets X queue early keys while font setup runs.
@@ -1476,21 +1478,22 @@ xinitview(int cols, int rows, int startpty)
 	current_window.mode = MODE_NUMLOCK;
 	resettitle();
 	xidentityhints();
-	if (startpty) {
+	if (spawnpty) {
 		XMapWindow(xw.dpy, xw.win);
 		XFlush(xw.dpy);
-		xstartuptime("map-request");
+		if (first)
+			xstartuptime("map-request");
 	}
 
 	/* font */
 	if (!FcInit())
 		die("could not init fontconfig.\n");
-	if (startpty)
+	if (first)
 		xstartuptime("fontconfig");
 
 	usedfont = (opt_font == NULL)? font : opt_font;
 	xloadfonts(usedfont, 0);
-	if (startpty)
+	if (first)
 		xstartuptime("font");
 
 	/* colors */
@@ -1568,7 +1571,7 @@ xinitview(int cols, int rows, int startpty)
 	xsel.xtarget = XInternAtom(xw.dpy, "UTF8_STRING", 0);
 	if (xsel.xtarget == None)
 		xsel.xtarget = XA_STRING;
-	if (!startpty) {
+	if (!spawnpty) {
 		XMapWindow(xw.dpy, xw.win);
 		XFlush(xw.dpy);
 	}
@@ -1587,7 +1590,7 @@ xinitview(int cols, int rows, int startpty)
 void
 xinit(int cols, int rows)
 {
-	xinitview(cols, rows, 1);
+	xinitview(cols, rows, 1, 1);
 	view->live = 1;
 }
 
@@ -1618,21 +1621,24 @@ xcopycolors(XView *source, XView *target)
 }
 
 static void
-xaddview(void)
+xaddview(int newtab)
 {
 	XView *previous = view;
+	XView *source = views;
 	XView *created = xmalloc(sizeof(*created));
 	int cols, rows;
 
 	memset(created, 0, sizeof(*created));
-	created->terminal = views->terminal;
-	created->next = views->next;
-	views->next = created;
-	cols = MAX(1, (views->win.w - 2 * borderpx) / views->win.cw);
-	rows = MAX(1, (views->win.h - 2 * borderpx) / views->win.ch);
+	cols = MAX(1, (source->win.w - 2 * borderpx) / source->win.cw);
+	rows = MAX(1, (source->win.h - 2 * borderpx) / source->win.ch);
+	created->terminal = newtab ? tsessionnew(cols, rows) : source->terminal;
+	created->live = newtab;
+	created->next = source->next;
+	source->next = created;
 	xsetview(created);
-	xinitview(cols, rows, 0);
-	xcopycolors(previous, created);
+	xinitview(cols, rows, 0, newtab);
+	if (!newtab)
+		xcopycolors(source, created);
 	xsetview(previous);
 }
 
@@ -1650,11 +1656,11 @@ xsharedaccept(void)
 	setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 	if (getsockopt(client, SOL_SOCKET, SO_PEERCRED, &peer, &length) != 0 ||
 	    length != sizeof(peer) || peer.uid != getuid() ||
-	    read(client, &command, 1) != 1 || command != 'V') {
+	    read(client, &command, 1) != 1 || (command != 'V' && command != 'N')) {
 		close(client);
 		return;
 	}
-	xaddview();
+	xaddview(command == 'N');
 	(void)write(client, "Y", 1);
 	close(client);
 }
@@ -1730,9 +1736,12 @@ xremoveview(int destroyed)
 		/* The owner's deliberate last-window shutdown wins over a shell's
 		 * SIGHUP exit status, which SIGCHLD otherwise turns into exit(1). */
 		signal(SIGCHLD, SIG_IGN);
-		ttyhangup();
+		tsessionhangupall();
 		exit(0);
 	}
+	/* A tab without any view has no X context for parser callbacks yet. */
+	if (!nextlive)
+		tsessionstop(removed->terminal);
 	xsetview(views);
 	if (waslive && nextlive) {
 		xsetview(nextlive);
@@ -2477,8 +2486,9 @@ run(void)
 	XEvent ev;
 	XWindowAttributes attrs;
 	XView *candidate;
+	TermSession *terminal;
 	fd_set rfd;
-	int xfd = XConnectionNumber(xw.dpy), ttyfd = startup_ttyfd, xev, drawing;
+	int xfd = XConnectionNumber(xw.dpy), ttyfd, maxfd, activepty, xev, drawing, ptyevent;
 	struct timespec seltv, *tv, now, lastblink, trigger;
 	double timeout;
 
@@ -2503,8 +2513,23 @@ run(void)
 	xstartuptime("resize");
 
 	for (timeout = -1, drawing = 0, lastblink = (struct timespec){0};;) {
+		tsessionreap();
 		FD_ZERO(&rfd);
-		FD_SET(ttyfd, &rfd);
+		maxfd = MAX(xfd, sharedserver);
+		activepty = 0;
+		for (terminal = tsessionnext(NULL); terminal;
+		     terminal = tsessionnext(terminal)) {
+			ttyfd = tsessionfd(terminal);
+			if (ttyfd < 0)
+				continue;
+			if (ttyfd >= FD_SETSIZE)
+				die("too many PTYs for select\n");
+			FD_SET(ttyfd, &rfd);
+			maxfd = MAX(maxfd, ttyfd);
+			activepty++;
+		}
+		if (!activepty)
+			exit(tsessionexitstatus());
 		FD_SET(xfd, &rfd);
 		if (sharedserver >= 0)
 			FD_SET(sharedserver, &rfd);
@@ -2516,7 +2541,7 @@ run(void)
 		seltv.tv_nsec = 1E6 * (timeout - 1E3 * seltv.tv_sec);
 		tv = timeout >= 0 ? &seltv : NULL;
 
-		if (pselect(MAX(MAX(xfd, ttyfd), sharedserver)+1,
+		if (pselect(maxfd+1,
 		            &rfd, NULL, NULL, tv, NULL) < 0) {
 			if (errno == EINTR)
 				continue;
@@ -2524,13 +2549,18 @@ run(void)
 		}
 		clock_gettime(CLOCK_MONOTONIC, &now);
 
-		if (FD_ISSET(ttyfd, &rfd)) {
-			XView *live = xlivefor(startup_terminal);
-			if (live)
-				xsetview(live);
-			else
-				tsessionuse(startup_terminal);
+		ptyevent = 0;
+		for (terminal = tsessionnext(NULL); terminal;
+		     terminal = tsessionnext(terminal)) {
+			ttyfd = tsessionfd(terminal);
+			if (ttyfd < 0 || !FD_ISSET(ttyfd, &rfd))
+				continue;
+			XView *live = xlivefor(terminal);
+			if (!live)
+				die("PTY has no live view\n");
+			xsetview(live);
 			ttyread();
+			ptyevent = 1;
 		}
 		if (sharedserver >= 0 && FD_ISSET(sharedserver, &rfd))
 			xsharedaccept();
@@ -2561,7 +2591,7 @@ run(void)
 		 * maximum latency intervals during `cat huge.txt`, and perfect
 		 * sync with periodic updates from animations/key-repeats/etc.
 		 */
-		if (FD_ISSET(ttyfd, &rfd) || xev) {
+		if (ptyevent || xev) {
 			if (!drawing) {
 				trigger = now;
 				drawing = 1;
@@ -2600,7 +2630,7 @@ void
 usage(void)
 {
 	die("usage: %s [-aiv] [-c class] [-f font] [-g geometry]"
-	    " [-n name] [-o file] [-S]\n"
+	    " [-n name] [-o file] [-S [-A]]\n"
 	    "          [-T title] [-t title] [-w windowid]"
 	    " [[-e] command [args ...]]\n"
 	    "       %s [-aiv] [-c class] [-f font] [-g geometry]"
@@ -2644,6 +2674,9 @@ main(int argc, char *argv[])
 	case 'S':
 		shared_requested = 1;
 		break;
+	case 'A':
+		new_tab_requested = 1;
+		break;
 	case 'l':
 		opt_line = EARGF(usage());
 		break;
@@ -2675,11 +2708,12 @@ run:
 	XSetLocaleModifiers("");
 	cols = MAX(cols, 1);
 	rows = MAX(rows, 1);
+	if (new_tab_requested && !shared_requested)
+		die("-A requires -S\n");
 	if (shared_requested)
 		xsharedstart();
 	tnew(cols, rows);
 	view->terminal = tsessioncurrent();
-	startup_terminal = view->terminal;
 	xinit(cols, rows);
 	selinit();
 	run();
