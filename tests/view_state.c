@@ -59,8 +59,10 @@ setup_view(XView *target, Display *display, int x, unsigned long color)
 	xw.cmap = DefaultColormap(display, xw.scr);
 	xw.win = XCreateSimpleWindow(display, DefaultRootWindow(display),
 	                             x + 300, 300, 100, 60, 0, 0, 0);
-	XSetWindowAttributes attributes = {.override_redirect = True};
-	XChangeWindowAttributes(display, xw.win, CWOverrideRedirect, &attributes);
+	if (!getenv("WORMINAL_PROOF_MANAGED_VIEWS")) {
+		XSetWindowAttributes attributes = {.override_redirect = True};
+		XChangeWindowAttributes(display, xw.win, CWOverrideRedirect, &attributes);
+	}
 	XSetWMHints(display, xw.win, &hints);
 	XSelectInput(display, xw.win,
 	             FocusChangeMask | KeyPressMask | ButtonPressMask);

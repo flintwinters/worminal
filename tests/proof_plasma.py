@@ -47,7 +47,8 @@ def main():
 
                 result = subprocess.run(
                     [str(ROOT / ".checks/view_state_test")],
-                    env={**env, "WORMINAL_PROOF_REQUIRE_IM": "1"},
+                    env={**env, "WORMINAL_PROOF_REQUIRE_IM": "1",
+                         "WORMINAL_PROOF_MANAGED_VIEWS": "1"},
                 )
                 code = result.returncode
                 if not code:
