@@ -312,6 +312,12 @@ class NativeTerminalTest(unittest.TestCase):
                 pixels = subprocess.check_output(["xwd", "-id", window, "-silent"], env=env)
                 return hashlib.sha256(pixels).digest()
 
+            def geometry(window):
+                lines = subprocess.check_output(
+                    ["xdotool", "getwindowgeometry", "--shell", window], env=env, text=True)
+                return {key: int(value) for key, value in
+                        (line.split("=", 1) for line in lines.splitlines())}
+
             def size_count(count):
                 deadline = time.monotonic() + 3
                 while time.monotonic() < deadline:
@@ -333,8 +339,8 @@ class NativeTerminalTest(unittest.TestCase):
                         subprocess.run(["xdotool", "windowmove", window, x, "20"],
                                        env=env, check=True)
                 focus(second)
-                before = image_hash(second)
                 focus(first)
+                before = image_hash(second)
                 typed("alpha")
                 self.assertEqual(image_hash(second), before,
                                  "inactive view received a PTY repaint")
@@ -344,14 +350,22 @@ class NativeTerminalTest(unittest.TestCase):
                 typed("beta")
                 subprocess.run(["xdotool", "windowsize", second, "600", "300"],
                                env=env, check=True)
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline and geometry(second)["WIDTH"] < 500:
+                    time.sleep(.05)
+                self.assertGreaterEqual(geometry(second)["WIDTH"], 500,
+                                        "window manager did not apply the test resize")
                 focus(second)
+                second_geometry = geometry(second)
                 typed("size")
                 second_size = size_count(1)[-1]
                 focus(first)
+                first_geometry = geometry(first)
                 typed("size")
                 first_size = size_count(2)[-1]
                 self.assertNotEqual(first_size, second_size,
-                                    "live-view handoff did not resize the PTY")
+                                    "live-view handoff did not resize the PTY; "
+                                    f"first={first_geometry!r} second={second_geometry!r}")
                 focus(second)
                 typed("size")
                 self.assertEqual(size_count(3)[-1], second_size)
