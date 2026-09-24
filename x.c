@@ -142,6 +142,7 @@ typedef struct {
 	size_t collen;
 	Font font, bfont, ifont, ibfont;
 	GC gc;
+	Color border;
 } DC;
 
 static inline ushort sixd_to_16bit(int);
@@ -1222,6 +1223,8 @@ xinit(int cols, int rows)
 	Window parent, root;
 	pid_t thispid = getpid();
 	XColor xmousefg, xmousebg;
+	XRenderColor bordergray = {.red = 0x9999, .green = 0x9999,
+	                           .blue = 0x9999, .alpha = 0xffff};
 	unsigned int geometrymask;
 
 	if (!(xw.dpy = XOpenDisplay(NULL)))
@@ -1286,6 +1289,8 @@ xinit(int cols, int rows)
 
 	/* colors */
 	xloadcols();
+	if (!XftColorAllocValue(xw.dpy, xw.vis, xw.cmap, &bordergray, &dc.border))
+		die("could not allocate border color\n");
 
 	/* adjust fixed window geometry */
 	win.w = 2 * borderpx + cols * win.cw;
@@ -1822,7 +1827,7 @@ xfinishdraw(void)
 {
 	/* The window manager may discard an X window border; draw the outline
 	 * inside the client area after cell backgrounds have been repainted. */
-	XSetForeground(xw.dpy, dc.gc, WhitePixel(xw.dpy, xw.scr));
+	XSetForeground(xw.dpy, dc.gc, dc.border.pixel);
 	XDrawRectangle(xw.dpy, xw.buf, dc.gc, 0, 0, win.w - 1, win.h - 1);
 	XCopyArea(xw.dpy, xw.buf, xw.win, dc.gc, 0, 0, win.w,
 			win.h, 0, 0);
