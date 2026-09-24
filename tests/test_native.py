@@ -1,6 +1,7 @@
 """Build settings and a real keyboard-to-PTY smoke check."""
 
 import os
+import hashlib
 from pathlib import Path
 import select
 import subprocess
@@ -147,6 +148,98 @@ def smoke_x11(env):
 
 
 class NativeTerminalTest(unittest.TestCase):
+    def test_shared_view_end_to_end(self):
+        with isolated_display() as env:
+            env = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"proof-{os.getpid()}"}
+            title = f"Worminal shared {os.getpid()}"
+            received = ROOT / ".checks" / "shared_input"
+            received.unlink(missing_ok=True)
+            script = (
+                "printf '\033[?25l'; "
+                'while IFS= read -r line; do '
+                'printf "[%s]\\n" "$line"; '
+                'printf "%s\\n" "$line" >> "$1"; done'
+            )
+            owner = subprocess.Popen(
+                [str(ROOT / "worminal"), "-S", "-T", title, "-e", "/bin/sh",
+                 "-c", script, "sh", str(received)],
+                env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            )
+
+            def windows(count):
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    found = subprocess.run(
+                        ["xdotool", "search", "--onlyvisible", "--name", title],
+                        env=env, capture_output=True, text=True,
+                    )
+                    ids = found.stdout.splitlines() if found.returncode == 0 else []
+                    if len(ids) == count:
+                        return ids
+                    if owner.poll() is not None:
+                        self.fail(f"Shared owner exited: {owner.communicate()[1].decode()}")
+                    time.sleep(.05)
+                self.fail(f"Expected {count} shared windows; saw {ids}")
+
+            def focus(window):
+                subprocess.run(["xdotool", "windowfocus", "--sync", window], env=env, check=True)
+                time.sleep(.1)
+
+            def typed(value):
+                subprocess.run(["xdotool", "type", "--clearmodifiers", "--delay", "0", value],
+                               env=env, check=True)
+                subprocess.run(["xdotool", "key", "Return"], env=env, check=True)
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline:
+                    if received.exists() and value in received.read_text().splitlines():
+                        return
+                    time.sleep(.05)
+                self.fail(f"Input {value!r} did not reach the shared shell")
+
+            def image_hash(window):
+                pixels = subprocess.check_output(["xwd", "-id", window, "-silent"], env=env)
+                return hashlib.sha256(pixels).digest()
+
+            try:
+                first = windows(1)[0]
+                subprocess.run([str(ROOT / "worminal"), "-S"], env=env,
+                               capture_output=True, check=True, timeout=5)
+                first, second = windows(2)
+                focus(second)
+                before = image_hash(second)
+                focus(first)
+                typed("alpha")
+                self.assertEqual(image_hash(second), before,
+                                 "inactive view received a PTY repaint")
+                focus(second)
+                self.assertNotEqual(image_hash(second), before,
+                                    "reactivated view did not catch up")
+                typed("beta")
+                subprocess.run(["xdotool", "windowclose", first], env=env, check=True)
+                self.assertEqual(windows(1), [second], "first view did not close")
+                self.assertIsNone(owner.poll(), "first close ended the shared owner")
+                focus(second)
+                typed("gamma")
+                self.assertEqual(received.read_text().splitlines(), ["alpha", "beta", "gamma"])
+                subprocess.run(["xdotool", "windowclose", second], env=env, check=True)
+                try:
+                    owner.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    visible = subprocess.run(
+                        ["xdotool", "search", "--onlyvisible", "--name", title],
+                        env=env, capture_output=True, text=True,
+                    )
+                    ready, _, _ = select.select([owner.stderr], [], [], 0)
+                    trace = os.read(owner.stderr.fileno(), 4096).decode() if ready else ""
+                    self.fail(f"Owner remained after last close; windows={visible.stdout!r}, trace={trace!r}")
+                self.assertEqual(owner.returncode, 0)
+            finally:
+                if owner.poll() is None:
+                    owner.terminate()
+                owner.wait(timeout=2)
+                owner.stderr.close()
+                received.unlink(missing_ok=True)
+
     def test_view_contexts_draw_independently(self):
         with isolated_display() as env:
             subprocess.run([str(ROOT / ".checks/view_state_test")], env=env, check=True)

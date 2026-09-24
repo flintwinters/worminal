@@ -1,4 +1,5 @@
 /* Draw into two real X windows through independent Worminal view contexts. */
+#define _GNU_SOURCE
 #include <X11/extensions/XTest.h>
 #define main worminal_main
 #include "../x.c"
@@ -17,6 +18,16 @@ ttywrite(const char *data, size_t len, int echo)
 	die("unexpected PTY focus report\n");
 }
 
+void
+tsessionuse(TermSession *chosen)
+{
+	die("unexpected terminal session switch\n");
+}
+
+void tresize(int cols, int rows) { die("unexpected terminal resize\n"); }
+void ttyresize(int width, int height) { die("unexpected PTY resize\n"); }
+void redraw(void) { die("unexpected terminal redraw\n"); }
+
 void *
 xrealloc(void *pointer, size_t size)
 {
@@ -32,6 +43,7 @@ setup_view(XView *target, Display *display, int x, unsigned long color)
 	XWMHints hints = {.flags = InputHint, .input = True};
 
 	view = target;
+	target->live = 1;
 	xw.dpy = display;
 	xw.scr = DefaultScreen(display);
 	xw.vis = DefaultVisual(display, xw.scr);

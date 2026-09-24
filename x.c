@@ -1,12 +1,16 @@
 /* See LICENSE for license details. */
+#define _GNU_SOURCE
 #include <errno.h>
 #include <math.h>
 #include <limits.h>
 #include <locale.h>
 #include <signal.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
 #include <libgen.h>
@@ -155,6 +159,8 @@ static void ximinstantiate(Display *, XPointer, XPointer);
 static void ximdestroy(XIM, XPointer, XPointer);
 static int xicdestroy(XIC, XPointer, XPointer);
 static void xinit(int, int);
+static void xinitview(int, int, int);
+static void xactivate(void);
 static void cresize(int, int);
 static void xresize(int, int);
 static void xhints(void);
@@ -174,6 +180,7 @@ static int evrow(XEvent *);
 static void expose(XEvent *);
 static void visibility(XEvent *);
 static void unmap(XEvent *);
+static void destroy(XEvent *);
 static void kpress(XEvent *);
 static void cmessage(XEvent *);
 static void resize(XEvent *);
@@ -202,6 +209,7 @@ static void (*handler[LASTEvent])(XEvent *) = {
 	[ConfigureNotify] = resize,
 	[VisibilityNotify] = visibility,
 	[UnmapNotify] = unmap,
+	[DestroyNotify] = destroy,
 	[Expose] = expose,
 	[FocusIn] = focus,
 	[FocusOut] = focus,
@@ -242,18 +250,21 @@ typedef struct XView {
 	XWindow xw;
 	XSelection xsel;
 	TermWindow win;
+	TermSession *terminal;
 	Fontcache *fallback_fonts;
 	int fallback_len, fallback_cap;
 	char *font_name;
 	FcPattern *style_pattern;
 	double font_size, default_font_size;
 	uint buttons;
+	int live;
 	struct XView *next;
 } XView;
 
 static XView primaryview;
 static XView *views = &primaryview;
 static XView *view = &primaryview;
+static Display *shared_display;
 /* One XIM serves the display; each view has its own XIC. Opening a second
  * XIM on the same display fails with the KDE input method in practice. */
 static XIM sharedxim;
@@ -281,6 +292,14 @@ xviewfor(Window window)
 #define usedfontsize (view->font_size)
 #define defaultfontsize (view->default_font_size)
 
+static void
+xsetview(XView *chosen)
+{
+	view = chosen;
+	if (chosen->terminal)
+		tsessionuse(chosen->terminal);
+}
+
 static char *opt_class = NULL;
 static char **opt_cmd  = NULL;
 static char *opt_embed = NULL;
@@ -290,6 +309,60 @@ static char *opt_line  = NULL;
 static char *opt_name  = NULL;
 static char *opt_title = NULL;
 static int startup_ttyfd;
+static TermSession *startup_terminal;
+static int sharedserver = -1;
+static int shared_requested;
+
+/* Linux abstract sockets disappear with their owner, so a crashed owner
+ * cannot leave a stale pathname that prevents a new owner from starting. */
+static void
+xsharedstart(void)
+{
+	struct sockaddr_un addr = {.sun_family = AF_UNIX};
+	const char *display = getenv("DISPLAY");
+	const char *scope = getenv("WORMINAL_SHARED_SOCKET_SCOPE");
+	int size, fd, attempt;
+	char reply;
+	struct timespec pause = {.tv_nsec = 10000000};
+
+	if (!display)
+		die("shared views require DISPLAY\n");
+	size = snprintf(addr.sun_path + 1, sizeof(addr.sun_path) - 1,
+	                "worminal-%lu-%s-%s", (unsigned long)getuid(), display,
+	                scope ? scope : "");
+	if (size < 0 || size >= sizeof(addr.sun_path) - 1)
+		die("DISPLAY is too long for shared-view socket\n");
+	for (attempt = 0; attempt < 100; attempt++) {
+		fd = socket(AF_UNIX, SOCK_STREAM, 0);
+		if (fd < 0)
+			die("shared-view socket failed: %s\n", strerror(errno));
+		if (connect(fd, (struct sockaddr *)&addr,
+		            offsetof(struct sockaddr_un, sun_path) + 1 + size) == 0) {
+			if (write(fd, "V", 1) != 1 || read(fd, &reply, 1) != 1 ||
+			    reply != 'Y')
+				die("shared-view owner did not accept a view\n");
+			close(fd);
+			exit(0);
+		}
+		close(fd);
+		fd = socket(AF_UNIX, SOCK_STREAM, 0);
+		if (fd < 0)
+			die("shared-view socket failed: %s\n", strerror(errno));
+		if (bind(fd, (struct sockaddr *)&addr,
+		         offsetof(struct sockaddr_un, sun_path) + 1 + size) == 0) {
+			if (listen(fd, 8) < 0)
+				die("shared-view listen failed: %s\n", strerror(errno));
+			sharedserver = fd;
+			return;
+		}
+		int bind_error = errno;
+		close(fd);
+		if (bind_error != EADDRINUSE)
+			die("shared-view bind failed: %s\n", strerror(bind_error));
+		nanosleep(&pause, NULL);
+	}
+	die("shared-view owner did not become available\n");
+}
 
 static void
 xstartupevent(const char *event, int value)
@@ -524,6 +597,7 @@ mouseaction(XEvent *e, uint release)
 void
 bpress(XEvent *e)
 {
+	xactivate();
 	int btn = e->xbutton.button;
 	char *key;
 	struct timespec now;
@@ -1241,7 +1315,7 @@ ximinstantiate(Display *dpy, XPointer client, XPointer call)
 	int ready = 1;
 
 	for (candidate = views; candidate; candidate = candidate->next) {
-		view = candidate;
+		xsetview(candidate);
 		ready &= ximopen(dpy);
 	}
 	if (ready) {
@@ -1249,7 +1323,7 @@ ximinstantiate(Display *dpy, XPointer client, XPointer call)
 		                                 ximinstantiate, client);
 		ximwaiting = 0;
 	}
-	view = previous;
+	xsetview(previous);
 }
 
 void
@@ -1260,7 +1334,7 @@ ximdestroy(XIM xim, XPointer client, XPointer call)
 
 	sharedxim = NULL;
 	for (candidate = views; candidate; candidate = candidate->next) {
-		view = candidate;
+		xsetview(candidate);
 		xw.ime.xic = NULL;
 		if (xw.ime.spotlist)
 			XFree(xw.ime.spotlist);
@@ -1271,21 +1345,21 @@ ximdestroy(XIM xim, XPointer client, XPointer call)
 		                               ximinstantiate, NULL);
 		ximwaiting = 1;
 	}
-	view = previous;
+	xsetview(previous);
 }
 
 int
 xicdestroy(XIC xim, XPointer client, XPointer call)
 {
 	XView *previous = view;
-	view = (XView *)client;
+	xsetview((XView *)client);
 	xw.ime.xic = NULL;
-	view = previous;
+	xsetview(previous);
 	return 1;
 }
 
 void
-xinit(int cols, int rows)
+xinitview(int cols, int rows, int startpty)
 {
 	XGCValues gcvalues;
 	XWindowChanges changes;
@@ -1297,9 +1371,14 @@ xinit(int cols, int rows)
 	                           .blue = 0x9999, .alpha = 0xffff};
 	unsigned int geometrymask;
 
-	if (!(xw.dpy = XOpenDisplay(NULL)))
-		die("can't open display\n");
-	xstartuptime("display");
+	if (startpty) {
+		if (!(xw.dpy = XOpenDisplay(NULL)))
+			die("can't open display\n");
+		shared_display = xw.dpy;
+		xstartuptime("display");
+	} else {
+		xw.dpy = shared_display;
+	}
 	xw.scr = XDefaultScreen(xw.dpy);
 	xw.vis = XDefaultVisual(xw.dpy, xw.scr);
 	xw.cmap = XDefaultColormap(xw.dpy, xw.scr);
@@ -1323,9 +1402,11 @@ xinit(int cols, int rows)
 			| CWEventMask | CWColormap, &xw.attrs);
 	if (parent != root)
 		XReparentWindow(xw.dpy, xw.win, parent, xw.l, xw.t);
-	xsetenv();
-	startup_ttyfd = ttynew(opt_line, shell, opt_io, opt_cmd);
-	xstartuptime("pty");
+	if (startpty) {
+		xsetenv();
+		startup_ttyfd = ttynew(opt_line, shell, opt_io, opt_cmd);
+		xstartuptime("pty");
+	}
 
 	/* Mapping this placeholder lets X queue early keys while font setup runs.
 	 * Final font metrics replace its provisional pixel geometry below. */
@@ -1346,16 +1427,19 @@ xinit(int cols, int rows)
 	xidentityhints();
 	XMapWindow(xw.dpy, xw.win);
 	XFlush(xw.dpy);
-	xstartuptime("map-request");
+	if (startpty)
+		xstartuptime("map-request");
 
 	/* font */
 	if (!FcInit())
 		die("could not init fontconfig.\n");
-	xstartuptime("fontconfig");
+	if (startpty)
+		xstartuptime("fontconfig");
 
 	usedfont = (opt_font == NULL)? font : opt_font;
 	xloadfonts(usedfont, 0);
-	xstartuptime("font");
+	if (startpty)
+		xstartuptime("font");
 
 	/* colors */
 	xloadcols();
@@ -1432,6 +1516,135 @@ xinit(int cols, int rows)
 	xsel.xtarget = XInternAtom(xw.dpy, "UTF8_STRING", 0);
 	if (xsel.xtarget == None)
 		xsel.xtarget = XA_STRING;
+}
+
+void
+xinit(int cols, int rows)
+{
+	xinitview(cols, rows, 1);
+	view->live = 1;
+}
+
+static void
+xaddview(void)
+{
+	XView *previous = view;
+	XView *created = xmalloc(sizeof(*created));
+	int cols, rows;
+
+	memset(created, 0, sizeof(*created));
+	created->terminal = views->terminal;
+	created->next = views->next;
+	views->next = created;
+	cols = MAX(1, (views->win.w - 2 * borderpx) / views->win.cw);
+	rows = MAX(1, (views->win.h - 2 * borderpx) / views->win.ch);
+	xsetview(created);
+	xinitview(cols, rows, 0);
+	xsetview(previous);
+}
+
+static void
+xsharedaccept(void)
+{
+	int client = accept(sharedserver, NULL, NULL);
+	struct { pid_t pid; uid_t uid; gid_t gid; } peer;
+	socklen_t length = sizeof(peer);
+	struct timeval timeout = {.tv_sec = 2};
+	char command;
+
+	if (client < 0)
+		return;
+	setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+	if (getsockopt(client, SOL_SOCKET, SO_PEERCRED, &peer, &length) != 0 ||
+	    length != sizeof(peer) || peer.uid != getuid() ||
+	    read(client, &command, 1) != 1 || command != 'V') {
+		close(client);
+		return;
+	}
+	xaddview();
+	(void)write(client, "Y", 1);
+	close(client);
+}
+
+static void
+xactivate(void)
+{
+	XView *candidate;
+
+	if (view->live)
+		return;
+	for (candidate = views; candidate; candidate = candidate->next)
+		if (candidate->terminal == view->terminal)
+			candidate->live = 0;
+	view->live = 1;
+	cresize(current_window.w, current_window.h);
+	redraw();
+}
+
+static XView *
+xlivefor(TermSession *terminal)
+{
+	XView *candidate;
+
+	for (candidate = views; candidate; candidate = candidate->next)
+		if (candidate->terminal == terminal && candidate->live)
+			return candidate;
+	return NULL;
+}
+
+static void
+xremoveview(int destroyed)
+{
+	XView *removed = view;
+	XView **slot = &views;
+	XView *nextlive = NULL, *candidate;
+	size_t i;
+	int waslive = removed->live;
+
+	while (*slot && *slot != removed)
+		slot = &(*slot)->next;
+	if (!*slot)
+		die("closing an unknown view\n");
+	*slot = removed->next;
+	for (candidate = views; candidate; candidate = candidate->next)
+		if (candidate->terminal == removed->terminal) {
+			nextlive = candidate;
+			break;
+		}
+	if (xw.ime.xic)
+		XDestroyIC(xw.ime.xic);
+	if (xw.ime.spotlist)
+		XFree(xw.ime.spotlist);
+	xunloadfonts();
+	free(frc);
+	for (i = 0; i < dc.collen; i++)
+		if (dc.colloaded[i])
+			XftColorFree(xw.dpy, xw.vis, xw.cmap, &dc.col[i]);
+	XftColorFree(xw.dpy, xw.vis, xw.cmap, &dc.border);
+	free(dc.col);
+	free(dc.colloaded);
+	free(xw.specbuf);
+	XftDrawDestroy(xw.draw);
+	XFreePixmap(xw.dpy, xw.buf);
+	XFreeGC(xw.dpy, dc.gc);
+	if (!destroyed)
+		XDestroyWindow(xw.dpy, xw.win);
+	free(xsel.primary);
+	free(xsel.clipboard);
+	if (removed != &primaryview)
+		free(removed);
+	if (!views) {
+		/* The owner's deliberate last-window shutdown wins over a shell's
+		 * SIGHUP exit status, which SIGCHLD otherwise turns into exit(1). */
+		signal(SIGCHLD, SIG_IGN);
+		ttyhangup();
+		exit(0);
+	}
+	xsetview(views);
+	if (waslive && nextlive) {
+		xsetview(nextlive);
+		xactivate();
+	}
 }
 
 int
@@ -1922,7 +2135,10 @@ xximspot(int x, int y)
 void
 expose(XEvent *ev)
 {
-	redraw();
+	if (view->live)
+		redraw();
+	else
+		xfinishdraw();
 }
 
 void
@@ -1940,6 +2156,12 @@ unmap(XEvent *ev)
 }
 
 void
+destroy(XEvent *ev)
+{
+	xremoveview(1);
+}
+
+void
 xsetpointermotion(int set)
 {
 	MODBIT(xw.attrs.event_mask, set, PointerMotionMask);
@@ -1949,8 +2171,11 @@ xsetpointermotion(int set)
 void
 xsetmode(int set, unsigned int flags)
 {
+	XView *candidate;
 	int mode = current_window.mode;
-	MODBIT(current_window.mode, set, flags);
+	for (candidate = views; candidate; candidate = candidate->next)
+		if (candidate->terminal == view->terminal)
+			MODBIT(candidate->win.mode, set, flags);
 	if ((current_window.mode & MODE_REVERSE) != (mode & MODE_REVERSE))
 		redraw();
 }
@@ -1992,6 +2217,7 @@ focus(XEvent *ev)
 		return;
 
 	if (ev->type == FocusIn) {
+		xactivate();
 		if (xw.ime.xic)
 			XSetICFocus(xw.ime.xic);
 		current_window.mode |= MODE_FOCUSED;
@@ -2053,6 +2279,7 @@ kmap(KeySym k, uint state)
 void
 kpress(XEvent *ev)
 {
+	xactivate();
 	static int firstkey = 1;
 	XKeyEvent *e = &ev->xkey;
 	KeySym ksym = NoSymbol;
@@ -2123,8 +2350,7 @@ cmessage(XEvent *e)
 			current_window.mode &= ~MODE_FOCUSED;
 		}
 	} else if (e->xclient.data.l[0] == xw.wmdeletewin) {
-		ttyhangup();
-		exit(0);
+		xremoveview(0);
 	}
 }
 
@@ -2133,8 +2359,23 @@ resize(XEvent *e)
 {
 	if (e->xconfigure.width == current_window.w && e->xconfigure.height == current_window.h)
 		return;
-
-	cresize(e->xconfigure.width, e->xconfigure.height);
+	if (view->live) {
+		cresize(e->xconfigure.width, e->xconfigure.height);
+	} else {
+		Pixmap old = xw.buf;
+		int oldw = current_window.w, oldh = current_window.h;
+		current_window.w = e->xconfigure.width;
+		current_window.h = e->xconfigure.height;
+		xw.buf = XCreatePixmap(xw.dpy, xw.win, current_window.w,
+		                       current_window.h, DefaultDepth(xw.dpy, xw.scr));
+		XSetForeground(xw.dpy, dc.gc, dc.col[defaultbg].pixel);
+		XFillRectangle(xw.dpy, xw.buf, dc.gc, 0, 0,
+		               current_window.w, current_window.h);
+		XCopyArea(xw.dpy, old, xw.buf, dc.gc, 0, 0,
+		          MIN(oldw, current_window.w), MIN(oldh, current_window.h), 0, 0);
+		XFreePixmap(xw.dpy, old);
+		XftDrawChange(xw.draw, xw.buf);
+	}
 }
 
 void
@@ -2142,6 +2383,7 @@ run(void)
 {
 	XEvent ev;
 	XWindowAttributes attrs;
+	XView *candidate;
 	fd_set rfd;
 	int xfd = XConnectionNumber(xw.dpy), ttyfd = startup_ttyfd, xev, drawing;
 	struct timespec seltv, *tv, now, lastblink, trigger;
@@ -2171,6 +2413,8 @@ run(void)
 		FD_ZERO(&rfd);
 		FD_SET(ttyfd, &rfd);
 		FD_SET(xfd, &rfd);
+		if (sharedserver >= 0)
+			FD_SET(sharedserver, &rfd);
 
 		if (XPending(xw.dpy))
 			timeout = 0;  /* existing events might not set xfd */
@@ -2179,15 +2423,24 @@ run(void)
 		seltv.tv_nsec = 1E6 * (timeout - 1E3 * seltv.tv_sec);
 		tv = timeout >= 0 ? &seltv : NULL;
 
-		if (pselect(MAX(xfd, ttyfd)+1, &rfd, NULL, NULL, tv, NULL) < 0) {
+		if (pselect(MAX(MAX(xfd, ttyfd), sharedserver)+1,
+		            &rfd, NULL, NULL, tv, NULL) < 0) {
 			if (errno == EINTR)
 				continue;
 			die("select failed: %s\n", strerror(errno));
 		}
 		clock_gettime(CLOCK_MONOTONIC, &now);
 
-		if (FD_ISSET(ttyfd, &rfd))
+		if (FD_ISSET(ttyfd, &rfd)) {
+			XView *live = xlivefor(startup_terminal);
+			if (live)
+				xsetview(live);
+			else
+				tsessionuse(startup_terminal);
 			ttyread();
+		}
+		if (sharedserver >= 0 && FD_ISSET(sharedserver, &rfd))
+			xsharedaccept();
 
 		xev = 0;
 		while (XPending(xw.dpy)) {
@@ -2195,8 +2448,10 @@ run(void)
 			XNextEvent(xw.dpy, &ev);
 			XView *target = xviewfor(ev.xany.window);
 			if (target)
-				view = target;
+				xsetview(target);
 			if (XFilterEvent(&ev, None))
+				continue;
+			if (!target)
 				continue;
 			if (handler[ev.type])
 				(handler[ev.type])(&ev);
@@ -2238,7 +2493,11 @@ run(void)
 			}
 		}
 
-		draw();
+		for (candidate = views; candidate; candidate = candidate->next)
+			if (candidate->live) {
+				xsetview(candidate);
+				draw();
+			}
 		XFlush(xw.dpy);
 		drawing = 0;
 	}
@@ -2248,7 +2507,7 @@ void
 usage(void)
 {
 	die("usage: %s [-aiv] [-c class] [-f font] [-g geometry]"
-	    " [-n name] [-o file]\n"
+	    " [-n name] [-o file] [-S]\n"
 	    "          [-T title] [-t title] [-w windowid]"
 	    " [[-e] command [args ...]]\n"
 	    "       %s [-aiv] [-c class] [-f font] [-g geometry]"
@@ -2289,6 +2548,9 @@ main(int argc, char *argv[])
 	case 'o':
 		opt_io = EARGF(usage());
 		break;
+	case 'S':
+		shared_requested = 1;
+		break;
 	case 'l':
 		opt_line = EARGF(usage());
 		break;
@@ -2320,7 +2582,11 @@ run:
 	XSetLocaleModifiers("");
 	cols = MAX(cols, 1);
 	rows = MAX(rows, 1);
+	if (shared_requested)
+		xsharedstart();
 	tnew(cols, rows);
+	view->terminal = tsessioncurrent();
+	startup_terminal = view->terminal;
 	xinit(cols, rows);
 	selinit();
 	run();
