@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Worminal
+Comment=Small X11 terminal
+Exec=worminal -c Worminal
+TryExec=worminal
+Icon=worminal
+Terminal=false
+Categories=System;TerminalEmulator;
+StartupWMClass=Worminal
