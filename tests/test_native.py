@@ -403,6 +403,15 @@ class NativeTerminalTest(unittest.TestCase):
                 wait_for(lambda: title(second) == a_title, "Ctrl+1 did not select tab A")
                 subprocess.run(["xdotool", "key", "ctrl+9"], env=env, check=True)
                 wait_for(lambda: title(second) == b_title, "Ctrl+9 did not select last tab")
+                subprocess.run(["xdotool", "key", "alt+1"], env=env, check=True)
+                wait_for(lambda: title(second) == a_title, "Alt+1 did not select tab A")
+                for key in ("alt+9", "alt+0"):
+                    subprocess.run(["xdotool", "key", key], env=env, check=True)
+                    time.sleep(.05)
+                    self.assertEqual(title(second), a_title,
+                                     f"{key} selected an absent tab slot")
+                subprocess.run(["xdotool", "key", "alt+2"], env=env, check=True)
+                wait_for(lambda: title(second) == b_title, "Alt+2 did not select tab B")
                 focus_window(env, second)
                 subprocess.run(["xdotool", "key", "ctrl+n"], env=env, check=True)
                 third = wait_for(lambda: next((w for w in windows()
