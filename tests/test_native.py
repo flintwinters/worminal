@@ -73,7 +73,7 @@ def smoke_x11(env):
     result_path.unlink(missing_ok=True)
     title = f"Worminal smoke {os.getpid()}"
     script = (
-        '[ -n "$WINDOWID" ] && [ "$(stty size)" = "24 80" ] || exit 4; '
+        '[ -n "$WINDOWID" ] && [ "$(stty size)" = "24 120" ] || exit 4; '
         r"printf '\033[1mB\033[0m\033[3mI\033[0m\033[1;3mJ\033[0m"
         r"\033[38;5;196mC\033[0m\n'; "
         'IFS= read -r value; [ "$value" = ready ] && printf yes > "$1"'
