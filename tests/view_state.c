@@ -86,8 +86,13 @@ wait_viewable(Display *display, Window window)
 
 	for (int attempt = 0; attempt < 500; attempt++) {
 		if (XGetWindowAttributes(display, window, &attrs) &&
-		    attrs.map_state == IsViewable)
-			return;
+		    attrs.map_state == IsViewable) {
+			/* Managed windows can be briefly unmapped while reparenting. */
+			nanosleep(&pause, NULL);
+			if (XGetWindowAttributes(display, window, &attrs) &&
+			    attrs.map_state == IsViewable)
+				return;
+		}
 		nanosleep(&pause, NULL);
 	}
 	die("proof window was not mapped by the window manager\n");
@@ -143,18 +148,56 @@ focus_view(Display *display, Window window)
 	exit(1);
 }
 
+static int image_error_code;
+
+static int
+image_error(Display *display, XErrorEvent *error)
+{
+	(void)display;
+	image_error_code = error->error_code;
+	return 0;
+}
+
 static unsigned long
 interior_pixel(Display *display, Window window)
 {
-	XImage *image = XGetImage(display, window, 5, 5, 1, 1,
-	                          AllPlanes, ZPixmap);
+	XImage *image;
+	XWindowAttributes attrs;
 	unsigned long pixel;
+	int (*previous)(Display *, XErrorEvent *);
+	struct timespec pause = {.tv_nsec = 10000000};
 
-	if (!image)
-		die("could not read view pixels\n");
-	pixel = XGetPixel(image, 0, 0);
-	XDestroyImage(image);
-	return pixel;
+	for (int attempt = 0; attempt < 200; attempt++) {
+		if (!XGetWindowAttributes(display, window, &attrs) ||
+		    attrs.map_state != IsViewable) {
+			nanosleep(&pause, NULL);
+			continue;
+		}
+		/* Reparenting can race a GetImage request after map-state query. */
+		XSync(display, False);
+		image_error_code = 0;
+		previous = XSetErrorHandler(image_error);
+		image = XGetImage(display, window, 5, 5, 1, 1,
+		                  AllPlanes, ZPixmap);
+		XSync(display, False);
+		XSetErrorHandler(previous);
+		if (image_error_code && image_error_code != BadMatch)
+			die("unexpected X error while reading view pixels\n");
+		if (image_error_code) {
+			if (image)
+				XDestroyImage(image);
+			nanosleep(&pause, NULL);
+			continue;
+		}
+		if (image) {
+			pixel = XGetPixel(image, 0, 0);
+			XDestroyImage(image);
+			return pixel;
+		}
+		nanosleep(&pause, NULL);
+	}
+	die("could not read view pixels\n");
+	return 0;
 }
 
 int
