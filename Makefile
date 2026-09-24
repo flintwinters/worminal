@@ -56,10 +56,18 @@ install: worminal
 	mkdir -p $(DESTDIR)$(MANPREFIX)/man1
 	sed "s/VERSION/$(VERSION)/g" < worminal.1 > $(DESTDIR)$(MANPREFIX)/man1/worminal.1
 	chmod 644 $(DESTDIR)$(MANPREFIX)/man1/worminal.1
+	mkdir -p $(DESTDIR)$(PREFIX)/share/applications
+	cp -f worminal.desktop $(DESTDIR)$(PREFIX)/share/applications/worminal.desktop
+	chmod 644 $(DESTDIR)$(PREFIX)/share/applications/worminal.desktop
+	mkdir -p $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps
+	cp -f worminal.svg $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/worminal.svg
+	chmod 644 $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/worminal.svg
 	tic -sx st.info
 
 uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/worminal
 	rm -f $(DESTDIR)$(MANPREFIX)/man1/worminal.1
+	rm -f $(DESTDIR)$(PREFIX)/share/applications/worminal.desktop
+	rm -f $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/worminal.svg
 
 .PHONY: all clean install uninstall
