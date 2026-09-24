@@ -65,7 +65,6 @@ install: worminal
 	mkdir -p $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps
 	cp -f worminal.svg $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/worminal.svg
 	chmod 644 $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/worminal.svg
-	tic -sx st.info
 
 uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/worminal
