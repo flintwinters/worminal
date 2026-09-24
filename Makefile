@@ -12,7 +12,7 @@ all: worminal
 	$(CC) $(STCFLAGS) -c $<
 
 st.o: config.h .checks/theme.h st.h win.h
-x.o: arg.h config.h .checks/theme.h st.h win.h
+x.o: arg.h config.h icon.h .checks/theme.h st.h win.h
 
 .checks/theme.h: tools/theme.py
 	python3 -c 'from tools.theme import generate_theme; generate_theme()'
@@ -37,7 +37,7 @@ worminal: $(OBJ)
 .checks/compact_theme.h: tests/fixtures/alacritty/compact.toml tools/theme.py
 	python3 -c 'from pathlib import Path; from tools.theme import generate_theme; generate_theme(Path("tests/fixtures/alacritty/compact.toml"), Path(".checks/compact_theme.h"))'
 
-.checks/compact-worminal: st.c x.c st.h win.h config.h .checks/compact_theme.h
+.checks/compact-worminal: st.c x.c st.h win.h config.h icon.h .checks/compact_theme.h
 	$(CC) $(STCFLAGS) '-DWORMINAL_THEME_HEADER=".checks/compact_theme.h"' -o $@ st.c x.c $(STLDFLAGS)
 
 .checks/overlap_probe: tests/overlap_probe.c
@@ -46,8 +46,11 @@ worminal: $(OBJ)
 .checks/border_probe: tests/border_probe.c
 	$(CC) -O2 -o $@ $< `$(PKG_CONFIG) --cflags --libs x11`
 
+.checks/icon_probe: tests/icon_probe.c
+	$(CC) -O2 -o $@ $< `$(PKG_CONFIG) --cflags --libs x11`
+
 clean:
-	rm -f worminal $(OBJ) .checks/theme.h .checks/key_injector .checks/placement_wm .checks/scrollback_test .checks/compact_theme.h .checks/compact-worminal .checks/overlap_probe .checks/border_probe
+	rm -f worminal $(OBJ) .checks/theme.h .checks/key_injector .checks/placement_wm .checks/scrollback_test .checks/compact_theme.h .checks/compact-worminal .checks/overlap_probe .checks/border_probe .checks/icon_probe
 
 install: worminal
 	mkdir -p $(DESTDIR)$(PREFIX)/bin

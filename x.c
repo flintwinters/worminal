@@ -64,6 +64,7 @@ static void ttysend(const Arg *);
 
 /* config.h for applying patches and the configuration. */
 #include "config.h"
+#include "icon.h"
 
 /* XEMBED messages */
 #define XEMBED_FOCUS_IN  4
@@ -935,8 +936,8 @@ xhints(void)
 void
 xidentityhints(void)
 {
-	XClassHint class = {opt_name ? opt_name : termname,
-	                    opt_class ? opt_class : termname};
+	XClassHint class = {opt_name ? opt_name : "worminal",
+	                    opt_class ? opt_class : "Worminal"};
 	XWMHints wm = {.flags = InputHint, .input = 1};
 
 	XSetClassHint(xw.dpy, xw.win, &class);
@@ -1259,6 +1260,10 @@ xinit(int cols, int rows)
 	xw.wmdeletewin = XInternAtom(xw.dpy, "WM_DELETE_WINDOW", False);
 	xw.netwmname = XInternAtom(xw.dpy, "_NET_WM_NAME", False);
 	xw.netwmiconname = XInternAtom(xw.dpy, "_NET_WM_ICON_NAME", False);
+	XChangeProperty(xw.dpy, xw.win, XInternAtom(xw.dpy, "_NET_WM_ICON", False),
+			XA_CARDINAL, 32, PropModeReplace,
+			(const unsigned char *)worminal_icon,
+			sizeof(worminal_icon) / sizeof(worminal_icon[0]));
 	XSetWMProtocols(xw.dpy, xw.win, &xw.wmdeletewin, 1);
 	xw.netwmpid = XInternAtom(xw.dpy, "_NET_WM_PID", False);
 	XChangeProperty(xw.dpy, xw.win, xw.netwmpid, XA_CARDINAL, 32,
