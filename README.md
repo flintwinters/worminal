@@ -74,8 +74,10 @@ When rows are shorter than the font, glyphs can extend into adjacent rows.
 Worminal still uses its configured Xft font, so exact pixel heights can differ
 from Alacritty's renderer.
 
-The build uses `-O3` by default. `python3 manage.py check` builds and runs native
-checks. `python3 manage.py proof` runs those checks and every private-display
+The build uses `-O3` by default. `python3 manage.py lint` runs selected Clang
+static analyzer checks on the C sources (requires `clang-tidy`).
+`python3 manage.py check` builds and runs native checks. `python3 manage.py proof`
+runs those checks and every private-display
 proof in `tests/proof_*.py`, including isolated KWin and remote Cinnamon.
 Use `python3 manage.py proof plasma` or `python3 manage.py proof cinnamon`
 to run one managed proof. `python3 manage.py latency` reports median and 95th percentile launch to
