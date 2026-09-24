@@ -73,19 +73,17 @@ static unsigned int cursorthickness = 2;
  */
 static int bellvolume = 0;
 
-/* default TERM value */
-char *termname = "st-256color";
+/* Micro 2.0.14 treats Ctrl+End as text with st-256color but recognizes it with
+ * xterm-256color; keep Home/End sequences in sync with that entry. */
+char *termname = "xterm-256color";
 
 /*
  * spaces per tab
  *
- * When you are changing this value, don't forget to adapt the »it« value in
- * the st.info and appropriately install the st.info in the environment where
- * you use this st version.
+ * Keep this equal to the tab width in the advertised xterm-256color terminfo
+ * entry (it#8). If the TERM entry changes, update its tab width too.
  *
- *	it#$tabspaces,
- *
- * Secondly make sure your kernel is not expanding tabs. When running `stty
+ * Make sure your kernel is not expanding tabs. When running `stty
  * -a` »tab0« should appear. You can tell the terminal to not expand tabs by
  *  running following command:
  *
@@ -176,7 +174,7 @@ static Shortcut shortcuts[] = {
 };
 
 /*
- * Special keys (change & recompile st.info accordingly)
+ * Special keys (keep in sync with the advertised xterm-256color terminfo)
  *
  * Mask value:
  * * Use XK_ANY_MOD to match the key no matter modifiers state
@@ -214,10 +212,13 @@ static uint ignoremod = Mod2Mask|XK_SWITCH_MOD;
  */
 static Key key[] = {
 	/* keysym           mask            string      appkey appcursor */
-	{ XK_KP_Home,       ShiftMask,      "\033[2J",       0,   -1},
-	{ XK_KP_Home,       ShiftMask,      "\033[1;2H",     0,   +1},
+	/* Home/End modifiers must work in normal mode too: ESC [ J/K erase the display/line. */
+	{ XK_KP_Home,       ShiftMask,      "\033[1;2H",     0,    0},
+	{ XK_KP_Home,       ControlMask,    "\033[1;5H",     0,    0},
+	{ XK_KP_Home, ShiftMask|ControlMask,"\033[1;6H",    0,    0},
+	{ XK_KP_Home,       XK_ANY_MOD,     "\033Ow",      +1,    0},
 	{ XK_KP_Home,       XK_ANY_MOD,     "\033[H",        0,   -1},
-	{ XK_KP_Home,       XK_ANY_MOD,     "\033[1~",       0,   +1},
+	{ XK_KP_Home,       XK_ANY_MOD,     "\033OH",       0,   +1},
 	{ XK_KP_Up,         XK_ANY_MOD,     "\033Ox",       +1,    0},
 	{ XK_KP_Up,         XK_ANY_MOD,     "\033[A",        0,   -1},
 	{ XK_KP_Up,         XK_ANY_MOD,     "\033OA",        0,   +1},
@@ -233,11 +234,12 @@ static Key key[] = {
 	{ XK_KP_Prior,      ShiftMask,      "\033[5;2~",     0,    0},
 	{ XK_KP_Prior,      XK_ANY_MOD,     "\033[5~",       0,    0},
 	{ XK_KP_Begin,      XK_ANY_MOD,     "\033[E",        0,    0},
-	{ XK_KP_End,        ControlMask,    "\033[J",       -1,    0},
-	{ XK_KP_End,        ControlMask,    "\033[1;5F",    +1,    0},
-	{ XK_KP_End,        ShiftMask,      "\033[K",       -1,    0},
-	{ XK_KP_End,        ShiftMask,      "\033[1;2F",    +1,    0},
-	{ XK_KP_End,        XK_ANY_MOD,     "\033[4~",       0,    0},
+	{ XK_KP_End,        ControlMask,    "\033[1;5F",     0,    0},
+	{ XK_KP_End,        ShiftMask,      "\033[1;2F",     0,    0},
+	{ XK_KP_End,  ShiftMask|ControlMask,"\033[1;6F",    0,    0},
+	{ XK_KP_End,        XK_ANY_MOD,     "\033Oq",      +1,    0},
+	{ XK_KP_End,        XK_ANY_MOD,     "\033[F",        0,   -1},
+	{ XK_KP_End,        XK_ANY_MOD,     "\033OF",       0,   +1},
 	{ XK_KP_Next,       ShiftMask,      "\033[6;2~",     0,    0},
 	{ XK_KP_Next,       XK_ANY_MOD,     "\033[6~",       0,    0},
 	{ XK_KP_Insert,     ShiftMask,      "\033[2;2~",    +1,    0},
@@ -322,15 +324,16 @@ static Key key[] = {
 	{ XK_Delete,        XK_ANY_MOD,     "\033[3~",      +1,    0},
 	{ XK_BackSpace,     XK_NO_MOD,      "\177",          0,    0},
 	{ XK_BackSpace,     Mod1Mask,       "\033\177",      0,    0},
-	{ XK_Home,          ShiftMask,      "\033[2J",       0,   -1},
-	{ XK_Home,          ShiftMask,      "\033[1;2H",     0,   +1},
+	{ XK_Home,          ShiftMask,      "\033[1;2H",     0,    0},
+	{ XK_Home,          ControlMask,    "\033[1;5H",     0,    0},
+	{ XK_Home,    ShiftMask|ControlMask,"\033[1;6H",    0,    0},
 	{ XK_Home,          XK_ANY_MOD,     "\033[H",        0,   -1},
-	{ XK_Home,          XK_ANY_MOD,     "\033[1~",       0,   +1},
-	{ XK_End,           ControlMask,    "\033[J",       -1,    0},
-	{ XK_End,           ControlMask,    "\033[1;5F",    +1,    0},
-	{ XK_End,           ShiftMask,      "\033[K",       -1,    0},
-	{ XK_End,           ShiftMask,      "\033[1;2F",    +1,    0},
-	{ XK_End,           XK_ANY_MOD,     "\033[4~",       0,    0},
+	{ XK_Home,          XK_ANY_MOD,     "\033OH",       0,   +1},
+	{ XK_End,           ControlMask,    "\033[1;5F",     0,    0},
+	{ XK_End,           ShiftMask,      "\033[1;2F",     0,    0},
+	{ XK_End,     ShiftMask|ControlMask,"\033[1;6F",    0,    0},
+	{ XK_End,           XK_ANY_MOD,     "\033[F",        0,   -1},
+	{ XK_End,           XK_ANY_MOD,     "\033OF",       0,   +1},
 	{ XK_Prior,         ControlMask,    "\033[5;5~",     0,    0},
 	{ XK_Prior,         ShiftMask,      "\033[5;2~",     0,    0},
 	{ XK_Prior,         XK_ANY_MOD,     "\033[5~",       0,    0},
