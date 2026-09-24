@@ -256,6 +256,8 @@ class NativeTerminalTest(unittest.TestCase):
                 after = send(f"cd {ROOT / '.checks'}; {clear}")
                 self.assertNotEqual(before, after,
                                     "tab label did not follow the shell directory")
+                subprocess.run([str(ROOT / ".checks/border_probe"), window],
+                               env=env, check=True)
                 self.assertEqual(subprocess.check_output(
                     ["xdotool", "getwindowname", window], env=env,
                     text=True).strip(), title)
