@@ -5,6 +5,7 @@ include config.mk
 
 SRC = st.c x.c
 OBJ = $(SRC:.c=.o)
+CLANG_TIDY = clang-tidy
 
 all: worminal
 
@@ -21,6 +22,9 @@ $(OBJ): config.mk
 
 worminal: $(OBJ)
 	$(CC) -o $@ $(OBJ) $(STLDFLAGS)
+
+lint: .checks/theme.h
+	$(CLANG_TIDY) -quiet -checks='-*,clang-analyzer-core.DivideZero,clang-analyzer-core.UndefinedBinaryOperatorResult,clang-analyzer-core.uninitialized.*,clang-analyzer-unix.Malloc' -warnings-as-errors='*' $(SRC) -- $(INCS) $(STCPPFLAGS) $(CPPFLAGS) $(CFLAGS)
 
 .checks/key_injector: tests/key_injector.c
 	mkdir -p .checks
@@ -75,4 +79,4 @@ uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/share/applications/worminal.desktop
 	rm -f $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/worminal.svg
 
-.PHONY: all clean install uninstall
+.PHONY: all clean install lint uninstall
