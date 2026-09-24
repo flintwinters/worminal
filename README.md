@@ -35,7 +35,9 @@ colors. Selection colors and opacity retain st behavior.
 Scrollback uses `[scrolling].history` (default 10,000 lines) and
 `[scrolling].multiplier` (default three lines per wheel step). Use the mouse
 wheel or Shift+PageUp/Shift+PageDown to browse history. Typing returns to the
-live screen. Alternate-screen programs do not add to scrollback. History rows
+live screen. Alternate-screen programs do not add to scrollback. In that screen,
+wheel events go to applications that enable mouse reporting or xterm's alternate
+scroll mode. History rows
 are allocated as output arrives, so the configured limit does not reserve all
 row storage at startup.
 
