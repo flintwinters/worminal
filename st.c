@@ -201,6 +201,7 @@ static void tsetmode(int, int, const int *, int);
 static int twrite(const char *, int, int);
 static void tfulldirt(void);
 static Line tline(int);
+static Line tlineat(int, int);
 static Line thistorypush(Line);
 static void tcontrolcode(uchar );
 static void tdectest(char );
@@ -1071,13 +1072,23 @@ tnew(int col, int row)
 Line
 tline(int y)
 {
-	if (y < term.scr) {
+	return tlineat(y, term.scr);
+}
+
+/* Read the shared screen through a view's independent scroll offset. */
+Line
+tlineat(int y, int scroll)
+{
+	LIMIT(scroll, 0, term.histlen);
+	if (IS_SET(MODE_ALTSCREEN))
+		scroll = 0;
+	if (y < scroll) {
 		if (!term.hist || theme_history_size <= 0)
 			die("invalid scrollback viewport\n");
-		return term.hist[(term.histi - term.scr + y + theme_history_size)
+		return term.hist[(term.histi - scroll + y + theme_history_size)
 		                 % theme_history_size];
 	}
-	return term.line[y - term.scr];
+	return term.line[y - scroll];
 }
 
 /* Store a row without copying glyphs; reuse the evicted row as scratch space. */

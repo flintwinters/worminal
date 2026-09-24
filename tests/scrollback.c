@@ -81,5 +81,31 @@ main(void)
 	assert(term.histlen == theme_history_size);
 	kscrollup(&one);
 	assert(tline(0)[0].u == 'Z');
+
+	/* A frozen view keeps its old frame while the shared screen advances.
+	 * Activation reads the current screen or retained history independently. */
+	term.line[0][0].u = 'X';
+	Glyph frozen = tlineat(0, 0)[0];
+	tscrollup(0, 1);
+	term.line[0][0].u = 'Q';
+	assert(frozen.u == 'X');
+	assert(tlineat(0, 0)[0].u == 'Q');
+	assert(tlineat(0, 1)[0].u == 'X');
+	assert(tlineat(0, theme_history_size + 1)[0].u == 'Z');
+
+	/* The focused view may change the shared PTY geometry while a
+	 * full-screen program uses the alternate screen. */
+	term.scr = 0;
+	tswapscreen();
+	term.line[0][0].u = 'V';
+	tresize(8, 3);
+	assert(IS_SET(MODE_ALTSCREEN) && term.col == 8 && term.row == 3);
+	assert(term.line[0][0].u == 'V');
+	tresize(4, 1);
+	assert(IS_SET(MODE_ALTSCREEN) && term.col == 4 && term.row == 1);
+	assert(term.line[0][0].u == 'V');
+	tswapscreen();
+	assert(term.line[0][0].u == 'Q');
+	assert(tlineat(0, 1)[0].u == 'X');
 	return 0;
 }
