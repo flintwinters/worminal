@@ -156,3 +156,37 @@ class NativeTerminalTest(unittest.TestCase):
         for geometry, expected in ((None, (100, 80)), ("80x24+37+53", (37, 53))):
             with self.subTest(geometry=geometry), isolated_display() as env:
                 check_placement(env, geometry, expected)
+
+    def test_compact_rows_keep_descenders(self):
+        with isolated_display() as env:
+            title = f"Worminal overlap {os.getpid()}"
+            process = subprocess.Popen(
+                [str(ROOT / ".checks/compact-worminal"), "-T", title, "-g", "10x2",
+                 "-e", "/bin/sh", "-c", "printf '\\033[?25lg'; sleep 10"],
+                env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            )
+            try:
+                deadline = time.monotonic() + 5
+                result = None
+                while time.monotonic() < deadline:
+                    windows = subprocess.run(
+                        ["xdotool", "search", "--onlyvisible", "--name", title],
+                        env=env, capture_output=True, text=True,
+                    )
+                    if windows.returncode == 0:
+                        window = windows.stdout.splitlines()[0]
+                        result = subprocess.run(
+                            [str(ROOT / ".checks/overlap_probe"), window],
+                            env=env, capture_output=True, text=True,
+                        )
+                        if result.returncode == 0:
+                            break
+                    if process.poll() is not None:
+                        self.fail(f"Compact terminal exited: {process.communicate()[1].decode()}")
+                    time.sleep(0.05)
+                else:
+                    self.fail(f"Descender did not reach the next row: {result.stdout if result else 'no window'}")
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                process.communicate(timeout=2)

@@ -19,7 +19,7 @@
 
 #include "st.h"
 #include "win.h"
-#include ".checks/theme.h"
+#include WORMINAL_THEME_HEADER
 
 #if   defined(__linux)
  #include <pty.h>
@@ -2783,13 +2783,25 @@ void
 drawregion(int x1, int y1, int x2, int y2)
 {
 	int y;
+	int pass;
+
+	if (xoverlap()) {
+		/* Backgrounds erase overhangs; repaint every row to remove old spills. */
+		for (pass = DRAW_BACKGROUND; pass <= DRAW_FOREGROUND; pass <<= 1)
+			for (y = y1; y < y2; y++)
+				xdrawline(tline(y), x1, y, x2, pass);
+		for (y = y1; y < y2; y++)
+			term.dirty[y] = 0;
+		return;
+	}
 
 	for (y = y1; y < y2; y++) {
 		if (!term.dirty[y])
 			continue;
 
 		term.dirty[y] = 0;
-		xdrawline(tline(y), x1, y, x2);
+		xdrawline(tline(y), x1, y, x2,
+			DRAW_BACKGROUND | DRAW_FOREGROUND);
 	}
 }
 

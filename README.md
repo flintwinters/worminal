@@ -41,6 +41,7 @@ row storage at startup.
 
 Alacritty's `font.size` sets the Xft font's point size, and `font.offset.y` adds
 to its cell height at build time; negative offsets make rows more compact.
+When rows are shorter than the font, glyphs can extend into adjacent rows.
 Worminal still uses its configured Xft font, so exact pixel heights can differ
 from Alacritty's renderer.
 

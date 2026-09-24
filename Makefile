@@ -34,8 +34,17 @@ worminal: $(OBJ)
 	mkdir -p .checks
 	$(CC) -O1 -g -fsanitize=address,undefined -ffunction-sections -fdata-sections $(STCPPFLAGS) -Wl,--gc-sections -o $@ $< -lm
 
+.checks/compact_theme.h: tests/fixtures/alacritty/compact.toml tools/theme.py
+	python3 -c 'from pathlib import Path; from tools.theme import generate_theme; generate_theme(Path("tests/fixtures/alacritty/compact.toml"), Path(".checks/compact_theme.h"))'
+
+.checks/compact-worminal: st.c x.c st.h win.h config.h .checks/compact_theme.h
+	$(CC) $(STCFLAGS) '-DWORMINAL_THEME_HEADER=".checks/compact_theme.h"' -o $@ st.c x.c $(STLDFLAGS)
+
+.checks/overlap_probe: tests/overlap_probe.c
+	$(CC) -O2 -o $@ $< `$(PKG_CONFIG) --cflags --libs x11`
+
 clean:
-	rm -f worminal $(OBJ) .checks/theme.h .checks/key_injector .checks/placement_wm .checks/scrollback_test
+	rm -f worminal $(OBJ) .checks/theme.h .checks/key_injector .checks/placement_wm .checks/scrollback_test .checks/compact_theme.h .checks/compact-worminal .checks/overlap_probe
 
 install: worminal
 	mkdir -p $(DESTDIR)$(PREFIX)/bin
