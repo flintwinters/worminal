@@ -498,6 +498,7 @@ void
 bpress(XEvent *e)
 {
 	int btn = e->xbutton.button;
+	char *key;
 	struct timespec now;
 	int snap;
 
@@ -506,6 +507,16 @@ bpress(XEvent *e)
 
 	if (IS_SET(MODE_MOUSE) && !(e->xbutton.state & forcemousemod)) {
 		mousereport(e);
+		return;
+	}
+	/* With mouse reporting off, xterm alternate scroll maps the wheel to
+	 * cursor keys only on the alternate screen. */
+	if (IS_SET(MODE_ALTSCROLL) && tisaltscr() &&
+	    !(e->xbutton.state & forcemousemod) &&
+	    (btn == Button4 || btn == Button5)) {
+		key = kmap(btn == Button4 ? XK_Up : XK_Down, 0);
+		if (key)
+			ttywrite(key, strlen(key), 1);
 		return;
 	}
 

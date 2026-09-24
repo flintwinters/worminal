@@ -86,6 +86,7 @@ void redraw(void);
 void draw(void);
 void kscrollup(const Arg *);
 void kscrolldown(const Arg *);
+int tisaltscr(void);
 
 void printscreen(const Arg *);
 void printsel(const Arg *);
