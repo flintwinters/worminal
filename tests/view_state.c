@@ -110,6 +110,39 @@ drain_focus(Display *display)
 	}
 }
 
+static void
+focus_view(Display *display, Window window)
+{
+	Window focused;
+	int revert_to;
+	char command[160];
+	struct timespec pause = {.tv_nsec = 50000000};
+
+	/* A managed window can still be receiving its initial focus decision
+	 * after it becomes viewable. Verify that our requested focus sticks. */
+	for (int attempt = 0; attempt < 40; attempt++) {
+		if (getenv("WORMINAL_PROOF_MANAGED_VIEWS")) {
+			snprintf(command, sizeof(command),
+			         "xdotool windowactivate --sync %lu && "
+			         "xdotool windowfocus --sync %lu",
+			         (unsigned long)window, (unsigned long)window);
+			if (system(command) != 0)
+				die("could not activate managed view\n");
+		} else {
+			XSetInputFocus(display, window, RevertToNone, CurrentTime);
+		}
+		XSync(display, False);
+		nanosleep(&pause, NULL);
+		XGetInputFocus(display, &focused, &revert_to);
+		drain_focus(display);
+		if (focused == window)
+			return;
+	}
+	fprintf(stderr, "view did not retain X focus: want=%lu got=%lu\n",
+	        (unsigned long)window, (unsigned long)focused);
+	exit(1);
+}
+
 static unsigned long
 interior_pixel(Display *display, Window window)
 {
@@ -170,13 +203,11 @@ main(void)
 	    interior_pixel(display, second_window) != white)
 		die("view redraw affected the other window\n");
 
-	XSetInputFocus(display, first_window, RevertToNone, CurrentTime);
-	drain_focus(display);
+	focus_view(display, first_window);
 	view = &first;
 	if (!(current_window.mode & MODE_FOCUSED))
 		die("first view did not receive focus\n");
-	XSetInputFocus(display, second_window, RevertToNone, CurrentTime);
-	drain_focus(display);
+	focus_view(display, second_window);
 	view = &first;
 	if (current_window.mode & MODE_FOCUSED)
 		die("first view kept focus\n");

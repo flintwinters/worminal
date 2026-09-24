@@ -15,12 +15,13 @@ SSH = ["ssh", "-F", "/dev/null", "-Y", "-o", "BatchMode=yes",
        "-o", "ConnectTimeout=8", "-o", "ExitOnForwardFailure=yes", HOST]
 
 
-def wait_for_property(env, name, seconds, manager):
+def wait_for_property(env, name, seconds, manager, contains=None):
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         result = subprocess.run(["xprop", "-root", name], env=env,
                                 capture_output=True, text=True)
-        if result.returncode == 0 and "not found" not in result.stdout:
+        if (result.returncode == 0 and "not found" not in result.stdout
+                and (contains is None or contains in result.stdout)):
             return
         if manager.poll() is not None:
             raise RuntimeError("Cinnamon exited during startup")
@@ -62,6 +63,8 @@ def main():
                     raise RuntimeError("remote Cinnamon did not report its PID")
 
                 wait_for_property(env, "_NET_SUPPORTING_WM_CHECK", 20, manager)
+                wait_for_property(env, "_NET_SUPPORTED", 20, manager,
+                                  contains="_NET_ACTIVE_WINDOW")
                 wait_for_property(env, "_XIM_SERVERS", 10, manager)
                 code = subprocess.run(
                     [str(ROOT / ".checks/view_state_test")],
@@ -71,7 +74,8 @@ def main():
                 if not code:
                     code = subprocess.run(
                         [sys.executable, "-m", "unittest", "discover", "-s", "tests",
-                         "-p", "test_native.py", "-k", "shared_view_end_to_end", "-q"],
+                         "-p", "test_native.py", "-k", "shared_view_end_to_end",
+                         "-k", "independent_tabs_share_one_owner", "-q"],
                         cwd=ROOT, env={**env, "WORMINAL_PROOF_PRIVATE_DISPLAY": "1"},
                     ).returncode
             except RuntimeError as error:
