@@ -56,7 +56,9 @@ need `Xvfb`, `xdotool`, and the XTest development library (`libxtst-dev` on
 Debian). The `/bin/cat` probe excludes shell startup; both exclude Xvfb startup.
 `make install` installs the binary and the `st-256color` terminfo entry.
 It also installs a desktop launcher and scalable icon showing a light pink
-tilde on a black circle.
+tilde on a black circle. The same icon is embedded in the X11 window for panels;
+run `python3 manage.py icon` after editing `worminal.svg` to regenerate the
+checked-in `icon.h` (requires Inkscape and Pillow).
 The installed `stterm` package also supplies that entry.
 
 Edit [config.h](config.h) for other st settings and rebuild. The previous Tauri
