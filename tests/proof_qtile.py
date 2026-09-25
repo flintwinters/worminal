@@ -38,7 +38,8 @@ def main():
                     raise RuntimeError("private Qtile did not become ready")
                 code = subprocess.run(
                     [sys.executable, "-m", "unittest", "discover", "-s", "tests",
-                     "-p", "test_native.py", "-k", "zoom_cursor_stays_in_cell", "-q"],
+                     "-p", "test_native.py", "-k", "zoom_cursor_stays_in_cell",
+                     "-k", "zoom_compact_glyph_stays_in_cursor_cell", "-q"],
                     cwd=ROOT,
                     env={**env, "WORMINAL_PROOF_PRIVATE_DISPLAY": "1"},
                 ).returncode

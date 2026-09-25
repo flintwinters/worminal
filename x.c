@@ -2135,7 +2135,11 @@ xcelltop(int y)
 static int
 xglyphtop(int y)
 {
-	return xcelltop(y) - theme_glyph_offset_y;
+	/* Alacritty anchors glyphs to the cell bottom before glyph_offset.y
+	 * (https://alacritty.org/releases/0.14.0/config-alacritty.html).
+	 * Compact rows must move the baseline up with the cell bottom. */
+	return xcelltop(y) + current_window.ch - dc.font.height -
+	       theme_glyph_offset_y;
 }
 
 int
