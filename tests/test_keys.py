@@ -140,7 +140,10 @@ class NavigationKeysTest(unittest.TestCase):
                 try:
                     terminal.wait(timeout=5)
                 except subprocess.TimeoutExpired as error:
-                    raise AssertionError(f"micro did not exit; file contains {path.read_text()!r}; output {log.read_bytes()[:300]!r}") from error
+                    raise AssertionError(
+                        f"micro did not exit; file contains {path.read_text()!r}; "
+                        f"output {log.read_bytes()[:300]!r}"
+                    ) from error
                 self.assertEqual(path.read_text(), "QYfirstX\nlastZ\n")
             finally:
                 if terminal.poll() is None:

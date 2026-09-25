@@ -19,6 +19,10 @@ ROOT = Path(__file__).resolve().parent
 app = typer.Typer(no_args_is_help=True, help="Build and test Worminal.")
 proof_app = typer.Typer(help="Run proofs on private Xvfb displays.")
 app.add_typer(proof_app, name="proof")
+MAX_FILE_LINES = 1000
+MAX_LINE_LENGTH = 120
+# These inherited C files exceed the limit; prevent further growth until they are split.
+LEGACY_FILE_LINES = {"st.c": 3092, "x.c": 3281}
 
 
 @app.callback()
@@ -45,6 +49,31 @@ def prepare(*targets):
     make()
     if targets:
         make(*targets)
+
+
+def check_file_limits():
+    paths = subprocess.check_output(["git", "ls-files", "-z"], cwd=ROOT).split(b"\0")
+    problems = []
+    for raw in paths:
+        if not raw:
+            continue
+        path = ROOT / os.fsdecode(raw)
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except UnicodeDecodeError:
+            continue
+        limit = LEGACY_FILE_LINES.get(path.relative_to(ROOT).as_posix(), MAX_FILE_LINES)
+        if len(lines) > limit:
+            problems.append(f"{path.relative_to(ROOT)}: {len(lines)} lines (limit {limit})")
+        for number, line in enumerate(lines, 1):
+            if len(line) > MAX_LINE_LENGTH:
+                problems.append(f"{path.relative_to(ROOT)}:{number}: {len(line)} characters (limit {MAX_LINE_LENGTH})")
+    if problems:
+        for problem in problems[:20]:
+            typer.echo(problem, err=True)
+        if len(problems) > 20:
+            typer.echo(f"... and {len(problems) - 20} more", err=True)
+        raise typer.Exit(1)
 
 
 def run_checks():
@@ -77,7 +106,8 @@ def check():
 
 @app.command()
 def lint():
-    """Run Clang static analysis on the C sources (requires clang-tidy)."""
+    """Check file limits and run Clang static analysis (requires clang-tidy)."""
+    check_file_limits()
     prepare("lint")
 
 

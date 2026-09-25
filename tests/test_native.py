@@ -148,7 +148,10 @@ def smoke_x11(env):
         deadline = time.monotonic() + 15
         window = None
         while time.monotonic() < deadline:
-            search = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", title], env=env, capture_output=True, text=True)
+            search = subprocess.run(
+                ["xdotool", "search", "--onlyvisible", "--name", title],
+                env=env, capture_output=True, text=True,
+            )
             if search.returncode == 0:
                 window = search.stdout.splitlines()[0]
                 break
