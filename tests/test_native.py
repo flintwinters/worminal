@@ -74,7 +74,7 @@ def tab_has_underline(env, window):
 def check_placement(env, geometry, expected):
     title = f"Worminal placement {os.getpid()} {'explicit' if geometry else 'default'}"
     manager = subprocess.Popen(
-        [str(ROOT / ".checks/placement_wm")], env=env,
+        [str(ROOT / "build/placement_wm")], env=env,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
     )
     terminal = None
@@ -125,7 +125,7 @@ def check_placement(env, geometry, expected):
 
 
 def smoke_x11(env):
-    result_path = ROOT / ".checks" / "input"
+    result_path = ROOT / "build" / "input"
     result_path.parent.mkdir(exist_ok=True)
     result_path.unlink(missing_ok=True)
     title = f"Worminal smoke {os.getpid()}"
@@ -161,7 +161,7 @@ def smoke_x11(env):
         if window is None:
             raise AssertionError("Worminal did not open an X11 window")
 
-        subprocess.run([str(ROOT / ".checks/icon_probe"), window], env=env, check=True)
+        subprocess.run([str(ROOT / "build/icon_probe"), window], env=env, check=True)
 
         events = []
         trace_buffer = b""
@@ -185,7 +185,7 @@ def smoke_x11(env):
 
         border_deadline = time.monotonic() + 2
         while time.monotonic() < border_deadline:
-            border = subprocess.run([str(ROOT / ".checks/border_probe"), window],
+            border = subprocess.run([str(ROOT / "build/border_probe"), window],
                                     env=env, capture_output=True, text=True)
             if border.returncode == 0:
                 break
@@ -209,7 +209,7 @@ def smoke_x11(env):
 class NativeTerminalTest(unittest.TestCase):
     def test_new_executable_joins_existing_workspace(self):
         with isolated_display() as env:
-            copy = ROOT / ".checks" / f"worminal-copy-{os.getpid()}"
+            copy = ROOT / "build" / f"worminal-copy-{os.getpid()}"
             shutil.copy2(ROOT / "worminal", copy)
             owners = []
             try:
@@ -251,8 +251,8 @@ class NativeTerminalTest(unittest.TestCase):
         with isolated_display() as env:
             env = {**env, "SHELL": "/bin/sh"}
             title = f"Worminal directory {os.getpid()}"
-            marker = ROOT / ".checks" / f"directory-ready-{os.getpid()}"
-            new_tab_pwd = ROOT / ".checks" / f"new-tab-pwd-{os.getpid()}"
+            marker = ROOT / "build" / f"directory-ready-{os.getpid()}"
+            new_tab_pwd = ROOT / "build" / f"new-tab-pwd-{os.getpid()}"
             marker.unlink(missing_ok=True)
             new_tab_pwd.unlink(missing_ok=True)
             process = subprocess.Popen(
@@ -299,10 +299,10 @@ class NativeTerminalTest(unittest.TestCase):
                 before = send(clear)
                 self.assertTrue(tab_has_underline(env, window),
                                 "tab label has no visible underline")
-                after = send(f"cd {ROOT / '.checks'}; {clear}")
+                after = send(f"cd {ROOT / 'build'}; {clear}")
                 self.assertNotEqual(before, after,
                                     "tab label did not follow the shell directory")
-                subprocess.run([str(ROOT / ".checks/border_probe"), window],
+                subprocess.run([str(ROOT / "build/border_probe"), window],
                                env=env, check=True)
                 self.assertEqual(subprocess.check_output(
                     ["xdotool", "getwindowname", window], env=env,
@@ -312,7 +312,7 @@ class NativeTerminalTest(unittest.TestCase):
                                 f"pwd > {new_tab_pwd}"], env=env, check=True)
                 subprocess.run(["xdotool", "key", "Return"], env=env, check=True)
                 wait_for(new_tab_pwd.exists, "new tab did not run pwd")
-                self.assertEqual(new_tab_pwd.read_text().strip(), str(ROOT / ".checks"),
+                self.assertEqual(new_tab_pwd.read_text().strip(), str(ROOT / "build"),
                                  "new tab did not inherit the selected tab's directory")
             finally:
                 if process.poll() is None:
@@ -370,7 +370,7 @@ class NativeTerminalTest(unittest.TestCase):
         with isolated_display() as env:
             a_title = f"Worminal A {os.getpid()}"
             b_title = f"Worminal B {os.getpid()}"
-            prefix = ROOT / ".checks" / f"hidden-{os.getpid()}"
+            prefix = ROOT / "build" / f"hidden-{os.getpid()}"
             info, gate, done = (Path(f"{prefix}-{part}") for part in
                                 ("info", "gate", "done"))
             for path in (info, gate, done):
@@ -413,13 +413,13 @@ class NativeTerminalTest(unittest.TestCase):
                     [str(ROOT / "worminal"), "-T", b_title, "-g", "40x10",
                      "-e", "/bin/sh", "-c", script, "sh",
                      str(info), str(gate), str(done)],
-                    cwd=ROOT / ".checks", env=second_env,
+                    cwd=ROOT / "build", env=second_env,
                     stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
                 second = wait_for(lambda: next((w for w in windows() if w != first), None),
                                   "second window did not open")
                 details = wait_for(lambda: info.read_text() if info.exists() else None,
                                    "forwarded shell did not start").split("|")
-                self.assertEqual(details, ["forwarded", str(ROOT / ".checks"),
+                self.assertEqual(details, ["forwarded", str(ROOT / "build"),
                                            "10 40", second])
                 wait_for(lambda: title(second) == b_title,
                          "terminal reset lost its launcher's title")
@@ -501,11 +501,11 @@ class NativeTerminalTest(unittest.TestCase):
                    if os.environ.get("WORMINAL_PROOF_PRIVATE_DISPLAY") else isolated_display())
         with display as env:
             title = f"Worminal tabs {os.getpid()}"
-            first_tty = ROOT / ".checks" / "tab_first_tty"
-            first_input = ROOT / ".checks" / "tab_first_input"
-            second_tty = ROOT / ".checks" / "tab_second_tty"
-            second_input = ROOT / ".checks" / "tab_second_input"
-            second_window = ROOT / ".checks" / "tab_second_window"
+            first_tty = ROOT / "build" / "tab_first_tty"
+            first_input = ROOT / "build" / "tab_first_input"
+            second_tty = ROOT / "build" / "tab_second_tty"
+            second_input = ROOT / "build" / "tab_second_input"
+            second_window = ROOT / "build" / "tab_second_window"
             paths = (first_tty, first_input, second_tty, second_input, second_window)
             for path in paths:
                 path.unlink(missing_ok=True)
@@ -613,7 +613,7 @@ class NativeTerminalTest(unittest.TestCase):
     def test_close_during_early_map(self):
         with isolated_display() as env:
             manager = subprocess.Popen(
-                [str(ROOT / ".checks/placement_wm")],
+                [str(ROOT / "build/placement_wm")],
                 env={**env, "WORMINAL_CLOSE_ON_MAP": "1"},
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
@@ -642,7 +642,7 @@ class NativeTerminalTest(unittest.TestCase):
     def test_shared_owner_election_and_restart(self):
         with isolated_display() as env:
             title = f"Worminal race {os.getpid()}"
-            child_pids = ROOT / ".checks" / f"shared-race-pids-{os.getpid()}"
+            child_pids = ROOT / "build" / f"shared-race-pids-{os.getpid()}"
             child_pids.unlink(missing_ok=True)
             command = [str(ROOT / "worminal"), "-T", title,
                        "-e", "/bin/sh", "-c",
@@ -707,9 +707,9 @@ class NativeTerminalTest(unittest.TestCase):
                    if os.environ.get("WORMINAL_PROOF_PRIVATE_DISPLAY") else isolated_display())
         with display as env:
             title = f"Worminal shared {os.getpid()}"
-            received = ROOT / ".checks" / "shared_input"
-            sizes = ROOT / ".checks" / "shared_sizes"
-            drained = ROOT / ".checks" / "shared_drained"
+            received = ROOT / "build" / "shared_input"
+            sizes = ROOT / "build" / "shared_sizes"
+            drained = ROOT / "build" / "shared_drained"
             received.unlink(missing_ok=True)
             sizes.unlink(missing_ok=True)
             drained.unlink(missing_ok=True)
@@ -893,12 +893,12 @@ class NativeTerminalTest(unittest.TestCase):
                 subprocess.run([str(ROOT / "worminald"), "--stop"], env=env, check=True)
     def test_view_contexts_draw_independently(self):
         with isolated_display() as env:
-            subprocess.run([str(ROOT / ".checks/view_state_test")], env=env, check=True)
+            subprocess.run([str(ROOT / "build/view_state_test")], env=env, check=True)
 
     def test_unmapped_window_keeps_draining_pty(self):
         with isolated_display() as env:
-            gate = ROOT / ".checks" / "drain_gate"
-            done = ROOT / ".checks" / "drain_done"
+            gate = ROOT / "build" / "drain_gate"
+            done = ROOT / "build" / "drain_done"
             gate.unlink(missing_ok=True)
             done.unlink(missing_ok=True)
             title = f"Worminal drain {os.getpid()}"
@@ -969,7 +969,7 @@ class NativeTerminalTest(unittest.TestCase):
         with isolated_display() as env:
             title = f"Worminal overlap {os.getpid()}"
             process = subprocess.Popen(
-                [str(ROOT / ".checks/compact-worminal"), "-T", title, "-g", "10x2",
+                [str(ROOT / "build/compact-worminal"), "-T", title, "-g", "10x2",
                  "-e", "/bin/sh", "-c", "printf '\\033[?25lg'; sleep 10"],
                 env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
             )
@@ -984,7 +984,7 @@ class NativeTerminalTest(unittest.TestCase):
                     if windows.returncode == 0:
                         window = windows.stdout.splitlines()[0]
                         result = subprocess.run(
-                            [str(ROOT / ".checks/overlap_probe"), window],
+                            [str(ROOT / "build/overlap_probe"), window],
                             env=env, capture_output=True, text=True,
                         )
                         if result.returncode == 0:

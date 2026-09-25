@@ -11,7 +11,7 @@ SIZE = 48
 def generate_icon():
     from PIL import Image
 
-    cache = ROOT / ".checks"
+    cache = ROOT / "build"
     cache.mkdir(exist_ok=True)
     png = cache / "icon.png"
     subprocess.run(
