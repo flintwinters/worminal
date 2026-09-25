@@ -22,6 +22,7 @@ class ThemeTest(unittest.TestCase):
         self.assertIn("theme_bold_bright = 0", header)
         self.assertIn("theme_font_offset_y = 0", header)
         self.assertIn("theme_font_size = 0.0", header)
+        self.assertIn("theme_font_family = NULL", header)
         self.assertIn("theme_history_size = 10000", header)
         self.assertIn("theme_scroll_multiplier = 3", header)
 
@@ -37,6 +38,7 @@ class ThemeTest(unittest.TestCase):
             "theme_bold_bright = 1",
             "theme_font_offset_y = -3",
             "theme_font_size = 9.0",
+            'theme_font_family = "Iosevka Term"',
             "theme_history_size = 64",
             "theme_scroll_multiplier = 5",
         ):
@@ -51,6 +53,10 @@ class ThemeTest(unittest.TestCase):
         self.assertIn('[262] = "#0b2238"', header)
         self.assertIn('[269] = "#70879d"', header)
 
+    def test_font_family_is_quoted_for_generated_c(self):
+        header = theme_header({"font": {"normal": {"family": 'Mono: "Book"'}}})
+        self.assertIn('theme_font_family = "Mono: \\"Book\\""', header)
+
     def test_invalid_color_and_import_cycle_fail_build(self):
         with self.assertRaisesRegex(ValueError, "#RRGGBB"):
             theme_header({"colors": {"normal": {"red": "red; }"}}})
@@ -62,5 +68,9 @@ class ThemeTest(unittest.TestCase):
             theme_header({"font": {"offset": {"y": 1.5}}})
         with self.assertRaisesRegex(ValueError, "font.size"):
             theme_header({"font": {"size": -1}})
+        with self.assertRaisesRegex(ValueError, "font.normal.family"):
+            theme_header({"font": {"normal": {"family": ""}}})
+        with self.assertRaisesRegex(ValueError, "font.normal.family"):
+            theme_header({"font": {"normal": {"family": 42}}})
         with self.assertRaisesRegex(ValueError, "scrolling.history"):
             theme_header({"scrolling": {"history": 100001}})

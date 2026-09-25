@@ -20,7 +20,7 @@ python3 manage.py run
 
 `build` reads `~/.config/alacritty/alacritty.toml` (or the usual XDG Alacritty
 config path), follows `[general].import` in order, and compiles its colors,
-`font.size`, `font.offset.y`, and scrolling settings into the binary. The importing file
+`font.normal.family`, `font.size`, `font.offset.y`, and scrolling settings into the binary. The importing file
 overrides imported settings. Set
 `WORMINAL_ALACRITTY_CONFIG=/path/to/theme.toml` while building to choose another
 file. Rebuild after theme changes; Worminal reads no TOML at launch. `run` starts
@@ -69,7 +69,9 @@ scroll mode. History rows
 are allocated as output arrives, so the configured limit does not reserve all
 row storage at startup.
 
-Alacritty's `font.size` sets the Xft font's point size, and `font.offset.y` adds
+Alacritty's `font.normal.family` selects the Xft font family when present;
+`-f` overrides it for one launch. `font.size` sets the Xft font's point size,
+and `font.offset.y` adds
 to its cell height at build time; negative offsets make rows more compact.
 When rows are shorter than the font, glyphs can extend into adjacent rows.
 Worminal still uses its configured Xft font, so exact pixel heights can differ

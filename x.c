@@ -258,6 +258,7 @@ typedef struct XView {
 	char *font_name;
 	FcPattern *style_pattern;
 	double font_size, default_font_size;
+	int use_theme_font_family;
 	uint buttons;
 	int live;
 	struct XView *next;
@@ -1387,6 +1388,12 @@ xloadfonts(const char *fontstr, double fontsize)
 
 	if (!pattern)
 		die("can't open font %s\n", fontstr);
+	if (view->use_theme_font_family && theme_font_family) {
+		/* Add the family as a Fontconfig value, not pattern syntax: names may
+		 * contain punctuation that FcNameParse treats as separators. */
+		FcPatternDel(pattern, FC_FAMILY);
+		FcPatternAddString(pattern, FC_FAMILY, (const FcChar8 *)theme_font_family);
+	}
 
 	/* The configured Alacritty point size sets the base font before cell spacing. */
 	if (fontsize == 0 && theme_font_size > 0) {
@@ -1672,7 +1679,8 @@ xinitview(int cols, int rows, int first, int spawnpty)
 	if (first)
 		xstartuptime("fontconfig");
 
-	usedfont = (opt_font == NULL)? font : opt_font;
+	view->use_theme_font_family = opt_font == NULL;
+	usedfont = view->use_theme_font_family ? font : opt_font;
 	xloadfonts(usedfont, 0);
 	if (first)
 		xstartuptime("font");
