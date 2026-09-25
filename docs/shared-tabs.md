@@ -1,6 +1,11 @@
-# Shared tabs: design and proof ledger
+# Shared tabs: earlier design and proof ledger
 
-One owner process serves one executable build, user, and X11 `DISPLAY`.
+This records the earlier in-process owner design. The current architecture is
+described in [README.md](../README.md): `worminald` owns tabs and PTYs, and
+windows connect locally or through an SSH bridge. Its service and bridge have
+headless regression tests; private Xvfb, KWin, and remote Cinnamon proofs pass.
+
+Earlier design: one owner process served one executable build, user, and X11 `DISPLAY`.
 Ordinary launches send a bounded, versioned request to that owner and open a
 new window on a new tab. A rebuild starts a new owner; the earlier owner keeps
 its windows and PTYs until they close.

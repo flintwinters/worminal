@@ -1,4 +1,5 @@
 worminal
+worminald
 *.o
 __pycache__/
 .checks/

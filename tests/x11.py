@@ -2,10 +2,12 @@
 
 from contextlib import contextmanager
 import os
+from pathlib import Path
 import select
 import shutil
 import subprocess
 import time
+import uuid
 
 
 @contextmanager
@@ -16,6 +18,7 @@ def isolated_display():
 
     read_fd, write_fd = os.pipe()
     server = None
+    workspace_env = None
     try:
         server = subprocess.Popen(
             ["Xvfb", "-displayfd", str(write_fd), "-screen", "0", "1024x768x24", "-nolisten", "tcp"],
@@ -29,10 +32,16 @@ def isolated_display():
         number = os.read(read_fd, 32).strip() if ready else b""
         if not number.isdigit():
             detail = server.poll()
-            raise RuntimeError(f"Xvfb did not start a private display (exit status: {detail})")
+            server.terminate()
+            _, stderr = server.communicate(timeout=5)
+            raise RuntimeError(
+                f"Xvfb did not start a private display (exit status: {detail}): "
+                f"{stderr.decode(errors='replace')[-500:]}")
 
         env = os.environ.copy()
         env["DISPLAY"] = f":{number.decode()}"
+        env["WORMINAL_SHARED_SOCKET_SCOPE"] = f"test-{os.getpid()}-{uuid.uuid4().hex}"
+        workspace_env = env
         env.pop("XAUTHORITY", None)
         # -displayfd reports the chosen display before Xvfb accepts clients.
         deadline = time.monotonic() + 5
@@ -45,6 +54,10 @@ def isolated_display():
             raise RuntimeError("Private Xvfb display never accepted connections")
         yield env
     finally:
+        if workspace_env is not None:
+            subprocess.run([str(Path(__file__).resolve().parent.parent / "worminald"), "--stop"],
+                           env=workspace_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=3)
         os.close(read_fd)
         if write_fd != -1:
             os.close(write_fd)
