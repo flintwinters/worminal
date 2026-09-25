@@ -2420,6 +2420,7 @@ xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 	Color drawcol;
 	Glyph original = g;
 	int top = xglyphtop(cy);
+	int height = MAX(current_window.ch, dc.font.height);
 
 	/* Compact rows are fully repainted before the cursor is drawn. */
 	if (!xoverlap()) {
@@ -2470,13 +2471,13 @@ xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 		case 2: { /* Steady Block */
 			XftGlyphFontSpec spec;
 			int count;
-			/* Cell background stays in the grid; the cursor follows the
-			 * glyph baseline when glyph_offset.y moves text across rows. */
+			/* The background stays in the grid. The cursor spans the font
+			 * when negative line spacing makes the row shorter than its ink. */
 			xdrawglyphfontspecs(NULL, original, 1, cx, cy, DRAW_BACKGROUND);
 			XftDrawRect(xw.draw, &drawcol,
 			            borderpx + cx * current_window.cw, top,
 			            current_window.cw * ((g.mode & ATTR_WIDE) ? 2 : 1),
-			            current_window.ch);
+			            height);
 			count = xmakeglyphfontspecs(&spec, &g, 1, cx, cy);
 			if (count)
 				xdrawglyphfontspecs(&spec, g, count, cx, cy, DRAW_FOREGROUND);
@@ -2486,7 +2487,7 @@ xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 		case 4: /* Steady Underline */
 			XftDrawRect(xw.draw, &drawcol,
 					borderpx + cx * current_window.cw,
-					top + current_window.ch - cursorthickness,
+					top + height - cursorthickness,
 					current_window.cw, cursorthickness);
 			break;
 		case 5: /* Blinking bar */
@@ -2494,7 +2495,7 @@ xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 			XftDrawRect(xw.draw, &drawcol,
 					borderpx + cx * current_window.cw,
 					top,
-					cursorthickness, current_window.ch);
+					cursorthickness, height);
 			break;
 		}
 	} else {
@@ -2505,14 +2506,14 @@ xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 		XftDrawRect(xw.draw, &drawcol,
 				borderpx + cx * current_window.cw,
 				top,
-				1, current_window.ch - 1);
+				1, height - 1);
 		XftDrawRect(xw.draw, &drawcol,
 				borderpx + (cx + 1) * current_window.cw - 1,
 				top,
-				1, current_window.ch - 1);
+				1, height - 1);
 		XftDrawRect(xw.draw, &drawcol,
 				borderpx + cx * current_window.cw,
-				top + current_window.ch - 1,
+				top + height - 1,
 				current_window.cw, 1);
 	}
 }
