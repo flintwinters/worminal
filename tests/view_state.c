@@ -2,7 +2,7 @@
 #define _GNU_SOURCE
 #include <X11/extensions/XTest.h>
 #define main worminal_main
-#include "../x.c"
+#include "../src/x11/x.c"
 #undef main
 
 void

@@ -945,9 +945,9 @@ class NativeTerminalTest(unittest.TestCase):
 
     def test_default_build_uses_o3(self):
         commands = subprocess.check_output(["make", "-nB"], cwd=ROOT, text=True)
-        compile_commands = [line for line in commands.splitlines() if line.endswith(("-c st.c", "-c x.c"))]
-        self.assertEqual(len(compile_commands), 2)
-        self.assertTrue(all("-O3" in line.split() for line in compile_commands))
+        compiled = [line for line in commands.splitlines() if line.endswith(("src/terminal/st.c", "src/x11/x.c"))]
+        self.assertEqual(len(compiled), 2)
+        self.assertTrue(all("-O3" in line.split() for line in compiled))
 
     def test_first_keystroke_reaches_shell(self):
         with isolated_display() as env:

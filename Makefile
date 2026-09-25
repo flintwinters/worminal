@@ -1,36 +1,44 @@
 # Worminal is based on st. See LICENSE for copyright and license details.
-.POSIX:
+# GNU make maps the source hierarchy into .checks/obj.
 
 include config.mk
 
-SRC = st.c x.c session_view.c url.c wire.c workspace_socket.c workspace_client.c workspace_service.c
-COMMON_OBJ = st.o session_view.o wire.o workspace_socket.o
-OBJ = $(SRC:.c=.o)
+COMMON_SRC = src/terminal/st.c src/terminal/session_view.c \
+		src/workspace/wire.c src/workspace/workspace_socket.c
+CLIENT_SRC = $(COMMON_SRC) src/workspace/workspace_client.c src/x11/x.c src/x11/url.c
+SERVER_SRC = $(COMMON_SRC) src/workspace/workspace_service.c
+SRC = $(CLIENT_SRC) src/workspace/workspace_service.c
+OBJ = $(patsubst src/%.c,.checks/obj/%.o,$(SRC))
+CLIENT_OBJ = $(patsubst src/%.c,.checks/obj/%.o,$(CLIENT_SRC))
+SERVER_OBJ = $(patsubst src/%.c,.checks/obj/%.o,$(SERVER_SRC))
 CLANG_TIDY = clang-tidy
 COMPACT_THEME = tests/fixtures/alacritty/compact.toml
 COMPACT_HEADER = .checks/compact_theme.h
 
 all: worminal worminald
 
-.c.o:
-	$(CC) $(STCFLAGS) -c $<
+.checks/obj/%.o: src/%.c
+	mkdir -p $(dir $@)
+	$(CC) $(STCFLAGS) -c -o $@ $<
 
-st.o: config.h .checks/theme.h st.h st_state.h win.h
-x.o: arg.h config.h icon.h .checks/theme.h st.h win.h url.h
-url.o: url.h st.h
-session_view.o: session_view.h st_state.h st.h
-workspace_service.o: .checks/theme.h session_view.h wire.h workspace_socket.h
+.checks/obj/terminal/st.o: src/config.h .checks/theme.h src/terminal/st.h src/terminal/st_state.h src/terminal/win.h
+.checks/obj/x11/x.o: src/arg.h src/config.h src/x11/icon.h .checks/theme.h \
+		src/terminal/st.h src/terminal/win.h src/x11/url.h
+.checks/obj/x11/url.o: src/x11/url.h src/terminal/st.h
+.checks/obj/terminal/session_view.o: src/terminal/session_view.h src/terminal/st_state.h src/terminal/st.h
+.checks/obj/workspace/workspace_service.o: .checks/theme.h src/terminal/session_view.h \
+		src/workspace/wire.h src/workspace/workspace_socket.h
 
 .checks/theme.h: tools/theme.py
 	python3 -c 'from tools.theme import generate_theme; generate_theme()'
 
 $(OBJ): config.mk
 
-worminal: $(COMMON_OBJ) workspace_client.o x.o url.o
-	$(CC) -o $@ $(COMMON_OBJ) workspace_client.o x.o url.o $(STLDFLAGS)
+worminal: $(CLIENT_OBJ)
+	$(CC) -o $@ $(CLIENT_OBJ) $(STLDFLAGS)
 
-worminald: $(COMMON_OBJ) workspace_service.o
-	$(CC) -o $@ $(COMMON_OBJ) workspace_service.o $(STLDFLAGS)
+worminald: $(SERVER_OBJ)
+	$(CC) -o $@ $(SERVER_OBJ) $(STLDFLAGS)
 
 lint: .checks/theme.h
 	$(CLANG_TIDY) -quiet $(SRC) -- $(INCS) $(STCPPFLAGS) $(CPPFLAGS) $(CFLAGS)
@@ -43,26 +51,27 @@ lint: .checks/theme.h
 	mkdir -p .checks
 	$(CC) -O2 -o $@ $< `$(PKG_CONFIG) --cflags --libs x11`
 
-.checks/scrollback_test: tests/scrollback.c st.c st.h win.h .checks/theme.h
+.checks/scrollback_test: tests/scrollback.c src/terminal/st.c src/terminal/st.h \
+		src/terminal/win.h src/config.h .checks/theme.h
 	mkdir -p .checks
 	$(CC) -O1 -g -fsanitize=address,undefined -ffunction-sections -fdata-sections \
 		$(STCPPFLAGS) -Wl,--gc-sections -o $@ $< -lm
 
-.checks/url_test: tests/url.c url.c url.h st.h
+.checks/url_test: tests/url.c src/x11/url.c src/x11/url.h src/terminal/st.h
 	mkdir -p .checks
-	$(CC) -O1 -g -fsanitize=address,undefined -o $@ tests/url.c url.c
+	$(CC) -O1 -g -fsanitize=address,undefined $(STCPPFLAGS) -o $@ tests/url.c src/x11/url.c
 
 $(COMPACT_HEADER): $(COMPACT_THEME) tools/theme.py
 	python3 -c 'from tools.theme import generate_theme; generate_theme("$(COMPACT_THEME)", "$(COMPACT_HEADER)")'
 
-.checks/compact-worminal: st.c x.c session_view.c wire.c workspace_socket.c workspace_client.c \
-		url.c url.h st.h win.h config.h icon.h $(COMPACT_HEADER) .checks/worminald
+.checks/compact-worminal: $(CLIENT_SRC) src/x11/url.h src/terminal/st.h src/terminal/win.h \
+		src/config.h src/x11/icon.h $(COMPACT_HEADER) .checks/worminald
 	$(CC) $(STCFLAGS) '-DWORMINAL_THEME_HEADER="$(COMPACT_HEADER)"' -o $@ \
-		st.c x.c session_view.c url.c wire.c workspace_socket.c workspace_client.c $(STLDFLAGS)
+		$(CLIENT_SRC) $(STLDFLAGS)
 
-.checks/worminald: st.c session_view.c wire.c workspace_socket.c workspace_service.c $(COMPACT_HEADER)
+.checks/worminald: $(SERVER_SRC) $(COMPACT_HEADER)
 	$(CC) $(STCFLAGS) '-DWORMINAL_THEME_HEADER="$(COMPACT_HEADER)"' -o $@ \
-		st.c session_view.c wire.c workspace_socket.c workspace_service.c $(STLDFLAGS)
+		$(SERVER_SRC) $(STLDFLAGS)
 
 .checks/overlap_probe: tests/overlap_probe.c
 	$(CC) -O2 -o $@ $< `$(PKG_CONFIG) --cflags --libs x11`
@@ -73,15 +82,18 @@ $(COMPACT_HEADER): $(COMPACT_THEME) tools/theme.py
 .checks/icon_probe: tests/icon_probe.c
 	$(CC) -O2 -o $@ $< `$(PKG_CONFIG) --cflags --libs x11`
 
-.checks/view_state_test: tests/view_state.c x.c url.c wire.c workspace_socket.c workspace_client.c \
-		config.h icon.h .checks/theme.h
+.checks/view_state_test: tests/view_state.c src/x11/x.c src/x11/url.c \
+		src/workspace/wire.c src/workspace/workspace_socket.c src/workspace/workspace_client.c \
+		src/config.h src/x11/icon.h .checks/theme.h
 	$(CC) $(STCFLAGS) -ffunction-sections -fdata-sections -Wl,--gc-sections \
-		-o $@ $< url.c wire.c workspace_socket.c workspace_client.c $(STLDFLAGS) `$(PKG_CONFIG) --libs xtst`
+		-o $@ $< src/x11/url.c src/workspace/wire.c src/workspace/workspace_socket.c \
+		src/workspace/workspace_client.c $(STLDFLAGS) `$(PKG_CONFIG) --libs xtst`
 
 clean:
-	rm -f worminal worminald $(OBJ) .checks/theme.h .checks/key_injector .checks/placement_wm \
+	rm -f worminal worminald .checks/theme.h .checks/key_injector .checks/placement_wm \
 		.checks/scrollback_test $(COMPACT_HEADER) .checks/compact-worminal .checks/worminald \
 		.checks/overlap_probe .checks/border_probe .checks/icon_probe .checks/view_state_test .checks/url_test
+	rm -rf .checks/obj
 
 install: worminal worminald
 	mkdir -p $(DESTDIR)$(PREFIX)/bin
@@ -90,13 +102,13 @@ install: worminal worminald
 	cp -f worminald $(DESTDIR)$(PREFIX)/bin/worminald
 	chmod 755 $(DESTDIR)$(PREFIX)/bin/worminald
 	mkdir -p $(DESTDIR)$(MANPREFIX)/man1
-	sed "s/VERSION/$(VERSION)/g" < worminal.1 > $(DESTDIR)$(MANPREFIX)/man1/worminal.1
+	sed "s/VERSION/$(VERSION)/g" < docs/man/worminal.1 > $(DESTDIR)$(MANPREFIX)/man1/worminal.1
 	chmod 644 $(DESTDIR)$(MANPREFIX)/man1/worminal.1
 	mkdir -p $(DESTDIR)$(PREFIX)/share/applications
-	cp -f worminal.desktop $(DESTDIR)$(PREFIX)/share/applications/worminal.desktop
+	cp -f assets/worminal.desktop $(DESTDIR)$(PREFIX)/share/applications/worminal.desktop
 	chmod 644 $(DESTDIR)$(PREFIX)/share/applications/worminal.desktop
 	mkdir -p $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps
-	cp -f worminal.svg $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/worminal.svg
+	cp -f assets/worminal.svg $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/worminal.svg
 	chmod 644 $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/worminal.svg
 
 uninstall:
