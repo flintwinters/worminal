@@ -1,9 +1,11 @@
 """Alacritty import and palette compilation checks."""
 
 from pathlib import Path
+import os
 import unittest
+from unittest.mock import patch
 
-from tools.theme import read_config, theme_header
+from tools.theme import find_config, read_config, theme_header
 
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "alacritty"
@@ -21,6 +23,7 @@ class ThemeTest(unittest.TestCase):
         self.assertIn('[269] = "#8e8e8e"', header)
         self.assertIn("theme_bold_bright = 0", header)
         self.assertIn("theme_font_offset_y = 0", header)
+        self.assertIn("theme_glyph_offset_y = 0", header)
         self.assertIn("theme_font_size = 0.0", header)
         self.assertIn("theme_font_family = NULL", header)
         self.assertIn("theme_history_size = 10000", header)
@@ -57,6 +60,27 @@ class ThemeTest(unittest.TestCase):
         header = theme_header({"font": {"normal": {"family": 'Mono: "Book"'}}})
         self.assertIn('theme_font_family = "Mono: \\"Book\\""', header)
 
+    def test_legacy_yaml_is_discovered_and_compiled(self):
+        with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(FIXTURES.parent)}, clear=False):
+            path = find_config()
+        self.assertEqual(path, FIXTURES / "alacritty.yml")
+        header = theme_header(read_config(path))
+        for entry in (
+            'theme_font_family = "Input Mono Condensed"',
+            "theme_font_size = 6.0",
+            "theme_font_offset_y = -7",
+            "theme_glyph_offset_y = -4",
+            "theme_bold_bright = 1",
+            '[1] = "#abcdef"',
+            '[258] = "#f9e7c4"',
+            '[259] = "#1d1f21"',
+        ):
+            self.assertIn(entry, header)
+
+    def test_legacy_bold_setting_at_root(self):
+        self.assertIn("theme_bold_bright = 1",
+                      theme_header({"draw_bold_text_with_bright_colors": True}))
+
     def test_invalid_color_and_import_cycle_fail_build(self):
         with self.assertRaisesRegex(ValueError, "#RRGGBB"):
             theme_header({"colors": {"normal": {"red": "red; }"}}})
@@ -66,6 +90,8 @@ class ThemeTest(unittest.TestCase):
     def test_invalid_line_offset_and_history_fail_build(self):
         with self.assertRaisesRegex(ValueError, "font.offset.y"):
             theme_header({"font": {"offset": {"y": 1.5}}})
+        with self.assertRaisesRegex(ValueError, "font.glyph_offset.y"):
+            theme_header({"font": {"glyph_offset": {"y": 1.5}}})
         with self.assertRaisesRegex(ValueError, "font.size"):
             theme_header({"font": {"size": -1}})
         with self.assertRaisesRegex(ValueError, "font.normal.family"):

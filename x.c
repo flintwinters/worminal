@@ -2139,7 +2139,7 @@ xmakeglyphfontspecs(XftGlyphFontSpec *specs, const Glyph *glyphs, int len, int x
 	FcCharSet *fccharset;
 	int i, f, numspecs = 0;
 
-	for (i = 0, xp = winx, yp = winy + font->ascent; i < len; ++i) {
+	for (i = 0, xp = winx, yp = winy + font->ascent - theme_glyph_offset_y; i < len; ++i) {
 		/* Fetch rune and mode for current glyph. */
 		rune = glyphs[i].u;
 		mode = glyphs[i].mode;
@@ -2161,7 +2161,7 @@ xmakeglyphfontspecs(XftGlyphFontSpec *specs, const Glyph *glyphs, int len, int x
 			} else if (mode & ATTR_BOLD) {
 				frcflags = FRC_BOLD;
 			}
-			yp = winy + font->ascent;
+			yp = winy + font->ascent - theme_glyph_offset_y;
 		}
 
 		/* Lookup character index with default font. */
@@ -2656,7 +2656,9 @@ xstartdraw(void)
 int
 xoverlap(void)
 {
-	return current_window.ch < dc.font.height;
+	/* Moving glyphs up or down can cross rows even at normal cell height. */
+	return theme_glyph_offset_y > 0 ||
+	       dc.font.height - theme_glyph_offset_y > current_window.ch;
 }
 
 void
