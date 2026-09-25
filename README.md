@@ -7,7 +7,7 @@ webview or JavaScript runtime.
 
 ## Build and run
 
-Install Python 3.11+, a C compiler, `make`, `pkg-config`, and the development headers for X11,
+Install Python 3.11+, a C compiler, GNU make, `pkg-config`, and the development headers for X11,
 Xft, Fontconfig, and FreeType. On Debian, these are provided by `build-essential`,
 `pkg-config`, `libx11-dev`, `libxft-dev`, `libfontconfig-dev`, and `libfreetype-dev`.
 The management CLI also needs Typer (`requirements-dev.txt`); the compiled
@@ -26,6 +26,12 @@ overrides imported settings. Set
 file. Rebuild after theme changes; Worminal reads no TOML at launch. `run` starts
 the already-built binary without rebuilding. Launch `./worminal` directly to
 avoid Python startup time.
+
+The source tree is grouped by responsibility: `src/terminal` owns terminal
+state, `src/x11` owns windows and rendering, and `src/workspace` owns the
+service and wire protocol. Build configuration is in `src/config.h` and
+`config.mk`; desktop files and terminfo are in `assets`. The root `manage.py`
+is the entrypoint for builds and checks, with generated files under `.checks`.
 
 ## Shared tabs
 
@@ -88,7 +94,7 @@ from Alacritty's renderer.
 The build uses `-O3` by default. `python3 manage.py lint` checks tracked text
 files for 120-character lines and a 1,000-line file limit, then runs selected
 Clang static analyzer checks on the C sources (requires `clang-tidy`). The
-inherited `st.c` and `x.c` exceed 1,000 lines; lint caps them at their current
+inherited `src/terminal/st.c` and `src/x11/x.c` exceed 1,000 lines; lint caps them at their current
 lengths until they can be split.
 `python3 manage.py check` builds and runs native checks. `python3 manage.py proof`
 runs those checks and every private-display
@@ -106,7 +112,7 @@ Worminal advertises `xterm-256color` so applications such as micro recognize
 modified Home and End keys. `make install` installs both binaries.
 It also installs a desktop launcher and scalable icon showing a light pink
 tilde on a black circle. The same icon is embedded in the X11 window for panels;
-run `python3 manage.py icon` after editing `worminal.svg` to regenerate the
-checked-in `icon.h` (requires Inkscape and Pillow).
-Edit [config.h](config.h) for other st settings and rebuild. The previous Tauri
+run `python3 manage.py icon` after editing `assets/worminal.svg` to regenerate the
+checked-in `src/x11/icon.h` (requires Inkscape and Pillow).
+Edit [config.h](src/config.h) for other st settings and rebuild. The previous Tauri
 implementation remains in Git history.
