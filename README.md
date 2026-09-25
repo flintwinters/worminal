@@ -74,6 +74,9 @@ Alacritty's `font.normal.family` selects the Xft font family when present;
 `-f` overrides it for one launch. `font.size` sets the Xft font's point size,
 and `font.offset.y` adds to its cell height; negative offsets make rows more
 compact. `font.glyph_offset.y` moves glyphs and the cursor relative to those rows.
+Changing font size or window width reflows main-screen text and scrollback at
+soft wraps. Alternate-screen applications receive the new grid size and draw
+their own content.
 When glyphs extend beyond their rows, adjacent rows are repainted behind them.
 Worminal still uses its configured Xft font, so exact pixel heights can differ
 from Alacritty's renderer.
