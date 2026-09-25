@@ -208,7 +208,9 @@ def smoke_x11(env):
 
 class NativeTerminalTest(unittest.TestCase):
     def test_zoom_cursor_stays_in_cell(self):
-        with isolated_display() as env:
+        display = (nullcontext(os.environ.copy())
+                   if os.environ.get("WORMINAL_PROOF_PRIVATE_DISPLAY") else isolated_display())
+        with display as env:
             for style in (2, 6):
                 with self.subTest(style=style):
                     scoped = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"cursor-{os.getpid()}-{style}"}
@@ -397,24 +399,57 @@ class NativeTerminalTest(unittest.TestCase):
                                        env=scoped, check=True)
                     windows.append((scoped, window))
 
-                captures = []
+                hints = subprocess.check_output(
+                    ["xprop", "-id", windows[0][1], "WM_NORMAL_HINTS"],
+                    env=windows[0][0], text=True)
+                match = re.search(r"resize increment: (\d+) by (\d+)", hints)
+                self.assertIsNotNone(match, hints)
+                _, cell_height = map(int, match.groups())
 
                 def pixels(scoped, window):
                     image = subprocess.check_output(
                         ["xwd", "-id", window, "-silent"], env=scoped)
-                    captures.append(image)
                     header = struct.unpack(">25I", image[:100])
                     offset = header[0] + header[19] * 12
-                    return header[4:6], image[offset:offset + header[5] * header[12]]
+                    data = image[offset:offset + header[5] * header[12]]
+                    return header[4:6], data, image, header[11] // 8, header[12]
 
-                plain = []
-                selected = []
+                def capture_pair():
+                    pair = []
+                    for scoped, window in windows:
+                        subprocess.run(["xdotool", "windowraise", window],
+                                       env=scoped, check=True)
+                        focus_window(scoped, window)
+                        pair.append(pixels(scoped, window))
+                    return pair
+
+                def wait_for_matching_render(previous=None):
+                    deadline = time.monotonic() + 3
+                    while time.monotonic() < deadline:
+                        pair = capture_pair()
+                        (width, _), data, _, pixel_size, stride = pair[0]
+                        # Reverse video fills the first cell; the far corner is
+                        # blank. This prevents two unfinished frames passing.
+                        def pixel(x, y):
+                            start = y * stride + x * pixel_size
+                            return data[start:start + pixel_size]
+                        rendered = (pixel(3, 3 + cell_height) !=
+                                    pixel(width - 3, 3 + 3 * cell_height))
+                        matching = pair[0][:2] == pair[1][:2]
+                        changed = previous is None or pair[0][:2] != previous[0][:2]
+                        if rendered and matching and changed:
+                            return pair
+                        time.sleep(0.05)
+                    for index, capture in enumerate(pair):
+                        (ROOT / ".checks" / f"reflow-capture-{index}.xwd").write_bytes(capture[2])
+                    self.fail("Zoom render did not settle to matching frames; "
+                              "XWD captures are in .checks/reflow-capture-*.xwd")
+
+                plain = wait_for_matching_render()
                 for scoped, window in windows:
                     subprocess.run(["xdotool", "windowraise", window],
                                    env=scoped, check=True)
                     focus_window(scoped, window)
-                    time.sleep(0.1)
-                    plain.append(pixels(scoped, window))
                     hints = subprocess.check_output(
                         ["xprop", "-id", window, "WM_NORMAL_HINTS"],
                         env=scoped, text=True,
@@ -427,12 +462,7 @@ class NativeTerminalTest(unittest.TestCase):
                         subprocess.run(["xdotool", "mousemove", "--window", window,
                                         str(x), str(y)], env=scoped, check=True)
                         subprocess.run(["xdotool", action, "1"], env=scoped, check=True)
-                    selected.append(pixels(scoped, window))
-                if plain[0] != plain[1] or selected[0] != selected[1]:
-                    for index, capture in enumerate(captures):
-                        (ROOT / ".checks" / f"reflow-capture-{index}.xwd").write_bytes(capture)
-                    self.fail("Zoom render differs from a fresh render; "
-                              "XWD captures are in .checks/reflow-capture-*.xwd")
+                wait_for_matching_render(plain)
             finally:
                 for process in processes:
                     if process.poll() is None:
