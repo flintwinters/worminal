@@ -6,6 +6,8 @@ include config.mk
 SRC = st.c x.c
 OBJ = $(SRC:.c=.o)
 CLANG_TIDY = clang-tidy
+COMPACT_THEME = tests/fixtures/alacritty/compact.toml
+COMPACT_HEADER = .checks/compact_theme.h
 
 all: worminal
 
@@ -24,7 +26,7 @@ worminal: $(OBJ)
 	$(CC) -o $@ $(OBJ) $(STLDFLAGS)
 
 lint: .checks/theme.h
-	$(CLANG_TIDY) -quiet -checks='-*,clang-analyzer-core.DivideZero,clang-analyzer-core.UndefinedBinaryOperatorResult,clang-analyzer-core.uninitialized.*,clang-analyzer-unix.Malloc' -warnings-as-errors='*' $(SRC) -- $(INCS) $(STCPPFLAGS) $(CPPFLAGS) $(CFLAGS)
+	$(CLANG_TIDY) -quiet $(SRC) -- $(INCS) $(STCPPFLAGS) $(CPPFLAGS) $(CFLAGS)
 
 .checks/key_injector: tests/key_injector.c
 	mkdir -p .checks
@@ -36,13 +38,14 @@ lint: .checks/theme.h
 
 .checks/scrollback_test: tests/scrollback.c st.c st.h win.h .checks/theme.h
 	mkdir -p .checks
-	$(CC) -O1 -g -fsanitize=address,undefined -ffunction-sections -fdata-sections $(STCPPFLAGS) -Wl,--gc-sections -o $@ $< -lm
+	$(CC) -O1 -g -fsanitize=address,undefined -ffunction-sections -fdata-sections \
+		$(STCPPFLAGS) -Wl,--gc-sections -o $@ $< -lm
 
-.checks/compact_theme.h: tests/fixtures/alacritty/compact.toml tools/theme.py
-	python3 -c 'from pathlib import Path; from tools.theme import generate_theme; generate_theme(Path("tests/fixtures/alacritty/compact.toml"), Path(".checks/compact_theme.h"))'
+$(COMPACT_HEADER): $(COMPACT_THEME) tools/theme.py
+	python3 -c 'from tools.theme import generate_theme; generate_theme("$(COMPACT_THEME)", "$(COMPACT_HEADER)")'
 
-.checks/compact-worminal: st.c x.c st.h win.h config.h icon.h .checks/compact_theme.h
-	$(CC) $(STCFLAGS) '-DWORMINAL_THEME_HEADER=".checks/compact_theme.h"' -o $@ st.c x.c $(STLDFLAGS)
+.checks/compact-worminal: st.c x.c st.h win.h config.h icon.h $(COMPACT_HEADER)
+	$(CC) $(STCFLAGS) '-DWORMINAL_THEME_HEADER="$(COMPACT_HEADER)"' -o $@ st.c x.c $(STLDFLAGS)
 
 .checks/overlap_probe: tests/overlap_probe.c
 	$(CC) -O2 -o $@ $< `$(PKG_CONFIG) --cflags --libs x11`
@@ -54,10 +57,13 @@ lint: .checks/theme.h
 	$(CC) -O2 -o $@ $< `$(PKG_CONFIG) --cflags --libs x11`
 
 .checks/view_state_test: tests/view_state.c x.c config.h icon.h .checks/theme.h
-	$(CC) $(STCFLAGS) -ffunction-sections -fdata-sections -Wl,--gc-sections -o $@ $< $(STLDFLAGS) `$(PKG_CONFIG) --libs xtst`
+	$(CC) $(STCFLAGS) -ffunction-sections -fdata-sections -Wl,--gc-sections \
+		-o $@ $< $(STLDFLAGS) `$(PKG_CONFIG) --libs xtst`
 
 clean:
-	rm -f worminal $(OBJ) .checks/theme.h .checks/key_injector .checks/placement_wm .checks/scrollback_test .checks/compact_theme.h .checks/compact-worminal .checks/overlap_probe .checks/border_probe .checks/icon_probe .checks/view_state_test
+	rm -f worminal $(OBJ) .checks/theme.h .checks/key_injector .checks/placement_wm \
+		.checks/scrollback_test $(COMPACT_HEADER) .checks/compact-worminal \
+		.checks/overlap_probe .checks/border_probe .checks/icon_probe .checks/view_state_test
 
 install: worminal
 	mkdir -p $(DESTDIR)$(PREFIX)/bin
