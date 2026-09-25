@@ -12,7 +12,6 @@ import signal
 import struct
 import subprocess
 import time
-import tomllib
 import unittest
 
 from x11 import isolated_display
@@ -28,15 +27,17 @@ def focus_window(env, window):
                        env=env, check=True)
     subprocess.run(["xdotool", "windowfocus", "--sync", window],
                    env=env, check=True)
+
+    def focused():
+        result = subprocess.run(["xdotool", "getwindowfocus"],
+                                env=env, capture_output=True, text=True)
+        return result.returncode == 0 and result.stdout.strip() == window
+
     deadline = time.monotonic() + 3
     while time.monotonic() < deadline:
-        focused = subprocess.check_output(
-            ["xdotool", "getwindowfocus"], env=env, text=True).strip()
-        if focused == window:
+        if focused():
             time.sleep(.05)
-            if subprocess.check_output(
-                    ["xdotool", "getwindowfocus"], env=env,
-                    text=True).strip() == window:
+            if focused():
                 return
         time.sleep(.05)
     raise AssertionError(f"window {window} did not retain X focus")
@@ -206,10 +207,7 @@ def smoke_x11(env):
 
 
 class NativeTerminalTest(unittest.TestCase):
-    def test_cursor_tracks_glyph_offset(self):
-        compact = tomllib.loads((ROOT / "tests/fixtures/alacritty/compact.toml").read_text())
-        shift = -compact["font"]["glyph_offset"]["y"]
-        top_trim = -compact["font"]["offset"]["y"]
+    def test_zoom_cursor_stays_in_cell(self):
         with isolated_display() as env:
             for style in (2, 6):
                 with self.subTest(style=style):
@@ -218,7 +216,7 @@ class NativeTerminalTest(unittest.TestCase):
                     process = subprocess.Popen(
                         [str(ROOT / ".checks/compact-worminal"), "-T", title,
                          "-g", "10x2", "-e", "/bin/sh", "-c",
-                         f"printf '\\033[{style} q'; sleep 10"],
+                         f"printf 'abcdefghij\\033[1;1H\\033[{style} q'; sleep 10"],
                         env=scoped, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                     )
                     try:
@@ -235,6 +233,15 @@ class NativeTerminalTest(unittest.TestCase):
                         else:
                             self.fail("Cursor test window did not appear")
                         focus_window(scoped, window)
+                        subprocess.run(["xdotool", "key", "ctrl+shift+plus"],
+                                       env=scoped, check=True)
+                        hints = subprocess.check_output(
+                            ["xprop", "-id", window, "WM_NORMAL_HINTS"],
+                            env=scoped, text=True,
+                        )
+                        match = re.search(r"resize increment: (\d+) by (\d+)", hints)
+                        self.assertIsNotNone(match, hints)
+                        cell_width, cell_height = map(int, match.groups())
                         deadline = time.monotonic() + 3
                         while time.monotonic() < deadline:
                             image = subprocess.check_output(
@@ -242,9 +249,7 @@ class NativeTerminalTest(unittest.TestCase):
                             header = struct.unpack(">25I", image[:100])
                             offset = header[0] + header[19] * 12
                             pixel_size, stride = header[11] // 8, header[12]
-                            cell_height = (header[5] - 4) // 3
-                            cell_width = (header[4] - 4) // 10
-                            top = 2 + cell_height + shift + top_trim
+                            top = 2 + cell_height
 
                             def pixel(x, y):
                                 start = offset + y * stride + x * pixel_size
@@ -258,7 +263,30 @@ class NativeTerminalTest(unittest.TestCase):
                                 break
                             time.sleep(0.05)
                         else:
-                            self.fail("Cursor covered the preceding line or missed its own")
+                            self.fail("Cursor did not occupy its grid cell after zoom")
+                        first = 2 + 3 * cell_width + cell_width // 2
+                        last = 2 + 4 * cell_width + cell_width // 2
+                        for x, action in ((first, "mousedown"), (last, "mouseup")):
+                            subprocess.run(["xdotool", "mousemove", "--window", window,
+                                            str(x), str(top + cell_height // 2)],
+                                           env=scoped, check=True)
+                            subprocess.run(["xdotool", action, "1"],
+                                           env=scoped, check=True)
+                        deadline = time.monotonic() + 3
+                        while time.monotonic() < deadline:
+                            image = subprocess.check_output(
+                                ["xwd", "-id", window, "-silent"], env=scoped)
+                            selected_x = 2 + 4 * cell_width - 1
+                            plain_x = 2 + 7 * cell_width - 1
+                            if (pixel(selected_x, top) != pixel(plain_x, top) and
+                                    pixel(selected_x, top + cell_height - 1) !=
+                                    pixel(plain_x, top + cell_height - 1) and
+                                    pixel(selected_x, top - 1) == pixel(plain_x, top - 1)):
+                                break
+                            time.sleep(0.05)
+                        else:
+                            (ROOT / ".checks" / f"selection-{style}.xwd").write_bytes(image)
+                            self.fail("Selection did not occupy its grid cell after zoom")
                     finally:
                         if process.poll() is None:
                             process.terminate()
@@ -317,6 +345,101 @@ class NativeTerminalTest(unittest.TestCase):
                 if process.poll() is None:
                     process.terminate()
                 process.communicate(timeout=5)
+
+    def test_zoom_reflow_matches_fresh_render(self):
+        text = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        script = (
+            "stty -echo; IFS= read -r trigger; "
+            f"printf '\\033[2 q\\033[7m%s\\033[0m' '{text}'; "
+            ': > "$1"; exec sleep 30'
+        )
+        with isolated_display() as env:
+            windows = []
+            processes = []
+            markers = []
+            try:
+                for order in ("after", "before"):
+                    scoped = {**env, "WORMINAL_SHARED_SOCKET_SCOPE":
+                              f"reflow-{os.getpid()}-{order}"}
+                    marker = ROOT / ".checks" / f"reflow-{os.getpid()}-{order}"
+                    marker.unlink(missing_ok=True)
+                    markers.append(marker)
+                    title = f"Worminal reflow {os.getpid()} {order}"
+                    process = subprocess.Popen(
+                        [str(ROOT / ".checks/compact-worminal"), "-T", title,
+                         "-g", "20x4", "-e", "/bin/sh", "-c", script, "sh", str(marker)],
+                        env=scoped, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                    )
+                    processes.append(process)
+                    deadline = time.monotonic() + 5
+                    while time.monotonic() < deadline:
+                        result = subprocess.run(
+                            ["xdotool", "search", "--onlyvisible", "--name", title],
+                            env=scoped, capture_output=True, text=True,
+                        )
+                        if result.returncode == 0:
+                            window = result.stdout.splitlines()[0]
+                            break
+                        time.sleep(0.05)
+                    else:
+                        self.fail(f"Reflow {order} window did not appear")
+                    focus_window(scoped, window)
+                    if order == "before":
+                        subprocess.run(["xdotool", "key", "ctrl+shift+plus"],
+                                       env=scoped, check=True)
+                    subprocess.run(["xdotool", "key", "Return"], env=scoped, check=True)
+                    deadline = time.monotonic() + 5
+                    while not marker.exists() and time.monotonic() < deadline:
+                        time.sleep(0.02)
+                    self.assertTrue(marker.exists(), f"Reflow {order} output was not written")
+                    if order == "after":
+                        subprocess.run(["xdotool", "key", "ctrl+shift+plus"],
+                                       env=scoped, check=True)
+                    windows.append((scoped, window))
+
+                captures = []
+
+                def pixels(scoped, window):
+                    image = subprocess.check_output(
+                        ["xwd", "-id", window, "-silent"], env=scoped)
+                    captures.append(image)
+                    header = struct.unpack(">25I", image[:100])
+                    offset = header[0] + header[19] * 12
+                    return header[4:6], image[offset:offset + header[5] * header[12]]
+
+                plain = []
+                selected = []
+                for scoped, window in windows:
+                    subprocess.run(["xdotool", "windowraise", window],
+                                   env=scoped, check=True)
+                    focus_window(scoped, window)
+                    time.sleep(0.1)
+                    plain.append(pixels(scoped, window))
+                    hints = subprocess.check_output(
+                        ["xprop", "-id", window, "WM_NORMAL_HINTS"],
+                        env=scoped, text=True,
+                    )
+                    match = re.search(r"resize increment: (\d+) by (\d+)", hints)
+                    self.assertIsNotNone(match, hints)
+                    cw, ch = map(int, match.groups())
+                    for x, y, action in ((2 + cw, 2 + ch + 1, "mousedown"),
+                                         (2 + 4 * cw, 2 + 3 * ch + 1, "mouseup")):
+                        subprocess.run(["xdotool", "mousemove", "--window", window,
+                                        str(x), str(y)], env=scoped, check=True)
+                        subprocess.run(["xdotool", action, "1"], env=scoped, check=True)
+                    selected.append(pixels(scoped, window))
+                if plain[0] != plain[1] or selected[0] != selected[1]:
+                    for index, capture in enumerate(captures):
+                        (ROOT / ".checks" / f"reflow-capture-{index}.xwd").write_bytes(capture)
+                    self.fail("Zoom render differs from a fresh render; "
+                              "XWD captures are in .checks/reflow-capture-*.xwd")
+            finally:
+                for process in processes:
+                    if process.poll() is None:
+                        process.kill()
+                    process.communicate(timeout=5)
+                for marker in markers:
+                    marker.unlink(missing_ok=True)
 
     def test_new_executable_keeps_old_owner_tabs(self):
         with isolated_display() as env:
