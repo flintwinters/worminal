@@ -2123,10 +2123,22 @@ xremoveview(int destroyed)
 	}
 }
 
+static int
+xcelltop(int y)
+{
+	return borderpx + (y + 1) * current_window.ch;
+}
+
+static int
+xglyphtop(int y)
+{
+	return xcelltop(y) - theme_glyph_offset_y;
+}
+
 int
 xmakeglyphfontspecs(XftGlyphFontSpec *specs, const Glyph *glyphs, int len, int x, int y)
 {
-	float winx = borderpx + x * current_window.cw, winy = borderpx + (y + 1) * current_window.ch, xp, yp;
+	float winx = borderpx + x * current_window.cw, xp, yp;
 	ushort mode, prevmode = USHRT_MAX;
 	Font *font = &dc.font;
 	int frcflags = FRC_NORMAL;
@@ -2139,7 +2151,7 @@ xmakeglyphfontspecs(XftGlyphFontSpec *specs, const Glyph *glyphs, int len, int x
 	FcCharSet *fccharset;
 	int i, f, numspecs = 0;
 
-	for (i = 0, xp = winx, yp = winy + font->ascent - theme_glyph_offset_y; i < len; ++i) {
+	for (i = 0, xp = winx, yp = xglyphtop(y) + font->ascent; i < len; ++i) {
 		/* Fetch rune and mode for current glyph. */
 		rune = glyphs[i].u;
 		mode = glyphs[i].mode;
@@ -2161,7 +2173,7 @@ xmakeglyphfontspecs(XftGlyphFontSpec *specs, const Glyph *glyphs, int len, int x
 			} else if (mode & ATTR_BOLD) {
 				frcflags = FRC_BOLD;
 			}
-			yp = winy + font->ascent - theme_glyph_offset_y;
+			yp = xglyphtop(y) + font->ascent;
 		}
 
 		/* Lookup character index with default font. */
@@ -2256,7 +2268,7 @@ void
 xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len, int x, int y, int pass)
 {
 	int charlen = len * ((base.mode & ATTR_WIDE) ? 2 : 1);
-	int winx = borderpx + x * current_window.cw, winy = borderpx + (y + 1) * current_window.ch,
+	int winx = borderpx + x * current_window.cw, winy = xcelltop(y),
 	    width = charlen * current_window.cw;
 	Color *fg, *bg, *temp, revfg, revbg, truefg, truebg;
 	Font *font = xgetfont(base.mode);
@@ -2383,10 +2395,10 @@ xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len, int x, i
 		XftDrawGlyphFontSpec(xw.draw, fg, specs, len);
 		if (base.mode & ATTR_UNDERLINE)
 			XftDrawRect(xw.draw, fg, winx,
-					winy + dc.font.ascent * chscale + 1, width, 1);
+					xglyphtop(y) + dc.font.ascent * chscale + 1, width, 1);
 		if (base.mode & ATTR_STRUCK)
 			XftDrawRect(xw.draw, fg, winx,
-					winy + 2 * dc.font.ascent * chscale / 3, width, 1);
+					xglyphtop(y) + 2 * dc.font.ascent * chscale / 3, width, 1);
 		XftDrawSetClip(xw.draw, 0);
 	}
 }
@@ -2406,6 +2418,8 @@ void
 xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 {
 	Color drawcol;
+	Glyph original = g;
+	int top = xglyphtop(cy);
 
 	/* Compact rows are fully repainted before the cursor is drawn. */
 	if (!xoverlap()) {
@@ -2416,6 +2430,8 @@ xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 
 	if (IS_SET(MODE_HIDE))
 		return;
+	if (selected(cx, cy))
+		original.mode ^= ATTR_REVERSE;
 
 	/*
 	 * Select the right color for the right mode.
@@ -2451,41 +2467,52 @@ xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 			/* FALLTHROUGH */
 		case 0: /* Blinking Block */
 		case 1: /* Blinking Block (Default) */
-		case 2: /* Steady Block */
-			xdrawglyph(g, cx, cy);
+		case 2: { /* Steady Block */
+			XftGlyphFontSpec spec;
+			int count;
+			/* Cell background stays in the grid; the cursor follows the
+			 * glyph baseline when glyph_offset.y moves text across rows. */
+			xdrawglyphfontspecs(NULL, original, 1, cx, cy, DRAW_BACKGROUND);
+			XftDrawRect(xw.draw, &drawcol,
+			            borderpx + cx * current_window.cw, top,
+			            current_window.cw * ((g.mode & ATTR_WIDE) ? 2 : 1),
+			            current_window.ch);
+			count = xmakeglyphfontspecs(&spec, &g, 1, cx, cy);
+			if (count)
+				xdrawglyphfontspecs(&spec, g, count, cx, cy, DRAW_FOREGROUND);
 			break;
+		}
 		case 3: /* Blinking Underline */
 		case 4: /* Steady Underline */
 			XftDrawRect(xw.draw, &drawcol,
 					borderpx + cx * current_window.cw,
-					borderpx + (cy + 2) * current_window.ch - \
-						cursorthickness,
+					top + current_window.ch - cursorthickness,
 					current_window.cw, cursorthickness);
 			break;
 		case 5: /* Blinking bar */
 		case 6: /* Steady bar */
 			XftDrawRect(xw.draw, &drawcol,
 					borderpx + cx * current_window.cw,
-					borderpx + (cy + 1) * current_window.ch,
+					top,
 					cursorthickness, current_window.ch);
 			break;
 		}
 	} else {
 		XftDrawRect(xw.draw, &drawcol,
 				borderpx + cx * current_window.cw,
-				borderpx + (cy + 1) * current_window.ch,
+				top,
 				current_window.cw - 1, 1);
 		XftDrawRect(xw.draw, &drawcol,
 				borderpx + cx * current_window.cw,
-				borderpx + (cy + 1) * current_window.ch,
+				top,
 				1, current_window.ch - 1);
 		XftDrawRect(xw.draw, &drawcol,
 				borderpx + (cx + 1) * current_window.cw - 1,
-				borderpx + (cy + 1) * current_window.ch,
+				top,
 				1, current_window.ch - 1);
 		XftDrawRect(xw.draw, &drawcol,
 				borderpx + cx * current_window.cw,
-				borderpx + (cy + 2) * current_window.ch - 1,
+				top + current_window.ch - 1,
 				current_window.cw, 1);
 	}
 }
@@ -2656,9 +2683,9 @@ xstartdraw(void)
 int
 xoverlap(void)
 {
-	/* Moving glyphs up or down can cross rows even at normal cell height. */
-	return theme_glyph_offset_y > 0 ||
-	       dc.font.height - theme_glyph_offset_y > current_window.ch;
+	/* The shifted cursor box crosses a row boundary for any nonzero glyph
+	 * offset, even when the font itself still fits inside the cell. */
+	return theme_glyph_offset_y != 0 || current_window.ch < dc.font.height;
 }
 
 void

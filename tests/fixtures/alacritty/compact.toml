@@ -3,3 +3,6 @@ size = 9
 
 [font.offset]
 y = -3
+
+[font.glyph_offset]
+y = -4
