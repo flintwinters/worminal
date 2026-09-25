@@ -3,27 +3,33 @@
 
 include config.mk
 
-SRC = st.c x.c
+SRC = st.c x.c session_view.c wire.c workspace_socket.c workspace_client.c workspace_service.c
+COMMON_OBJ = st.o session_view.o wire.o workspace_socket.o
 OBJ = $(SRC:.c=.o)
 CLANG_TIDY = clang-tidy
 COMPACT_THEME = tests/fixtures/alacritty/compact.toml
 COMPACT_HEADER = .checks/compact_theme.h
 
-all: worminal
+all: worminal worminald
 
 .c.o:
 	$(CC) $(STCFLAGS) -c $<
 
-st.o: config.h .checks/theme.h st.h win.h
+st.o: config.h .checks/theme.h st.h st_state.h win.h
 x.o: arg.h config.h icon.h .checks/theme.h st.h win.h
+session_view.o: session_view.h st_state.h st.h
+workspace_service.o: .checks/theme.h session_view.h wire.h workspace_socket.h
 
 .checks/theme.h: tools/theme.py
 	python3 -c 'from tools.theme import generate_theme; generate_theme()'
 
 $(OBJ): config.mk
 
-worminal: $(OBJ)
-	$(CC) -o $@ $(OBJ) $(STLDFLAGS)
+worminal: $(COMMON_OBJ) workspace_client.o x.o
+	$(CC) -o $@ $(COMMON_OBJ) workspace_client.o x.o $(STLDFLAGS)
+
+worminald: $(COMMON_OBJ) workspace_service.o
+	$(CC) -o $@ $(COMMON_OBJ) workspace_service.o $(STLDFLAGS)
 
 lint: .checks/theme.h
 	$(CLANG_TIDY) -quiet $(SRC) -- $(INCS) $(STCPPFLAGS) $(CPPFLAGS) $(CFLAGS)
@@ -44,8 +50,14 @@ lint: .checks/theme.h
 $(COMPACT_HEADER): $(COMPACT_THEME) tools/theme.py
 	python3 -c 'from tools.theme import generate_theme; generate_theme("$(COMPACT_THEME)", "$(COMPACT_HEADER)")'
 
-.checks/compact-worminal: st.c x.c st.h win.h config.h icon.h $(COMPACT_HEADER)
-	$(CC) $(STCFLAGS) '-DWORMINAL_THEME_HEADER="$(COMPACT_HEADER)"' -o $@ st.c x.c $(STLDFLAGS)
+.checks/compact-worminal: st.c x.c session_view.c wire.c workspace_socket.c workspace_client.c \
+		st.h win.h config.h icon.h $(COMPACT_HEADER) .checks/worminald
+	$(CC) $(STCFLAGS) '-DWORMINAL_THEME_HEADER="$(COMPACT_HEADER)"' -o $@ \
+		st.c x.c session_view.c wire.c workspace_socket.c workspace_client.c $(STLDFLAGS)
+
+.checks/worminald: st.c session_view.c wire.c workspace_socket.c workspace_service.c $(COMPACT_HEADER)
+	$(CC) $(STCFLAGS) '-DWORMINAL_THEME_HEADER="$(COMPACT_HEADER)"' -o $@ \
+		st.c session_view.c wire.c workspace_socket.c workspace_service.c $(STLDFLAGS)
 
 .checks/overlap_probe: tests/overlap_probe.c
 	$(CC) -O2 -o $@ $< `$(PKG_CONFIG) --cflags --libs x11`
@@ -56,19 +68,22 @@ $(COMPACT_HEADER): $(COMPACT_THEME) tools/theme.py
 .checks/icon_probe: tests/icon_probe.c
 	$(CC) -O2 -o $@ $< `$(PKG_CONFIG) --cflags --libs x11`
 
-.checks/view_state_test: tests/view_state.c x.c config.h icon.h .checks/theme.h
+.checks/view_state_test: tests/view_state.c x.c wire.c workspace_socket.c workspace_client.c \
+		config.h icon.h .checks/theme.h
 	$(CC) $(STCFLAGS) -ffunction-sections -fdata-sections -Wl,--gc-sections \
-		-o $@ $< $(STLDFLAGS) `$(PKG_CONFIG) --libs xtst`
+		-o $@ $< wire.c workspace_socket.c workspace_client.c $(STLDFLAGS) `$(PKG_CONFIG) --libs xtst`
 
 clean:
-	rm -f worminal $(OBJ) .checks/theme.h .checks/key_injector .checks/placement_wm \
-		.checks/scrollback_test $(COMPACT_HEADER) .checks/compact-worminal \
+	rm -f worminal worminald $(OBJ) .checks/theme.h .checks/key_injector .checks/placement_wm \
+		.checks/scrollback_test $(COMPACT_HEADER) .checks/compact-worminal .checks/worminald \
 		.checks/overlap_probe .checks/border_probe .checks/icon_probe .checks/view_state_test
 
-install: worminal
+install: worminal worminald
 	mkdir -p $(DESTDIR)$(PREFIX)/bin
 	cp -f worminal $(DESTDIR)$(PREFIX)/bin/worminal
 	chmod 755 $(DESTDIR)$(PREFIX)/bin/worminal
+	cp -f worminald $(DESTDIR)$(PREFIX)/bin/worminald
+	chmod 755 $(DESTDIR)$(PREFIX)/bin/worminald
 	mkdir -p $(DESTDIR)$(MANPREFIX)/man1
 	sed "s/VERSION/$(VERSION)/g" < worminal.1 > $(DESTDIR)$(MANPREFIX)/man1/worminal.1
 	chmod 644 $(DESTDIR)$(MANPREFIX)/man1/worminal.1
@@ -81,6 +96,7 @@ install: worminal
 
 uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/worminal
+	rm -f $(DESTDIR)$(PREFIX)/bin/worminald
 	rm -f $(DESTDIR)$(MANPREFIX)/man1/worminal.1
 	rm -f $(DESTDIR)$(PREFIX)/share/applications/worminal.desktop
 	rm -f $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/worminal.svg

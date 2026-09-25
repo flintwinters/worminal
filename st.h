@@ -1,4 +1,7 @@
 /* See LICENSE for license details. */
+#ifndef WORMINAL_ST_H
+#define WORMINAL_ST_H
+#include <stddef.h>
 
 #include <stdint.h>
 #include <sys/select.h>
@@ -96,7 +99,7 @@ void tsessionstop(TermSession *);
 void tsessionremove(TermSession *);
 void tsessionallowalt(TermSession *, int);
 
-void die(const char *, ...);
+void die(const char *, ...) __attribute__((noreturn));
 void redraw(void);
 void draw(void);
 void kscrollup(const Arg *);
@@ -118,6 +121,9 @@ int ttynew(const char *, char *, const char *, char **);
 size_t ttyread(void);
 void ttyresize(int, int);
 void ttywrite(const char *, size_t, int);
+extern void (*ttywritehook)(const char *, size_t, int);
+extern void (*tscrollhook)(int, int);
+extern void (*tprinterhook)(const char *, size_t);
 
 void resettitle(void);
 
@@ -147,3 +153,4 @@ extern unsigned int tabspaces;
 extern unsigned int defaultfg;
 extern unsigned int defaultbg;
 extern unsigned int defaultcs;
+#endif
