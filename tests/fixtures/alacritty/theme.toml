@@ -2,6 +2,9 @@
 draw_bold_text_with_bright_colors = true
 indexed_colors = [{ index = 196, color = "#123456" }]
 
+[font.normal]
+family = "Imported Mono"
+
 [colors.primary]
 foreground = "#111111"
 background = "#222222"

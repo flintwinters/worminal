@@ -7,6 +7,9 @@ foreground = "#EEEEEE"
 [font]
 size = 9
 
+[font.normal]
+family = "Iosevka Term"
+
 [font.offset]
 y = -3
 

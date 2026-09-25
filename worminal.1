@@ -65,7 +65,9 @@ defines the window class (default Worminal).
 .BI \-f " font"
 defines the
 .I font
-to use when worminal is run.
+to use when worminal is run, overriding the Alacritty
+.B font.normal.family
+selected at build time.
 .TP
 .BI \-g " geometry"
 defines the X11 geometry string.
@@ -150,6 +152,12 @@ Print the selection to the
 Increase font size.
 .TP
 .B Ctrl-Shift-Page Down
+Decrease font size.
+.TP
+.B Ctrl-+ or Ctrl-=
+Increase font size.
+.TP
+.B Ctrl--
 Decrease font size.
 .TP
 .B Ctrl-Shift-Home
