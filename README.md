@@ -10,7 +10,7 @@ webview or JavaScript runtime.
 Install Python 3.11+, a C compiler, `make`, `pkg-config`, and the development headers for X11,
 Xft, Fontconfig, and FreeType. On Debian, these are provided by `build-essential`,
 `pkg-config`, `libx11-dev`, `libxft-dev`, `libfontconfig-dev`, and `libfreetype-dev`.
-The management CLI also needs Typer (`requirements-dev.txt`); the compiled
+The management CLI also needs Typer and PyYAML (`requirements-dev.txt`); the compiled
 terminal does not.
 
 ```sh
@@ -18,12 +18,13 @@ python3 manage.py build
 python3 manage.py run
 ```
 
-`build` reads `~/.config/alacritty/alacritty.toml` (or the usual XDG Alacritty
-config path), follows `[general].import` in order, and compiles its colors,
-`font.normal.family`, `font.size`, `font.offset.y`, and scrolling settings into the binary. The importing file
-overrides imported settings. Set
-`WORMINAL_ALACRITTY_CONFIG=/path/to/theme.toml` while building to choose another
-file. Rebuild after theme changes; Worminal reads no TOML at launch. `run` starts
+`build` reads `alacritty.toml`, `alacritty.yml`, or `alacritty.yaml` from
+`~/.config/alacritty` (or the XDG config directory), preferring TOML when both
+exist. It follows imports in order and compiles colors, font family, size,
+`font.offset.y`, `font.glyph_offset.y`, and scrolling settings into the binary.
+The importing file overrides imported settings. Set
+`WORMINAL_ALACRITTY_CONFIG=/path/to/theme.yml` while building to choose another
+file. Rebuild after theme changes; Worminal reads no config file at launch. `run` starts
 the already-built binary without rebuilding. Launch `./worminal` directly to
 avoid Python startup time.
 
@@ -71,9 +72,9 @@ row storage at startup.
 
 Alacritty's `font.normal.family` selects the Xft font family when present;
 `-f` overrides it for one launch. `font.size` sets the Xft font's point size,
-and `font.offset.y` adds
-to its cell height at build time; negative offsets make rows more compact.
-When rows are shorter than the font, glyphs can extend into adjacent rows.
+and `font.offset.y` adds to its cell height; negative offsets make rows more
+compact. `font.glyph_offset.y` moves glyphs within those rows.
+When glyphs extend beyond their rows, adjacent rows are repainted behind them.
 Worminal still uses its configured Xft font, so exact pixel heights can differ
 from Alacritty's renderer.
 
