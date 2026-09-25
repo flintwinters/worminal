@@ -393,6 +393,19 @@ main(void)
 	view = &second;
 	if (dc.col[1].color.green != 0)
 		die("tab color leaked across sessions\n");
+	/* Resize while an older service frame may still be sending rows. The
+	 * terminal grid must change only when that frame arrives. */
+	view = &first;
+	xw.draw = XftDrawCreate(display, xw.buf, xw.vis, xw.cmap);
+	xw.specbuf = xmalloc(sizeof(GlyphFontSpec));
+	xw.spec_cols = 1;
+	workspacefd = 0;
+	cresize(80, 60);
+	int frame_capacity = xw.spec_cols;
+	cresize(70, 60);
+	if (xw.spec_cols < frame_capacity)
+		die("resize shrank a buffer still needed by an older frame\n");
+	workspacefd = -1;
 	if (previous_focus != None && previous_focus != PointerRoot)
 		XSetInputFocus(display, previous_focus, revert_to, CurrentTime);
 	XSync(display, False);
