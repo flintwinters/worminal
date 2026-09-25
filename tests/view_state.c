@@ -24,6 +24,13 @@ tsessionuse(TermSession *chosen)
 	/* This fixture checks view routing without constructing a PTY session. */
 }
 
+void
+tsetdirt(int top, int bot)
+{
+	(void)top;
+	(void)bot;
+}
+
 TermSession *tsessioncurrent(void) { return view->terminal; }
 
 char *

@@ -75,9 +75,9 @@ row storage at startup.
 
 Ctrl+click an HTTP or HTTPS URL printed in the terminal to open it with the
 local desktop browser, including when the shell runs over SSH. Wrapped URLs
-work across visible rows. Terminal applications can still receive ordinary
-mouse clicks; hold Shift while dragging to select text when mouse reporting is
-active. URL opening uses the local `xdg-open` command.
+work across visible rows and underline while hovered. Terminal applications
+can still receive ordinary mouse clicks; hold Shift while dragging to select
+text when mouse reporting is active. URL opening uses the local `xdg-open` command.
 
 Alacritty's `font.size` sets the Xft font's point size, and `font.offset.y` adds
 to its cell height at build time; negative offsets make rows more compact.

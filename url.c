@@ -32,9 +32,10 @@ unmatched_closer(const char *text, size_t start, size_t end, char open, char clo
 }
 
 char *
-urlat(Line *lines, int rows, int cols, int x, int y)
+urlat(Line *lines, int rows, int cols, int x, int y, UrlSpan *span)
 {
 	char text[URL_LIMIT];
+	int positions[URL_LIMIT];
 	size_t length = 0, clicked = URL_LIMIT, start, end;
 	int first, last;
 
@@ -59,6 +60,7 @@ urlat(Line *lines, int rows, int cols, int x, int y)
 				continue;
 			if (length == URL_LIMIT - 1)
 				return NULL;
+			positions[length] = row * cols + col;
 			text[length++] = urlchar(cell.u) ? cell.u : ' ';
 		}
 		if (row == y && x >= width)
@@ -94,6 +96,12 @@ urlat(Line *lines, int rows, int cols, int x, int y)
 		return NULL;
 	memcpy(result, text + start, end - start);
 	result[end - start] = 0;
+	if (span) {
+		span->start_x = positions[start] % cols;
+		span->start_y = positions[start] / cols;
+		span->end_x = positions[end - 1] % cols;
+		span->end_y = positions[end - 1] / cols;
+	}
 	return result;
 }
 
