@@ -250,12 +250,14 @@ class NativeTerminalTest(unittest.TestCase):
                                 return image[start:start + pixel_size]
 
                             background = pixel(2 + cell_width + 1, top)
+                            lower = top + shift + cell_height
                             if (pixel(2, top) == background and
-                                    pixel(2, top + shift) != background):
+                                    pixel(2, top + shift) != background and
+                                    pixel(2, lower) != pixel(2 + cell_width + 1, lower)):
                                 break
                             time.sleep(0.05)
                         else:
-                            self.fail("Cursor stayed at the unshifted row origin")
+                            self.fail("Cursor missed the font's lower edge")
                     finally:
                         if process.poll() is None:
                             process.terminate()
