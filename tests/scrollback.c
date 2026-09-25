@@ -1,7 +1,7 @@
 /* Exercise terminal history without opening an X window. */
 #include <assert.h>
 
-#include "../st.c"
+#include "../src/terminal/st.c"
 
 unsigned int defaultfg = 258;
 unsigned int defaultbg = 259;

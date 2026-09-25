@@ -22,7 +22,7 @@ app.add_typer(proof_app, name="proof")
 MAX_FILE_LINES = 1000
 MAX_LINE_LENGTH = 120
 # These inherited C files exceed the limit; prevent further growth until they are split.
-LEGACY_FILE_LINES = {"st.c": 3092, "x.c": 3364}
+LEGACY_FILE_LINES = {"src/terminal/st.c": 3092, "src/x11/x.c": 3364}
 
 
 @app.callback()
@@ -123,7 +123,7 @@ def clean():
 
 @app.command()
 def icon():
-    """Regenerate the embedded icon from worminal.svg."""
+    """Regenerate the embedded icon from assets/worminal.svg."""
     try:
         generate_icon()
     except (OSError, ImportError, subprocess.CalledProcessError) as error:

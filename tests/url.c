@@ -1,7 +1,7 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../url.h"
+#include "../src/x11/url.h"
 
 static void
 row(Glyph *cells, int width, const char *text, int wraps)
