@@ -28,6 +28,7 @@ char *argv0;
 #include "st.h"
 #include "win.h"
 #include "session_view.h"
+#include "url.h"
 #include "wire.h"
 #include "workspace_client.h"
 
@@ -263,6 +264,8 @@ typedef struct XView {
 	FcPattern *style_pattern;
 	double font_size, default_font_size;
 	uint buttons;
+	char *url_click;
+	int url_col, url_row;
 	int live;
 	struct XView *next;
 } XView;
@@ -700,6 +703,19 @@ mouseaction(XEvent *e, uint release)
 	return 0;
 }
 
+static char *
+xurlat(int col, int row)
+{
+	SessionFrame frame = tsessionframe(view->terminal);
+	Line *lines = xmalloc(frame.rows * sizeof(*lines));
+	char *url;
+	for (int y = 0; y < frame.rows; y++)
+		lines[y] = tsessionviewline(view->terminal, y);
+	url = urlat(lines, frame.rows, frame.cols, col, row);
+	free(lines);
+	return url;
+}
+
 void
 bpress(XEvent *e)
 {
@@ -730,6 +746,13 @@ bpress(XEvent *e)
 
 	if (1 <= btn && btn <= 11)
 		buttons |= 1 << (btn-1);
+	if (btn == Button1 && (e->xbutton.state & ControlMask) &&
+	    !(e->xbutton.state & ShiftMask) &&
+	    (view->url_click = xurlat(evcol(e), evrow(e)))) {
+		view->url_col = evcol(e);
+		view->url_row = evrow(e);
+		return;
+	}
 
 	if (IS_SET(MODE_MOUSE) && !(e->xbutton.state & forcemousemod)) {
 		mousereport(e);
@@ -967,6 +990,13 @@ brelease(XEvent *e)
 
 	if (1 <= btn && btn <= 11)
 		buttons &= ~(1 << (btn-1));
+	if (btn == Button1 && view->url_click) {
+		if (evcol(e) == view->url_col && evrow(e) == view->url_row)
+			urlopen(view->url_click);
+		free(view->url_click);
+		view->url_click = NULL;
+		return;
+	}
 
 	if (IS_SET(MODE_MOUSE) && !(e->xbutton.state & forcemousemod)) {
 		mousereport(e);
@@ -982,6 +1012,8 @@ brelease(XEvent *e)
 void
 bmotion(XEvent *e)
 {
+	if (view->url_click)
+		return;
 	if (IS_SET(MODE_MOUSE) && !(e->xbutton.state & forcemousemod)) {
 		mousereport(e);
 		return;
@@ -1894,6 +1926,7 @@ xremoveview(int destroyed)
 		XDestroyWindow(xw.dpy, xw.win);
 	free(xsel.primary);
 	free(xsel.clipboard);
+	free(removed->url_click);
 	if (removed != &primaryview)
 		free(removed);
 	if (!views) {
