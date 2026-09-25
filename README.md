@@ -39,7 +39,8 @@ label is reversed; click a label to select it. Ctrl+T creates a tab,
 Ctrl+W closes the selected tab in every window, Ctrl+Tab and Ctrl+Shift+Tab
 cycle, Ctrl+1 through Ctrl+8 select by position, Ctrl+9 selects the last tab,
 Alt+1 through Alt+9 select exact tab slots, Alt+0 selects slot 10, and Ctrl+N
-opens a new window and tab.
+opens a new window and tab. Ctrl+- decreases the font size; Ctrl++ and Ctrl+=
+increase it.
 
 The focused or input-receiving window paints its selected tab. Other windows
 selecting that tab keep their terminal pixels until they become live; tab-line
