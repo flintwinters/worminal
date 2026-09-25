@@ -74,8 +74,11 @@ When rows are shorter than the font, glyphs can extend into adjacent rows.
 Worminal still uses its configured Xft font, so exact pixel heights can differ
 from Alacritty's renderer.
 
-The build uses `-O3` by default. `python3 manage.py lint` runs selected Clang
-static analyzer checks on the C sources (requires `clang-tidy`).
+The build uses `-O3` by default. `python3 manage.py lint` checks tracked text
+files for 120-character lines and a 1,000-line file limit, then runs selected
+Clang static analyzer checks on the C sources (requires `clang-tidy`). The
+inherited `st.c` and `x.c` exceed 1,000 lines; lint caps them at their current
+lengths until they can be split.
 `python3 manage.py check` builds and runs native checks. `python3 manage.py proof`
 runs those checks and every private-display
 proof in `tests/proof_*.py`, including isolated KWin and remote Cinnamon.

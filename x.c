@@ -2355,7 +2355,8 @@ xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len, int x, i
 		}
 		if (winx + width >= borderpx + current_window.tw) {
 			xclear(winx + width, (y == 0)? 0 : winy, current_window.w,
-				((winy + current_window.ch >= borderpx + current_window.ch + current_window.th)? current_window.h : (winy + current_window.ch)));
+				((winy + current_window.ch >= borderpx + current_window.ch + current_window.th)?
+				 current_window.h : (winy + current_window.ch)));
 		}
 		if (y == 0)
 			xclear(winx, 0, winx + width, borderpx);
