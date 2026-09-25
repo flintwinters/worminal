@@ -209,6 +209,7 @@ class NativeTerminalTest(unittest.TestCase):
     def test_cursor_tracks_glyph_offset(self):
         compact = tomllib.loads((ROOT / "tests/fixtures/alacritty/compact.toml").read_text())
         shift = -compact["font"]["glyph_offset"]["y"]
+        top_trim = -compact["font"]["offset"]["y"]
         with isolated_display() as env:
             for style in (2, 6):
                 with self.subTest(style=style):
@@ -243,21 +244,21 @@ class NativeTerminalTest(unittest.TestCase):
                             pixel_size, stride = header[11] // 8, header[12]
                             cell_height = (header[5] - 4) // 3
                             cell_width = (header[4] - 4) // 10
-                            top = 2 + cell_height
+                            top = 2 + cell_height + shift + top_trim
 
                             def pixel(x, y):
                                 start = offset + y * stride + x * pixel_size
                                 return image[start:start + pixel_size]
 
-                            background = pixel(2 + cell_width + 1, top)
-                            lower = top + shift + cell_height
-                            if (pixel(2, top) == background and
-                                    pixel(2, top + shift) != background and
-                                    pixel(2, lower) != pixel(2 + cell_width + 1, lower)):
+                            neighbor = 2 + cell_width + 1
+                            if (pixel(2, top - 1) == pixel(neighbor, top - 1) and
+                                    pixel(2, top) != pixel(neighbor, top) and
+                                    pixel(2, top + cell_height - 1) !=
+                                    pixel(neighbor, top + cell_height - 1)):
                                 break
                             time.sleep(0.05)
                         else:
-                            self.fail("Cursor missed the font's lower edge")
+                            self.fail("Cursor covered the preceding line or missed its own")
                     finally:
                         if process.poll() is None:
                             process.terminate()

@@ -2419,11 +2419,15 @@ xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 {
 	Color drawcol;
 	Glyph original = g;
-	int top = xglyphtop(cy);
-	int height = MAX(current_window.ch, dc.font.height);
+	/* The previous row's glyph can extend into a compact row. Anchor the
+	 * cursor at this glyph's lower edge and keep it one row tall so it cannot
+	 * paint over the preceding line. */
+	int height = current_window.ch;
+	int top = xglyphtop(cy) + MAX(0, dc.font.height - height);
+	int overlap = xoverlap();
 
 	/* Compact rows are fully repainted before the cursor is drawn. */
-	if (!xoverlap()) {
+	if (!overlap) {
 		if (selected(ox, oy))
 			og.mode ^= ATTR_REVERSE;
 		xdrawglyph(og, ox, oy);
@@ -2471,9 +2475,10 @@ xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 		case 2: { /* Steady Block */
 			XftGlyphFontSpec spec;
 			int count;
-			/* The background stays in the grid. The cursor spans the font
-			 * when negative line spacing makes the row shorter than its ink. */
-			xdrawglyphfontspecs(NULL, original, 1, cx, cy, DRAW_BACKGROUND);
+			/* Overlapping rows were already painted behind their glyphs;
+			 * another background pass here would erase the line above. */
+			if (!overlap)
+				xdrawglyphfontspecs(NULL, original, 1, cx, cy, DRAW_BACKGROUND);
 			XftDrawRect(xw.draw, &drawcol,
 			            borderpx + cx * current_window.cw, top,
 			            current_window.cw * ((g.mode & ATTR_WIDE) ? 2 : 1),
