@@ -1753,8 +1753,9 @@ xinitview(int cols, int rows, int first, int spawnpty)
 
 	xhints();
 
-	clock_gettime(CLOCK_MONOTONIC, &xsel.tclick1);
-	clock_gettime(CLOCK_MONOTONIC, &xsel.tclick2);
+	/* The first click must not look like the third click of a sequence. */
+	xsel.tclick1 = (struct timespec){0};
+	xsel.tclick2 = (struct timespec){0};
 	xsel.primary = NULL;
 	xsel.clipboard = NULL;
 	xsel.xtarget = XInternAtom(xw.dpy, "UTF8_STRING", 0);
@@ -2419,11 +2420,10 @@ xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 {
 	Color drawcol;
 	Glyph original = g;
-	/* The previous row's glyph can extend into a compact row. Anchor the
-	 * cursor at this glyph's lower edge and keep it one row tall so it cannot
-	 * paint over the preceding line. */
+	/* Cursor and selection backgrounds belong to the grid cell. Glyph offset
+	 * only moves ink; following it shifts the cursor into the next row. */
 	int height = current_window.ch;
-	int top = xglyphtop(cy) + MAX(0, dc.font.height - height);
+	int top = xcelltop(cy);
 	int overlap = xoverlap();
 
 	/* Compact rows are fully repainted before the cursor is drawn. */
@@ -2689,8 +2689,7 @@ xstartdraw(void)
 int
 xoverlap(void)
 {
-	/* The shifted cursor box crosses a row boundary for any nonzero glyph
-	 * offset, even when the font itself still fits inside the cell. */
+	/* Shifted glyph ink can cross a row boundary even when its font fits. */
 	return theme_glyph_offset_y != 0 || current_window.ch < dc.font.height;
 }
 
