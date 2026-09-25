@@ -501,14 +501,12 @@ clipcopy(const Arg *dummy)
 {
 	Atom clipboard;
 
+	if (xsel.primary == NULL)
+		return;
 	free(xsel.clipboard);
-	xsel.clipboard = NULL;
-
-	if (xsel.primary != NULL) {
-		xsel.clipboard = xstrdup(xsel.primary);
-		clipboard = XInternAtom(xw.dpy, "CLIPBOARD", 0);
-		XSetSelectionOwner(xw.dpy, clipboard, xw.win, CurrentTime);
-	}
+	xsel.clipboard = xstrdup(xsel.primary);
+	clipboard = XInternAtom(xw.dpy, "CLIPBOARD", 0);
+	XSetSelectionOwner(xw.dpy, clipboard, xw.win, CurrentTime);
 }
 
 void
@@ -1792,8 +1790,8 @@ xinitview(int cols, int rows, int first, int spawnpty)
 
 	xhints();
 
-	clock_gettime(CLOCK_MONOTONIC, &xsel.tclick1);
-	clock_gettime(CLOCK_MONOTONIC, &xsel.tclick2);
+	/* A first click has no predecessor to qualify as a double or triple click. */
+	xsel.tclick1 = xsel.tclick2 = (struct timespec){0};
 	xsel.primary = NULL;
 	xsel.clipboard = NULL;
 	xsel.xtarget = XInternAtom(xw.dpy, "UTF8_STRING", 0);
@@ -2953,6 +2951,14 @@ match(uint mask, uint state)
 	return mask == XK_ANY_MOD || mask == (state & ~ignoremod);
 }
 
+static int
+shortcutmatch(const Shortcut *shortcut, KeySym symbol, uint state)
+{
+	return match(shortcut->mod, state) &&
+	       (symbol == shortcut->keysym ||
+	        (BETWEEN(symbol, XK_a, XK_z) && shortcut->keysym == symbol - XK_a + XK_A));
+}
+
 char*
 kmap(KeySym k, uint state)
 {
@@ -3060,7 +3066,7 @@ kpress(XEvent *ev)
 	}
 	/* 1. shortcuts */
 	for (bp = shortcuts; bp < shortcuts + LEN(shortcuts); bp++) {
-		if (ksym == bp->keysym && match(bp->mod, e->state)) {
+		if (shortcutmatch(bp, ksym, e->state)) {
 			bp->func(&(bp->arg));
 			return;
 		}

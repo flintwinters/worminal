@@ -260,6 +260,19 @@ main(void)
 	xfinishdraw();
 	views = &first;
 	first.next = &second;
+	view = &first;
+	xsel.primary = xstrdup("copy test");
+	clipcopy(NULL);
+	free(xsel.primary);
+	xsel.primary = NULL;
+	clipcopy(NULL);
+	if (!xsel.clipboard || strcmp(xsel.clipboard, "copy test"))
+		die("copy without a selection discarded the clipboard\n");
+	Shortcut copy = {.mod = ControlMask | ShiftMask, .keysym = XK_C};
+	if (!shortcutmatch(&copy, XK_c, ControlMask | ShiftMask | LockMask) ||
+	    !shortcutmatch(&copy, XK_C, ControlMask | ShiftMask) ||
+	    shortcutmatch(&copy, XK_c, ControlMask | LockMask))
+		die("Ctrl+Shift+C did not match Caps Lock and Shift correctly\n");
 	if (xviewfor(first_window) != &first ||
 	    xviewfor(second_window) != &second)
 		die("X events did not resolve to their view\n");
