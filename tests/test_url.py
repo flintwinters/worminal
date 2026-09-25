@@ -16,10 +16,10 @@ ROOT = Path(__file__).resolve().parent.parent
 
 class UrlClickTest(unittest.TestCase):
     def test_hover_and_ctrl_click_shell_url(self):
-        opener = ROOT / ".checks" / "xdg-open"
-        opened = ROOT / ".checks" / f"url-opened-{os.getpid()}"
-        gate = ROOT / ".checks" / f"url-gate-{os.getpid()}"
-        done = ROOT / ".checks" / f"url-done-{os.getpid()}"
+        opener = ROOT / "build" / "xdg-open"
+        opened = ROOT / "build" / f"url-opened-{os.getpid()}"
+        gate = ROOT / "build" / f"url-gate-{os.getpid()}"
+        done = ROOT / "build" / f"url-done-{os.getpid()}"
         opener.write_text("#!/bin/sh\nprintf '%s' \"$1\" > \"$WORMINAL_URL_OPENED\"\n")
         opener.chmod(0o755)
         opened.unlink(missing_ok=True)
@@ -28,7 +28,7 @@ class UrlClickTest(unittest.TestCase):
         terminal = None
         try:
             with isolated_display() as env:
-                env = {**env, "PATH": f"{ROOT / '.checks'}:{env['PATH']}",
+                env = {**env, "PATH": f"{ROOT / 'build'}:{env['PATH']}",
                        "WORMINAL_URL_OPENED": str(opened)}
                 terminal = subprocess.Popen(
                     [str(ROOT / "worminal"), "-g", "40x10", "-T", "URL click test",

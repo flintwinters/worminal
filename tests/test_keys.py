@@ -101,9 +101,9 @@ class NavigationKeysTest(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("micro"), "micro is not installed")
     def test_ctrl_end_in_micro(self):
-        path = ROOT / ".checks" / "micro-key-test.txt"
-        log = ROOT / ".checks" / "micro-output"
-        config = ROOT / ".checks" / f"micro-config-{os.getpid()}"
+        path = ROOT / "build" / "micro-key-test.txt"
+        log = ROOT / "build" / "micro-output"
+        config = ROOT / "build" / f"micro-config-{os.getpid()}"
         config.mkdir()
         path.write_text("first\nlast")
         title = f"Worminal micro keys {os.getpid()}"

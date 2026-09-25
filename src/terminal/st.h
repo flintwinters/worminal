@@ -22,7 +22,7 @@
 #define MODBIT(x, set, bit)	((set) ? ((x) |= (bit)) : ((x) &= ~(bit)))
 
 #ifndef WORMINAL_THEME_HEADER
-#define WORMINAL_THEME_HEADER ".checks/theme.h"
+#define WORMINAL_THEME_HEADER "build/theme.h"
 #endif
 
 #define TRUECOLOR(r,g,b)	(1 << 24 | (r) << 16 | (g) << 8 | (b))
