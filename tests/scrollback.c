@@ -77,7 +77,7 @@ main(void)
 	assert(term.histlen == before && term.scr == 0);
 	tswapscreen();
 
-	/* Existing history survives a width change with blank new cells. */
+	/* Existing hard-broken history stays in scrollback after widening. */
 	tresize(6, 3);
 	kscrollup(&one);
 	assert(tline(0)[0].u == 'B');
@@ -183,5 +183,96 @@ main(void)
 	close(firstslave);
 	close(secondmaster);
 	close(secondslave);
+
+	/* Wrapped text must survive both narrower and wider grids, including
+	 * the cursor position used by the next character. */
+	tsessionnew(4, 3);
+	twrite("abcdefghij", 10, 0);
+	tresize(5, 3);
+	assert(term.hist == NULL);
+	assert(term.line[0][0].u == 'a' && term.line[0][4].u == 'e');
+	assert(term.line[1][0].u == 'f' && term.line[1][4].u == 'j');
+	twrite("k", 1, 0);
+	assert(term.line[2][0].u == 'k');
+	tresize(3, 3);
+	assert(term.histlen == 1 && term.hist[0][0].u == 'a');
+	assert(term.line[0][0].u == 'd' && term.line[0][2].u == 'f');
+	assert(term.line[1][0].u == 'g' && term.line[1][2].u == 'i');
+	assert(term.line[2][0].u == 'j' && term.line[2][1].u == 'k');
+	tresize(6, 3);
+	assert(term.line[0][0].u == 'a' && term.line[0][5].u == 'f');
+	assert(term.line[1][0].u == 'g' && term.line[1][4].u == 'k');
+
+	/* Hard breaks stay hard, and a wide glyph stays whole at a new edge. */
+	tsessionnew(4, 3);
+	twrite("ab\r\ncd", 6, 0);
+	tresize(6, 3);
+	assert(term.line[0][0].u == 'a' && term.line[0][2].u == ' ');
+	assert(term.line[1][0].u == 'c');
+	tsessionnew(4, 2);
+	term.line[0][0].u = 'A';
+	term.line[0][1] = (Glyph){ .u = 0x754c, .mode = ATTR_WIDE };
+	term.line[0][2] = (Glyph){ .mode = ATTR_WDUMMY };
+	term.line[0][3].u = 'B';
+	term.c.x = 3;
+	tresize(3, 2);
+	assert(term.line[0][1].u == 0x754c &&
+	       term.line[0][2].mode & ATTR_WDUMMY);
+	assert(term.line[1][0].u == 'B' && term.c.y == 1);
+	tresize(1, 4);
+	tresize(3, 4);
+	assert(term.line[0][1].u == 0x754c &&
+	       term.line[0][1].mode & ATTR_WIDE &&
+	       term.line[0][2].mode & ATTR_WDUMMY);
+
+	/* st marks the wide lead cell, rather than its dummy, at a soft wrap. */
+	tsessionnew(4, 2);
+	term.line[0][0].u = 'A';
+	term.line[0][1].u = 'B';
+	term.line[0][2] = (Glyph){ .u = 0x754c,
+	                            .mode = ATTR_WIDE | ATTR_WRAP };
+	term.line[0][3] = (Glyph){ .mode = ATTR_WDUMMY };
+	term.line[1][0].u = 'C';
+	term.c.x = 1;
+	term.c.y = 1;
+	tresize(5, 2);
+	assert(term.line[0][4].u == 'C');
+	assert(term.line[0][2].mode & ATTR_WIDE);
+	assert(term.line[0][3].mode & ATTR_WDUMMY);
+
+	/* A scrolled viewport keeps its place as wraps change. */
+	tsessionnew(4, 3);
+	twrite("abcdefghijklmnop", 16, 0);
+	kscrollup(&one);
+	assert(term.scr == 1 && tline(0)[0].u == 'a');
+	tresize(5, 3);
+	assert(term.scr == 1 && tline(0)[0].u == 'a');
+	assert(term.histlen == 1);
+
+	/* A wrap into an empty cursor row still leaves room for the next input. */
+	tsessionnew(4, 3);
+	twrite("abcd", 4, 0);
+	term.line[0][3].mode |= ATTR_WRAP;
+	term.c.x = 0;
+	term.c.y = 1;
+	term.c.state &= ~CURSOR_WRAPNEXT;
+	tresize(2, 3);
+	assert(term.c.x == 0 && term.c.y == 2);
+	twrite("e", 1, 0);
+	assert(term.line[2][0].u == 'e');
+
+	/* Expansion of a full history ring still keeps only the configured limit. */
+	tsessionnew(4, 2);
+	for (i = 0; i <= theme_history_size; i++) {
+		term.line[0][0].u = 'q';
+		term.line[0][1].u = 'r';
+		term.line[0][2].u = 's';
+		term.line[0][3].u = 't';
+		term.line[0][3].mode |= ATTR_WRAP;
+		tscrollup(0, 1);
+	}
+	tresize(2, 2);
+	assert(term.histlen == theme_history_size);
+	assert(term.hist[(term.histi - 1 + theme_history_size) % theme_history_size][0].u == 's');
 	return 0;
 }
