@@ -1005,7 +1005,10 @@ cresize(int width, int height)
 	col = MAX(1, col);
 	row = MAX(1, row);
 
-	tresize(col, row);
+	/* Service frames own the grid size. Resizing it here could invalidate rows
+	 * still arriving from an earlier frame. */
+	if (workspacefd < 0)
+		tresize(col, row);
 	xresize(col, row);
 	if (workspacefd >= 0)
 		workspace_focus();
@@ -1025,9 +1028,11 @@ xresize(int col, int row)
 	XftDrawChange(xw.draw, xw.buf);
 	xclear(0, 0, current_window.w, current_window.h);
 
-	/* resize to new width */
-	xw.specbuf = xrealloc(xw.specbuf, col * sizeof(GlyphFontSpec));
-	xw.spec_cols = col;
+	/* An older frame may still need a wider glyph buffer. */
+	if (xw.spec_cols < col) {
+		xw.spec_cols = col;
+		xw.specbuf = xrealloc(xw.specbuf, xw.spec_cols * sizeof(GlyphFontSpec));
+	}
 }
 
 ushort
