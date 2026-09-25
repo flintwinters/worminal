@@ -207,16 +207,16 @@ def smoke_x11(env):
 
 
 class NativeTerminalTest(unittest.TestCase):
-    def test_new_executable_keeps_old_owner_tabs(self):
+    def test_new_executable_joins_existing_workspace(self):
         with isolated_display() as env:
-            env = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"build-{os.getpid()}"}
             copy = ROOT / ".checks" / f"worminal-copy-{os.getpid()}"
             shutil.copy2(ROOT / "worminal", copy)
             owners = []
             try:
-                for binary in (ROOT / "worminal", copy):
+                for binary, title in ((ROOT / "worminal", "Earlier build"),
+                                      (copy, "Later build")):
                     owner = subprocess.Popen(
-                        [str(binary), "-e", "/bin/cat"], env=env,
+                        [str(binary), "-T", title, "-e", "/bin/cat"], env=env,
                         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
                     owners.append(owner)
                     deadline = time.monotonic() + 5
@@ -227,11 +227,19 @@ class NativeTerminalTest(unittest.TestCase):
                         if result.returncode == 0:
                             break
                         if owner.poll() is not None:
-                            self.fail("new executable forwarded to the old owner")
+                            self.fail("client exited before opening its window")
                         time.sleep(.05)
                     else:
                         self.fail("new executable did not create its own window")
                 self.assertTrue(all(owner.poll() is None for owner in owners))
+                second = subprocess.check_output(
+                    ["xdotool", "search", "--onlyvisible", "--pid", str(owners[1].pid)],
+                    env=env, text=True).splitlines()[0]
+                focus_window(env, second)
+                subprocess.run(["xdotool", "key", "ctrl+1"], env=env, check=True)
+                self.assertEqual(subprocess.check_output(
+                    ["xdotool", "getwindowname", second], env=env, text=True).strip(),
+                    "Earlier build")
             finally:
                 for owner in owners:
                     if owner.poll() is None:
@@ -241,8 +249,7 @@ class NativeTerminalTest(unittest.TestCase):
 
     def test_tab_label_tracks_child_directory(self):
         with isolated_display() as env:
-            env = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"directory-{os.getpid()}",
-                   "SHELL": "/bin/sh"}
+            env = {**env, "SHELL": "/bin/sh"}
             title = f"Worminal directory {os.getpid()}"
             marker = ROOT / ".checks" / f"directory-ready-{os.getpid()}"
             new_tab_pwd = ROOT / ".checks" / f"new-tab-pwd-{os.getpid()}"
@@ -316,15 +323,15 @@ class NativeTerminalTest(unittest.TestCase):
 
     def test_forwarded_line_keeps_owner_stdin(self):
         with isolated_display() as env:
-            env = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"line-{os.getpid()}"}
             master, slave = pty.openpty()
             owner = subprocess.Popen(
                 [str(ROOT / "worminal"), "-e", "/bin/cat"],
                 env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            second = None
 
             def windows():
                 result = subprocess.run(
-                    ["xdotool", "search", "--onlyvisible", "--pid", str(owner.pid)],
+                    ["xdotool", "search", "--onlyvisible", "--class", "Worminal"],
                     env=env, capture_output=True, text=True)
                 return result.stdout.splitlines() if result.returncode == 0 else []
 
@@ -334,8 +341,9 @@ class NativeTerminalTest(unittest.TestCase):
                     time.sleep(.05)
                 self.assertEqual(len(windows()), 1)
                 stdin_before = os.readlink(f"/proc/{owner.pid}/fd/0")
-                subprocess.run([str(ROOT / "worminal"), "-l", os.ttyname(slave)],
-                               env=env, capture_output=True, check=True, timeout=5)
+                second = subprocess.Popen([str(ROOT / "worminal"), "-l", os.ttyname(slave)],
+                                          env=env, stdout=subprocess.DEVNULL,
+                                          stderr=subprocess.PIPE)
                 deadline = time.monotonic() + 5
                 while time.monotonic() < deadline and len(windows()) < 2:
                     time.sleep(.05)
@@ -346,17 +354,20 @@ class NativeTerminalTest(unittest.TestCase):
                                    check=True)
                 owner.wait(timeout=3)
                 self.assertEqual(owner.returncode, 0)
+                second.wait(timeout=3)
+                self.assertEqual(second.returncode, 0)
             finally:
-                if owner.poll() is None:
-                    owner.terminate()
-                owner.wait(timeout=2)
-                owner.stderr.close()
+                for process in (owner, second):
+                    if process is not None:
+                        if process.poll() is None:
+                            process.terminate()
+                        process.wait(timeout=2)
+                        process.stderr.close()
                 os.close(master)
                 os.close(slave)
 
     def test_hidden_tab_drains_and_launcher_state_is_forwarded(self):
         with isolated_display() as env:
-            env = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"hidden-{os.getpid()}"}
             a_title = f"Worminal A {os.getpid()}"
             b_title = f"Worminal B {os.getpid()}"
             prefix = ROOT / ".checks" / f"hidden-{os.getpid()}"
@@ -367,6 +378,7 @@ class NativeTerminalTest(unittest.TestCase):
             owner = subprocess.Popen(
                 [str(ROOT / "worminal"), "-T", a_title, "-e", "/bin/cat"],
                 env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            second_process = None
 
             def wait_for(predicate, message):
                 deadline = time.monotonic() + 6
@@ -379,7 +391,7 @@ class NativeTerminalTest(unittest.TestCase):
 
             def windows():
                 result = subprocess.run(
-                    ["xdotool", "search", "--onlyvisible", "--pid", str(owner.pid)],
+                    ["xdotool", "search", "--onlyvisible", "--class", "Worminal"],
                     env=env, capture_output=True, text=True)
                 return result.stdout.splitlines() if result.returncode == 0 else []
 
@@ -397,12 +409,12 @@ class NativeTerminalTest(unittest.TestCase):
                           'while [ ! -e "$2" ]; do sleep .02; done; '
                           'yes hidden | head -c 1048576; printf done > "$3"; '
                           'while :; do sleep 1; done')
-                subprocess.run(
+                second_process = subprocess.Popen(
                     [str(ROOT / "worminal"), "-T", b_title, "-g", "40x10",
                      "-e", "/bin/sh", "-c", script, "sh",
                      str(info), str(gate), str(done)],
                     cwd=ROOT / ".checks", env=second_env,
-                    capture_output=True, check=True, timeout=5)
+                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
                 second = wait_for(lambda: next((w for w in windows() if w != first), None),
                                   "second window did not open")
                 details = wait_for(lambda: info.read_text() if info.exists() else None,
@@ -467,15 +479,20 @@ class NativeTerminalTest(unittest.TestCase):
                          "hidden tab did not close globally")
                 subprocess.run(["xdotool", "windowclose", first], env=env, check=True)
                 wait_for(lambda: len(windows()) == 1, "first window did not close")
-                self.assertIsNone(owner.poll(), "hidden tab owner exited with one window")
+                self.assertEqual(owner.wait(timeout=3), 0)
+                self.assertIsNone(second_process.poll(), "remaining window exited")
                 subprocess.run(["xdotool", "windowclose", second], env=env, check=True)
                 owner.wait(timeout=3)
                 self.assertEqual(owner.returncode, 0)
+                second_process.wait(timeout=3)
+                self.assertEqual(second_process.returncode, 0)
             finally:
-                if owner.poll() is None:
-                    owner.terminate()
-                owner.wait(timeout=2)
-                owner.stderr.close()
+                for process in (owner, second_process):
+                    if process is not None:
+                        if process.poll() is None:
+                            process.terminate()
+                        process.wait(timeout=2)
+                        process.stderr.close()
                 for path in (info, gate, done):
                     path.unlink(missing_ok=True)
 
@@ -483,7 +500,6 @@ class NativeTerminalTest(unittest.TestCase):
         display = (nullcontext(os.environ.copy())
                    if os.environ.get("WORMINAL_PROOF_PRIVATE_DISPLAY") else isolated_display())
         with display as env:
-            env = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"tabs-{os.getpid()}"}
             title = f"Worminal tabs {os.getpid()}"
             first_tty = ROOT / ".checks" / "tab_first_tty"
             first_input = ROOT / ".checks" / "tab_first_input"
@@ -501,12 +517,13 @@ class NativeTerminalTest(unittest.TestCase):
                  "-c", script, "sh", str(first_tty), str(first_input)],
                 env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
             )
+            second_process = None
 
             def windows(count):
                 deadline = time.monotonic() + 5
                 while time.monotonic() < deadline:
                     found = subprocess.run(
-                        ["xdotool", "search", "--onlyvisible", "--pid", str(owner.pid)],
+                        ["xdotool", "search", "--onlyvisible", "--class", "Worminal"],
                         env=env, capture_output=True, text=True)
                     ids = found.stdout.splitlines() if found.returncode == 0 else []
                     if len(ids) == count:
@@ -540,8 +557,9 @@ class NativeTerminalTest(unittest.TestCase):
             try:
                 first = windows(1)[0]
                 wait_file(first_tty)
-                subprocess.run([str(ROOT / "worminal")],
-                               env=env, capture_output=True, check=True, timeout=5)
+                second_process = subprocess.Popen([str(ROOT / "worminal")], env=env,
+                                                  stdout=subprocess.DEVNULL,
+                                                  stderr=subprocess.PIPE)
                 second = next(window for window in windows(2) if window != first)
                 if os.environ.get("WORMINAL_PROOF_PRIVATE_DISPLAY"):
                     for window, x in ((first, "20"), (second, "380")):
@@ -579,14 +597,19 @@ class NativeTerminalTest(unittest.TestCase):
                 subprocess.run(["xdotool", "windowclose", first], env=env, check=True)
                 owner.wait(timeout=3)
                 self.assertEqual(owner.returncode, 0)
+                second_process.wait(timeout=3)
+                self.assertEqual(second_process.returncode, 0)
             finally:
-                if owner.poll() is None:
-                    owner.terminate()
-                owner.wait(timeout=2)
+                for process in (owner, second_process):
+                    if process is not None:
+                        if process.poll() is None:
+                            process.terminate()
+                        process.wait(timeout=2)
+                        process.stderr.close()
                 owner.stderr.close()
                 for path in paths:
                     path.unlink(missing_ok=True)
-
+                subprocess.run([str(ROOT / "worminald"), "--stop"], env=env, check=True)
     def test_close_during_early_map(self):
         with isolated_display() as env:
             manager = subprocess.Popen(
@@ -618,56 +641,53 @@ class NativeTerminalTest(unittest.TestCase):
 
     def test_shared_owner_election_and_restart(self):
         with isolated_display() as env:
-            env = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"race-{os.getpid()}"}
             title = f"Worminal race {os.getpid()}"
             child_pids = ROOT / ".checks" / f"shared-race-pids-{os.getpid()}"
             child_pids.unlink(missing_ok=True)
             command = [str(ROOT / "worminal"), "-T", title,
                        "-e", "/bin/sh", "-c",
-                       'trap "" HUP; printf "%s\\n" "$$" >> "$1"; exec sleep 30',
+                       'trap "" HUP; printf "%s\n" "$$" >> "$1"; exec sleep 30',
                        "sh", str(child_pids)]
             launchers = [subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL,
                                           stderr=subprocess.PIPE) for _ in range(2)]
             try:
                 deadline = time.monotonic() + 5
                 while time.monotonic() < deadline:
-                    search = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", title],
+                    result = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", title],
                                             env=env, capture_output=True, text=True)
-                    windows = search.stdout.splitlines() if search.returncode == 0 else []
-                    running = [p for p in launchers if p.poll() is None]
-                    exited = [p for p in launchers if p.poll() is not None]
-                    if len(windows) == 2 and len(running) == len(exited) == 1:
+                    windows = result.stdout.splitlines() if result.returncode == 0 else []
+                    if len(windows) == 2 and child_pids.exists() and len(child_pids.read_text().splitlines()) == 2:
                         break
                     time.sleep(.05)
                 else:
-                    self.fail(f"Concurrent launch did not elect one owner: windows={windows}, "
-                              f"statuses={[p.poll() for p in launchers]}")
-                self.assertEqual(exited[0].returncode, 0)
+                    self.fail(f"Concurrent clients did not create two tabs: {windows}")
+                self.assertTrue(all(process.poll() is None for process in launchers))
                 for window in windows:
                     subprocess.run(["xdotool", "windowclose", window], env=env, check=True)
-                running[0].wait(timeout=3)
-                ready, _, _ = select.select([running[0].stderr], [], [], 0)
-                self.assertEqual(running[0].returncode, 0,
-                                 os.read(running[0].stderr.fileno(), 4096).decode() if ready else "")
-
+                for process in launchers:
+                    self.assertEqual(process.wait(timeout=3), 0)
+                import socket
+                connection = socket.socket(socket.AF_UNIX)
+                try:
+                    scope = env["WORMINAL_SHARED_SOCKET_SCOPE"]
+                    connection.connect(f"\0worminal-workspace-{os.getuid()}-{scope}")
+                finally:
+                    connection.close()
                 restarted = subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL,
                                              stderr=subprocess.PIPE)
                 launchers.append(restarted)
                 deadline = time.monotonic() + 5
                 while time.monotonic() < deadline:
-                    search = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", title],
+                    result = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", title],
                                             env=env, capture_output=True, text=True)
-                    if search.returncode == 0:
+                    if result.returncode == 0 and len(child_pids.read_text().splitlines()) == 3:
                         break
                     time.sleep(.05)
                 else:
-                    self.fail("Owner could not restart after last-window shutdown")
-                subprocess.run(["xdotool", "windowclose", search.stdout.splitlines()[0]],
+                    self.fail("Workspace did not accept a new tab after all windows closed")
+                subprocess.run(["xdotool", "windowclose", result.stdout.splitlines()[0]],
                                env=env, check=True)
-                restarted.wait(timeout=3)
-                ready, _, _ = select.select([restarted.stderr], [], [], 0)
-                self.assertEqual(restarted.returncode, 0,
-                                 os.read(restarted.stderr.fileno(), 4096).decode() if ready else "")
+                self.assertEqual(restarted.wait(timeout=3), 0)
             finally:
                 for process in launchers:
                     if process.poll() is None:
@@ -686,7 +706,6 @@ class NativeTerminalTest(unittest.TestCase):
         display = (nullcontext(os.environ.copy())
                    if os.environ.get("WORMINAL_PROOF_PRIVATE_DISPLAY") else isolated_display())
         with display as env:
-            env = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"proof-{os.getpid()}"}
             title = f"Worminal shared {os.getpid()}"
             received = ROOT / ".checks" / "shared_input"
             sizes = ROOT / ".checks" / "shared_sizes"
@@ -701,7 +720,8 @@ class NativeTerminalTest(unittest.TestCase):
                 'size) stty size >> "$2";; '
                 "alt) printf '\\033[?1049h[ALT]\\n';; "
                 "leave) printf '\\033[?1049l';; "
-                "bulk) yes '0123456789abcdefghijklmnopqrstuvwxyz' | head -c 1048576; "
+                "bulk) printf started > \"$3\"; "
+                "yes '0123456789abcdefghijklmnopqrstuvwxyz' | head -c 1048576; "
                 'printf done > "$3";; esac; '
                 'printf "[%s]\\n" "$line"; '
                 'printf "%s\\n" "$line" >> "$1"; done'
@@ -711,12 +731,13 @@ class NativeTerminalTest(unittest.TestCase):
                  "-c", script, "sh", str(received), str(sizes), str(drained)],
                 env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
             )
+            second_process = None
 
             def windows(count):
                 deadline = time.monotonic() + 5
                 while time.monotonic() < deadline:
                     found = subprocess.run(
-                        ["xdotool", "search", "--onlyvisible", "--name", title],
+                        ["xdotool", "search", "--onlyvisible", "--class", "Worminal"],
                         env=env, capture_output=True, text=True,
                     )
                     ids = found.stdout.splitlines() if found.returncode == 0 else []
@@ -739,7 +760,10 @@ class NativeTerminalTest(unittest.TestCase):
                     if received.exists() and value in received.read_text().splitlines():
                         return
                     time.sleep(.05)
-                self.fail(f"Input {value!r} did not reach the shared shell")
+                self.fail(f"Input {value!r} did not reach the shared shell: "
+                          f"received={received.read_text() if received.exists() else None!r}, "
+                          f"drained={drained.read_text() if drained.exists() else None!r}, "
+                          f"clients={[owner.poll(), second_process.poll()]}")
 
             def image_hash(window):
                 return window_hash(env, window)
@@ -761,21 +785,33 @@ class NativeTerminalTest(unittest.TestCase):
 
             try:
                 first = windows(1)[0]
-                subprocess.run([str(ROOT / "worminal")], env=env,
-                               capture_output=True, check=True, timeout=5)
+                second_process = subprocess.Popen([str(ROOT / "worminal")], env=env,
+                                                  stdout=subprocess.DEVNULL,
+                                                  stderr=subprocess.PIPE)
                 deadline = time.monotonic() + 5
                 second = None
                 while time.monotonic() < deadline and second is None:
                     found = subprocess.run(
-                        ["xdotool", "search", "--onlyvisible", "--pid", str(owner.pid)],
+                        ["xdotool", "search", "--onlyvisible", "--pid", str(second_process.pid)],
                         env=env, capture_output=True, text=True)
                     second = next((window for window in found.stdout.splitlines()
                                    if window != first), None)
                     if second is None:
                         time.sleep(.05)
                 self.assertIsNotNone(second, "second shared window did not map")
-                focus(second)
-                subprocess.run(["xdotool", "key", "ctrl+1"], env=env, check=True)
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline:
+                    focus(second)
+                    subprocess.run(["xdotool", "key", "ctrl+1"], env=env, check=True)
+                    name = subprocess.check_output(
+                        ["xdotool", "getwindowname", second], env=env, text=True).strip()
+                    if name == title:
+                        break
+                    time.sleep(.05)
+                else:
+                    first_name = subprocess.check_output(
+                        ["xdotool", "getwindowname", first], env=env, text=True).strip()
+                    self.fail(f"second view never selected first tab: first={first_name!r}, second={name!r}")
                 self.assertEqual(set(windows(2)), {first, second})
                 if os.environ.get("WORMINAL_PROOF_PRIVATE_DISPLAY"):
                     for window, x in ((first, "20"), (second, "380")):
@@ -832,33 +868,29 @@ class NativeTerminalTest(unittest.TestCase):
                                     "inactive view did not catch up after bulk output")
                 subprocess.run(["xdotool", "windowclose", first], env=env, check=True)
                 self.assertEqual(windows(1), [second], "first view did not close")
-                self.assertIsNone(owner.poll(), "first close ended the shared owner")
+                owner.wait(timeout=3)
+                self.assertEqual(owner.returncode, 0)
                 focus(second)
                 typed("gamma")
                 self.assertEqual(received.read_text().splitlines(),
                                  ["alpha", "beta", "size", "size", "size",
                                   "alt", "leave", "bulk", "gamma"])
                 subprocess.run(["xdotool", "windowclose", second], env=env, check=True)
-                try:
-                    owner.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    visible = subprocess.run(
-                        ["xdotool", "search", "--onlyvisible", "--name", title],
-                        env=env, capture_output=True, text=True,
-                    )
-                    ready, _, _ = select.select([owner.stderr], [], [], 0)
-                    trace = os.read(owner.stderr.fileno(), 4096).decode() if ready else ""
-                    self.fail(f"Owner remained after last close; windows={visible.stdout!r}, trace={trace!r}")
+                owner.wait(timeout=3)
                 self.assertEqual(owner.returncode, 0)
+                second_process.wait(timeout=3)
+                self.assertEqual(second_process.returncode, 0)
             finally:
-                if owner.poll() is None:
-                    owner.terminate()
-                owner.wait(timeout=2)
-                owner.stderr.close()
+                for process in (owner, second_process):
+                    if process is not None:
+                        if process.poll() is None:
+                            process.terminate()
+                        process.wait(timeout=2)
+                        process.stderr.close()
                 received.unlink(missing_ok=True)
                 sizes.unlink(missing_ok=True)
                 drained.unlink(missing_ok=True)
-
+                subprocess.run([str(ROOT / "worminald"), "--stop"], env=env, check=True)
     def test_view_contexts_draw_independently(self):
         with isolated_display() as env:
             subprocess.run([str(ROOT / ".checks/view_state_test")], env=env, check=True)

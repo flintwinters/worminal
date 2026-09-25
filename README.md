@@ -29,10 +29,16 @@ avoid Python startup time.
 
 ## Shared tabs
 
-Every `./worminal` launch joins the owner for the same executable build, user,
-and X11 `DISPLAY`, opening a new window on a new tab. Rebuilding starts a new
-owner on the next launch; existing windows and tabs keep running in the old
-owner until closed. Each owner has its own tab list. Every
+`worminal` connects to a per-user `worminald` service on the local machine.
+The service owns ordered tabs, terminal state, and PTYs; X11 windows are views
+that can attach from different displays. It starts on demand and keeps tabs
+running after the last window closes. `worminald --stop` ends the service and
+its tabs (`ssh user@host worminald --stop` for a remote master). Each launch
+opens a new window and tab. `worminal --master user@host`
+uses SSH to attach to a service on another machine, where `worminald` must be
+in the account's PATH. Windows using the same master share its tab list.
+Tabs run on the master; use ordinary `ssh` inside a tab to run a shell on a
+further machine. That machine needs only SSH. Every
 window shows that list above the terminal and selects a tab independently. Each
 label shows the final segment of its tab's working directory. The selected
 label is reversed; click a label to select it. Ctrl+T creates a tab,
@@ -43,14 +49,13 @@ opens a new window and tab.
 
 The focused or input-receiving window paints its selected tab. Other windows
 selecting that tab keep their terminal pixels until they become live; tab-line
-changes still appear. A tab keeps running without a selected window while any
-Worminal window remains. Closing the final window ends the owner and all tabs.
+changes still appear. A tab keeps running without a selected window, including
+when no windows are open.
 Scrollback belongs to the tab, so switching windows preserves its position.
 The former `-S` and `-A` prototype flags are retired. Launch options, command,
 working directory, and environment are forwarded to the new shell.
 
-The [shared-tab design and proof ledger](docs/shared-tabs.md) records the state
-and limits of the X11 proofs.
+The [shared-tab proof ledger](docs/shared-tabs.md) records earlier X11 proofs.
 
 Supported color settings are primary foreground/background, normal, bright,
 explicit dim and indexed colors, cursor colors, and
@@ -92,7 +97,7 @@ display, so no windows or keystrokes reach your desktop. Checks and benchmarks
 need `Xvfb`, `xdotool`, and the XTest development library (`libxtst-dev` on
 Debian). The `/bin/cat` probe excludes shell startup; both exclude Xvfb startup.
 Worminal advertises `xterm-256color` so applications such as micro recognize
-modified Home and End keys. `make install` installs the binary.
+modified Home and End keys. `make install` installs both binaries.
 It also installs a desktop launcher and scalable icon showing a light pink
 tilde on a black circle. The same icon is embedded in the X11 window for panels;
 run `python3 manage.py icon` after editing `worminal.svg` to regenerate the

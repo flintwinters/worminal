@@ -21,7 +21,8 @@ from x11 import isolated_display
 ROOT = Path(__file__).resolve().parent.parent
 TRIALS = 20
 TIMEOUT = 5
-PHASES = ("main", "display", "pty", "map-request", "fontconfig", "font", "map-observed", "resize", "key", "echo")
+PHASES = ("main", "workspace", "display", "map-request", "fontconfig", "font",
+          "map-observed", "resize", "key", "echo")
 SHELL_MARKER = b"__WORMINAL_SHELL_READY__"
 
 
