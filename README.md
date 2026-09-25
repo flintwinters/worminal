@@ -74,7 +74,8 @@ Alacritty's `font.normal.family` selects the Xft font family when present;
 `-f` overrides it for one launch. `font.size` sets the Xft font's point size,
 and `font.offset.y` adds to its cell height; negative offsets make rows more
 compact. `font.glyph_offset.y` moves glyphs relative to the grid cells; cursor and
-selection backgrounds stay in the cells.
+selection backgrounds stay in the cells. Glyphs start at the cell bottom before
+the configured glyph offset is applied.
 Changing font size or window width reflows main-screen text and scrollback at
 soft wraps. Alternate-screen applications receive the new grid size and draw
 their own content.
