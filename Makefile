@@ -3,7 +3,7 @@
 
 include config.mk
 
-SRC = st.c x.c session_view.c wire.c workspace_socket.c workspace_client.c workspace_service.c
+SRC = st.c x.c session_view.c url.c wire.c workspace_socket.c workspace_client.c workspace_service.c
 COMMON_OBJ = st.o session_view.o wire.o workspace_socket.o
 OBJ = $(SRC:.c=.o)
 CLANG_TIDY = clang-tidy
@@ -16,7 +16,8 @@ all: worminal worminald
 	$(CC) $(STCFLAGS) -c $<
 
 st.o: config.h .checks/theme.h st.h st_state.h win.h
-x.o: arg.h config.h icon.h .checks/theme.h st.h win.h
+x.o: arg.h config.h icon.h .checks/theme.h st.h win.h url.h
+url.o: url.h st.h
 session_view.o: session_view.h st_state.h st.h
 workspace_service.o: .checks/theme.h session_view.h wire.h workspace_socket.h
 
@@ -25,8 +26,8 @@ workspace_service.o: .checks/theme.h session_view.h wire.h workspace_socket.h
 
 $(OBJ): config.mk
 
-worminal: $(COMMON_OBJ) workspace_client.o x.o
-	$(CC) -o $@ $(COMMON_OBJ) workspace_client.o x.o $(STLDFLAGS)
+worminal: $(COMMON_OBJ) workspace_client.o x.o url.o
+	$(CC) -o $@ $(COMMON_OBJ) workspace_client.o x.o url.o $(STLDFLAGS)
 
 worminald: $(COMMON_OBJ) workspace_service.o
 	$(CC) -o $@ $(COMMON_OBJ) workspace_service.o $(STLDFLAGS)
@@ -47,13 +48,17 @@ lint: .checks/theme.h
 	$(CC) -O1 -g -fsanitize=address,undefined -ffunction-sections -fdata-sections \
 		$(STCPPFLAGS) -Wl,--gc-sections -o $@ $< -lm
 
+.checks/url_test: tests/url.c url.c url.h st.h
+	mkdir -p .checks
+	$(CC) -O1 -g -fsanitize=address,undefined -o $@ tests/url.c url.c
+
 $(COMPACT_HEADER): $(COMPACT_THEME) tools/theme.py
 	python3 -c 'from tools.theme import generate_theme; generate_theme("$(COMPACT_THEME)", "$(COMPACT_HEADER)")'
 
 .checks/compact-worminal: st.c x.c session_view.c wire.c workspace_socket.c workspace_client.c \
-		st.h win.h config.h icon.h $(COMPACT_HEADER) .checks/worminald
+		url.c url.h st.h win.h config.h icon.h $(COMPACT_HEADER) .checks/worminald
 	$(CC) $(STCFLAGS) '-DWORMINAL_THEME_HEADER="$(COMPACT_HEADER)"' -o $@ \
-		st.c x.c session_view.c wire.c workspace_socket.c workspace_client.c $(STLDFLAGS)
+		st.c x.c session_view.c url.c wire.c workspace_socket.c workspace_client.c $(STLDFLAGS)
 
 .checks/worminald: st.c session_view.c wire.c workspace_socket.c workspace_service.c $(COMPACT_HEADER)
 	$(CC) $(STCFLAGS) '-DWORMINAL_THEME_HEADER="$(COMPACT_HEADER)"' -o $@ \
@@ -68,15 +73,15 @@ $(COMPACT_HEADER): $(COMPACT_THEME) tools/theme.py
 .checks/icon_probe: tests/icon_probe.c
 	$(CC) -O2 -o $@ $< `$(PKG_CONFIG) --cflags --libs x11`
 
-.checks/view_state_test: tests/view_state.c x.c wire.c workspace_socket.c workspace_client.c \
+.checks/view_state_test: tests/view_state.c x.c url.c wire.c workspace_socket.c workspace_client.c \
 		config.h icon.h .checks/theme.h
 	$(CC) $(STCFLAGS) -ffunction-sections -fdata-sections -Wl,--gc-sections \
-		-o $@ $< wire.c workspace_socket.c workspace_client.c $(STLDFLAGS) `$(PKG_CONFIG) --libs xtst`
+		-o $@ $< url.c wire.c workspace_socket.c workspace_client.c $(STLDFLAGS) `$(PKG_CONFIG) --libs xtst`
 
 clean:
 	rm -f worminal worminald $(OBJ) .checks/theme.h .checks/key_injector .checks/placement_wm \
 		.checks/scrollback_test $(COMPACT_HEADER) .checks/compact-worminal .checks/worminald \
-		.checks/overlap_probe .checks/border_probe .checks/icon_probe .checks/view_state_test
+		.checks/overlap_probe .checks/border_probe .checks/icon_probe .checks/view_state_test .checks/url_test
 
 install: worminal worminald
 	mkdir -p $(DESTDIR)$(PREFIX)/bin
