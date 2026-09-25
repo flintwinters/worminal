@@ -1,8 +1,11 @@
 [font]
-size = 9
+size = 12
+
+[font.normal]
+family = "Input Mono Condensed"
 
 [font.offset]
-y = -3
+y = -7
 
 [font.glyph_offset]
 y = -4

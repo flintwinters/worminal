@@ -21,6 +21,11 @@ from latency import measure_one
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def alignment_display():
+    return (nullcontext(os.environ.copy())
+            if os.environ.get("WORMINAL_PROOF_PRIVATE_DISPLAY") else isolated_display())
+
+
 def focus_window(env, window):
     if env.get("WORMINAL_PROOF_PRIVATE_DISPLAY"):
         subprocess.run(["xdotool", "windowactivate", "--sync", window],
@@ -207,10 +212,71 @@ def smoke_x11(env):
 
 
 class NativeTerminalTest(unittest.TestCase):
+    def test_zoom_compact_glyph_stays_in_cursor_cell(self):
+        with alignment_display() as env:
+            title = f"Worminal glyph alignment {os.getpid()}"
+            scoped = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"glyph-{os.getpid()}"}
+            process = subprocess.Popen(
+                [str(ROOT / ".checks/compact-worminal"), "-T", title,
+                 "-g", "10x4", "-e", "/bin/sh", "-c",
+                 "printf '\\033[?25l\\033[2;3HH'; sleep 30"],
+                env=scoped, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            )
+            try:
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    result = subprocess.run(
+                        ["xdotool", "search", "--onlyvisible", "--name", title],
+                        env=scoped, capture_output=True, text=True)
+                    if result.returncode == 0:
+                        window = result.stdout.splitlines()[0]
+                        break
+                    time.sleep(0.05)
+                else:
+                    self.fail("Glyph alignment window did not appear")
+                focus_window(scoped, window)
+                offsets = []
+                for step in range(4):
+                    if step:
+                        subprocess.run(["xdotool", "key", "ctrl+shift+plus"],
+                                       env=scoped, check=True)
+                    hints = subprocess.check_output(
+                        ["xprop", "-id", window, "WM_NORMAL_HINTS"],
+                        env=scoped, text=True)
+                    match = re.search(r"resize increment: (\d+) by (\d+)", hints)
+                    self.assertIsNotNone(match, hints)
+                    cw, ch = map(int, match.groups())
+                    top = 2 + 2 * ch
+                    deadline = time.monotonic() + 3
+                    while time.monotonic() < deadline:
+                        image = subprocess.check_output(
+                            ["xwd", "-id", window, "-silent"], env=scoped)
+                        header = struct.unpack(">25I", image[:100])
+                        offset = header[0] + header[19] * 12
+                        pixel_size, stride = header[11] // 8, header[12]
+
+                        def pixel(x, y):
+                            start = offset + y * stride + x * pixel_size
+                            return image[start:start + pixel_size]
+
+                        ink = [y for y in range(top - ch, min(header[5] - 2, top + 2 * ch))
+                               if any(pixel(x, y) != pixel(2 + 5 * cw, y)
+                                      for x in range(2 + 2 * cw, 2 + 3 * cw))]
+                        if ink:
+                            break
+                        time.sleep(0.05)
+                    self.assertTrue(ink, f"Glyph missing after zoom step {step}")
+                    center = (ink[0] + ink[-1]) / 2
+                    offsets.append((step, ch, ink[0], ink[-1], center - (top + ch / 2)))
+                self.assertTrue(all(abs(offset[-1]) < offset[1] / 4 for offset in offsets),
+                                f"Glyph centers relative to cells: {offsets}")
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                process.communicate(timeout=2)
+
     def test_zoom_cursor_stays_in_cell(self):
-        display = (nullcontext(os.environ.copy())
-                   if os.environ.get("WORMINAL_PROOF_PRIVATE_DISPLAY") else isolated_display())
-        with display as env:
+        with alignment_display() as env:
             for style in (2, 6):
                 with self.subTest(style=style):
                     scoped = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"cursor-{os.getpid()}-{style}"}
