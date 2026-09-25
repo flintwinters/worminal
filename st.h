@@ -114,6 +114,7 @@ void toggleprinter(const Arg *);
 int tattrset(int);
 void tnew(int, int);
 void tresize(int, int);
+void tsetdirt(int, int);
 void tsetdirtattr(int);
 void ttyhangup(void);
 void ttysetlaunch(const char *, char **, const char *);

@@ -197,6 +197,7 @@ static int mouseaction(XEvent *, uint);
 static void brelease(XEvent *);
 static void bpress(XEvent *);
 static void bmotion(XEvent *);
+static void leave(XEvent *);
 static void propnotify(XEvent *);
 static void selnotify(XEvent *);
 static void selclear_(XEvent *);
@@ -221,6 +222,7 @@ static void (*handler[LASTEvent])(XEvent *) = {
 	[FocusIn] = focus,
 	[FocusOut] = focus,
 	[MotionNotify] = bmotion,
+	[LeaveNotify] = leave,
 	[ButtonPress] = bpress,
 	[ButtonRelease] = brelease,
 /*
@@ -266,6 +268,8 @@ typedef struct XView {
 	uint buttons;
 	char *url_click;
 	int url_col, url_row;
+	UrlSpan hover;
+	int hover_active, hover_inside, hover_col, hover_row;
 	int live;
 	struct XView *next;
 } XView;
@@ -704,16 +708,45 @@ mouseaction(XEvent *e, uint release)
 }
 
 static char *
-xurlat(int col, int row)
+xurlat(int col, int row, UrlSpan *span)
 {
 	SessionFrame frame = tsessionframe(view->terminal);
 	Line *lines = xmalloc(frame.rows * sizeof(*lines));
 	char *url;
 	for (int y = 0; y < frame.rows; y++)
 		lines[y] = tsessionviewline(view->terminal, y);
-	url = urlat(lines, frame.rows, frame.cols, col, row);
+	url = urlat(lines, frame.rows, frame.cols, col, row, span);
 	free(lines);
 	return url;
+}
+
+static void
+xclearhover(void)
+{
+	if (!view->hover_active)
+		return;
+	tsetdirt(view->hover.start_y, view->hover.end_y);
+	view->hover_active = 0;
+}
+
+static void
+xupdatehover(void)
+{
+	UrlSpan span;
+	char *url = view->hover_inside ? xurlat(view->hover_col, view->hover_row, &span) : NULL;
+	if (url && view->hover_active &&
+	    span.start_x == view->hover.start_x && span.start_y == view->hover.start_y &&
+	    span.end_x == view->hover.end_x && span.end_y == view->hover.end_y) {
+		free(url);
+		return;
+	}
+	xclearhover();
+	if (url) {
+		view->hover = span;
+		view->hover_active = 1;
+		tsetdirt(span.start_y, span.end_y);
+		free(url);
+	}
 }
 
 void
@@ -748,7 +781,7 @@ bpress(XEvent *e)
 		buttons |= 1 << (btn-1);
 	if (btn == Button1 && (e->xbutton.state & ControlMask) &&
 	    !(e->xbutton.state & ShiftMask) &&
-	    (view->url_click = xurlat(evcol(e), evrow(e)))) {
+	    (view->url_click = xurlat(evcol(e), evrow(e), NULL))) {
 		view->url_col = evcol(e);
 		view->url_row = evrow(e);
 		return;
@@ -1012,6 +1045,15 @@ brelease(XEvent *e)
 void
 bmotion(XEvent *e)
 {
+	view->hover_inside = e->xmotion.x >= borderpx &&
+			e->xmotion.x < borderpx + current_window.tw &&
+			e->xmotion.y >= borderpx + current_window.ch &&
+			e->xmotion.y < borderpx + current_window.ch + current_window.th;
+	if (view->hover_inside) {
+		view->hover_col = evcol(e);
+		view->hover_row = evrow(e);
+	}
+	xupdatehover();
 	if (view->url_click)
 		return;
 	if (IS_SET(MODE_MOUSE) && !(e->xbutton.state & forcemousemod)) {
@@ -1020,6 +1062,14 @@ bmotion(XEvent *e)
 	}
 
 	mousesel(e, 0);
+}
+
+static void
+leave(XEvent *e)
+{
+	(void)e;
+	view->hover_inside = 0;
+	xclearhover();
 }
 
 void
@@ -1616,7 +1666,7 @@ xinitview(int cols, int rows, int first, int spawnpty)
 	xw.attrs.bit_gravity = NorthWestGravity;
 	xw.attrs.event_mask = FocusChangeMask | KeyPressMask | KeyReleaseMask
 		| ExposureMask | VisibilityChangeMask | StructureNotifyMask
-		| ButtonMotionMask | ButtonPressMask | ButtonReleaseMask;
+		| PointerMotionMask | LeaveWindowMask | ButtonPressMask | ButtonReleaseMask;
 	xw.attrs.colormap = xw.cmap;
 	xw.win = XCreateWindow(xw.dpy, root, xw.l, xw.t,
 			cols * 8 + 2 * borderpx, (rows + 1) * 16 + 2 * borderpx,
@@ -1831,15 +1881,14 @@ xselecttab(Tab *tab)
 		workspace_focus();
 		return;
 	}
+	xclearhover();
 	view->live = 0;
 	view->terminal = tab->terminal;
 	tsessionuse(tab->terminal);
+	xupdatehover();
 	current_window.mode = (current_window.mode & (MODE_VISIBLE | MODE_FOCUSED)) |
 	                      tab->mode | MODE_NUMLOCK;
 	current_window.cursor = tab->cursor;
-	MODBIT(xw.attrs.event_mask, tab->mode & MODE_MOUSEMANY,
-	       PointerMotionMask);
-	XChangeWindowAttributes(xw.dpy, xw.win, CWEventMask, &xw.attrs);
 	xloadcolsone();
 	char *title = xstrdup(tab->title);
 	xsettitle(title);
@@ -2601,6 +2650,16 @@ workspace_message(WirePacket *packet)
 		;
 	if (!tab)
 		return;
+	if (packet->type == WIRE_FRAME_FINISH) {
+		XView *previous = view;
+		for (XView *candidate = views; candidate; candidate = candidate->next)
+			if (candidate->terminal == tab->terminal && candidate->hover_inside) {
+				xsetview(candidate);
+				xupdatehover();
+			}
+		xsetview(previous);
+		return;
+	}
 	if (packet->type == WIRE_RELEASE) {
 		for (XView *candidate = views; candidate; candidate = candidate->next)
 			if (candidate->terminal == tab->terminal)
@@ -2708,6 +2767,10 @@ xdrawline(Line line, int x1, int y1, int x2, int pass)
 		new = line[x];
 		if (new.mode == ATTR_WDUMMY)
 			continue;
+		if (view->hover_active && y1 >= view->hover.start_y && y1 <= view->hover.end_y &&
+		    (y1 != view->hover.start_y || x >= view->hover.start_x) &&
+		    (y1 != view->hover.end_y || x <= view->hover.end_x))
+			new.mode |= ATTR_UNDERLINE;
 		if (selected(x, y1))
 			new.mode ^= ATTR_REVERSE;
 		if (i > 0 && ATTRCMP(base, new)) {
@@ -2774,6 +2837,8 @@ void
 unmap(XEvent *ev)
 {
 	current_window.mode &= ~MODE_VISIBLE;
+	view->hover_inside = 0;
+	xclearhover();
 	Tab *tab = xtabfor(view->terminal);
 	if (tab && tab->id && view->live)
 		wire_write(workspacefd, WIRE_RELEASE, tab->id, NULL, 0);
@@ -2788,17 +2853,8 @@ destroy(XEvent *ev)
 void
 xsetpointermotion(int set)
 {
-	TermSession *terminal = tsessioncurrent();
-	XView *previous = view, *candidate;
-	for (candidate = views; candidate; candidate = candidate->next) {
-		if (candidate->terminal != terminal)
-			continue;
-		xsetview(candidate);
-		MODBIT(xw.attrs.event_mask, set, PointerMotionMask);
-		XChangeWindowAttributes(xw.dpy, xw.win, CWEventMask, &xw.attrs);
-	}
-	xsetview(previous);
-	tsessionuse(terminal);
+	/* Hover needs motion events even when applications disable mouse reporting. */
+	(void)set;
 }
 
 void
