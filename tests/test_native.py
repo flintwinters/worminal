@@ -4,6 +4,7 @@ from contextlib import nullcontext
 import os
 import pty
 import hashlib
+import re
 from pathlib import Path
 import select
 import shutil
@@ -204,6 +205,60 @@ def smoke_x11(env):
 
 
 class NativeTerminalTest(unittest.TestCase):
+    def test_font_size_shortcuts(self):
+        with isolated_display() as env:
+            title = f"Worminal zoom {os.getpid()}"
+            process = subprocess.Popen(
+                [str(ROOT / "worminal"), "-T", title, "-e", "/bin/cat"],
+                env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            )
+            try:
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    result = subprocess.run(
+                        ["xdotool", "search", "--onlyvisible", "--name", title],
+                        env=env, capture_output=True, text=True,
+                    )
+                    if result.returncode == 0:
+                        window = result.stdout.splitlines()[0]
+                        break
+                    time.sleep(0.05)
+                else:
+                    self.fail("Zoom test window did not appear")
+
+                focus_window(env, window)
+
+                def increment():
+                    hints = subprocess.check_output(
+                        ["xprop", "-id", window, "WM_NORMAL_HINTS"], env=env,
+                        text=True,
+                    )
+                    match = re.search(r"resize increment: (\d+) by (\d+)", hints)
+                    self.assertIsNotNone(match, hints)
+                    return tuple(map(int, match.groups()))
+
+                def wait_for_change(previous):
+                    deadline = time.monotonic() + 3
+                    while time.monotonic() < deadline:
+                        current = increment()
+                        if current != previous:
+                            return current
+                        time.sleep(0.02)
+                    self.fail(f"Font size did not change from {previous}")
+
+                original = increment()
+                subprocess.run(["xdotool", "key", "ctrl+shift+plus"], env=env, check=True)
+                larger = wait_for_change(original)
+                self.assertGreater(larger[1], original[1])
+                subprocess.run(["xdotool", "key", "ctrl+minus"], env=env, check=True)
+                self.assertEqual(wait_for_change(larger), original)
+                subprocess.run(["xdotool", "key", "ctrl+equal"], env=env, check=True)
+                self.assertEqual(wait_for_change(original), larger)
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                process.communicate(timeout=5)
+
     def test_new_executable_keeps_old_owner_tabs(self):
         with isolated_display() as env:
             env = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"build-{os.getpid()}"}
