@@ -12,6 +12,7 @@ import signal
 import struct
 import subprocess
 import time
+import tomllib
 import unittest
 
 from x11 import isolated_display
@@ -205,6 +206,61 @@ def smoke_x11(env):
 
 
 class NativeTerminalTest(unittest.TestCase):
+    def test_cursor_tracks_glyph_offset(self):
+        compact = tomllib.loads((ROOT / "tests/fixtures/alacritty/compact.toml").read_text())
+        shift = -compact["font"]["glyph_offset"]["y"]
+        with isolated_display() as env:
+            for style in (2, 6):
+                with self.subTest(style=style):
+                    scoped = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"cursor-{os.getpid()}-{style}"}
+                    title = f"Worminal cursor {os.getpid()} {style}"
+                    process = subprocess.Popen(
+                        [str(ROOT / ".checks/compact-worminal"), "-T", title,
+                         "-g", "10x2", "-e", "/bin/sh", "-c",
+                         f"printf '\\033[{style} q'; sleep 10"],
+                        env=scoped, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                    )
+                    try:
+                        deadline = time.monotonic() + 5
+                        while time.monotonic() < deadline:
+                            result = subprocess.run(
+                                ["xdotool", "search", "--onlyvisible", "--name", title],
+                                env=scoped, capture_output=True, text=True,
+                            )
+                            if result.returncode == 0:
+                                window = result.stdout.splitlines()[0]
+                                break
+                            time.sleep(0.05)
+                        else:
+                            self.fail("Cursor test window did not appear")
+                        focus_window(scoped, window)
+                        deadline = time.monotonic() + 3
+                        while time.monotonic() < deadline:
+                            image = subprocess.check_output(
+                                ["xwd", "-id", window, "-silent"], env=scoped)
+                            header = struct.unpack(">25I", image[:100])
+                            offset = header[0] + header[19] * 12
+                            pixel_size, stride = header[11] // 8, header[12]
+                            cell_height = (header[5] - 4) // 3
+                            cell_width = (header[4] - 4) // 10
+                            top = 2 + cell_height
+
+                            def pixel(x, y):
+                                start = offset + y * stride + x * pixel_size
+                                return image[start:start + pixel_size]
+
+                            background = pixel(2 + cell_width + 1, top)
+                            if (pixel(2, top) == background and
+                                    pixel(2, top + shift) != background):
+                                break
+                            time.sleep(0.05)
+                        else:
+                            self.fail("Cursor stayed at the unshifted row origin")
+                    finally:
+                        if process.poll() is None:
+                            process.terminate()
+                        process.communicate(timeout=2)
+
     def test_font_size_shortcuts(self):
         with isolated_display() as env:
             title = f"Worminal zoom {os.getpid()}"
