@@ -150,6 +150,13 @@ def cinnamon():
     raise typer.Exit(run_proof_script(ROOT / "tests/proof_cinnamon.py"))
 
 
+@proof_app.command()
+def qtile():
+    """Check zoom cell alignment under private Qtile."""
+    prepare(".checks/compact-worminal")
+    raise typer.Exit(run_proof_script(ROOT / "tests/proof_qtile.py"))
+
+
 if __name__ == "__main__":
     try:
         app()

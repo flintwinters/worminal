@@ -155,6 +155,7 @@ static int xmakeglyphfontspecs(XftGlyphFontSpec *, const Glyph *, int, int, int)
 static void xdrawglyphfontspecs(const XftGlyphFontSpec *, Glyph, int, int, int, int);
 static void xdrawglyph(Glyph, int, int);
 static void xclear(int, int, int, int);
+static int xcelltop(int);
 static int xgeommasktogravity(int);
 static int ximopen(Display *);
 static void ximinstantiate(Display *, XPointer, XPointer);
@@ -622,7 +623,7 @@ evcol(XEvent *e)
 int
 evrow(XEvent *e)
 {
-	int y = e->xbutton.y - borderpx - current_window.ch;
+	int y = e->xbutton.y - xcelltop(0);
 	LIMIT(y, 0, current_window.th - 1);
 	return y / current_window.ch;
 }
@@ -2127,6 +2128,7 @@ xremoveview(int destroyed)
 static int
 xcelltop(int y)
 {
+	/* Shared grid origin for painting, cursor, and mouse hit testing. */
 	return borderpx + (y + 1) * current_window.ch;
 }
 
