@@ -223,7 +223,7 @@ main(void)
 {
 	const struct { const char *path, *label; } cases[] = {
 		{"/home/felix/projects/worminal/", "worminal"},
-		{"/home/felix/projects/.checks", ".checks"},
+		{"/home/felix/projects/build", "build"},
 		{"/", "/"},
 	};
 	Display *display = XOpenDisplay(NULL);

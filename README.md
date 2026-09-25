@@ -31,7 +31,7 @@ The source tree is grouped by responsibility: `src/terminal` owns terminal
 state, `src/x11` owns windows and rendering, and `src/workspace` owns the
 service and wire protocol. Build configuration is in `src/config.h` and
 `config.mk`; desktop files and terminfo are in `assets`. The root `manage.py`
-is the entrypoint for builds and checks, with generated files under `.checks`.
+is the entrypoint for builds and checks, with generated files under `build`.
 
 ## Shared tabs
 

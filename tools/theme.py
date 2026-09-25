@@ -10,7 +10,7 @@ import tomllib
 
 
 ROOT = Path(__file__).resolve().parent.parent
-OUTPUT = ROOT / ".checks" / "theme.h"
+OUTPUT = ROOT / "build" / "theme.h"
 NAMES = ("black", "red", "green", "yellow", "blue", "magenta", "cyan", "white")
 DEFAULTS = {
     "primary": {"foreground": "#d8d8d8", "background": "#181818"},

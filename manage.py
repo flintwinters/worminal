@@ -77,15 +77,15 @@ def check_file_limits():
 
 
 def run_checks():
-    prepare(".checks/key_injector", ".checks/placement_wm",
-            ".checks/compact-worminal", ".checks/overlap_probe",
-            ".checks/border_probe", ".checks/icon_probe",
-            ".checks/view_state_test", ".checks/scrollback_test", ".checks/url_test")
-    code = run([".checks/scrollback_test"],
+    prepare("build/key_injector", "build/placement_wm",
+            "build/compact-worminal", "build/overlap_probe",
+            "build/border_probe", "build/icon_probe",
+            "build/view_state_test", "build/scrollback_test", "build/url_test")
+    code = run(["build/scrollback_test"],
                env={**os.environ, "ASAN_OPTIONS": "detect_leaks=0"})
     if code:
         return code
-    code = run([".checks/url_test"],
+    code = run(["build/url_test"],
                env={**os.environ, "ASAN_OPTIONS": "detect_leaks=0"})
     if code:
         return code
@@ -134,14 +134,14 @@ def icon():
 @app.command()
 def latency():
     """Measure launch to usable input with /bin/cat on private Xvfb."""
-    prepare(".checks/key_injector")
+    prepare("build/key_injector")
     raise typer.Exit(run([sys.executable, "tests/latency.py"]))
 
 
 @app.command("latency-shell")
 def latency_shell():
     """Measure when the interactive shell receives early input."""
-    prepare(".checks/key_injector")
+    prepare("build/key_injector")
     raise typer.Exit(run([sys.executable, "tests/latency.py", "--shell"]))
 
 
@@ -179,14 +179,14 @@ def proof(ctx: typer.Context):
 @proof_app.command()
 def plasma():
     """Prove shared views and tabs under isolated KWin."""
-    prepare(".checks/view_state_test")
+    prepare("build/view_state_test")
     raise typer.Exit(run_proof_script(ROOT / "tests/proof_plasma.py"))
 
 
 @proof_app.command()
 def cinnamon():
     """Prove shared views and tabs under remote Cinnamon on private Xvfb."""
-    prepare(".checks/view_state_test")
+    prepare("build/view_state_test")
     raise typer.Exit(run_proof_script(ROOT / "tests/proof_cinnamon.py"))
 
 
