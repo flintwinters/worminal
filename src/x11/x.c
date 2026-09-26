@@ -854,8 +854,14 @@ selnotify(XEvent *e)
 	else if (e->type == PropertyNotify)
 		property = e->xproperty.atom;
 
-	if (property == None)
+	if (property == None) {
+		if (e->type == SelectionNotify &&
+		    e->xselection.target == xsel.xtarget &&
+		    xsel.xtarget != XA_STRING)
+			XConvertSelection(xw.dpy, e->xselection.selection, XA_STRING,
+			                  e->xselection.selection, xw.win, CurrentTime);
 		return;
+	}
 
 	do {
 		if (XGetWindowProperty(xw.dpy, xw.win, property, ofs,
