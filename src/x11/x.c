@@ -27,6 +27,10 @@ char *argv0;
 #include "arg.h"
 #include "st.h"
 #include "win.h"
+#include "session_view.h"
+#include "url.h"
+#include "wire.h"
+#include "workspace_client.h"
 
 /* types used in config.h */
 typedef struct {
@@ -102,6 +106,7 @@ typedef struct {
 	Window win;
 	Drawable buf;
 	GlyphFontSpec *specbuf; /* font spec buffer used for rendering */
+	int spec_cols;
 	Atom xembed, wmdeletewin, netwmname, netwmiconname, netwmpid;
 	struct {
 		XIC xic;
@@ -193,6 +198,7 @@ static int mouseaction(XEvent *, uint);
 static void brelease(XEvent *);
 static void bpress(XEvent *);
 static void bmotion(XEvent *);
+static void leave(XEvent *);
 static void propnotify(XEvent *);
 static void selnotify(XEvent *);
 static void selclear_(XEvent *);
@@ -217,6 +223,7 @@ static void (*handler[LASTEvent])(XEvent *) = {
 	[FocusIn] = focus,
 	[FocusOut] = focus,
 	[MotionNotify] = bmotion,
+	[LeaveNotify] = leave,
 	[ButtonPress] = bpress,
 	[ButtonRelease] = brelease,
 /*
@@ -261,11 +268,16 @@ typedef struct XView {
 	double font_size, default_font_size;
 	int use_theme_font_family;
 	uint buttons;
+	char *url_click;
+	int url_col, url_row;
+	UrlSpan hover;
+	int hover_active, hover_inside, hover_col, hover_row;
 	int live;
 	struct XView *next;
 } XView;
 
 typedef struct Tab {
+	uint32_t id;
 	TermSession *terminal;
 	char *title;
 	char *initial_title;
@@ -352,7 +364,10 @@ static char *opt_io    = NULL;
 static char *opt_line  = NULL;
 static char *opt_name  = NULL;
 static char *opt_title = NULL;
-static int sharedserver = -1;
+static int workspacefd = -1;
+static const char *master_target;
+static XView *pending_view;
+static int pending_new_tab;
 static int launch_argc;
 static const char *requested_cwd;
 static char **requested_env;
@@ -362,19 +377,12 @@ static int requested_fixed;
 static int requested_allowalt = 1;
 static char launch_windowid[32];
 extern char **environ;
-#define LAUNCH_MAGIC 0x574f524dU
-#define LAUNCH_LIMIT (1024 * 1024)
-typedef struct {
-	uint32_t magic, version, bytes, argc, envc, flags;
-	int32_t cols, rows, x, y, gm;
-} LaunchHeader;
 static Window initializing_window;
 static int initializing_window_gone;
 static int (*previous_xerror)(Display *, XErrorEvent *);
 static Tab *xtabfor(TermSession *);
 static void xdrawtabs(void);
 static void xrefreshtabs(void);
-static int xupdatedirectory(Tab *);
 static Tab *xfirsttab(void);
 static int xtabwidth(Tab *);
 static void xselecttab(Tab *);
@@ -382,66 +390,9 @@ static Tab *xtabslot(int);
 static void xclosetab(Tab *);
 static void xaddview(void);
 static XView *xlivefor(TermSession *);
-
-static int
-xtransfer(int fd, void *buffer, size_t length, int send)
-{
-	char *p = buffer;
-	while (length) {
-		ssize_t n = send ? write(fd, p, length) : read(fd, p, length);
-		if (n < 0 && errno == EINTR)
-			continue;
-		if (n <= 0)
-			return 0;
-		p += n;
-		length -= n;
-	}
-	return 1;
-}
-
-static int
-xsendlaunch(int fd)
-{
-	const char *options[] = {opt_class, opt_embed, opt_font, opt_io,
-	                         opt_line, opt_name, opt_title};
-	char *cwd = getcwd(NULL, 0);
-	char **entry;
-	LaunchHeader header = {.magic = LAUNCH_MAGIC, .version = 1,
-	                       .argc = launch_argc, .cols = cols, .rows = rows,
-	                       .x = xw.l, .y = xw.t, .gm = xw.gm,
-	                       .flags = (allowaltscreen ? 1 : 0) | (xw.isfixed ? 2 : 0)};
-	size_t size = 0;
-	int okay;
-	if (!cwd)
-		return 0;
-	for (size_t i = 0; i < LEN(options); i++)
-		size += strlen(options[i] ? options[i] : "") + 1;
-	size += strlen(cwd) + 1;
-	for (int i = 0; i < launch_argc; i++)
-		size += strlen(opt_cmd[i]) + 1;
-	for (entry = environ; *entry; entry++) {
-		size += strlen(*entry) + 1;
-		header.envc++;
-	}
-	if (size > LAUNCH_LIMIT || header.argc > 4096 || header.envc > 16384) {
-		free(cwd);
-		return 0;
-	}
-	header.bytes = size;
-	okay = xtransfer(fd, &header, sizeof(header), 1);
-	for (size_t i = 0; okay && i < LEN(options); i++) {
-		const char *s = options[i] ? options[i] : "";
-		okay = xtransfer(fd, (void *)s, strlen(s) + 1, 1);
-	}
-	if (okay)
-		okay = xtransfer(fd, cwd, strlen(cwd) + 1, 1);
-	for (int i = 0; okay && i < launch_argc; i++)
-		okay = xtransfer(fd, opt_cmd[i], strlen(opt_cmd[i]) + 1, 1);
-	for (entry = environ; okay && *entry; entry++)
-		okay = xtransfer(fd, *entry, strlen(*entry) + 1, 1);
-	free(cwd);
-	return okay;
-}
+static void workspace_send_launch(uint32_t, const char *, int, int);
+static void workspace_message(WirePacket *);
+static void workspace_focus(void);
 
 static int
 xinitialerror(Display *display, XErrorEvent *error)
@@ -458,65 +409,74 @@ xinitialerror(Display *display, XErrorEvent *error)
 	return 0;
 }
 
-/* Linux abstract sockets disappear with their owner, so a crashed owner
- * cannot leave a stale pathname that prevents a new owner from starting. */
 static void
-xsharedstart(void)
+workspace_send_launch(uint32_t type, const char *directory, int columns, int lines)
 {
-	struct sockaddr_un addr = {.sun_family = AF_UNIX};
-	struct stat executable;
-	const char *display = getenv("DISPLAY");
-	const char *scope = getenv("WORMINAL_SHARED_SOCKET_SCOPE");
-	int size, fd, attempt;
-	char reply;
-	struct timespec pause = {.tv_nsec = 10000000};
+	WireBuffer buffer = {0};
+	char *cwd = directory ? NULL : getcwd(NULL, 0);
+	char windowid[32];
+	uint32_t argc = type == WIRE_HELLO ? launch_argc : 0;
+	uint32_t envc = 0;
+	if (!master_target)
+		for (char **entry = environ; *entry; entry++)
+			envc++;
+	snprintf(windowid, sizeof(windowid), "%lu", xw.win);
+	wire_put_u32(&buffer, columns);
+	wire_put_u32(&buffer, lines);
+	wire_put_u32(&buffer, allowaltscreen);
+	wire_put_u32(&buffer, argc);
+	wire_put_u32(&buffer, envc);
+	wire_put_string(&buffer, type == WIRE_HELLO ? opt_title : "Worminal");
+	wire_put_string(&buffer, directory ? directory : master_target ? "" : cwd);
+	wire_put_string(&buffer, type == WIRE_HELLO ? opt_line : NULL);
+	wire_put_string(&buffer, type == WIRE_HELLO ? opt_io : NULL);
+	wire_put_string(&buffer, master_target ? NULL : windowid);
+	for (uint32_t i = 0; i < argc; i++)
+		wire_put_string(&buffer, opt_cmd[i]);
+	if (!master_target)
+		for (char **entry = environ; *entry; entry++)
+			wire_put_string(&buffer, *entry);
+	if (!wire_write(workspacefd, type, 0, buffer.data, buffer.len))
+		die("workspace connection closed during launch\n");
+	wire_buffer_free(&buffer);
+	free(cwd);
+}
 
-	if (!display)
-		die("shared tabs require DISPLAY\n");
-	/* Replacing a running binary leaves its owner and PTYs alive. A new
-	 * executable must not forward launches to that owner's older code. */
-	if (stat("/proc/self/exe", &executable) < 0)
-		die("could not identify Worminal executable: %s\n", strerror(errno));
-	size = snprintf(addr.sun_path + 1, sizeof(addr.sun_path) - 1,
-	                "worminal-%lu-%s-%llx-%llx-%s", (unsigned long)getuid(), display,
-	                (unsigned long long)executable.st_dev,
-	                (unsigned long long)executable.st_ino,
-	                scope ? scope : "");
-	if (size < 0 || size >= sizeof(addr.sun_path) - 1)
-		die("DISPLAY is too long for shared-tab socket\n");
-	for (attempt = 0; attempt < 100; attempt++) {
-		fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-		if (fd < 0)
-			die("shared-tab socket failed: %s\n", strerror(errno));
-		if (connect(fd, (struct sockaddr *)&addr,
-		            offsetof(struct sockaddr_un, sun_path) + 1 + size) == 0) {
-			if (!xsendlaunch(fd) ||
-			    read(fd, &reply, 1) != 1 ||
-			    reply != 'Y')
-				die("shared-tab owner did not accept a launch\n");
-			close(fd);
-			exit(0);
-		}
-		close(fd);
-		/* ttynew forks after this bind; the shell must not inherit the
-		 * listener or a restart can connect to an owner that has exited. */
-		fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-		if (fd < 0)
-			die("shared-tab socket failed: %s\n", strerror(errno));
-		if (bind(fd, (struct sockaddr *)&addr,
-		         offsetof(struct sockaddr_un, sun_path) + 1 + size) == 0) {
-			if (listen(fd, 8) < 0)
-				die("shared-tab listen failed: %s\n", strerror(errno));
-			sharedserver = fd;
-			return;
-		}
-		int bind_error = errno;
-		close(fd);
-		if (bind_error != EADDRINUSE)
-			die("shared-tab bind failed: %s\n", strerror(bind_error));
-		nanosleep(&pause, NULL);
-	}
-	die("shared-tab owner did not become available\n");
+static void
+workspace_focus(void)
+{
+	Tab *tab = xtabfor(view->terminal);
+	WireBuffer buffer = {0};
+	if (!tab || !tab->id)
+		return;
+	wire_put_u32(&buffer, MAX(1, current_window.tw / current_window.cw));
+	wire_put_u32(&buffer, MAX(1, current_window.th / current_window.ch));
+	wire_write(workspacefd, WIRE_FOCUS, tab->id, buffer.data, buffer.len);
+	wire_buffer_free(&buffer);
+}
+
+static void
+workspace_write(const char *bytes, size_t length, int echo)
+{
+	Tab *tab = xtabfor(tsessioncurrent());
+	(void)echo;
+	if (!view->live)
+		xactivate();
+	if (tab && tab->id)
+		wire_write(workspacefd, WIRE_INPUT, tab->id, bytes, length);
+}
+
+static void
+workspace_scroll(int up, int amount)
+{
+	Tab *tab = xtabfor(tsessioncurrent());
+	WireBuffer buffer = {0};
+	if (!tab || !tab->id)
+		return;
+	wire_put_u32(&buffer, up);
+	wire_put_u32(&buffer, amount);
+	wire_write(workspacefd, WIRE_SCROLL, tab->id, buffer.data, buffer.len);
+	wire_buffer_free(&buffer);
 }
 
 static void
@@ -543,14 +503,12 @@ clipcopy(const Arg *dummy)
 {
 	Atom clipboard;
 
+	if (xsel.primary == NULL)
+		return;
 	free(xsel.clipboard);
-	xsel.clipboard = NULL;
-
-	if (xsel.primary != NULL) {
-		xsel.clipboard = xstrdup(xsel.primary);
-		clipboard = XInternAtom(xw.dpy, "CLIPBOARD", 0);
-		XSetSelectionOwner(xw.dpy, clipboard, xw.win, CurrentTime);
-	}
+	xsel.clipboard = xstrdup(xsel.primary);
+	clipboard = XInternAtom(xw.dpy, "CLIPBOARD", 0);
+	XSetSelectionOwner(xw.dpy, clipboard, xw.win, CurrentTime);
 }
 
 void
@@ -749,6 +707,48 @@ mouseaction(XEvent *e, uint release)
 	return 0;
 }
 
+static char *
+xurlat(int col, int row, UrlSpan *span)
+{
+	SessionFrame frame = tsessionframe(view->terminal);
+	Line *lines = xmalloc(frame.rows * sizeof(*lines));
+	char *url;
+	for (int y = 0; y < frame.rows; y++)
+		lines[y] = tsessionviewline(view->terminal, y);
+	url = urlat(lines, frame.rows, frame.cols, col, row, span);
+	free(lines);
+	return url;
+}
+
+static void
+xclearhover(void)
+{
+	if (!view->hover_active)
+		return;
+	tsetdirt(view->hover.start_y, view->hover.end_y);
+	view->hover_active = 0;
+}
+
+static void
+xupdatehover(void)
+{
+	UrlSpan span;
+	char *url = view->hover_inside ? xurlat(view->hover_col, view->hover_row, &span) : NULL;
+	if (url && view->hover_active &&
+	    span.start_x == view->hover.start_x && span.start_y == view->hover.start_y &&
+	    span.end_x == view->hover.end_x && span.end_y == view->hover.end_y) {
+		free(url);
+		return;
+	}
+	xclearhover();
+	if (url) {
+		view->hover = span;
+		view->hover_active = 1;
+		tsetdirt(span.start_y, span.end_y);
+		free(url);
+	}
+}
+
 void
 bpress(XEvent *e)
 {
@@ -779,6 +779,13 @@ bpress(XEvent *e)
 
 	if (1 <= btn && btn <= 11)
 		buttons |= 1 << (btn-1);
+	if (btn == Button1 && (e->xbutton.state & ControlMask) &&
+	    !(e->xbutton.state & ShiftMask) &&
+	    (view->url_click = xurlat(evcol(e), evrow(e), NULL))) {
+		view->url_col = evcol(e);
+		view->url_row = evrow(e);
+		return;
+	}
 
 	if (IS_SET(MODE_MOUSE) && !(e->xbutton.state & forcemousemod)) {
 		mousereport(e);
@@ -1016,6 +1023,13 @@ brelease(XEvent *e)
 
 	if (1 <= btn && btn <= 11)
 		buttons &= ~(1 << (btn-1));
+	if (btn == Button1 && view->url_click) {
+		if (evcol(e) == view->url_col && evrow(e) == view->url_row)
+			urlopen(view->url_click);
+		free(view->url_click);
+		view->url_click = NULL;
+		return;
+	}
 
 	if (IS_SET(MODE_MOUSE) && !(e->xbutton.state & forcemousemod)) {
 		mousereport(e);
@@ -1031,12 +1045,31 @@ brelease(XEvent *e)
 void
 bmotion(XEvent *e)
 {
+	view->hover_inside = e->xmotion.x >= borderpx &&
+			e->xmotion.x < borderpx + current_window.tw &&
+			e->xmotion.y >= borderpx + current_window.ch &&
+			e->xmotion.y < borderpx + current_window.ch + current_window.th;
+	if (view->hover_inside) {
+		view->hover_col = evcol(e);
+		view->hover_row = evrow(e);
+	}
+	xupdatehover();
+	if (view->url_click)
+		return;
 	if (IS_SET(MODE_MOUSE) && !(e->xbutton.state & forcemousemod)) {
 		mousereport(e);
 		return;
 	}
 
 	mousesel(e, 0);
+}
+
+static void
+leave(XEvent *e)
+{
+	(void)e;
+	view->hover_inside = 0;
+	xclearhover();
 }
 
 void
@@ -1054,9 +1087,15 @@ cresize(int width, int height)
 	col = MAX(1, col);
 	row = MAX(1, row);
 
-	tresize(col, row);
+	/* Service frames own the grid size. Resizing it here could invalidate rows
+	 * still arriving from an earlier frame. */
+	if (workspacefd < 0)
+		tresize(col, row);
 	xresize(col, row);
-	ttyresize(current_window.tw, current_window.th);
+	if (workspacefd >= 0)
+		workspace_focus();
+	else
+		ttyresize(current_window.tw, current_window.th);
 }
 
 void
@@ -1071,8 +1110,11 @@ xresize(int col, int row)
 	XftDrawChange(xw.draw, xw.buf);
 	xclear(0, 0, current_window.w, current_window.h);
 
-	/* resize to new width */
-	xw.specbuf = xrealloc(xw.specbuf, col * sizeof(GlyphFontSpec));
+	/* An older frame may still need a wider glyph buffer. */
+	if (xw.spec_cols < col) {
+		xw.spec_cols = col;
+		xw.specbuf = xrealloc(xw.specbuf, xw.spec_cols * sizeof(GlyphFontSpec));
+	}
 }
 
 ushort
@@ -1630,7 +1672,7 @@ xinitview(int cols, int rows, int first, int spawnpty)
 	xw.attrs.bit_gravity = NorthWestGravity;
 	xw.attrs.event_mask = FocusChangeMask | KeyPressMask | KeyReleaseMask
 		| ExposureMask | VisibilityChangeMask | StructureNotifyMask
-		| ButtonMotionMask | ButtonPressMask | ButtonReleaseMask;
+		| PointerMotionMask | LeaveWindowMask | ButtonPressMask | ButtonReleaseMask;
 	xw.attrs.colormap = xw.cmap;
 	xw.win = XCreateWindow(xw.dpy, root, xw.l, xw.t,
 			cols * 8 + 2 * borderpx, (rows + 1) * 16 + 2 * borderpx,
@@ -1648,6 +1690,8 @@ xinitview(int cols, int rows, int first, int spawnpty)
 		ttysetlaunch(NULL, NULL, NULL);
 		if (first)
 			xstartuptime("pty");
+	} else if (workspacefd >= 0 && (first || pending_view == view)) {
+		workspace_send_launch(first ? WIRE_HELLO : WIRE_NEW, requested_cwd, cols, rows);
 	}
 
 	/* Mapping this placeholder lets X queue early keys while font setup runs.
@@ -1667,7 +1711,7 @@ xinitview(int cols, int rows, int first, int spawnpty)
 	current_window.mode = MODE_NUMLOCK;
 	resettitle();
 	xidentityhints();
-	if (spawnpty) {
+	if (spawnpty || workspacefd >= 0) {
 		XMapWindow(xw.dpy, xw.win);
 		XFlush(xw.dpy);
 		if (first)
@@ -1723,6 +1767,7 @@ xinitview(int cols, int rows, int first, int spawnpty)
 
 	/* font spec buffer */
 	xw.specbuf = xmalloc(cols * sizeof(GlyphFontSpec));
+	xw.spec_cols = cols;
 
 	/* Xft rendering context */
 	xw.draw = XftDrawCreate(xw.dpy, xw.buf, xw.vis, xw.cmap);
@@ -1762,7 +1807,7 @@ xinitview(int cols, int rows, int first, int spawnpty)
 	xsel.xtarget = XInternAtom(xw.dpy, "UTF8_STRING", 0);
 	if (xsel.xtarget == None)
 		xsel.xtarget = XA_STRING;
-	if (!spawnpty) {
+	if (!spawnpty && workspacefd < 0) {
 		XMapWindow(xw.dpy, xw.win);
 		XFlush(xw.dpy);
 	}
@@ -1781,7 +1826,7 @@ xinitview(int cols, int rows, int first, int spawnpty)
 void
 xinit(int cols, int rows)
 {
-	xinitview(cols, rows, 1, 1);
+	xinitview(cols, rows, 1, workspacefd < 0);
 	view->live = 1;
 }
 
@@ -1800,13 +1845,12 @@ xaddview(void)
 		cols = requested_cols;
 		rows = requested_rows;
 	}
-	created->terminal = tsessionnew(cols, rows);
-	tsessionallowalt(created->terminal,
-	                 requested_geometry ? requested_allowalt : 1);
-	xtabnew(created->terminal, opt_title ? opt_title : "Worminal", requested_cwd);
-	created->live = 1;
+	created->terminal = previous->terminal;
+	created->live = 0;
 	created->next = source->next;
 	source->next = created;
+	pending_view = created;
+	pending_new_tab = 1;
 	xsetview(created);
 	if (requested_geometry) {
 		xw.l = requested_x;
@@ -1814,108 +1858,9 @@ xaddview(void)
 		xw.gm = requested_gm;
 		xw.isfixed = requested_fixed;
 	}
-	xinitview(cols, rows, 0, 1);
+	xinitview(cols, rows, 0, 0);
 	xsetview(previous);
 	xrefreshtabs();
-}
-
-static void
-xsharedaccept(void)
-{
-	int client = accept(sharedserver, NULL, NULL);
-	struct { pid_t pid; uid_t uid; gid_t gid; } peer;
-	socklen_t length = sizeof(peer);
-	struct timeval timeout = {.tv_sec = 2};
-	LaunchHeader header;
-	char *payload = NULL, *cursor, *end, *parts[8], **args = NULL, **env = NULL;
-	char *saved_class = opt_class, *saved_embed = opt_embed;
-	char *saved_font = opt_font, *saved_io = opt_io, *saved_line = opt_line;
-	char *saved_name = opt_name, *saved_title = opt_title;
-	char **saved_cmd = opt_cmd;
-	int valid = 1;
-
-	if (client < 0)
-		return;
-	setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-	if (getsockopt(client, SOL_SOCKET, SO_PEERCRED, &peer, &length) != 0 ||
-	    length != sizeof(peer) || peer.uid != getuid() ||
-	    !xtransfer(client, &header, sizeof(header), 0) ||
-	    header.magic != LAUNCH_MAGIC || header.version != 1 ||
-	    header.bytes > LAUNCH_LIMIT || header.argc > 4096 ||
-	    header.envc > 16384 || header.cols < 1 || header.rows < 1) {
-		close(client);
-		return;
-	}
-	payload = xmalloc(header.bytes + 1);
-	if (!xtransfer(client, payload, header.bytes, 0)) {
-		free(payload);
-		close(client);
-		return;
-	}
-	payload[header.bytes] = '\0';
-	cursor = payload;
-	end = payload + header.bytes;
-	args = xmalloc((header.argc + 1) * sizeof(char *));
-	env = xmalloc((header.envc + 1) * sizeof(char *));
-	for (size_t i = 0; i < LEN(parts) + header.argc + header.envc; i++) {
-		char *nul = cursor < end ? memchr(cursor, '\0', end - cursor) : NULL;
-		if (!nul) {
-			valid = 0;
-			break;
-		}
-		if (i < LEN(parts))
-			parts[i] = cursor;
-		else if (i < LEN(parts) + header.argc)
-			args[i - LEN(parts)] = cursor;
-		else
-			env[i - LEN(parts) - header.argc] = cursor;
-		cursor = nul + 1;
-	}
-	if (!valid || cursor != end || !parts[7][0]) {
-		free(args);
-		free(env);
-		free(payload);
-		close(client);
-		return;
-	}
-	args[header.argc] = NULL;
-	env[header.envc] = NULL;
-	opt_class = *parts[0] ? parts[0] : NULL;
-	opt_embed = *parts[1] ? parts[1] : NULL;
-	opt_font = *parts[2] ? parts[2] : NULL;
-	opt_io = *parts[3] ? parts[3] : NULL;
-	opt_line = *parts[4] ? parts[4] : NULL;
-	opt_name = *parts[5] ? parts[5] : NULL;
-	opt_title = *parts[6] ? parts[6] : "Worminal";
-	opt_cmd = header.argc ? args : NULL;
-	requested_cwd = parts[7];
-	requested_env = env;
-	requested_geometry = 1;
-	requested_cols = header.cols;
-	requested_rows = header.rows;
-	requested_x = header.x;
-	requested_y = header.y;
-	requested_gm = header.gm;
-	requested_fixed = !!(header.flags & 2);
-	requested_allowalt = !!(header.flags & 1);
-	xaddview();
-	requested_geometry = 0;
-	requested_allowalt = 1;
-	requested_cwd = NULL;
-	requested_env = NULL;
-	opt_class = saved_class;
-	opt_embed = saved_embed;
-	opt_font = saved_font;
-	opt_io = saved_io;
-	opt_line = saved_line;
-	opt_name = saved_name;
-	opt_title = saved_title;
-	opt_cmd = saved_cmd;
-	(void)write(client, "Y", 1);
-	close(client);
-	free(args);
-	free(env);
-	free(payload);
 }
 
 static void
@@ -1923,8 +1868,10 @@ xactivate(void)
 {
 	XView *candidate;
 
-	if (view->live)
+	if (view->live) {
+		workspace_focus();
 		return;
+	}
 	for (candidate = views; candidate; candidate = candidate->next)
 		if (candidate->terminal == view->terminal)
 			candidate->live = 0;
@@ -1938,21 +1885,18 @@ xselecttab(Tab *tab)
 {
 	if (!tab)
 		return;
-	int changed = xupdatedirectory(tab);
 	if (view->terminal == tab->terminal) {
-		if (changed)
-			xrefreshtabs();
+		workspace_focus();
 		return;
 	}
+	xclearhover();
 	view->live = 0;
 	view->terminal = tab->terminal;
 	tsessionuse(tab->terminal);
+	xupdatehover();
 	current_window.mode = (current_window.mode & (MODE_VISIBLE | MODE_FOCUSED)) |
 	                      tab->mode | MODE_NUMLOCK;
 	current_window.cursor = tab->cursor;
-	MODBIT(xw.attrs.event_mask, tab->mode & MODE_MOUSEMANY,
-	       PointerMotionMask);
-	XChangeWindowAttributes(xw.dpy, xw.win, CWEventMask, &xw.attrs);
 	xloadcolsone();
 	char *title = xstrdup(tab->title);
 	xsettitle(title);
@@ -1973,65 +1917,20 @@ xtabslot(int slot)
 static void
 xclosetab(Tab *tab)
 {
-	Tab **slot = &tabs, *fallback, *preceding = NULL;
-	XView *candidate, *previous = view;
-	size_t i;
-	while (*slot && *slot != tab) {
-		preceding = *slot;
-		slot = &(*slot)->next;
-	}
-	if (!*slot)
-		return;
-	fallback = tab->next ? tab->next : preceding;
-	if (!fallback) {
-		signal(SIGCHLD, SIG_IGN);
-		tsessionhangupall();
-		exit(0);
-	}
-	for (candidate = views; candidate; candidate = candidate->next)
-		if (candidate->terminal == tab->terminal) {
-			xsetview(candidate);
-			xselecttab(fallback);
-		}
-	*slot = tab->next;
-	if (lasttab == tab) {
-		lasttab = tabs;
-		while (lasttab && lasttab->next)
-			lasttab = lasttab->next;
-	}
-	free(tab->title);
-	free(tab->initial_title);
-	free(tab->directory);
-	if (tab->colors) {
-		for (i = 0; i < MAX(LEN(colorname), 256); i++)
-			free(tab->colors[i]);
-		free(tab->colors);
-	}
-	tsessionremove(tab->terminal);
-	free(tab);
-	xsetview(previous);
-	xrefreshtabs();
+	if (tab && tab->id)
+		wire_write(workspacefd, WIRE_CLOSE, tab->id, NULL, 0);
 }
 
 static void
 xnewtab(void)
 {
-	XView *target = view;
-	Tab *selected = xtabfor(target->terminal);
+	Tab *selected = xtabfor(view->terminal);
 	int cols = MAX(1, (current_window.w - 2 * borderpx) / current_window.cw);
 	int rows = MAX(1, (current_window.h - 2 * borderpx - current_window.ch) /
 	                  current_window.ch);
-	TermSession *terminal = tsessionnew(cols, rows);
-	xupdatedirectory(selected);
-	tsessionallowalt(terminal, 1);
-	Tab *tab = xtabnew(terminal, "Worminal", selected->directory);
-	xsetview(target);
-	xselecttab(tab);
-	xsetenv();
-	ttysetlaunch(tab->directory, NULL, launch_windowid);
-	ttynew(NULL, shell, NULL, NULL);
-	ttysetlaunch(NULL, NULL, NULL);
-	xrefreshtabs();
+	pending_view = view;
+	pending_new_tab = 1;
+	workspace_send_launch(WIRE_NEW, selected ? selected->directory : NULL, cols, rows);
 }
 
 static XView *
@@ -2043,31 +1942,6 @@ xlivefor(TermSession *terminal)
 		if (candidate->terminal == terminal && candidate->live)
 			return candidate;
 	return NULL;
-}
-
-static int
-xupdatedirectory(Tab *tab)
-{
-#ifdef __linux__
-	pid_t child = tsessionpid(tab->terminal);
-	char link[64], directory[PATH_MAX];
-	ssize_t length;
-
-	if (child <= 0)
-		return 0;
-	snprintf(link, sizeof(link), "/proc/%ld/cwd", (long)child);
-	length = readlink(link, directory, sizeof(directory) - 1);
-	if (length < 0 || (size_t)length == sizeof(directory) - 1)
-		return 0;
-	directory[length] = '\0';
-	if (strcmp(tab->directory, directory) == 0)
-		return 0;
-	free(tab->directory);
-	tab->directory = xstrdup(directory);
-	return 1;
-#else
-	return 0;
-#endif
 }
 
 static void
@@ -2109,6 +1983,7 @@ xremoveview(int destroyed)
 		XDestroyWindow(xw.dpy, xw.win);
 	free(xsel.primary);
 	free(xsel.clipboard);
+	free(removed->url_click);
 	if (removed != &primaryview)
 		free(removed);
 	if (!views) {
@@ -2382,7 +2257,8 @@ xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len, int x, i
 		}
 		if (winx + width >= borderpx + current_window.tw) {
 			xclear(winx + width, (y == 0)? 0 : winy, current_window.w,
-				((winy + current_window.ch >= borderpx + current_window.ch + current_window.th)? current_window.h : (winy + current_window.ch)));
+				((winy + current_window.ch >= borderpx + current_window.ch + current_window.th)?
+				 current_window.h : (winy + current_window.ch)));
 		}
 		if (y == 0)
 			xclear(winx, 0, winx + width, borderpx);
@@ -2686,6 +2562,225 @@ xrefreshtabs(void)
 	xsetview(previous);
 }
 
+static Tab *
+workspace_find(Tab **head, uint32_t id)
+{
+	Tab **slot = head;
+	while (*slot && (*slot)->id != id)
+		slot = &(*slot)->next;
+	if (!*slot)
+		return NULL;
+	Tab *tab = *slot;
+	*slot = tab->next;
+	tab->next = NULL;
+	return tab;
+}
+
+static void
+workspace_free_tab(Tab *tab)
+{
+	free(tab->title);
+	free(tab->initial_title);
+	free(tab->directory);
+	if (tab->colors) {
+		for (size_t i = 0; i < MAX(LEN(colorname), 256); i++)
+			free(tab->colors[i]);
+		free(tab->colors);
+	}
+	tsessionremove(tab->terminal);
+	free(tab);
+}
+
+static void
+workspace_catalog(WirePacket *packet)
+{
+	uint32_t count, id, mode, cursor, colors, closed, fallback;
+	Tab *unseen = tabs;
+	XView *saved = view;
+	if (!wire_get_u32(packet, &count) || !wire_get_u32(packet, &closed) ||
+	    !wire_get_u32(packet, &fallback) || count > 1000)
+		die("invalid workspace catalog\n");
+	if (!count)
+		exit(0);
+	tabs = lasttab = NULL;
+	for (uint32_t item = 0; item < count; item++) {
+		if (!wire_get_u32(packet, &id) || !wire_get_u32(packet, &mode) ||
+		    !wire_get_u32(packet, &cursor) || !id)
+			die("invalid workspace tab\n");
+		char *title = wire_get_string(packet);
+		char *directory = wire_get_string(packet);
+		if (!title || !directory || !wire_get_u32(packet, &colors) ||
+		    colors != LEN(colorname))
+			die("invalid workspace metadata\n");
+		Tab *tab = workspace_find(&unseen, id);
+		if (!tab)
+			tab = workspace_find(&unseen, 0);
+		if (!tab) {
+			TermSession *terminal = tsessionnew(cols, rows);
+			tab = xtabnew(terminal, title, directory);
+		} else {
+			if (lasttab)
+				lasttab->next = tab;
+			else
+				tabs = tab;
+			lasttab = tab;
+		}
+		tab->id = id;
+		tab->mode = mode;
+		tab->cursor = cursor;
+		free(tab->title);
+		free(tab->directory);
+		tab->title = title;
+		tab->directory = directory;
+		if (!tab->colors)
+			tab->colors = calloc(MAX(LEN(colorname), 256), sizeof(char *));
+		for (uint32_t i = 0; i < colors; i++) {
+			char *name = wire_get_string(packet);
+			if (!name)
+				die("invalid workspace palette\n");
+			free(tab->colors[i]);
+			tab->colors[i] = *name ? name : NULL;
+			if (!*name)
+				free(name);
+		}
+	}
+	if (packet->pos != packet->len)
+		die("invalid workspace catalog length\n");
+	for (XView *candidate = views; candidate; candidate = candidate->next) {
+		xsetview(candidate);
+		Tab *selected = xtabfor(candidate->terminal);
+		if (candidate == pending_view && pending_new_tab)
+			selected = lasttab;
+		if (!selected && fallback)
+			for (Tab *old = unseen; old; old = old->next)
+				if (old->terminal == candidate->terminal && old->id == closed)
+					for (Tab *next = tabs; next; next = next->next)
+						if (next->id == fallback)
+							selected = next;
+		if (!selected)
+			selected = tabs;
+		if (candidate->terminal != selected->terminal)
+			xselecttab(selected);
+		else {
+			current_window.mode = (current_window.mode & (MODE_VISIBLE | MODE_FOCUSED)) |
+			                      selected->mode | MODE_NUMLOCK;
+			current_window.cursor = selected->cursor;
+			xloadcolsone();
+			char *copy = xstrdup(selected->title);
+			xsettitle(copy);
+			free(copy);
+		}
+	}
+	pending_view = NULL;
+	pending_new_tab = 0;
+	while (unseen) {
+		Tab *next = unseen->next;
+		workspace_free_tab(unseen);
+		unseen = next;
+	}
+	xsetview(saved);
+	xrefreshtabs();
+}
+
+static void
+workspace_message(WirePacket *packet)
+{
+	Tab *tab = NULL;
+	uint32_t values[6];
+	if (packet->type == WIRE_CATALOG) {
+		workspace_catalog(packet);
+		return;
+	}
+	for (tab = tabs; tab && tab->id != packet->tab; tab = tab->next)
+		;
+	if (!tab)
+		return;
+	if (packet->type == WIRE_FRAME_FINISH) {
+		XView *previous = view;
+		for (XView *candidate = views; candidate; candidate = candidate->next)
+			if (candidate->terminal == tab->terminal && candidate->hover_inside) {
+				xsetview(candidate);
+				xupdatehover();
+			}
+		xsetview(previous);
+		return;
+	}
+	if (packet->type == WIRE_RELEASE) {
+		for (XView *candidate = views; candidate; candidate = candidate->next)
+			if (candidate->terminal == tab->terminal)
+				candidate->live = 0;
+		return;
+	}
+	if (packet->type == WIRE_PRINT) {
+		for (size_t done = 0; done < packet->len;) {
+			ssize_t count = write(1, packet->data + done, packet->len - done);
+			if (count <= 0)
+				break;
+			done += count;
+		}
+		return;
+	}
+	if (packet->type == WIRE_FRAME) {
+		for (size_t i = 0; i < LEN(values); i++)
+			if (!wire_get_u32(packet, &values[i]))
+				die("invalid workspace frame\n");
+		if (values[0] < 1 || values[0] > 400 || values[1] < 1 || values[1] > 200 ||
+		    values[2] >= values[0] || values[3] >= values[1])
+			die("invalid workspace dimensions\n");
+		SessionFrame frame = {
+			.cols = values[0], .rows = values[1],
+			.cursor_x = values[2], .cursor_y = values[3],
+			.scroll = values[4], .alternate = values[5]
+		};
+		XView *previous = view;
+		for (XView *candidate = views; candidate; candidate = candidate->next)
+			if (candidate->terminal == tab->terminal) {
+				xsetview(candidate);
+				if (xw.spec_cols < frame.cols) {
+					xw.specbuf = xrealloc(xw.specbuf, frame.cols * sizeof(GlyphFontSpec));
+					xw.spec_cols = frame.cols;
+				}
+			}
+		xsetview(previous);
+		tsessionimportframe(tab->terminal, &frame);
+		return;
+	}
+	if (packet->type == WIRE_CLIPBOARD) {
+		char *value = wire_get_string(packet);
+		if (!value)
+			return;
+		for (XView *candidate = views; candidate; candidate = candidate->next)
+			if (candidate->terminal == tab->terminal && candidate->live) {
+				XView *previous = view;
+				xsetview(candidate);
+				xsetsel(value);
+				xclipcopy();
+				xsetview(previous);
+				return;
+			}
+		free(value);
+		return;
+	}
+	if (packet->type == WIRE_ROW) {
+		uint32_t row;
+		SessionFrame frame = tsessionframe(tab->terminal);
+		if (!wire_get_u32(packet, &row) || row >= (uint32_t)frame.rows ||
+		    packet->len - packet->pos != (size_t)frame.cols * 16)
+			die("invalid workspace row\n");
+		Glyph *glyphs = xmalloc(frame.cols * sizeof(*glyphs));
+		for (int col = 0; col < frame.cols; col++) {
+			uint32_t mode;
+			wire_get_u32(packet, &glyphs[col].u);
+			wire_get_u32(packet, &mode);
+			glyphs[col].mode = mode;
+			wire_get_u32(packet, &glyphs[col].fg);
+			wire_get_u32(packet, &glyphs[col].bg);
+		}
+		tsessionimportrow(tab->terminal, row, glyphs, frame.cols);
+		free(glyphs);
+	}
+}
+
 int
 xstartdraw(void)
 {
@@ -2718,6 +2813,10 @@ xdrawline(Line line, int x1, int y1, int x2, int pass)
 		new = line[x];
 		if (new.mode == ATTR_WDUMMY)
 			continue;
+		if (view->hover_active && y1 >= view->hover.start_y && y1 <= view->hover.end_y &&
+		    (y1 != view->hover.start_y || x >= view->hover.start_x) &&
+		    (y1 != view->hover.end_y || x <= view->hover.end_x))
+			new.mode |= ATTR_UNDERLINE;
 		if (selected(x, y1))
 			new.mode ^= ATTR_REVERSE;
 		if (i > 0 && ATTRCMP(base, new)) {
@@ -2784,6 +2883,11 @@ void
 unmap(XEvent *ev)
 {
 	current_window.mode &= ~MODE_VISIBLE;
+	view->hover_inside = 0;
+	xclearhover();
+	Tab *tab = xtabfor(view->terminal);
+	if (tab && tab->id && view->live)
+		wire_write(workspacefd, WIRE_RELEASE, tab->id, NULL, 0);
 }
 
 void
@@ -2795,17 +2899,8 @@ destroy(XEvent *ev)
 void
 xsetpointermotion(int set)
 {
-	TermSession *terminal = tsessioncurrent();
-	XView *previous = view, *candidate;
-	for (candidate = views; candidate; candidate = candidate->next) {
-		if (candidate->terminal != terminal)
-			continue;
-		xsetview(candidate);
-		MODBIT(xw.attrs.event_mask, set, PointerMotionMask);
-		XChangeWindowAttributes(xw.dpy, xw.win, CWEventMask, &xw.attrs);
-	}
-	xsetview(previous);
-	tsessionuse(terminal);
+	/* Hover needs motion events even when applications disable mouse reporting. */
+	(void)set;
 }
 
 void
@@ -2902,6 +2997,14 @@ int
 match(uint mask, uint state)
 {
 	return mask == XK_ANY_MOD || mask == (state & ~ignoremod);
+}
+
+static int
+shortcutmatch(const Shortcut *shortcut, KeySym symbol, uint state)
+{
+	return match(shortcut->mod, state) &&
+	       (symbol == shortcut->keysym ||
+	        (BETWEEN(symbol, XK_a, XK_z) && shortcut->keysym == symbol - XK_a + XK_A));
 }
 
 char*
@@ -3011,7 +3114,7 @@ kpress(XEvent *ev)
 	}
 	/* 1. shortcuts */
 	for (bp = shortcuts; bp < shortcuts + LEN(shortcuts); bp++) {
-		if (ksym == bp->keysym && match(bp->mod, e->state)) {
+		if (shortcutmatch(bp, ksym, e->state)) {
 			bp->func(&(bp->arg));
 			return;
 		}
@@ -3090,9 +3193,8 @@ run(void)
 	XEvent ev;
 	XWindowAttributes attrs;
 	XView *candidate;
-	TermSession *terminal;
 	fd_set rfd;
-	int xfd = XConnectionNumber(xw.dpy), ttyfd, maxfd, activepty, xev, drawing, ptyevent;
+	int xfd = XConnectionNumber(xw.dpy), maxfd, xev, drawing, ptyevent;
 	struct timespec seltv, *tv, now, lastblink, trigger;
 	double timeout;
 
@@ -3117,31 +3219,10 @@ run(void)
 	xstartuptime("resize");
 
 	for (timeout = -1, drawing = 0, lastblink = (struct timespec){0};;) {
-		tsessionreap();
-		for (Tab *tab = tabs, *next; tab; tab = next) {
-			next = tab->next;
-			if (tsessionfd(tab->terminal) < 0)
-				xclosetab(tab);
-		}
 		FD_ZERO(&rfd);
-		maxfd = MAX(xfd, sharedserver);
-		activepty = 0;
-		for (terminal = tsessionnext(NULL); terminal;
-		     terminal = tsessionnext(terminal)) {
-			ttyfd = tsessionfd(terminal);
-			if (ttyfd < 0)
-				continue;
-			if (ttyfd >= FD_SETSIZE)
-				die("too many PTYs for select\n");
-			FD_SET(ttyfd, &rfd);
-			maxfd = MAX(maxfd, ttyfd);
-			activepty++;
-		}
-		if (!activepty)
-			exit(tsessionexitstatus());
+		maxfd = MAX(xfd, workspacefd);
 		FD_SET(xfd, &rfd);
-		if (sharedserver >= 0)
-			FD_SET(sharedserver, &rfd);
+		FD_SET(workspacefd, &rfd);
 
 		if (XPending(xw.dpy))
 			timeout = 0;  /* existing events might not set xfd */
@@ -3159,23 +3240,14 @@ run(void)
 		clock_gettime(CLOCK_MONOTONIC, &now);
 
 		ptyevent = 0;
-		for (terminal = tsessionnext(NULL); terminal;
-		     terminal = tsessionnext(terminal)) {
-			ttyfd = tsessionfd(terminal);
-			if (ttyfd < 0 || !FD_ISSET(ttyfd, &rfd))
-				continue;
-			XView *live = xlivefor(terminal);
-			if (live)
-				xsetview(live);
-			else
-				tsessionuse(terminal);
-			ttyread();
-			if (xupdatedirectory(xtabfor(terminal)))
-				xrefreshtabs();
+		if (FD_ISSET(workspacefd, &rfd)) {
+			WirePacket packet;
+			if (!wire_read(workspacefd, &packet))
+				die("workspace connection closed\n");
+			workspace_message(&packet);
+			wire_packet_free(&packet);
 			ptyevent = 1;
 		}
-		if (sharedserver >= 0 && FD_ISSET(sharedserver, &rfd))
-			xsharedaccept();
 
 		xev = 0;
 		while (XPending(xw.dpy)) {
@@ -3255,6 +3327,11 @@ int
 main(int argc, char *argv[])
 {
 	xstartuptime("main");
+	if (argc >= 3 && strcmp(argv[1], "--master") == 0) {
+		master_target = argv[2];
+		memmove(argv + 1, argv + 3, (argc - 2) * sizeof(*argv));
+		argc -= 2;
+	}
 	xw.l = xw.t = 0;
 	xw.isfixed = False;
 	xsetcursor(cursorshape);
@@ -3315,11 +3392,18 @@ run:
 	XSetLocaleModifiers("");
 	cols = MAX(cols, 1);
 	rows = MAX(rows, 1);
-	xsharedstart();
+	workspacefd = workspace_client_open(master_target);
+	if (workspacefd < 0)
+		die("could not connect to Worminal workspace: %s\n", strerror(errno));
+	xstartuptime("workspace");
+	ttywritehook = workspace_write;
+	tscrollhook = workspace_scroll;
 	tnew(cols, rows);
 	view->terminal = tsessioncurrent();
 	tsessionallowalt(view->terminal, allowaltscreen);
 	xtabnew(view->terminal, opt_title, NULL);
+	pending_view = view;
+	pending_new_tab = 1;
 	xinit(cols, rows);
 	selinit();
 	run();

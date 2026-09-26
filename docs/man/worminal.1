@@ -3,6 +3,8 @@
 worminal \- simple terminal based on st
 .SH SYNOPSIS
 .B worminal
+.RB [ --master
+.IR user@host ]
 .RB [ \-aiv ]
 .RB [ \-c
 .IR class ]
@@ -50,10 +52,15 @@ worminal \- simple terminal based on st
 .SH DESCRIPTION
 .B worminal
 is a simple terminal emulator.
-Each launch opens a new window and tab in the owner for the same executable build,
-user, and X11 display. Rebuilding starts a new owner on the next launch; existing
-tabs keep running in the old owner until closed.
-Tabs remain alive without a selected window while another Worminal window is open.
+Each launch opens a window and tab in the local per-user workspace service.
+The service owns the PTYs and ordered tabs and persists after all windows close.
+Use
+.B worminald --stop
+to stop it and end its tabs.
+.B --master user@host
+connects over SSH to a service on that host; the remote account needs
+.B worminald
+in its PATH. Further hosts can be reached with ordinary SSH inside a tab.
 .SH OPTIONS
 .TP
 .B \-a
@@ -191,7 +198,7 @@ Select the exact tab slot (Alt-0 selects slot 10). An empty slot does nothing.
 Open a new window and tab.
 .SH CUSTOMIZATION
 .B worminal
-can be customized by creating a custom config.h and (re)compiling the source
+can be customized by editing src/config.h and (re)compiling the source
 code. This keeps it fast, secure and simple.
 .SH AUTHORS
 See the LICENSE file for the authors.

@@ -101,9 +101,9 @@ class NavigationKeysTest(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("micro"), "micro is not installed")
     def test_ctrl_end_in_micro(self):
-        path = ROOT / ".checks" / "micro-key-test.txt"
-        log = ROOT / ".checks" / "micro-output"
-        config = ROOT / ".checks" / f"micro-config-{os.getpid()}"
+        path = ROOT / "build" / "micro-key-test.txt"
+        log = ROOT / "build" / "micro-output"
+        config = ROOT / "build" / f"micro-config-{os.getpid()}"
         config.mkdir()
         path.write_text("first\nlast")
         title = f"Worminal micro keys {os.getpid()}"
@@ -140,7 +140,10 @@ class NavigationKeysTest(unittest.TestCase):
                 try:
                     terminal.wait(timeout=5)
                 except subprocess.TimeoutExpired as error:
-                    raise AssertionError(f"micro did not exit; file contains {path.read_text()!r}; output {log.read_bytes()[:300]!r}") from error
+                    raise AssertionError(
+                        f"micro did not exit; file contains {path.read_text()!r}; "
+                        f"output {log.read_bytes()[:300]!r}"
+                    ) from error
                 self.assertEqual(path.read_text(), "QYfirstX\nlastZ\n")
             finally:
                 if terminal.poll() is None:
@@ -180,11 +183,17 @@ class NavigationKeysTest(unittest.TestCase):
                             window = result.stdout.splitlines()[0]
                             break
                         time.sleep(0.05)
-                    self.assertIsNotNone(window, "Worminal did not open an X11 window")
+                    if window is None:
+                        detail = terminal.stderr.read(4096) if terminal.poll() is not None else b""
+                        self.fail(f"Worminal did not open: exit={terminal.poll()}, stderr={detail!r}")
                     self.assertEqual(read_bytes(terminal.stdout, 6 if appcursor else 1),
                                      b"\033[?1hR" if appcursor else b"R")
-                    subprocess.run(["xdotool", "windowfocus", "--sync", window],
-                                   env=env, check=True)
+                    focused = subprocess.run(["xdotool", "windowfocus", "--sync", window],
+                                             env=env, capture_output=True)
+                    if focused.returncode:
+                        detail = terminal.stderr.read(4096) if terminal.poll() is not None else b""
+                        self.fail(f"Worminal exited before focus: {terminal.poll()}, {detail!r}, "
+                                  f"{focused.stderr!r}")
                     for keys, normal, application in (
                         ("Home", b"\033[H", b"\033OH"),
                         ("End", b"\033[F", b"\033OF"),

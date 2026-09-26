@@ -1,0 +1,7 @@
+Checks: >-
+  -*,
+  clang-analyzer-core.DivideZero,
+  clang-analyzer-core.UndefinedBinaryOperatorResult,
+  clang-analyzer-core.uninitialized.*,
+  clang-analyzer-unix.Malloc
+WarningsAsErrors: '*'

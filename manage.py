@@ -19,6 +19,11 @@ ROOT = Path(__file__).resolve().parent
 app = typer.Typer(no_args_is_help=True, help="Build and test Worminal.")
 proof_app = typer.Typer(help="Run proofs on private Xvfb displays.")
 app.add_typer(proof_app, name="proof")
+MAX_FILE_LINES = 1000
+MAX_LINE_LENGTH = 120
+# These merged files exceed the limit; prevent further growth until they are split.
+LEGACY_FILE_LINES = {"src/terminal/st.c": 3223, "src/x11/x.c": 3412,
+                     "tests/test_native.py": 1333}
 
 
 @app.callback()
@@ -47,12 +52,41 @@ def prepare(*targets):
         make(*targets)
 
 
+def check_file_limits():
+    paths = subprocess.check_output(["git", "ls-files", "-z"], cwd=ROOT).split(b"\0")
+    problems = []
+    for raw in paths:
+        if not raw:
+            continue
+        path = ROOT / os.fsdecode(raw)
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except UnicodeDecodeError:
+            continue
+        limit = LEGACY_FILE_LINES.get(path.relative_to(ROOT).as_posix(), MAX_FILE_LINES)
+        if len(lines) > limit:
+            problems.append(f"{path.relative_to(ROOT)}: {len(lines)} lines (limit {limit})")
+        for number, line in enumerate(lines, 1):
+            if len(line) > MAX_LINE_LENGTH:
+                problems.append(f"{path.relative_to(ROOT)}:{number}: {len(line)} characters (limit {MAX_LINE_LENGTH})")
+    if problems:
+        for problem in problems[:20]:
+            typer.echo(problem, err=True)
+        if len(problems) > 20:
+            typer.echo(f"... and {len(problems) - 20} more", err=True)
+        raise typer.Exit(1)
+
+
 def run_checks():
-    prepare(".checks/key_injector", ".checks/placement_wm",
-            ".checks/compact-worminal", ".checks/overlap_probe",
-            ".checks/border_probe", ".checks/icon_probe",
-            ".checks/view_state_test", ".checks/scrollback_test")
-    code = run([".checks/scrollback_test"],
+    prepare("build/key_injector", "build/placement_wm",
+            "build/compact-worminal", "build/overlap_probe",
+            "build/border_probe", "build/icon_probe",
+            "build/view_state_test", "build/scrollback_test", "build/url_test")
+    code = run(["build/scrollback_test"],
+               env={**os.environ, "ASAN_OPTIONS": "detect_leaks=0"})
+    if code:
+        return code
+    code = run(["build/url_test"],
                env={**os.environ, "ASAN_OPTIONS": "detect_leaks=0"})
     if code:
         return code
@@ -76,6 +110,13 @@ def check():
 
 
 @app.command()
+def lint():
+    """Check file limits and run Clang static analysis (requires clang-tidy)."""
+    check_file_limits()
+    prepare("lint")
+
+
+@app.command()
 def clean():
     """Remove generated binaries and headers."""
     raise typer.Exit(run(["make", "-s", "clean"]))
@@ -83,7 +124,7 @@ def clean():
 
 @app.command()
 def icon():
-    """Regenerate the embedded icon from worminal.svg."""
+    """Regenerate the embedded icon from assets/worminal.svg."""
     try:
         generate_icon()
     except (OSError, ImportError, subprocess.CalledProcessError) as error:
@@ -94,14 +135,14 @@ def icon():
 @app.command()
 def latency():
     """Measure launch to usable input with /bin/cat on private Xvfb."""
-    prepare(".checks/key_injector")
+    prepare("build/key_injector")
     raise typer.Exit(run([sys.executable, "tests/latency.py"]))
 
 
 @app.command("latency-shell")
 def latency_shell():
     """Measure when the interactive shell receives early input."""
-    prepare(".checks/key_injector")
+    prepare("build/key_injector")
     raise typer.Exit(run([sys.executable, "tests/latency.py", "--shell"]))
 
 
@@ -139,14 +180,14 @@ def proof(ctx: typer.Context):
 @proof_app.command()
 def plasma():
     """Prove shared views and tabs under isolated KWin."""
-    prepare(".checks/view_state_test")
+    prepare("build/view_state_test")
     raise typer.Exit(run_proof_script(ROOT / "tests/proof_plasma.py"))
 
 
 @proof_app.command()
 def cinnamon():
     """Prove shared views and tabs under remote Cinnamon on private Xvfb."""
-    prepare(".checks/view_state_test")
+    prepare("build/view_state_test")
     raise typer.Exit(run_proof_script(ROOT / "tests/proof_cinnamon.py"))
 
 

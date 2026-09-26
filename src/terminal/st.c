@@ -19,6 +19,7 @@
 
 #include "st.h"
 #include "win.h"
+#include "st_state.h"
 #include WORMINAL_THEME_HEADER
 
 #if   defined(__linux)
@@ -31,11 +32,6 @@
 
 /* Arbitrary sizes */
 #define UTF_INVALID   0xFFFD
-#define UTF_SIZ       4
-#define ESC_BUF_SIZ   (128*UTF_SIZ)
-#define ESC_ARG_SIZ   16
-#define STR_BUF_SIZ   ESC_BUF_SIZ
-#define STR_ARG_SIZ   ESC_ARG_SIZ
 
 /* macros */
 #define IS_SET(flag)		((term.mode & (flag)) != 0)
@@ -43,16 +39,6 @@
 #define ISCONTROLC1(c)		(BETWEEN(c, 0x80, 0x9f))
 #define ISCONTROL(c)		(ISCONTROLC0(c) || ISCONTROLC1(c))
 #define ISDELIM(u)		(u && wcschr(worddelimiters, u))
-
-enum term_mode {
-	MODE_WRAP        = 1 << 0,
-	MODE_INSERT      = 1 << 1,
-	MODE_ALTSCREEN   = 1 << 2,
-	MODE_CRLF        = 1 << 3,
-	MODE_ECHO        = 1 << 4,
-	MODE_PRINT       = 1 << 5,
-	MODE_UTF8        = 1 << 6,
-};
 
 enum cursor_movement {
 	CURSOR_SAVE,
@@ -84,78 +70,6 @@ enum escape_state {
 	ESC_TEST       = 32, /* Enter in test mode */
 	ESC_UTF8       = 64,
 };
-
-typedef struct {
-	Glyph attr; /* current char attributes */
-	int x;
-	int y;
-	char state;
-} TCursor;
-
-typedef struct {
-	int mode;
-	int type;
-	int snap;
-	/*
-	 * Selection variables:
-	 * nb – normalized coordinates of the beginning of the selection
-	 * ne – normalized coordinates of the end of the selection
-	 * ob – original coordinates of the beginning of the selection
-	 * oe – original coordinates of the end of the selection
-	 */
-	struct {
-		int x, y;
-	} nb, ne, ob, oe;
-
-	int alt;
-} Selection;
-
-/* Internal representation of the screen */
-typedef struct {
-	int row;      /* nb row */
-	int col;      /* nb col */
-	Line *line;   /* screen */
-	Line *alt;    /* alternate screen */
-	Line *hist;   /* lazily allocated ring of main-screen lines */
-	int histlen;  /* number of retained lines */
-	int histi;    /* next history slot to write */
-	int scr;      /* lines above the live screen */
-	int *dirty;   /* dirtyness of lines */
-	TCursor c;    /* cursor */
-	int ocx;      /* old cursor col */
-	int ocy;      /* old cursor row */
-	int top;      /* top    scroll limit */
-	int bot;      /* bottom scroll limit */
-	int mode;     /* terminal mode flags */
-	int esc;      /* escape state flags */
-	char trantbl[4]; /* charset table translation */
-	int charset;  /* current charset */
-	int icharset; /* selected charset for sequence */
-	int *tabs;
-	Rune lastc;   /* last printed char outside of sequence, 0 if control */
-} Term;
-
-/* CSI Escape sequence structs */
-/* ESC '[' [[ [<priv>] <arg> [;]] <mode> [<mode>]] */
-typedef struct {
-	char buf[ESC_BUF_SIZ]; /* raw string */
-	size_t len;            /* raw string length */
-	char priv;
-	int arg[ESC_ARG_SIZ];
-	int narg;              /* nb of args */
-	char mode[2];
-} CSIEscape;
-
-/* STR Escape sequence structs */
-/* ESC type [[ [<priv>] <arg> [;]] <mode>] ESC '\' */
-typedef struct {
-	char type;             /* ESC type ... */
-	char *buf;             /* allocated raw string */
-	size_t siz;            /* allocation size */
-	size_t len;            /* raw string length */
-	char *args[STR_ARG_SIZ];
-	int narg;              /* nb of args */
-} STREscape;
 
 static void execsh(char *, char **);
 static void stty(char **);
@@ -194,14 +108,12 @@ static void tscrollup(int, int);
 static void tscrolldown(int, int);
 static void tsetattr(const int *, int);
 static void tsetchar(Rune, const Glyph *, int, int);
-static void tsetdirt(int, int);
 static void tsetscroll(int, int);
 static void tswapscreen(void);
 static void tsetmode(int, int, const int *, int);
 static int twrite(const char *, int, int);
 static void tfulldirt(void);
 static Line tline(int);
-static Line tlineat(int, int);
 static Line thistorypush(Line);
 static void tcontrolcode(uchar );
 static void tdectest(char );
@@ -226,21 +138,6 @@ static char base64dec_getc(const char **);
 
 static ssize_t xwrite(int, const char *, size_t);
 
-/* A tab owns the parser, PTY, selection, and screen together. */
-struct TermSession {
-	Term term;
-	Selection sel;
-	CSIEscape csiescseq;
-	STREscape strescseq;
-	int output_fd, pty_fd;
-	pid_t child_pid;
-	int altscreen_allowed;
-	char ttybuf[BUFSIZ];
-	int ttybuflen;
-	TCursor saved[2];
-	struct TermSession *next;
-};
-
 static TermSession primarysession = {.output_fd = 1, .pty_fd = -1,
                                      .altscreen_allowed = 1};
 static TermSession *session = &primarysession;
@@ -248,6 +145,9 @@ static TermSession *sessions = &primarysession;
 static int last_child_status;
 static const char *launch_cwd, *launch_windowid;
 static char **launch_env;
+void (*ttywritehook)(const char *, size_t, int);
+void (*tscrollhook)(int, int);
+void (*tprinterhook)(const char *, size_t);
 #define term (session->term)
 #define sel (session->sel)
 #define csiescseq (session->csiescseq)
@@ -1073,6 +973,10 @@ void
 ttywrite(const char *s, size_t n, int may_echo)
 {
 	const char *next;
+	if (ttywritehook) {
+		ttywritehook(s, n, may_echo);
+		return;
+	}
 
 	if (cmdfd < 0)
 		return;
@@ -1348,6 +1252,10 @@ void
 kscrollup(const Arg *arg)
 {
 	int n;
+	if (tscrollhook) {
+		tscrollhook(1, arg->i);
+		return;
+	}
 
 	if (IS_SET(MODE_ALTSCREEN) || !term.histlen)
 		return;
@@ -1364,6 +1272,10 @@ void
 kscrolldown(const Arg *arg)
 {
 	int n;
+	if (tscrollhook) {
+		tscrollhook(0, arg->i);
+		return;
+	}
 
 	if (IS_SET(MODE_ALTSCREEN) || !term.scr)
 		return;
@@ -2423,6 +2335,10 @@ sendbreak(const Arg *arg)
 void
 tprinter(char *s, size_t len)
 {
+	if (iofd == 1 && tprinterhook) {
+		tprinterhook(s, len);
+		return;
+	}
 	if (iofd != -1 && xwrite(iofd, s, len) < 0) {
 		perror("Error writing to output file");
 		close(iofd);
@@ -3064,6 +2980,8 @@ treflow(int col, int row)
 	TCursor cursor = term.c, saved = session->saved[0];
 	Line source;
 
+	if (col <= 0 || row <= 0)
+		die("invalid reflow dimensions\n");
 	/* Empty rows below the cursor are space for future output, not history. */
 	while (last > cursor.y) {
 		for (x = 0; x < oldcol && term.line[last][x].u == ' '; x++)
@@ -3287,7 +3205,7 @@ draw(void)
 		cx--;
 
 	drawregion(0, 0, term.col, term.row);
-	if (!term.scr)
+	if (!term.scr && !session->remote_scroll)
 		xdrawcursor(cx, term.c.y, term.line[term.c.y][cx],
 				term.ocx, term.ocy, term.line[term.ocy][term.ocx]);
 	term.ocx = cx;

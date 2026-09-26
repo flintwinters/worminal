@@ -1,4 +1,4 @@
-/* Generated from worminal.svg by `python3 manage.py icon`. */
+/* Generated from assets/worminal.svg by `python3 manage.py icon`. */
 static const unsigned long worminal_icon[] = {
 	0x00000030UL, 0x00000030UL, 0x00000000UL, 0x00000000UL, 0x00000000UL, 0x00000000UL,
 	0x00000000UL, 0x00000000UL, 0x00000000UL, 0x00000000UL, 0x00000000UL, 0x00000000UL,

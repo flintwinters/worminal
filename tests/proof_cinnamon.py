@@ -39,7 +39,7 @@ def main():
             raise RuntimeError(f"private X11 forwarding failed: {preflight.stderr.strip()}")
 
         env = {**env, "XMODIFIERS": "@im=ibus"}
-        log_path = ROOT / ".checks" / "cinnamon-proof.log"
+        log_path = ROOT / "build" / "cinnamon-proof.log"
         with log_path.open("wb") as log:
             ibus = subprocess.Popen(
                 ["dbus-run-session", "--", "ibus-daemon", "--single", "--xim",
@@ -67,7 +67,7 @@ def main():
                                   contains="_NET_ACTIVE_WINDOW")
                 wait_for_property(env, "_XIM_SERVERS", 10, manager)
                 code = subprocess.run(
-                    [str(ROOT / ".checks/view_state_test")],
+                    [str(ROOT / "build/view_state_test")],
                     env={**env, "WORMINAL_PROOF_REQUIRE_IM": "1",
                          "WORMINAL_PROOF_MANAGED_VIEWS": "1"},
                 ).returncode

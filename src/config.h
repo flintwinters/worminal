@@ -205,9 +205,9 @@ static KeySym mappedkeys[] = { -1 };
 
 /*
  * State bits to ignore when matching key or button events.  By default,
- * numlock (Mod2Mask) and keyboard layout (XK_SWITCH_MOD) are ignored.
+ * Caps Lock, numlock (Mod2Mask), and keyboard layout (XK_SWITCH_MOD) are ignored.
  */
-static uint ignoremod = Mod2Mask|XK_SWITCH_MOD;
+static uint ignoremod = LockMask|Mod2Mask|XK_SWITCH_MOD;
 
 /*
  * This is the huge key array which defines all compatibility to the Linux

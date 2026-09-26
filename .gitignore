@@ -1,5 +1,7 @@
 worminal
+worminald
 *.o
 __pycache__/
+build/
 .checks/
-.tools/
+archive/

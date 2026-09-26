@@ -1,4 +1,7 @@
 /* See LICENSE for license details. */
+#ifndef WORMINAL_ST_H
+#define WORMINAL_ST_H
+#include <stddef.h>
 
 #include <stdint.h>
 #include <sys/select.h>
@@ -19,7 +22,7 @@
 #define MODBIT(x, set, bit)	((set) ? ((x) |= (bit)) : ((x) &= ~(bit)))
 
 #ifndef WORMINAL_THEME_HEADER
-#define WORMINAL_THEME_HEADER ".checks/theme.h"
+#define WORMINAL_THEME_HEADER "build/theme.h"
 #endif
 
 #define TRUECOLOR(r,g,b)	(1 << 24 | (r) << 16 | (g) << 8 | (b))
@@ -96,7 +99,7 @@ void tsessionstop(TermSession *);
 void tsessionremove(TermSession *);
 void tsessionallowalt(TermSession *, int);
 
-void die(const char *, ...);
+void die(const char *, ...) __attribute__((noreturn));
 void redraw(void);
 void draw(void);
 void kscrollup(const Arg *);
@@ -111,6 +114,7 @@ void toggleprinter(const Arg *);
 int tattrset(int);
 void tnew(int, int);
 void tresize(int, int);
+void tsetdirt(int, int);
 void tsetdirtattr(int);
 void ttyhangup(void);
 void ttysetlaunch(const char *, char **, const char *);
@@ -118,6 +122,9 @@ int ttynew(const char *, char *, const char *, char **);
 size_t ttyread(void);
 void ttyresize(int, int);
 void ttywrite(const char *, size_t, int);
+extern void (*ttywritehook)(const char *, size_t, int);
+extern void (*tscrollhook)(int, int);
+extern void (*tprinterhook)(const char *, size_t);
 
 void resettitle(void);
 
@@ -147,3 +154,4 @@ extern unsigned int tabspaces;
 extern unsigned int defaultfg;
 extern unsigned int defaultbg;
 extern unsigned int defaultcs;
+#endif
