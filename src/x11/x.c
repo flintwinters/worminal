@@ -779,8 +779,7 @@ bpress(XEvent *e)
 
 	if (1 <= btn && btn <= 11)
 		buttons |= 1 << (btn-1);
-	if (btn == Button1 && (e->xbutton.state & ControlMask) &&
-	    !(e->xbutton.state & ShiftMask) &&
+	if (btn == Button1 && !(e->xbutton.state & ShiftMask) &&
 	    (view->url_click = xurlat(evcol(e), evrow(e), NULL))) {
 		view->url_col = evcol(e);
 		view->url_row = evrow(e);
