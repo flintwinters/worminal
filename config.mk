@@ -9,6 +9,6 @@ LIBS = -lm -lrt -lutil `$(PKG_CONFIG) --libs x11 xft fontconfig freetype2`
 
 # The shipped build is optimized for startup and runtime performance.
 CFLAGS = -O3
-STCPPFLAGS = -DVERSION=\"$(VERSION)\" -D_XOPEN_SOURCE=600
+STCPPFLAGS = -I. -Isrc -Isrc/terminal -Isrc/x11 -Isrc/workspace -DVERSION=\"$(VERSION)\" -D_XOPEN_SOURCE=600
 STCFLAGS = $(INCS) $(STCPPFLAGS) $(CPPFLAGS) $(CFLAGS)
 STLDFLAGS = $(LIBS) $(LDFLAGS)

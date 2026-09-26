@@ -21,7 +21,8 @@ from x11 import isolated_display
 ROOT = Path(__file__).resolve().parent.parent
 TRIALS = 20
 TIMEOUT = 5
-PHASES = ("main", "display", "pty", "map-request", "fontconfig", "font", "map-observed", "resize", "key", "echo")
+PHASES = ("main", "workspace", "display", "map-request", "fontconfig", "font",
+          "map-observed", "resize", "key", "echo")
 SHELL_MARKER = b"__WORMINAL_SHELL_READY__"
 
 
@@ -50,7 +51,7 @@ def measure_one(env, index, shell=False):
         )
         expected = SHELL_MARKER if shell else b"z"
         injector = subprocess.Popen(
-            [str(ROOT / ".checks/key_injector"), title] + (["Return"] if shell else []), env=env,
+            [str(ROOT / "build/key_injector"), title] + (["Return"] if shell else []), env=env,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
         ready, _, _ = select.select([injector.stdout], [], [], TIMEOUT)
