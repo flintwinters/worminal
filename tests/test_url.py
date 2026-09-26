@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class UrlClickTest(unittest.TestCase):
-    def test_hover_and_ctrl_click_shell_url(self):
+    def test_hover_and_click_shell_url(self):
         opener = ROOT / "build" / "xdg-open"
         opened = ROOT / "build" / f"url-opened-{os.getpid()}"
         gate = ROOT / "build" / f"url-gate-{os.getpid()}"
@@ -94,7 +94,7 @@ class UrlClickTest(unittest.TestCase):
                                 str(int(dimensions["X"]) + 2 + 10 * cw + cw // 2),
                                 str(int(dimensions["Y"]) + 2 + ch + ch // 2)],
                                env=env, check=True)
-                subprocess.run(["xdotool", "keydown", "ctrl", "click", "1", "keyup", "ctrl"],
+                subprocess.run(["xdotool", "click", "1"],
                                env=env, check=True)
                 deadline = time.monotonic() + 3
                 while time.monotonic() < deadline and not opened.exists():
