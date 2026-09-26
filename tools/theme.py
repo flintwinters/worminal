@@ -10,7 +10,7 @@ import tomllib
 
 
 ROOT = Path(__file__).resolve().parent.parent
-OUTPUT = ROOT / ".checks" / "theme.h"
+OUTPUT = ROOT / "build" / "theme.h"
 NAMES = ("black", "red", "green", "yellow", "blue", "magenta", "cyan", "white")
 DEFAULTS = {
     "primary": {"foreground": "#d8d8d8", "background": "#181818"},
@@ -200,7 +200,8 @@ def theme_header(config):
              f"static const int theme_font_offset_y = {line_offset};",
              f"static const int theme_glyph_offset_y = {glyph_offset_y};",
              f"static const double theme_font_size = {float(font_size)!r};",
-             f"static const char *theme_font_family = {json.dumps(family, ensure_ascii=False) if family is not None else 'NULL'};",
+             "static const char *theme_font_family = "
+             f"{json.dumps(family, ensure_ascii=False) if family is not None else 'NULL'};",
              f"static const int theme_history_size = {history};",
              f"static const int theme_scroll_multiplier = {multiplier};",
              f"static const int theme_bold_bright = {int(bold_bright)};",

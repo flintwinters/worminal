@@ -2,7 +2,7 @@
 #define _GNU_SOURCE
 #include <X11/extensions/XTest.h>
 #define main worminal_main
-#include "../x.c"
+#include "../src/x11/x.c"
 #undef main
 
 void
@@ -22,6 +22,13 @@ void
 tsessionuse(TermSession *chosen)
 {
 	/* This fixture checks view routing without constructing a PTY session. */
+}
+
+void
+tsetdirt(int top, int bot)
+{
+	(void)top;
+	(void)bot;
 }
 
 TermSession *tsessioncurrent(void) { return view->terminal; }
@@ -216,7 +223,7 @@ main(void)
 {
 	const struct { const char *path, *label; } cases[] = {
 		{"/home/felix/projects/worminal/", "worminal"},
-		{"/home/felix/projects/.checks", ".checks"},
+		{"/home/felix/projects/build", "build"},
 		{"/", "/"},
 	};
 	Display *display = XOpenDisplay(NULL);
@@ -253,6 +260,19 @@ main(void)
 	xfinishdraw();
 	views = &first;
 	first.next = &second;
+	view = &first;
+	xsel.primary = xstrdup("copy test");
+	clipcopy(NULL);
+	free(xsel.primary);
+	xsel.primary = NULL;
+	clipcopy(NULL);
+	if (!xsel.clipboard || strcmp(xsel.clipboard, "copy test"))
+		die("copy without a selection discarded the clipboard\n");
+	Shortcut copy = {.mod = ControlMask | ShiftMask, .keysym = XK_C};
+	if (!shortcutmatch(&copy, XK_c, ControlMask | ShiftMask | LockMask) ||
+	    !shortcutmatch(&copy, XK_C, ControlMask | ShiftMask) ||
+	    shortcutmatch(&copy, XK_c, ControlMask | LockMask))
+		die("Ctrl+Shift+C did not match Caps Lock and Shift correctly\n");
 	if (xviewfor(first_window) != &first ||
 	    xviewfor(second_window) != &second)
 		die("X events did not resolve to their view\n");
@@ -393,6 +413,19 @@ main(void)
 	view = &second;
 	if (dc.col[1].color.green != 0)
 		die("tab color leaked across sessions\n");
+	/* Resize while an older service frame may still be sending rows. The
+	 * terminal grid must change only when that frame arrives. */
+	view = &first;
+	xw.draw = XftDrawCreate(display, xw.buf, xw.vis, xw.cmap);
+	xw.specbuf = xmalloc(sizeof(GlyphFontSpec));
+	xw.spec_cols = 1;
+	workspacefd = 0;
+	cresize(80, 60);
+	int frame_capacity = xw.spec_cols;
+	cresize(70, 60);
+	if (xw.spec_cols < frame_capacity)
+		die("resize shrank a buffer still needed by an older frame\n");
+	workspacefd = -1;
 	if (previous_focus != None && previous_focus != PointerRoot)
 		XSetInputFocus(display, previous_focus, revert_to, CurrentTime);
 	XSync(display, False);

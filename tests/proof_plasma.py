@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 def main():
     with isolated_display() as env:
         env = {**env, "XMODIFIERS": "@im=ibus"}
-        log_path = ROOT / ".checks" / "kwin-proof.log"
+        log_path = ROOT / "build" / "kwin-proof.log"
         with log_path.open("wb") as log:
             manager = subprocess.Popen(
                 ["dbus-run-session", "--", "sh", "-c",
@@ -58,7 +58,7 @@ def main():
                     raise RuntimeError("private IBus XIM did not become ready")
 
                 result = subprocess.run(
-                    [str(ROOT / ".checks/view_state_test")],
+                    [str(ROOT / "build/view_state_test")],
                     env={**env, "WORMINAL_PROOF_REQUIRE_IM": "1",
                          "WORMINAL_PROOF_MANAGED_VIEWS": "1"},
                 )
