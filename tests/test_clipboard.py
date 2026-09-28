@@ -22,7 +22,7 @@ class ClipboardShortcutTest(unittest.TestCase):
             terminal = subprocess.Popen(
                 [str(ROOT / "worminal"), "-g", "40x10", "-T", title,
                  "-e", "/bin/sh", "-c",
-                 "printf '\\033[?25l\\033[?1000hCOPY TEST\\n'; exec cat"],
+                 "printf '\\033]52;c;Q09ERVg=\\a\\033[?25l\\033[?1000hCOPY TEST\\n'; exec cat"],
                 env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
             )
             try:
@@ -55,6 +55,22 @@ class ClipboardShortcutTest(unittest.TestCase):
                 time.sleep(.2)
                 subprocess.run(["xdotool", "windowfocus", "--sync", window], env=env, check=True)
 
+                def clipboard():
+                    return subprocess.check_output(
+                        ["xclip", "-selection", "clipboard", "-out"], env=env,
+                        timeout=3, text=True)
+
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline:
+                    try:
+                        if clipboard() == "CODEX":
+                            break
+                    except subprocess.CalledProcessError:
+                        pass
+                    time.sleep(.05)
+                else:
+                    self.fail("OSC 52 did not update the clipboard")
+
                 def copy(start, end, caps=False):
                     subprocess.run(["xdotool", "mousemove", str(x + start * cw), str(y)],
                                    env=env, check=True)
@@ -64,9 +80,7 @@ class ClipboardShortcutTest(unittest.TestCase):
                     if caps:
                         subprocess.run(["xdotool", "key", "Caps_Lock"], env=env, check=True)
                     subprocess.run(["xdotool", "key", "ctrl+shift+c"], env=env, check=True)
-                    return subprocess.check_output(
-                        ["xclip", "-selection", "clipboard", "-out"], env=env,
-                        timeout=3, text=True)
+                    return clipboard()
 
                 self.assertEqual(copy(0, 3), "COPY")
                 self.assertEqual(copy(5, 8, caps=True), "TEST")
