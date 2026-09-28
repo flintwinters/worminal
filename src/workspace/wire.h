@@ -38,6 +38,12 @@ typedef struct {
 	size_t len, pos;
 } WirePacket;
 
+typedef struct {
+	uint32_t header[4];
+	size_t header_bytes, body_bytes;
+	WirePacket packet;
+} WireReader;
+
 void wire_put_u32(WireBuffer *, uint32_t);
 void wire_put_bytes(WireBuffer *, const void *, size_t);
 void wire_put_string(WireBuffer *, const char *);
@@ -46,6 +52,9 @@ int wire_get_u32(WirePacket *, uint32_t *);
 int wire_get_bytes(WirePacket *, void *, size_t);
 char *wire_get_string(WirePacket *);
 int wire_read(int, WirePacket *);
+/* Return 1 for a complete packet, 0 for more input needed, -1 for a bad or closed connection. */
+int wire_tryread(int, WireReader *, WirePacket *);
+void wire_reader_free(WireReader *);
 int wire_write(int, uint32_t, uint32_t, const void *, size_t);
 int wire_trywrite(int, uint32_t, uint32_t, const void *, size_t);
 void wire_packet_free(WirePacket *);

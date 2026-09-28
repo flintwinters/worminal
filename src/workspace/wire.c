@@ -109,6 +109,17 @@ wire_exact(int fd, void *bytes, size_t length)
 	return 1;
 }
 
+static int
+wire_header(WirePacket *packet, const uint32_t header[4])
+{
+	if (ntohl(header[0]) != WIRE_VERSION || ntohl(header[3]) > WIRE_MAX_BYTES)
+		return 0;
+	packet->type = ntohl(header[1]);
+	packet->tab = ntohl(header[2]);
+	packet->len = ntohl(header[3]);
+	return 1;
+}
+
 int
 wire_read(int fd, WirePacket *packet)
 {
@@ -116,11 +127,8 @@ wire_read(int fd, WirePacket *packet)
 	memset(packet, 0, sizeof(*packet));
 	if (!wire_exact(fd, header, sizeof(header)))
 		return 0;
-	if (ntohl(header[0]) != WIRE_VERSION || ntohl(header[3]) > WIRE_MAX_BYTES)
+	if (!wire_header(packet, header))
 		return 0;
-	packet->type = ntohl(header[1]);
-	packet->tab = ntohl(header[2]);
-	packet->len = ntohl(header[3]);
 	packet->data = malloc(packet->len ? packet->len : 1);
 	if (!packet->data)
 		abort();
@@ -129,6 +137,52 @@ wire_read(int fd, WirePacket *packet)
 		return 0;
 	}
 	return 1;
+}
+
+int
+wire_tryread(int fd, WireReader *reader, WirePacket *packet)
+{
+	for (;;) {
+		void *destination;
+		size_t remaining;
+		ssize_t count;
+		if (reader->header_bytes < sizeof(reader->header)) {
+			destination = (unsigned char *)reader->header + reader->header_bytes;
+			remaining = sizeof(reader->header) - reader->header_bytes;
+		} else {
+			if (!reader->packet.data) {
+				if (!wire_header(&reader->packet, reader->header))
+					return -1;
+				reader->packet.data = malloc(reader->packet.len ? reader->packet.len : 1);
+				if (!reader->packet.data)
+					abort();
+			}
+			if (reader->body_bytes == reader->packet.len) {
+				*packet = reader->packet;
+				memset(reader, 0, sizeof(*reader));
+				return 1;
+			}
+			destination = reader->packet.data + reader->body_bytes;
+			remaining = reader->packet.len - reader->body_bytes;
+		}
+		count = recv(fd, destination, remaining, MSG_DONTWAIT);
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+			return 0;
+		if (count <= 0)
+			return -1;
+		if (reader->header_bytes < sizeof(reader->header))
+			reader->header_bytes += count;
+		else
+			reader->body_bytes += count;
+	}
+}
+
+void
+wire_reader_free(WireReader *reader)
+{
+	free(reader->packet.data);
 }
 
 static int

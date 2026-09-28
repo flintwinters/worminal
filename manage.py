@@ -82,15 +82,31 @@ def run_checks():
             "build/compact-worminal", "build/overlap_probe",
             "build/border_probe", "build/icon_probe",
             "build/view_state_test", "build/scrollback_test", "build/url_test")
-    code = run(["build/scrollback_test"],
-               env={**os.environ, "ASAN_OPTIONS": "detect_leaks=0"})
-    if code:
-        return code
-    code = run(["build/url_test"],
-               env={**os.environ, "ASAN_OPTIONS": "detect_leaks=0"})
+    code = run_native_checks()
     if code:
         return code
     return run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-q"])
+
+
+def run_native_checks():
+    for binary in ("build/scrollback_test", "build/url_test"):
+        code = run([binary], env={**os.environ, "ASAN_OPTIONS": "detect_leaks=0"})
+        if code:
+            return code
+    return 0
+
+
+def run_headless_checks():
+    prepare("build/scrollback_test", "build/url_test")
+    code = run_native_checks()
+    if code:
+        return code
+    for pattern in ("test_workspace.py", "test_theme.py"):
+        code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                    "-p", pattern, "-q"])
+        if code:
+            return code
+    return 0
 
 
 def run_proof_script(path):
@@ -107,6 +123,12 @@ def build():
 def check():
     """Run the local native and private-display regression suite."""
     raise typer.Exit(run_checks())
+
+
+@app.command("check-headless")
+def check_headless():
+    """Run native and service checks that need no X11 display."""
+    raise typer.Exit(run_headless_checks())
 
 
 @app.command()
