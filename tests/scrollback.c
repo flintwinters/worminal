@@ -9,7 +9,6 @@ unsigned int defaultcs = 257;
 unsigned int tabspaces = 8;
 wchar_t *worddelimiters = L" ";
 int allowaltscreen = 1;
-int allowwindowops = 0;
 char *vtiden = "\033[?6c";
 
 void xsetmode(int set, unsigned int flags) {}

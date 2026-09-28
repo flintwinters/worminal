@@ -11,7 +11,7 @@ import uuid
 
 
 ROOT = Path(__file__).resolve().parent.parent
-HELLO, INPUT, FOCUS, CATALOG, FRAME, ROW, FINISH, STOP, PRINT = 1, 3, 4, 7, 8, 9, 10, 13, 14
+HELLO, INPUT, FOCUS, CATALOG, FRAME, ROW, FINISH, CLIPBOARD, STOP, PRINT = 1, 3, 4, 7, 8, 9, 10, 11, 13, 14
 
 
 def number(value):
@@ -131,13 +131,17 @@ class WorkspaceServiceTest(unittest.TestCase):
                                            stderr=subprocess.PIPE)
                 remote.close()
                 bridges.append((process, local))
-                launch = b"".join((number(40), number(10), number(1), number(1), number(0),
+                command = (["/bin/sh", "-c", "printf '\\033]52;c;Q09ERVg=\\a'; exec cat"]
+                           if index == 0 else ["/bin/cat"])
+                launch = b"".join((number(40), number(10), number(1), number(len(command)), number(0),
                                    string(f"bridge-{index}"), string(str(ROOT)), string(""),
-                                   string("-"), string(""), string("/bin/cat")))
+                                   string("-"), string(""), *(string(arg) for arg in command)))
                 send(local, HELLO, payload=launch)
                 _, catalog = wait_kind(local, CATALOG)
                 self.assertEqual(struct.unpack("!I", catalog[:4])[0], index + 1)
                 if index == 0:
+                    _, clipboard = wait_kind(local, CLIPBOARD)
+                    self.assertEqual(clipboard, string("CODEX"))
                     local.shutdown(socket.SHUT_WR)
                     process.wait(timeout=3)
                     self.assertEqual(process.returncode, 0)
