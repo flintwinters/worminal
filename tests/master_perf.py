@@ -52,6 +52,7 @@ def launch(process, kind):
     payload = b"".join((number(120), number(40), number(1), number(1), number(0),
                         string("master-perf"), string(""), string(""), string(""),
                         string(""), string("/bin/cat")))
+    started = time.monotonic()
     send(process, kind, payload=payload)
     deadline = time.monotonic() + 20
     tab = None
@@ -63,17 +64,18 @@ def launch(process, kind):
         if tab == packet_tab and tab is not None:
             total += size
         if packet_kind == FINISH and packet_tab == tab:
-            return tab, total
+            return tab, total, (time.monotonic() - started) * 1000
 
 
-def measure(host, daemon):
+def measure(host, daemon, compress):
     scope = f"master-perf-{os.getpid()}-{uuid.uuid4().hex}"
     prefix = f"env WORMINAL_SHARED_SOCKET_SCOPE={shlex.quote(scope)} {shlex.quote(daemon)}"
-    process = subprocess.Popen([*SSH, host, f"{prefix} --bridge"], stdin=subprocess.PIPE,
+    ssh = [*SSH, "-C"] if compress else SSH
+    process = subprocess.Popen([*ssh, host, f"{prefix} --bridge"], stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
-        first, initial_bytes = launch(process, HELLO)
-        second, _ = launch(process, NEW)
+        first, initial_bytes, initial_ms = launch(process, HELLO)
+        second, new_bytes, new_ms = launch(process, NEW)
         started = time.monotonic()
         for tab in (first, second, first):
             send(process, FOCUS, tab, number(120) + number(40))
@@ -92,11 +94,13 @@ def measure(host, daemon):
             kind, tab, _, _ = receive(process, deadline)
             if kind == FINISH and tab == first:
                 break
-        print(f"{daemon}: initial 120x40 frame {initial_bytes:,} bytes; "
+        print(f"{daemon} ({'SSH -C' if compress else 'SSH'}): "
+              f"initial 120x40 frame {initial_bytes:,} bytes / {initial_ms:.1f} ms; "
+              f"new tab {new_bytes:,} bytes / {new_ms:.1f} ms; "
               f"three cached switches {redundant_frames} frames / {redundant_bytes:,} bytes; "
               f"resize frame began after {delay_ms:.1f} ms")
     finally:
-        subprocess.run([*SSH, host, f"{prefix} --stop"], stdout=subprocess.DEVNULL,
+        subprocess.run([*ssh, host, f"{prefix} --stop"], stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL, timeout=12)
         process.terminate()
         try:
@@ -109,4 +113,6 @@ def measure(host, daemon):
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         raise SystemExit("Usage: python3 manage.py master-perf HOST")
-    measure(sys.argv[1], os.environ.get("WORMINAL_MASTER_DAEMON", "worminald"))
+    daemon = os.environ.get("WORMINAL_MASTER_DAEMON", "worminald")
+    for compress in (False, True):
+        measure(sys.argv[1], daemon, compress)

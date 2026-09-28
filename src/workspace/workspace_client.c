@@ -32,7 +32,9 @@ workspace_client_open(const char *master)
 		dup2(sockets[1], 1);
 		close(sockets[0]);
 		close(sockets[1]);
-		execlp("ssh", "ssh", "-T", master, "worminald", "--bridge", (char *)NULL);
+		/* Full terminal frames are mostly repeated glyph fields; SSH compression
+		 * keeps first visits to existing tabs responsive over the bridge. */
+		execlp("ssh", "ssh", "-T", "-C", master, "worminald", "--bridge", (char *)NULL);
 		_exit(127);
 	}
 	close(sockets[1]);
