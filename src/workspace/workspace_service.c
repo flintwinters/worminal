@@ -22,7 +22,7 @@
 char *utmp, *scroll, *stty_args = "stty raw pass8 nl -echo -iexten -cstopb 38400";
 char *vtiden = "\033[?6c", *termname = "xterm-256color";
 wchar_t *worddelimiters = L" ";
-int allowaltscreen = 1, allowwindowops = 0;
+int allowaltscreen = 1;
 unsigned int defaultfg = 258, defaultbg = 259, defaultcs = 256, tabspaces = 8;
 
 typedef struct Client Client;

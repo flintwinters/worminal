@@ -81,11 +81,12 @@ scroll mode. History rows
 are allocated as output arrives, so the configured limit does not reserve all
 row storage at startup.
 
-Ctrl+click an HTTP or HTTPS URL printed in the terminal to open it with the
+Click an HTTP or HTTPS URL printed in the terminal to open it with the
 local desktop browser, including when the shell runs over SSH. Wrapped URLs
 work across visible rows and underline while hovered. Terminal applications
-can still receive ordinary mouse clicks; hold Shift while dragging to select
+still receive clicks outside URLs; hold Shift while dragging to select
 text when mouse reporting is active. URL opening uses the local `xdg-open` command.
+OSC 52 sequences from tab programs update the viewing host's clipboard.
 
 Alacritty's `font.normal.family` selects the Xft font family when present;
 `-f` overrides it for one launch. `font.size` sets the Xft font's point size,
