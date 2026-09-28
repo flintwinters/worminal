@@ -396,21 +396,28 @@ client_message(Client *client, WirePacket *packet)
 	if (!client->ready || !tab)
 		return;
 	switch (packet->type) {
-	case WIRE_FOCUS:
+	case WIRE_FOCUS: {
 		if (!wire_get_u32(packet, &cols) || !wire_get_u32(packet, &rows) ||
 		    cols < 1 || cols > 400 || rows < 1 || rows > 200 || packet->pos != packet->len)
 			break;
+		int new_controller = tab->controller != client;
 		take_control(tab, client);
 		tsessionuse(tab->session);
-		if (cols != (uint32_t)tsessionframe(tab->session).cols ||
-		    rows != (uint32_t)tsessionframe(tab->session).rows) {
+		SessionFrame frame = tsessionframe(tab->session);
+		int resized = cols != (uint32_t)frame.cols || rows != (uint32_t)frame.rows;
+		if (resized) {
 			tresize(cols, rows);
 			ttyresize(0, 0);
 		}
-		send_frame(client, tab, 1);
-		tab->pending_frame = 0;
-		tsessioncleandirty(tab->session);
+		/* The controller receives incremental rows even while its tab is hidden.
+		 * Keep pending dirty rows when focus requires no full snapshot. */
+		if (new_controller || resized) {
+			send_frame(client, tab, 1);
+			tab->pending_frame = 0;
+			tsessioncleandirty(tab->session);
+		}
 		break;
+	}
 	case WIRE_INPUT:
 		if (packet->len > 65536)
 			break;
