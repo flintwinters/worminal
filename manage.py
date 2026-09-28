@@ -174,6 +174,13 @@ def master_perf(host: str):
     raise typer.Exit(run([sys.executable, "tests/master_perf.py", host]))
 
 
+@app.command("window-perf")
+def window_perf():
+    """Measure isolated tab repaint on the current X11 display (needs python-xlib)."""
+    prepare()
+    raise typer.Exit(run([sys.executable, "tests/window_perf.py"]))
+
+
 @app.command("run")
 def run_window():
     """Run the already-built Worminal binary."""
