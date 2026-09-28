@@ -183,6 +183,13 @@ class WorkspaceServiceTest(unittest.TestCase):
             second = connections[1]
             send(second, FOCUS, first_tab, number(40) + number(10))
             wait_kind(second, FINISH, first_tab)
+            # The next frame must be for the resize. A redundant focus used to
+            # send a full 40-column screen before the requested 41-column one.
+            send(second, FOCUS, first_tab, number(40) + number(10))
+            send(second, FOCUS, first_tab, number(41) + number(10))
+            _, frame = wait_kind(second, FRAME, first_tab)
+            self.assertEqual(struct.unpack("!I", frame[:4])[0], 41)
+            wait_kind(second, FINISH, first_tab)
             send(second, INPUT, first_tab, b"shared\n")
             printed = b""
             while b"shared" not in printed and len(printed) < 128:
@@ -191,8 +198,7 @@ class WorkspaceServiceTest(unittest.TestCase):
             self.assertIn(b"shared", printed)
             connections[0].close()
             connections.pop(0)
-            send(second, FOCUS, first_tab, number(40) + number(10))
-            wait_kind(second, FINISH, first_tab)
+            send(second, FOCUS, first_tab, number(41) + number(10))
             self.assertIsNone(service.poll())
         finally:
             if connections:
