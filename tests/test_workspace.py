@@ -53,6 +53,71 @@ def wait_kind(connection, wanted, wanted_tab=None):
 
 
 class WorkspaceServiceTest(unittest.TestCase):
+    def test_partial_client_packet_does_not_pause_other_tab(self):
+        scope = f"partial-{os.getpid()}-{uuid.uuid4().hex}"
+        env = {**os.environ, "WORMINAL_SHARED_SOCKET_SCOPE": scope}
+        address = f"\0worminal-workspace-{os.getuid()}-{scope}"
+        service = subprocess.Popen([str(ROOT / "worminald"), "--serve"], env=env,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        connections = []
+        try:
+            for index in range(2):
+                deadline = time.monotonic() + 3
+                while True:
+                    connection = socket.socket(socket.AF_UNIX)
+                    connection.settimeout(3)
+                    try:
+                        connection.connect(address)
+                        break
+                    except OSError:
+                        connection.close()
+                        if time.monotonic() >= deadline:
+                            self.fail(f"workspace did not start: {service.poll()}")
+                        time.sleep(.01)
+                connections.append(connection)
+                launch = b"".join((number(40), number(10), number(1), number(1), number(0),
+                                   string(f"partial-{index}"), string(str(ROOT)), string(""),
+                                   string("-"), string(""), string("/bin/cat")))
+                send(connection, HELLO, payload=launch)
+                _, catalog = wait_kind(connection, CATALOG)
+                if index == 0:
+                    first_tab = struct.unpack("!I", catalog[12:16])[0]
+
+            # A readable socket with an incomplete header used to hold the service
+            # in wire_read until its receive timeout, delaying every other PTY.
+            partial = struct.pack("!4I", 1, INPUT, first_tab, 3)
+            connections[1].sendall(partial[:8])
+            connections[0].settimeout(1.25)
+            send(connections[0], INPUT, first_tab, b"responsive\n")
+            printed = b""
+            while b"responsive" not in printed:
+                _, chunk = wait_kind(connections[0], PRINT)
+                printed += chunk
+            self.assertIn(b"responsive", printed)
+            connections[1].sendall(partial[8:] + b"y")
+            send(connections[0], INPUT, first_tab, b"second\n")
+            printed = b""
+            while b"second" not in printed:
+                _, chunk = wait_kind(connections[0], PRINT)
+                printed += chunk
+            self.assertIn(b"second", printed)
+            connections[1].sendall(b"z\n")
+            printed = b""
+            while b"yz" not in printed:
+                _, chunk = wait_kind(connections[0], PRINT)
+                printed += chunk
+            self.assertIn(b"yz", printed)
+        finally:
+            for connection in reversed(connections):
+                connection.close()
+            subprocess.run([str(ROOT / "worminald"), "--stop"], env=env,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
+            try:
+                service.communicate(timeout=3)
+            except subprocess.TimeoutExpired:
+                service.kill()
+                service.communicate()
+
     def test_bridge_starts_service_and_preserves_tabs_between_connections(self):
         scope = f"bridge-{os.getpid()}-{uuid.uuid4().hex}"
         env = {**os.environ, "WORMINAL_SHARED_SOCKET_SCOPE": scope}
