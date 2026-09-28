@@ -779,8 +779,7 @@ bpress(XEvent *e)
 
 	if (1 <= btn && btn <= 11)
 		buttons |= 1 << (btn-1);
-	if (btn == Button1 && (e->xbutton.state & ControlMask) &&
-	    !(e->xbutton.state & ShiftMask) &&
+	if (btn == Button1 && !(e->xbutton.state & ShiftMask) &&
 	    (view->url_click = xurlat(evcol(e), evrow(e), NULL))) {
 		view->url_col = evcol(e);
 		view->url_row = evrow(e);
@@ -855,8 +854,14 @@ selnotify(XEvent *e)
 	else if (e->type == PropertyNotify)
 		property = e->xproperty.atom;
 
-	if (property == None)
+	if (property == None) {
+		if (e->type == SelectionNotify &&
+		    e->xselection.target == xsel.xtarget &&
+		    xsel.xtarget != XA_STRING)
+			XConvertSelection(xw.dpy, e->xselection.selection, XA_STRING,
+			                  e->xselection.selection, xw.win, CurrentTime);
 		return;
+	}
 
 	do {
 		if (XGetWindowProperty(xw.dpy, xw.win, property, ofs,
