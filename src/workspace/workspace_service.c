@@ -30,6 +30,7 @@ typedef struct Tab Tab;
 struct Client {
 	int fd, ready;
 	int needs_resync;
+	WireReader input;
 	WireBuffer output;
 	size_t sent;
 	Client *next;
@@ -84,6 +85,8 @@ client_drop(Client *client)
 		close(client->fd);
 	client->fd = -1;
 	client->ready = 0;
+	wire_reader_free(&client->input);
+	client->input = (WireReader){0};
 	wire_buffer_free(&client->output);
 	client->output = (WireBuffer){0};
 	client->sent = 0;
@@ -517,8 +520,6 @@ serve(void)
 			}
 			if (fd >= 0) {
 				Client *client = calloc(1, sizeof(*client));
-				struct timeval timeout = {.tv_sec = 2};
-				setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 				client->fd = fd;
 				client->next = clients;
 				clients = client;
@@ -528,10 +529,11 @@ serve(void)
 			if (client->fd < 0 || !FD_ISSET(client->fd, &readers))
 				continue;
 			WirePacket packet;
-			if (wire_read(client->fd, &packet)) {
+			int result = wire_tryread(client->fd, &client->input, &packet);
+			if (result > 0) {
 				client_message(client, &packet);
 				wire_packet_free(&packet);
-			} else {
+			} else if (result < 0) {
 				client_drop(client);
 			}
 		}

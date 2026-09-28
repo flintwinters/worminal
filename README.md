@@ -105,7 +105,8 @@ files for 120-character lines and a 1,000-line file limit, then runs selected
 Clang static analyzer checks on the C sources (requires `clang-tidy`). The
 merged `src/terminal/st.c`, `src/x11/x.c`, and `tests/test_native.py` exceed 1,000 lines;
 lint caps them at their current lengths until they can be split.
-`python3 manage.py check` builds and runs native checks. `python3 manage.py proof`
+`python3 manage.py check` builds and runs native checks. `python3 manage.py check-headless`
+runs the native, service, and theme checks without X11. `python3 manage.py proof`
 runs those checks and every private-display proof in `tests/proof_*.py`,
 including isolated Qtile and KWin and remote Cinnamon.
 Use `python3 manage.py proof plasma` or `python3 manage.py proof cinnamon`
