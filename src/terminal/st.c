@@ -143,6 +143,8 @@ static TermSession primarysession = {.output_fd = 1, .pty_fd = -1,
 static TermSession *session = &primarysession;
 static TermSession *sessions = &primarysession;
 static int last_child_status;
+/* The service parses OSC 52; keep this policy with the shared parser. */
+int allowwindowops = 1;
 static const char *launch_cwd, *launch_windowid;
 static char **launch_env;
 void (*ttywritehook)(const char *, size_t, int);
