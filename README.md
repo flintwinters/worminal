@@ -114,10 +114,13 @@ to run one managed proof. `python3 manage.py latency` reports median and 95th pe
 the first key queued by X and then echoed across 20 runs.
 `python3 manage.py latency-shell` measures when your interactive shell reads
 that input. Worminal maps a blank, provisional window before loading fonts, so X can queue early
-keystrokes until the terminal processes them. Tests and benchmarks use a private Xvfb
-display, so no windows or keystrokes reach your desktop. Checks and benchmarks
+keystrokes until the terminal processes them. Display checks and launch benchmarks use a private Xvfb
+display, so no windows or keystrokes reach your desktop. Those commands
 need `Xvfb`, `xdotool`, and the XTest development library (`libxtst-dev` on
 Debian). The `/bin/cat` probe excludes shell startup; both exclude Xvfb startup.
+`python3 manage.py master-perf user@host` measures full-frame traffic during tab
+switches over SSH using an isolated service. Set `WORMINAL_MASTER_DAEMON` to a
+remote daemon path to compare builds without touching existing tabs.
 Worminal advertises `xterm-256color` so applications such as micro recognize
 modified Home and End keys. `make install` installs both binaries.
 It also installs a desktop launcher and scalable icon showing a light pink

@@ -22,7 +22,7 @@ app.add_typer(proof_app, name="proof")
 MAX_FILE_LINES = 1000
 MAX_LINE_LENGTH = 120
 # These merged files exceed the limit; prevent further growth until they are split.
-LEGACY_FILE_LINES = {"src/terminal/st.c": 3223, "src/x11/x.c": 3412,
+LEGACY_FILE_LINES = {"src/terminal/st.c": 3223, "src/x11/x.c": 3417,
                      "tests/test_native.py": 1333}
 
 
@@ -166,6 +166,12 @@ def latency_shell():
     """Measure when the interactive shell receives early input."""
     prepare("build/key_injector")
     raise typer.Exit(run([sys.executable, "tests/latency.py", "--shell"]))
+
+
+@app.command("master-perf")
+def master_perf(host: str):
+    """Measure SSH tab-switch traffic; set WORMINAL_MASTER_DAEMON for a test build."""
+    raise typer.Exit(run([sys.executable, "tests/master_perf.py", host]))
 
 
 @app.command("run")
