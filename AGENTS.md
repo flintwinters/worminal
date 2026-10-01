@@ -12,4 +12,5 @@ and `src/workspace` connects views to the service. Compact rows repaint backgrou
 `-O3`; `manage.py` checks and measures latency on private Xvfb. The upstream source and license remain in the
 repository.
 
-Current job: measure service and window memory, then compare launch and memory against the earlier in-process owner.
+Current jobs: diagnose Codex mouse-wheel scrolling through remote masters; measure service and window memory,
+then compare launch and memory against the earlier in-process owner.

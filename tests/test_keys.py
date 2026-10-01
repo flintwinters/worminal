@@ -39,7 +39,16 @@ def read_through(stream, final):
 
 class NavigationKeysTest(unittest.TestCase):
     def test_alternate_scroll_sends_cursor_keys(self):
+        self.check_alternate_scroll([])
+
+    def test_master_alternate_scroll_sends_cursor_keys(self):
+        self.check_alternate_scroll(["--master", "wheel-test"])
+
+    def check_alternate_scroll(self, connection):
         with isolated_display() as env:
+            if connection:
+                env["PATH"] = str(ROOT / "tests" / "fixtures" / "master") + os.pathsep + env["PATH"]
+                env["WORMINAL_TEST_DAEMON"] = str(ROOT / "worminald")
             for appcursor, mouse_report in ((False, False), (True, False), (False, True)):
                 title = f"Worminal alternate scroll {os.getpid()} {appcursor} {mouse_report}"
                 mode = b"\033[?1049h\033[?1007h"
@@ -50,7 +59,7 @@ class NavigationKeysTest(unittest.TestCase):
                 escapes = "".join(f"\\{byte:03o}" for byte in mode)
                 command = f"stty raw -echo; printf '{escapes}R'; exec cat"
                 terminal = subprocess.Popen(
-                    [str(ROOT / "worminal"), "-T", title, "-o", "-",
+                    [str(ROOT / "worminal"), *connection, "-T", title, "-o", "-",
                      "-e", "/bin/sh", "-c", command],
                     env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 )
