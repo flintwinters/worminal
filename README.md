@@ -85,7 +85,10 @@ Click an HTTP or HTTPS URL printed in the terminal to open it with the
 local desktop browser, including when the shell runs over SSH. Wrapped URLs
 work across visible rows and underline while hovered. Terminal applications
 still receive clicks outside URLs; hold Shift while dragging to select
-text when mouse reporting is active. URL opening uses the local `xdg-open` command.
+text when mouse reporting is active. To copy from Codex or another mouse-reporting
+application, hold Shift while dragging over the text, release the mouse button,
+then press Ctrl+Shift+C. The shortcut copies Worminal's mouse selection.
+URL opening uses the local `xdg-open` command.
 OSC 52 sequences from tab programs update the viewing host's clipboard.
 
 Alacritty's `font.normal.family` selects the Xft font family when present;
