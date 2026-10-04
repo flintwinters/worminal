@@ -3114,7 +3114,8 @@ kpress(XEvent *ev)
 		}
 	}
 	if (e->state & Mod1Mask && BETWEEN(ksym, XK_0, XK_9)) {
-		xselecttab(xtabslot(ksym == XK_0 ? 10 : ksym - XK_0));
+		xselecttab(ksym == XK_9 ? lasttab :
+		           xtabslot(ksym == XK_0 ? 10 : ksym - XK_0));
 		return;
 	}
 	/* 1. shortcuts */
