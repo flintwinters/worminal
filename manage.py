@@ -125,6 +125,14 @@ def check():
     raise typer.Exit(run_checks())
 
 
+@app.command("check-keys")
+def check_keys():
+    """Check navigation and mouse input on private Xvfb displays."""
+    prepare()
+    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                          "-p", "test_keys.py", "-q"]))
+
+
 @app.command("check-headless")
 def check_headless():
     """Run native and service checks that need no X11 display."""
