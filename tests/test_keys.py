@@ -1,4 +1,4 @@
-"""Check modified navigation keys through X11, the PTY, and a raw-mode child."""
+"""Check navigation keys through X11, the PTY, and a raw-mode child."""
 
 import os
 from pathlib import Path
@@ -162,8 +162,20 @@ class NavigationKeysTest(unittest.TestCase):
                 log.unlink(missing_ok=True)
                 shutil.rmtree(config)
 
-    def test_modified_home_end(self):
+    def test_navigation_keys(self):
+        self.check_navigation_keys([])
+
+    def test_master_navigation_keys(self):
+        self.check_navigation_keys(["--master", "key-test"])
+
+    def check_navigation_keys(self, connection):
         cases = (
+            ("Delete", b"\033[3~"),
+            ("ctrl+Delete", b"\033[3;5~"),
+            ("shift+Delete", b"\033[3;2~"),
+            ("KP_Delete", b"\033[3~"),
+            ("ctrl+KP_Delete", b"\033[3;5~"),
+            ("shift+KP_Delete", b"\033[3;2~"),
             ("ctrl+End", b"\033[1;5F"),
             ("ctrl+Home", b"\033[1;5H"),
             ("shift+End", b"\033[1;2F"),
@@ -171,12 +183,16 @@ class NavigationKeysTest(unittest.TestCase):
             ("ctrl+shift+End", b"\033[1;6F"),
         )
         with isolated_display() as env:
-            for appcursor in (False, True):
-                title = f"Worminal keys {os.getpid()} {appcursor}"
-                mode = r"printf '\033[?1h'; " if appcursor else ""
-                command = f"stty raw -echo; {mode}printf R; exec cat"
+            if connection:
+                env["PATH"] = str(ROOT / "tests" / "fixtures" / "master") + os.pathsep + env["PATH"]
+                env["WORMINAL_TEST_DAEMON"] = str(ROOT / "worminald")
+            for appcursor, appkeypad in ((False, False), (False, True), (True, False), (True, True)):
+                title = f"Worminal keys {os.getpid()} {appcursor} {appkeypad}"
+                mode = (b"\033[?1h" if appcursor else b"") + (b"\033=" if appkeypad else b"")
+                escapes = "".join(f"\\{byte:03o}" for byte in mode)
+                command = f"stty raw -echo; printf '{escapes}R'; exec cat"
                 terminal = subprocess.Popen(
-                    [str(ROOT / "worminal"), "-T", title, "-o", "-",
+                    [str(ROOT / "worminal"), *connection, "-T", title, "-o", "-",
                      "-e", "/bin/sh", "-c", command],
                     env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 )
@@ -195,8 +211,7 @@ class NavigationKeysTest(unittest.TestCase):
                     if window is None:
                         detail = terminal.stderr.read(4096) if terminal.poll() is not None else b""
                         self.fail(f"Worminal did not open: exit={terminal.poll()}, stderr={detail!r}")
-                    self.assertEqual(read_bytes(terminal.stdout, 6 if appcursor else 1),
-                                     b"\033[?1hR" if appcursor else b"R")
+                    self.assertEqual(read_bytes(terminal.stdout, len(mode) + 1), mode + b"R")
                     focused = subprocess.run(["xdotool", "windowfocus", "--sync", window],
                                              env=env, capture_output=True)
                     if focused.returncode:
