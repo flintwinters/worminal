@@ -1,5 +1,6 @@
 """Run shared-tab checks against remote Cinnamon on a private local Xvfb display."""
 
+import os
 from pathlib import Path
 import select
 import subprocess
@@ -10,9 +11,8 @@ from x11 import isolated_display
 
 
 ROOT = Path(__file__).resolve().parent.parent
-HOST = "user@host"
 SSH = ["ssh", "-F", "/dev/null", "-Y", "-o", "BatchMode=yes",
-       "-o", "ConnectTimeout=8", "-o", "ExitOnForwardFailure=yes", HOST]
+       "-o", "ConnectTimeout=8", "-o", "ExitOnForwardFailure=yes"]
 
 
 def wait_for_property(env, name, seconds, manager, contains=None):
@@ -30,10 +30,18 @@ def wait_for_property(env, name, seconds, manager, contains=None):
 
 
 def main():
+    host = os.environ.get("WORMINAL_CINNAMON_HOST")
+    if not host:
+        print("Set WORMINAL_CINNAMON_HOST to run the remote Cinnamon proof.", file=sys.stderr)
+        return 1
+    if host.startswith("-"):
+        print("WORMINAL_CINNAMON_HOST must be an SSH destination, not an option.", file=sys.stderr)
+        return 1
+    ssh = [*SSH, host]
     with isolated_display() as env:
         # SSH forwards this private DISPLAY. Neither Cinnamon nor test windows
         # can reach the remote host's active :0 session.
-        preflight = subprocess.run([*SSH, "xprop -root >/dev/null"], env=env,
+        preflight = subprocess.run([*ssh, "xprop -root >/dev/null"], env=env,
                                    capture_output=True, text=True)
         if preflight.returncode:
             raise RuntimeError(f"private X11 forwarding failed: {preflight.stderr.strip()}")
@@ -52,7 +60,7 @@ def main():
                 # The reported PID belongs to timeout, which forwards SIGTERM
                 # to Cinnamon. A deadline also bounds cleanup if SSH drops.
                 manager = subprocess.Popen(
-                    [*SSH, "sh -c 'timeout 75s env LIBGL_ALWAYS_SOFTWARE=1 "
+                    [*ssh, "sh -c 'timeout 75s env LIBGL_ALWAYS_SOFTWARE=1 "
                      "XDG_SESSION_TYPE=x11 dbus-run-session -- cinnamon --replace & "
                      "wm=$!; echo $wm; wait $wm'"],
                     env=env, stdout=subprocess.PIPE, stderr=log,
@@ -84,7 +92,7 @@ def main():
                 code = 1
             finally:
                 if remote_pid and remote_pid.isdigit():
-                    subprocess.run([*SSH, f"kill -TERM {remote_pid.decode()}"],
+                    subprocess.run([*ssh, f"kill -TERM {remote_pid.decode()}"],
                                    env=env, capture_output=True, timeout=10)
                 if manager is not None:
                     try:

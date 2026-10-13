@@ -5,3 +5,9 @@ __pycache__/
 build/
 .checks/
 archive/
+.nfs*
+.env
+.env.*
+!.env.example
+*.pem
+*.key
