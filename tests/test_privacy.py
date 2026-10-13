@@ -11,6 +11,18 @@ from tools.privacy import check_privacy, findings
 
 
 class PrivacyTests(unittest.TestCase):
+    def test_forced_private_file_is_rejected_even_without_recognized_credentials(self):
+        root = Path(__file__).resolve().parent.parent
+        with patch("tools.privacy.git", side_effect=[b".env\0", b"CUSTOM_SETTING=opaque"]):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertTrue(check_privacy(root, staged=True))
+
+    def test_history_rejects_non_anonymous_names_without_email_addresses(self):
+        calls = [b"", b"", b"abc\n", b"", b"Person\nanonymous\nPerson\nanonymous\n"]
+        with patch("tools.privacy.git", side_effect=calls):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertTrue(check_privacy(Path.cwd(), history=True))
+
     def test_staged_scan_uses_index_even_when_worktree_is_clean(self):
         root = Path(__file__).resolve().parent.parent
         secret = b"ghp_" + b"a" * 30
