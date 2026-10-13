@@ -50,6 +50,10 @@ def check_privacy(root, history=False, staged=False, identities=False, message_f
         # Upstream license attribution must remain intact.
         if path.name == "LICENSE":
             continue
+        if path.suffix in (".pem", ".key") or path.name == ".env" or (
+                path.name.startswith(".env.") and path.name != ".env.example"):
+            console.print(f"{path.relative_to(root)}: private configuration or key file", markup=False)
+            count += 1
         data = git("show", f":{path.relative_to(root).as_posix()}") if staged else path.read_bytes()
         report(path.relative_to(root).as_posix(), data)
     if identities:
@@ -70,5 +74,9 @@ def check_privacy(root, history=False, staged=False, identities=False, message_f
         for entry in git("log", "--all", "--format=%H").splitlines():
             oid = entry.decode()
             report(f"commit {oid[:12]}", git("show", "-s", "--format=%an <%ae>%n%cn <%ce>%n%B", oid))
+            identity = git("show", "-s", "--format=%an%n%ae%n%cn%n%ce", oid).splitlines()
+            if identity != [b"Worminal contributor", b"anonymous"] * 2:
+                console.print(f"commit {oid[:12]}: non-anonymous identity", markup=False)
+                count += 1
     console.print(f"Privacy check: {count} finding(s).", markup=False)
     return bool(count)
