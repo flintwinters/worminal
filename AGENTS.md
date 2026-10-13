@@ -11,6 +11,8 @@ size, spacing, and scrollback into a generated C header. `src/terminal` owns ter
 and `src/workspace` connects views to the service. Compact rows repaint backgrounds before glyphs. `config.mk` selects
 `-O3`; `manage.py` checks and measures latency on private Xvfb. The upstream source and license remain in the
 repository.
+Keep machine destinations in environment configuration and use anonymous commit identities.
+Run `manage.py privacy-setup` in fresh clones; privacy hooks and CI guard staged content and history.
 
 Current jobs: diagnose Codex mouse-wheel scrolling through remote masters; measure service and window memory,
 then compare launch and memory against the earlier in-process owner.

@@ -33,7 +33,7 @@ def git(*args):
     return subprocess.check_output(["git", *args])
 
 
-def check_privacy(root, history=False):
+def check_privacy(root, history=False, staged=False, identities=False, message_file=None):
     console = Console()
     count = 0
 
@@ -50,7 +50,15 @@ def check_privacy(root, history=False):
         # Upstream license attribution must remain intact.
         if path.name == "LICENSE":
             continue
-        report(path.relative_to(root).as_posix(), path.read_bytes())
+        data = git("show", f":{path.relative_to(root).as_posix()}") if staged else path.read_bytes()
+        report(path.relative_to(root).as_posix(), data)
+    if identities:
+        for variable in ("GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"):
+            if not git("var", variable).startswith(b"Worminal contributor <anonymous> "):
+                console.print(f"{variable}: use the anonymous project identity (manage.py privacy-setup).")
+                count += 1
+    if message_file:
+        report("commit message", message_file.read_bytes())
     if history:
         objects = git("rev-list", "--objects", "--all").splitlines()
         for entry in objects:

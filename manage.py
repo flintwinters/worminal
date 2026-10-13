@@ -129,9 +129,23 @@ def check():
 
 
 @app.command("check-privacy")
-def privacy(history: bool = typer.Option(False, "--history", help="Also scan reachable Git history.")):
+def privacy(history: bool = typer.Option(False, "--history", help="Also scan reachable Git history."),
+            staged: bool = typer.Option(False, "--staged", help="Scan index content instead of working files."),
+            identities: bool = typer.Option(False, "--identities", help="Require anonymous commit identities."),
+            message_file: Path = typer.Option(None, "--message-file", help="Also scan a commit message.")):
     """Scan tracked content for common private data; redact matched values."""
-    raise typer.Exit(int(check_privacy(ROOT, history)))
+    raise typer.Exit(int(check_privacy(ROOT, history, staged, identities, message_file)))
+
+
+@app.command("privacy-setup")
+def privacy_setup():
+    """Install tracked privacy hooks and set an anonymous repository-local identity."""
+    for name, value in (("core.hooksPath", ".githooks"), ("user.name", "Worminal contributor"),
+                        ("user.email", "anonymous")):
+        code = run(["git", "config", "--local", name, value])
+        if code:
+            raise typer.Exit(code)
+    typer.echo("Privacy hooks and anonymous identity installed for this checkout.")
 
 
 @app.command("check-keys")

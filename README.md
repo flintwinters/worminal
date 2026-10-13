@@ -118,6 +118,10 @@ The remote proof requires `WORMINAL_CINNAMON_HOST=user@host`; set it in your env
 `python3 manage.py check-privacy` scans tracked files for common credentials and personal machine details.
 Add `--history` to inspect reachable Git blobs and commit identities too. Reports show locations and categories,
 never matched values. Pattern checks cannot guarantee the absence of all private information.
+Run `python3 manage.py privacy-setup` after cloning to enable the tracked commit and push hooks
+and anonymous project commit identity. Commit checks read the staged content, validate author and committer
+identities, and scan commit messages. Push checks and CI scan reachable history. Hooks can be bypassed;
+require the Privacy CI job in branch rules to enforce it on contributions.
 Use `python3 manage.py proof plasma` or `python3 manage.py proof cinnamon`
 to run one managed proof. `python3 manage.py latency` reports median and 95th percentile launch to
 the first key queued by X and then echoed across 20 runs.
