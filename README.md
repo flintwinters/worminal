@@ -122,6 +122,8 @@ Run `python3 manage.py privacy-setup` after cloning to enable the tracked commit
 and anonymous project commit identity. Commit checks read the staged content, validate author and committer
 identities, and scan commit messages. Push checks and CI scan reachable history. Hooks can be bypassed;
 require the Privacy CI job in branch rules to enforce it on contributions.
+Create merge commits locally with the anonymous project identity; server-generated merge commits
+can introduce personal or service identities and will fail the history check.
 Use `python3 manage.py proof plasma` or `python3 manage.py proof cinnamon`
 to run one managed proof. `python3 manage.py latency` reports median and 95th percentile launch to
 the first key queued by X and then echoed across 20 runs.
