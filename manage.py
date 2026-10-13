@@ -12,6 +12,7 @@ except ModuleNotFoundError as error:
     raise SystemExit("Install Typer to use manage.py: python3 -m pip install typer") from error
 
 from tools.icon import generate_icon
+from tools.privacy import check_privacy
 from tools.theme import generate_theme
 
 
@@ -78,6 +79,8 @@ def check_file_limits():
 
 
 def run_checks():
+    if check_privacy(ROOT):
+        return 1
     prepare("build/key_injector", "build/placement_wm",
             "build/compact-worminal", "build/overlap_probe",
             "build/border_probe", "build/icon_probe",
@@ -101,7 +104,7 @@ def run_headless_checks():
     code = run_native_checks()
     if code:
         return code
-    for pattern in ("test_workspace.py", "test_theme.py"):
+    for pattern in ("test_workspace.py", "test_theme.py", "test_privacy.py"):
         code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                     "-p", pattern, "-q"])
         if code:
@@ -123,6 +126,12 @@ def build():
 def check():
     """Run the local native and private-display regression suite."""
     raise typer.Exit(run_checks())
+
+
+@app.command("check-privacy")
+def privacy(history: bool = typer.Option(False, "--history", help="Also scan reachable Git history.")):
+    """Scan tracked content for common private data; redact matched values."""
+    raise typer.Exit(int(check_privacy(ROOT, history)))
 
 
 @app.command("check-keys")

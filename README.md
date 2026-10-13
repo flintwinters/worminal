@@ -114,6 +114,10 @@ lint caps them at their current lengths until they can be split.
 runs the native, service, and theme checks without X11. `python3 manage.py proof`
 runs those checks and every private-display proof in `tests/proof_*.py`,
 including isolated Qtile and KWin and remote Cinnamon.
+The remote proof requires `WORMINAL_CINNAMON_HOST=user@host`; set it in your environment.
+`python3 manage.py check-privacy` scans tracked files for common credentials and personal machine details.
+Add `--history` to inspect reachable Git blobs and commit identities too. Reports show locations and categories,
+never matched values. Pattern checks cannot guarantee the absence of all private information.
 Use `python3 manage.py proof plasma` or `python3 manage.py proof cinnamon`
 to run one managed proof. `python3 manage.py latency` reports median and 95th percentile launch to
 the first key queued by X and then echoed across 20 runs.
