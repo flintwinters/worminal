@@ -1,7 +1,6 @@
 """Check navigation keys through X11, the PTY, and a raw-mode child."""
 
 import os
-import re
 from pathlib import Path
 import select
 import shutil
@@ -46,8 +45,6 @@ class NavigationKeysTest(unittest.TestCase):
         self.check_alternate_scroll(["--master", "wheel-test"])
 
     def check_alternate_scroll(self, connection):
-        header = (ROOT / "build" / "theme.h").read_text()
-        multiplier = int(re.search(r"theme_scroll_multiplier = (\d+)", header)[1])
         with isolated_display() as env:
             if connection:
                 env["PATH"] = str(ROOT / "tests" / "fixtures" / "master") + os.pathsep + env["PATH"]
@@ -104,7 +101,7 @@ class NavigationKeysTest(unittest.TestCase):
                                 self.assertRegex(read_through(terminal.stdout, b"M").decode(),
                                                  rf"^\x1b\[<{code};[0-9]+;[0-9]+M$")
                             else:
-                                expected = (application if appcursor else normal) * multiplier
+                                expected = application if appcursor else normal
                                 self.assertEqual(read_bytes(terminal.stdout, len(expected)), expected)
                 finally:
                     if terminal.poll() is None:
