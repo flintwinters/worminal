@@ -790,14 +790,14 @@ bpress(XEvent *e)
 		mousereport(e);
 		return;
 	}
-	/* With mouse reporting off, xterm alternate scroll maps the wheel to
-	 * cursor keys only on the alternate screen. */
+	/* Alternate scroll uses the configured wheel distance on the alternate screen. */
 	if (IS_SET(MODE_ALTSCROLL) && tisaltscr() &&
 	    !(e->xbutton.state & forcemousemod) &&
 	    (btn == Button4 || btn == Button5)) {
 		key = kmap(btn == Button4 ? XK_Up : XK_Down, 0);
 		if (key)
-			ttywrite(key, strlen(key), 1);
+			for (int step = 0; step < theme_scroll_multiplier; step++)
+				ttywrite(key, strlen(key), 1);
 		return;
 	}
 
