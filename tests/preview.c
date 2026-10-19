@@ -99,6 +99,8 @@ open_browser(App *app, const char *url)
 	WAIT(g_list_length(app->pages) == before + 1 && app->active && app->active->browser);
 	Page *page = app->active;
 	WAIT(!webkit_web_view_is_loading(page->browser->view) && webkit_web_view_get_title(page->browser->view));
+	/* Short page titles must remain readable even in a strip with many tabs. */
+	WAIT(!pango_layout_is_ellipsized(gtk_label_get_layout(GTK_LABEL(page->label))));
 	return page;
 }
 
@@ -150,6 +152,21 @@ paint(Terminal *t, const char *name)
 	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, allocation.width, allocation.height);
 	cairo_t *cr = cairo_create(surface);
 	draw_terminal(t->page->widget, cr, t);
+	gint64 start = g_get_monotonic_time();
+	for (int i = 0; i < 30; i++) draw_terminal(t->page->widget, cr, t);
+	g_print("Terminal repaint: %.2f ms/frame\n", (g_get_monotonic_time() - start) / 30000.0);
+	/* Cached and freshly shaped layouts must paint exactly the same pixels. */
+	cairo_surface_t *reference = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, allocation.width, allocation.height);
+	cairo_t *fresh = cairo_create(reference);
+	clear_layouts(t);
+	draw_terminal(t->page->widget, fresh, t);
+	cairo_surface_flush(surface);
+	cairo_surface_flush(reference);
+	g_assert_cmpmem(cairo_image_surface_get_data(surface),
+	    cairo_image_surface_get_stride(surface) * allocation.height,
+	    cairo_image_surface_get_data(reference),
+	    cairo_image_surface_get_stride(reference) * allocation.height);
+	cairo_destroy(fresh); cairo_surface_destroy(reference);
 	g_assert_cmpint(cairo_status(cr), ==, CAIRO_STATUS_SUCCESS);
 	g_assert_cmpint(cairo_surface_write_to_png(surface, name), ==, CAIRO_STATUS_SUCCESS);
 	cairo_destroy(cr); cairo_surface_destroy(surface);
@@ -184,6 +201,10 @@ main(int argc, char **argv)
 	Terminal *t = terminal->terminal;
 	WAIT(screen_has(t, "READY"));
 	WAIT(screen_has(t, "q"));
+	app_page_title(terminal, "Shell");
+	WAIT(gtk_widget_get_allocated_width(terminal->label) > 30 &&
+	     !pango_layout_is_ellipsized(gtk_label_get_layout(GTK_LABEL(terminal->label))));
+	g_assert_cmpstr(gtk_widget_get_tooltip_text(terminal->label), ==, "Shell");
 	input(t, " hello UTF-8: \303\251 \344\270\255", strlen(" hello UTF-8: \303\251 \344\270\255"));
 	WAIT(screen_has(t, "hello UTF-8: \303\251 \344\270\255"));
 	g_assert_cmpuint(t->page->mode & MODE_MOUSE, ==, 0);
@@ -206,6 +227,9 @@ main(int argc, char **argv)
 	oldcols = t->frame.cols;
 	app->zoom = 2;
 	terminal_zoom(t);
+	for (size_t style = 0; style < G_N_ELEMENTS(t->ascii); style++)
+		for (size_t c = 0; c < G_N_ELEMENTS(t->ascii[style]); c++)
+			g_assert_null(t->ascii[style][c]);
 	WAIT(t->frame.cols != oldcols && t->frame.cols == t->cols);
 	paint(t, ".checks/preview-terminal.png");
 	GString *flood = g_string_new(NULL);
@@ -214,6 +238,7 @@ main(int argc, char **argv)
 	input(t, flood->str, flood->len);
 	g_string_free(flood, TRUE);
 	WAIT(screen_has(t, "DRAINED"));
+	paint(t, ".checks/preview-terminal-dense.png");
 	WireBuffer scroll = {0};
 	wire_put_u32(&scroll, 1); wire_put_u32(&scroll, 3);
 	app_send(app, WIRE_SCROLL, terminal->id, scroll.data, scroll.len);
