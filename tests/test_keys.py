@@ -128,8 +128,8 @@ class NavigationKeysTest(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("micro"), "micro is not installed")
     def test_ctrl_end_in_micro(self):
-        path = ROOT / "build" / "micro-key-test.txt"
-        log = ROOT / "build" / "micro-output"
+        path = ROOT / "build" / f"micro-key-test-{os.getpid()}.txt"
+        log = ROOT / "build" / f"micro-output-{os.getpid()}"
         config = ROOT / "build" / f"micro-config-{os.getpid()}"
         config.mkdir()
         path.write_text("first\nlast")

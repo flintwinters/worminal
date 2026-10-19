@@ -5,6 +5,7 @@
 #include "../src/gtk/terminal.c"
 #include "../src/gtk/browser.c"
 #include "../src/gtk/tabs.c"
+#include "../src/gtk/windows.c"
 #include <glib/gstdio.h>
 
 static App *diagnostic_app, *diagnostic_peer;
@@ -149,7 +150,8 @@ static void
 select_page(Page *page)
 {
 	gtk_window_present(GTK_WINDOW(page->app->window));
-	gtk_notebook_set_current_page(GTK_NOTEBOOK(page->app->notebook),
+	if (page->url) app_select(page);
+	else gtk_notebook_set_current_page(GTK_NOTEBOOK(page->app->notebook),
 	    gtk_notebook_page_num(GTK_NOTEBOOK(page->app->notebook), page->widget));
 	WAIT(page->app->active == page && gtk_widget_get_mapped(page->widget));
 	if (page->terminal) g_assert_true(gtk_window_get_focus(GTK_WINDOW(page->app->window)) == page->widget);
@@ -341,13 +343,20 @@ main(int argc, char **argv)
 	WAIT(g_list_length(peer->pages) == 2);
 	Page *shared = find_page(peer, web->id);
 	g_assert_null(shared->browser); /* Shared links do not eagerly launch pages. */
+	Browser *live_browser = web->browser;
 	select_page(shared);
-	WAIT(!webkit_web_view_is_loading(shared->browser->view) && webkit_web_view_get_title(shared->browser->view));
+	WAIT(shared->browser == live_browser && !web->browser);
+	expect_script(shared->browser, "document.title + ':' + document.querySelector('input').value", "Fixture:local form");
 	char *other = g_strconcat(base, "/other", NULL);
 	webkit_web_view_load_uri(shared->browser->view, other);
 	WAIT(!webkit_web_view_is_loading(shared->browser->view) &&
 	     !g_strcmp0(webkit_web_view_get_title(shared->browser->view), "Other"));
 	WAIT(!g_strcmp0(web->url, other));
+	webkit_web_view_go_back(shared->browser->view);
+	WAIT(!webkit_web_view_is_loading(shared->browser->view) &&
+	     !g_strcmp0(webkit_web_view_get_title(shared->browser->view), "Fixture"));
+	select_page(web);
+	WAIT(web->browser == live_browser && !shared->browser);
 	expect_script(web->browser, "document.title + ':' + document.querySelector('input').value", "Fixture:local form");
 	expect_script(web->browser, "localStorage.getItem('saved') + ':' + document.cookie", "yes:session=local");
 	webkit_web_view_load_uri(web->browser->view, other);
@@ -416,6 +425,45 @@ main(int argc, char **argv)
 	WAIT(find_page(app, webid) == NULL && find_page(peer, webid) == NULL);
 	web = open_browser(app, url);
 	expect_script(web->browser, "localStorage.getItem('saved') + ':' + document.cookie", "yes:session=local");
+	/* The shell command changes the existing record, then Ctrl+T always creates
+	 * a fresh terminal. Ctrl+Shift+B has no browser action. */
+	App *converter = new_app();
+	converter->master = g_strdup(master);
+	char *test_cwd = g_get_current_dir();
+	char *daemon_path = g_build_filename(test_cwd, "worminald-preview", NULL);
+	g_free(test_cwd);
+	char *quoted_daemon = g_shell_quote(daemon_path);
+	char *convert_script = g_strdup_printf("stty raw -echo; printf CONVERT_READY; "
+	    "dd bs=1 count=1 >/dev/null 2>&1; %s --new-browser-tab; sleep 30", quoted_daemon);
+	char *convert_command[] = {"/bin/sh", "-c", convert_script, NULL};
+	converter->command = g_strdupv(convert_command);
+	show_app(converter);
+	WAIT(converter->active && converter->active->terminal && screen_has(converter->active->terminal, "CONVERT_READY"));
+	uint32_t converted_id = converter->active->id;
+	WAIT(find_page(peer, converted_id));
+	select_page(find_page(peer, converted_id));
+	WAIT(peer->active->live);
+	select_page(converter->active);
+	app_focus(converter->active);
+	WAIT(converter->active->live && !peer->active->live);
+	input(converter->active->terminal, "x", 1);
+	WAIT(converter->active && converter->active->id == converted_id && converter->active->browser);
+	g_assert_null(converter->active->terminal);
+	Browser *converted_browser = converter->active->browser;
+	WAIT(peer->active && peer->active->id == converted_id && peer->active->url);
+	g_assert_null(peer->active->browser);
+	WAIT(gtk_window_get_focus(GTK_WINDOW(converter->window)) == converted_browser->entry);
+	GdkEventKey control_t = {.type = GDK_KEY_PRESS, .keyval = GDK_KEY_t, .state = GDK_CONTROL_MASK};
+	g_assert_true(shortcut(converter->window, &control_t, converter));
+	WAIT(converter->active && converter->active->terminal && converter->active->id != converted_id);
+	GdkEventKey removed = {.type = GDK_KEY_PRESS, .keyval = GDK_KEY_b,
+	    .state = GDK_CONTROL_MASK | GDK_SHIFT_MASK};
+	g_assert_false(shortcut(converter->window, &removed, converter));
+	WAIT(find_page(app, converted_id));
+	gtk_widget_destroy(converter->window);
+	select_page(find_page(app, converted_id));
+	WAIT(app->active->browser == converted_browser);
+	g_free(convert_script); g_free(quoted_daemon); g_free(daemon_path);
 	int before_window = g_list_length(app->pages);
 	app_new_window(app);
 	WAIT(windows == 3 && g_list_length(app->pages) == before_window + 1);
@@ -431,7 +479,7 @@ main(int argc, char **argv)
 	gtk_widget_destroy(peer->window);
 	gtk_widget_destroy(app->window);
 	g_free(url); g_free(other);
-	g_print("Preview %s: terminal, resize, selection, clipboard, IME, ownership, reconnect, browser isolation, "
+	g_print("Preview %s: terminal, resize, selection, clipboard, IME, ownership, reconnect, browser sharing, conversion, "
 	        "navigation, storage, popups, downloads, permissions, TLS rejection and renderer recovery passed.\n",
 	        backend ? backend : "default");
 	return 0;

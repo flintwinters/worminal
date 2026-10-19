@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import select
+import socket
 import statistics
 import subprocess
 import time
@@ -11,6 +12,7 @@ import time
 from latency import measure_one
 from preview import fixture, profile
 from x11 import isolated_display
+from workspace_protocol import send, string, wait_kind
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -83,26 +85,17 @@ def steady(frontend, mixed):
                                              env=env, text=True).splitlines()[0]
             subprocess.run(["xdotool", "windowfocus", "--sync", window], env=env, check=True)
             if mixed:
-                key(env, "ctrl+shift+b")
-                # The URL dialog maps asynchronously; its title provides the readiness barrier.
-                deadline = time.monotonic() + 5
-                while True:
-                    result = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", "Open browser tab"],
-                                            env=env, capture_output=True, text=True)
-                    if result.returncode == 0:
-                        break
-                    if time.monotonic() > deadline:
-                        raise RuntimeError("Browser URL dialog did not open")
-                    time.sleep(.01)
-                dialog = result.stdout.splitlines()[0]
-                subprocess.run(["xdotool", "windowfocus", "--sync", dialog], env=env, check=True)
-                subprocess.run(["xdotool", "type", "--clearmodifiers", url + "/page"], env=env, check=True)
-                key(env, "Return")
+                with socket.socket(socket.AF_UNIX) as peer:
+                    peer.connect(f"\0worminal-workspace-v2-{os.getuid()}-{env['WORMINAL_SHARED_SOCKET_SCOPE']}")
+                    send(peer, 17, payload=string(url + "/page"), version=2)
+                    wait_kind(peer, 7, version=2)
+                key(env, "ctrl+9")
                 deadline = time.monotonic() + 10
                 while subprocess.run(["xdotool", "search", "--name", "^Fixture$"], env=env,
                                      stdout=subprocess.DEVNULL).returncode:
                     if time.monotonic() > deadline:
                         raise RuntimeError("Mixed browser did not finish loading")
+                    key(env, "ctrl+9")  # Catalog delivery and GTK input use independent queues.
                     time.sleep(.02)
             if mixed:
                 subprocess.run(["xdotool", "windowfocus", "--sync", window], env=env, check=True)

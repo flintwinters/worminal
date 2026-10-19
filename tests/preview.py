@@ -3,6 +3,7 @@
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
+import select
 from pathlib import Path
 import shutil
 import socket
@@ -28,7 +29,8 @@ class Fixture(BaseHTTPRequestHandler):
             self.wfile.write(b"Worminal download fixture\n")
             return
         title = "Other" if self.path == "/other" else "Fixture"
-        body = (f"<!doctype html><title>{title}</title><input autofocus>"
+        body = (f"<!doctype html><title>{title}</title>"
+                "<input autofocus oninput=\"document.title='Edited:'+this.value\">"
                 '<a href="/other" target="_blank">Popup</a> '
                 '<a href="/download" download>Download</a>').encode()
         self.send_response(200)
@@ -165,6 +167,76 @@ def qtile_display():
                 manager.wait(timeout=5)
 
 
+def broker_check(env, url, log):
+    """Independent launches must share the GTK owner and the live DOM, not reload a URL."""
+    executable = str(ROOT / "worminal-preview")
+    title = f"Broker terminal {os.getpid()}"
+    first = subprocess.Popen([executable, "-T", title, "-o", "-", "-e", "/bin/sh", "-c",
+                              "stty raw -echo; printf BROKER_READY; exec cat"],
+                             env=env, stdout=subprocess.PIPE, stderr=log)
+
+    def read(stream, marker):
+        output = b""
+        deadline = time.monotonic() + 5
+        while marker not in output and time.monotonic() < deadline:
+            ready, _, _ = select.select([stream], [], [], max(0, deadline - time.monotonic()))
+            if ready:
+                chunk = os.read(stream.fileno(), 4096)
+                if not chunk: break
+                output += chunk
+        if marker not in output: raise RuntimeError(f"Missing broker output: {marker!r}")
+
+    def window(name):
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            result = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", "^" + name + "$"],
+                                    env=env, capture_output=True, text=True)
+            if result.returncode == 0: return result.stdout.splitlines()[0]
+            time.sleep(.01)
+        raise RuntimeError(f"Missing broker window: {name}")
+
+    def key(*args):
+        subprocess.run(["xdotool", *args], env=env, check=True, stdout=subprocess.DEVNULL, stderr=log)
+
+    try:
+        read(first.stdout, b"BROKER_READY")
+        terminal_window = window(title)
+        invalid = subprocess.run([executable, "--invalid"], env=env,
+                                 stdout=subprocess.PIPE, stderr=log, timeout=5)
+        if invalid.returncode == 0 or first.poll() is not None:
+            raise RuntimeError("Invalid forwarded arguments terminated the shared frontend")
+        result = subprocess.run([executable, "--surf", url + "/page"], env=env,
+                                stdout=subprocess.PIPE, stderr=log, timeout=10)
+        if result.returncode: raise RuntimeError("Second launch did not join the frontend")
+        browser_window = window("Fixture")
+        key("windowfocus", "--sync", browser_window)
+        key("type", "--clearmodifiers", "--delay", "0", "shared-state")
+        window("Edited:shared-state")
+        key("windowfocus", "--sync", terminal_window)
+        key("key", "--clearmodifiers", "ctrl+9")
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            name = subprocess.check_output(["xdotool", "getwindowname", terminal_window], env=env, text=True).strip()
+            if name == "Edited:shared-state": break
+            time.sleep(.01)
+        else: raise RuntimeError("Browser state was not shared with the independently launched window")
+        key("type", "--clearmodifiers", "--delay", "0", "!")
+        window("Edited:shared-state!")
+        key("key", "--clearmodifiers", "ctrl+t")
+        window("Worminal")
+        forwarded_env = {**env, "WORMINAL_BROKER_TEST": "caller-value"}
+        forwarded = subprocess.Popen([executable, "-T", "Forwarded terminal", "-o", "-", "-e", "/bin/sh", "-c",
+                                      "printf 'FORWARDED:%s:%s' \"$WORMINAL_BROKER_TEST\" \"$PWD\"; exec cat"],
+                                     cwd=ROOT / "tests", env=forwarded_env, stdout=subprocess.PIPE, stderr=log)
+        try:
+            if forwarded.wait(timeout=5): raise RuntimeError("Forwarded terminal launch failed")
+            read(forwarded.stdout, f"FORWARDED:caller-value:{ROOT / 'tests'}".encode())
+        finally:
+            forwarded.stdout.close()
+    finally:
+        first.terminate(); first.communicate(timeout=5)
+
+
 def main():
     backend = sys.argv[1] if len(sys.argv) == 2 else "x11"
     display = {"x11": isolated_display, "wayland": wayland_display, "qtile": qtile_display}[backend]
@@ -192,6 +264,8 @@ def main():
                     command = ["gdb", "-batch", "-ex", "run", "-ex", "bt", "--args", *command]
                 result = subprocess.run(["dbus-run-session", "--", *command],
                                         env=trial_env, stdout=log, stderr=log, timeout=90)
+                if not result.returncode and backend == "x11" and not remote:
+                    broker_check(trial_env, url, log)
             output = log_path.read_text(errors="replace")
             if result.returncode or not any(line.startswith("Preview ") for line in output.splitlines()):
                 print(output[-4000:], file=sys.stderr)

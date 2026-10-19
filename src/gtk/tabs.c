@@ -71,8 +71,7 @@ tabs_click(GtkWidget *widget, GdkEventButton *event, TabStrip *strip)
 		Page *page = item->data;
 		int width = tab_width(strip, page);
 		if (event->x >= x && event->x < MIN(x + width, right)) {
-			gtk_notebook_set_current_page(GTK_NOTEBOOK(strip->app->notebook),
-			    gtk_notebook_page_num(GTK_NOTEBOOK(strip->app->notebook), page->widget));
+			app_select(page);
 			return TRUE;
 		}
 		x += width;

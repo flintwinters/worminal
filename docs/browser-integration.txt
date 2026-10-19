@@ -39,21 +39,39 @@ Browser policy
 WebKitGTK 4.1 is normally linked. Its context is constructed only when a browser
 page is selected; unselected shared browser links create no WebKit objects.
 Cookies, local storage, page execution, forms and navigation history stay local.
-Persistent data/cache use the XDG worminal-preview directories. Only saved URLs
-cross the workspace socket. A peer's URL update never replaces an existing local
-page, form or history. Existing views do not follow a peer's navigation.
+Persistent data/cache use the XDG worminal-preview directories. Windows on the
+same display/workspace share one GTK owner, including independently launched
+executables. Selecting a browser tab moves its existing WebKit view, preserving
+forms, history and login state. The previous window offers Show browser here;
+closing the owning window transfers its view to a surviving local mirror.
+Caller cwd/environment and -o - stdout descriptors survive forwarded launches.
+Only saved URLs cross the workspace socket. Windows on different machines open
+independent pages; their navigation cannot replace an existing page on this machine.
 
 The browser provides Back, Forward, Reload/Stop, titles and location entry.
-Ctrl+Shift+B opens a new-link dialog; --surf URL creates a browser tab directly.
-Ctrl+L selects the active browser's address. Terminal CLI commands, local launch
-environments, remote account environment inheritance, tab/window shortcuts,
+Ctrl+T always creates a terminal. Ctrl+Shift+B has no browser action.
+Inside a preview terminal, worminald-preview --new-browser-tab [URL] replaces
+that terminal with a browser under the same ordered identity. This ends its shell
+and PTY; it does not allocate a hidden terminal. With no URL, about:blank opens
+and the address entry receives focus. For example:
+
+  alias s='worminald-preview --new-browser-tab'
+  s
+  s https://example.com
+
+The service uses kernel peer credentials and the caller's process session to
+identify the terminal, independent of which window is focused. Calls outside a
+preview PTY fail. The additive v2 command requires an updated service; an older
+service times out with an actionable message, without terminating its sessions.
+--surf URL still creates a browser tab directly. Ctrl+L selects the active browser's
+address. Terminal CLI commands, local launch environments, remote account environment inheritance, tab/window shortcuts,
 selection, clipboard, input methods, mouse reporting and zoom use GTK equivalents.
 
 User popup requests open their requested link in an independent browser tab.
 window.open returns null and no window.opener relationship is retained. Related
 WebKit popup construction crashed in the installed WebKitGTK 2.50.6 during the
 integration test; the preview instead intercepts create/navigation requests and
-opens ordinary independent views. Popup workflows that require an opener or
+opens an ordinary independent page identity. Popup workflows that require an opener or
 write into a newly created blank window are therefore outside current parity.
 
 Downloads use a GTK save chooser with overwrite confirmation. Geolocation,
@@ -88,7 +106,7 @@ The integration runner exercises local connections and the real SSH bridge via a
 local ssh fixture. It checks UTF-8 and early input, sustained output, scrollback,
 resize/zoom/reflow, selection, clipboard, IME commit, controller transfer,
 reconnect, browser allocation, navigation, forms, cookies/local storage,
-shared-link independence, popups, download saving, notification denial, invalid
+local live-view transfer, shell-to-browser conversion, popups, download saving, notification denial, invalid
 TLS, renderer recovery and tab close/reopen. GTK critical diagnostics are fatal.
 The original X11 suite remains the regression gate. Counterfactual builds prove
 the blocked-PTY, stale-resize ownership and sizeof(pointer) read-capacity regressions fail without fixes.
@@ -131,6 +149,12 @@ still batches; only emitted frames advance the batching clock. Pending frames
 precede mode catalogs so alternate-screen mouse behavior cannot use stale state.
 The measure excludes physical input/compositor presentation. A running daemon
 retains its old code until restarted; do not stop it while sessions need saving.
+
+After local-window sharing and the launch broker, the repeat measurement reported
+137.46 ms median launch, 321.54 ms shell-ready, and 3.51/3.31 ms PTY echo medians
+for terminal-only/mixed preview. Frontend/helpers RSS measured 119.1/401.5 MiB
+(PSS 61.6/197.0 MiB); service/shell stayed 3.4-3.6 MiB. These were warm-service
+trials alongside preview checks; they are not compositor presentation timings.
 
 The detailed machine-local results are .checks/preview-performance.json. The
 preview's startup and memory overhead is substantial; retaining the original

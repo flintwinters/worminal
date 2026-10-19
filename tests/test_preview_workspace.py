@@ -137,6 +137,39 @@ class PreviewWorkspaceTest(unittest.TestCase):
             output += chunk
         self.assertIn(digest, output)
 
+    def test_command_converts_calling_terminal_and_preserves_order(self):
+        for url in ("https://example.invalid/converted", None):
+            with self.subTest(url=url):
+                command = shlex.quote(str(DAEMON)) + " --new-browser-tab"
+                if url: command += " " + shlex.quote(url)
+                tab = self.launch("stty raw -echo; printf READY; dd bs=1 count=1 >/dev/null 2>&1; "
+                                  + command + "; sleep 30")
+                other = self.launch("stty raw -echo; printf READY; exec cat")
+                send(self.peer, 3, tab, b"x")
+                for _ in range(512):
+                    _, payload = wait_kind(self.peer, 7)
+                    rows = records(payload)
+                    converted = next((row for row in rows if row[0] == tab and row[1] == 1), None)
+                    if converted:
+                        self.assertEqual(converted[2], url or "about:blank")
+                        identities = [row[0] for row in rows]
+                        self.assertLess(identities.index(tab), identities.index(other))
+                        self.assertEqual(next(row for row in rows if row[0] == other)[1], 0)
+                        break
+                else:
+                    self.fail("calling terminal was not converted")
+                send(self.peer, 3, other, b"still-live")
+                output = b""
+                while b"still-live" not in output:
+                    _, chunk = wait_kind(self.peer, 14, other)
+                    output += chunk
+
+    def test_browser_command_outside_a_terminal_is_rejected(self):
+        result = subprocess.run([str(DAEMON), "--new-browser-tab"], env=self.env,
+                                capture_output=True, timeout=5)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(b"inside a preview terminal", result.stderr)
+
     def test_input_reply_frame_precedes_its_mode_catalog(self):
         # Catalog titles are also frontend readiness barriers. A client must not
         # see a new input mode while its imported alternate screen is stale.
