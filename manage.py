@@ -11,9 +11,9 @@ try:
 except ModuleNotFoundError as error:
     raise SystemExit("Install Typer to use manage.py: python3 -m pip install typer") from error
 
+from tools import build as native_build
 from tools.icon import generate_icon
 from tools.privacy import check_privacy
-from tools.theme import generate_theme
 
 
 ROOT = Path(__file__).resolve().parent
@@ -34,23 +34,6 @@ def root():
 
 def run(args, *, env=None):
     return subprocess.run(args, env=env).returncode
-
-
-def make(*targets):
-    code = run(["make", "-s", *targets])
-    if code:
-        raise typer.Exit(code)
-
-
-def prepare(*targets):
-    try:
-        generate_theme()
-    except (OSError, ValueError) as error:
-        typer.echo(f"Theme error: {error}", err=True)
-        raise typer.Exit(1) from error
-    make()
-    if targets:
-        make(*targets)
 
 
 def check_file_limits():
@@ -81,10 +64,10 @@ def check_file_limits():
 def run_checks():
     if check_privacy(ROOT):
         return 1
-    prepare("build/key_injector", "build/placement_wm",
-            "build/compact-worminal", "build/overlap_probe",
-            "build/border_probe", "build/icon_probe",
-            "build/view_state_test", "build/scrollback_test", "build/url_test")
+    native_build.build_targets(
+        "build/key_injector", "build/placement_wm", "build/compact-worminal", "build/overlap_probe",
+        "build/border_probe", "build/icon_probe", "build/view_state_test", "build/scrollback_test", "build/url_test",
+    )
     code = run_native_checks()
     if code:
         return code
@@ -100,11 +83,11 @@ def run_native_checks():
 
 
 def run_headless_checks():
-    prepare("build/scrollback_test", "build/url_test")
+    native_build.build_targets("build/scrollback_test", "build/url_test")
     code = run_native_checks()
     if code:
         return code
-    for pattern in ("test_workspace.py", "test_theme.py", "test_privacy.py"):
+    for pattern in ("test_build.py", "test_workspace.py", "test_theme.py", "test_privacy.py"):
         code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                     "-p", pattern, "-q"])
         if code:
@@ -119,7 +102,7 @@ def run_proof_script(path):
 @app.command()
 def build():
     """Compile Worminal with the current Alacritty theme."""
-    prepare()
+    native_build.build_targets()
 
 
 @app.command()
@@ -151,7 +134,7 @@ def privacy_setup():
 @app.command("check-keys")
 def check_keys():
     """Check navigation and mouse input on private Xvfb displays."""
-    prepare()
+    native_build.build_targets()
     raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                           "-p", "test_keys.py", "-q"]))
 
@@ -166,13 +149,25 @@ def check_headless():
 def lint():
     """Check file limits and run Clang static analysis (requires clang-tidy)."""
     check_file_limits()
-    prepare("lint")
+    native_build.analyze()
 
 
 @app.command()
 def clean():
     """Remove generated binaries and headers."""
-    raise typer.Exit(run(["make", "-s", "clean"]))
+    native_build.clean()
+
+
+@app.command()
+def install(prefix: Path = typer.Option(None, help="Installation prefix (default: PREFIX or /usr/local).")):
+    """Build and install binaries, manual, desktop launcher, and icon; supports DESTDIR staging."""
+    native_build.install(prefix)
+
+
+@app.command()
+def uninstall(prefix: Path = typer.Option(None, help="Prefix used for installation.")):
+    """Remove installed files; supports PREFIX, MANPREFIX, and DESTDIR."""
+    native_build.uninstall(prefix)
 
 
 @app.command()
@@ -188,14 +183,14 @@ def icon():
 @app.command()
 def latency():
     """Measure launch to usable input with /bin/cat on private Xvfb."""
-    prepare("build/key_injector")
+    native_build.build_targets("build/key_injector")
     raise typer.Exit(run([sys.executable, "tests/latency.py"]))
 
 
 @app.command("latency-shell")
 def latency_shell():
     """Measure when the interactive shell receives early input."""
-    prepare("build/key_injector")
+    native_build.build_targets("build/key_injector")
     raise typer.Exit(run([sys.executable, "tests/latency.py", "--shell"]))
 
 
@@ -208,7 +203,7 @@ def master_perf(host: str):
 @app.command("window-perf")
 def window_perf():
     """Measure isolated tab repaint on the current X11 display (needs python-xlib)."""
-    prepare()
+    native_build.build_targets()
     raise typer.Exit(run([sys.executable, "tests/window_perf.py"]))
 
 
@@ -246,26 +241,29 @@ def proof(ctx: typer.Context):
 @proof_app.command()
 def plasma():
     """Prove shared views and tabs under isolated KWin."""
-    prepare("build/view_state_test")
+    native_build.build_targets("build/view_state_test")
     raise typer.Exit(run_proof_script(ROOT / "tests/proof_plasma.py"))
 
 
 @proof_app.command()
 def cinnamon():
     """Prove shared views and tabs under remote Cinnamon on private Xvfb."""
-    prepare("build/view_state_test")
+    native_build.build_targets("build/view_state_test")
     raise typer.Exit(run_proof_script(ROOT / "tests/proof_cinnamon.py"))
 
 
 @proof_app.command()
 def qtile():
     """Check zoom cell alignment under private Qtile."""
-    prepare(".checks/compact-worminal")
+    native_build.build_targets("build/compact-worminal")
     raise typer.Exit(run_proof_script(ROOT / "tests/proof_qtile.py"))
 
 
 if __name__ == "__main__":
     try:
         app()
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        typer.echo(f"Command failed: {error}", err=True)
+        raise SystemExit(1) from error
     except KeyboardInterrupt:
         raise SystemExit(130)

@@ -11,3 +11,7 @@ archive/
 !.env.example
 *.pem
 *.key
+/worminal.command.json
+/worminald.command.json
+/worminal.pending
+/worminald.pending

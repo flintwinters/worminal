@@ -1,4 +1,4 @@
-"""Build settings and a real keyboard-to-PTY smoke check."""
+"""Native rendering, service views, and real keyboard-to-PTY checks."""
 
 from contextlib import nullcontext
 import os
@@ -220,7 +220,7 @@ class NativeTerminalTest(unittest.TestCase):
             title = f"Worminal glyph alignment {os.getpid()}"
             scoped = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"glyph-{os.getpid()}"}
             process = subprocess.Popen(
-                [str(ROOT / ".checks/compact-worminal"), "-T", title,
+                [str(ROOT / "build/compact-worminal"), "-T", title,
                  "-g", "10x4", "-e", "/bin/sh", "-c",
                  "printf '\\033[?25l\\033[2;3HH'; sleep 30"],
                 env=scoped, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
@@ -285,7 +285,7 @@ class NativeTerminalTest(unittest.TestCase):
                     scoped = {**env, "WORMINAL_SHARED_SOCKET_SCOPE": f"cursor-{os.getpid()}-{style}"}
                     title = f"Worminal cursor {os.getpid()} {style}"
                     process = subprocess.Popen(
-                        [str(ROOT / ".checks/compact-worminal"), "-T", title,
+                        [str(ROOT / "build/compact-worminal"), "-T", title,
                          "-g", "10x2", "-e", "/bin/sh", "-c",
                          f"printf 'abcdefghij\\033[1;1H\\033[{style} q'; sleep 10"],
                         env=scoped, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
@@ -437,7 +437,7 @@ class NativeTerminalTest(unittest.TestCase):
                     markers.append(marker)
                     title = f"Worminal reflow {os.getpid()} {order}"
                     process = subprocess.Popen(
-                        [str(ROOT / ".checks/compact-worminal"), "-T", title,
+                        [str(ROOT / "build/compact-worminal"), "-T", title,
                          "-g", "20x4", "-e", "/bin/sh", "-c", script, "sh", str(marker)],
                         env=scoped, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                     )
@@ -1279,12 +1279,6 @@ class NativeTerminalTest(unittest.TestCase):
                 process.communicate(timeout=2)
                 gate.unlink(missing_ok=True)
                 done.unlink(missing_ok=True)
-
-    def test_default_build_uses_o3(self):
-        commands = subprocess.check_output(["make", "-nB"], cwd=ROOT, text=True)
-        compiled = [line for line in commands.splitlines() if line.endswith(("src/terminal/st.c", "src/x11/x.c"))]
-        self.assertEqual(len(compiled), 2)
-        self.assertTrue(all("-O3" in line.split() for line in compiled))
 
     def test_first_keystroke_reaches_shell(self):
         with isolated_display() as env:
