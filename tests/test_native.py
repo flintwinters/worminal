@@ -711,7 +711,7 @@ class NativeTerminalTest(unittest.TestCase):
             owner = subprocess.Popen(
                 [str(ROOT / "worminal"), "-T", a_title, "-e", "/bin/cat"],
                 env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-            second_process = None
+            second_process = third_process = None
 
             def wait_for(predicate, message):
                 deadline = time.monotonic() + 6
@@ -797,11 +797,13 @@ class NativeTerminalTest(unittest.TestCase):
                 wait_for(lambda: title(second) == a_title, "Alt+1 did not select tab A")
                 subprocess.run(["xdotool", "key", "alt+2"], env=env, check=True)
                 wait_for(lambda: title(second) == b_title, "Alt+2 did not select tab B")
-                focus_window(env, second)
                 subprocess.run(["xdotool", "key", "ctrl+n"], env=env, check=True)
-                third = wait_for(lambda: next((w for w in windows()
-                                               if w not in (first, second)), None),
-                                 "Ctrl+N did not open a window")
+                time.sleep(.1)
+                self.assertEqual(set(windows()), {first, second}, "Ctrl+N opened a window")
+                third_process = subprocess.Popen([str(ROOT / "worminal"), "-e", "/bin/cat"],
+                    env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                third = wait_for(lambda: next((w for w in windows() if w not in (first, second)), None),
+                                 "third launcher did not open a window")
                 self.assertNotIn(title(third), (a_title, b_title))
                 self.assertEqual(title(second), b_title,
                                  "new window changed another window's selected tab")
@@ -824,7 +826,7 @@ class NativeTerminalTest(unittest.TestCase):
                 second_process.wait(timeout=3)
                 self.assertEqual(second_process.returncode, 0)
             finally:
-                for process in (owner, second_process):
+                for process in (owner, second_process, third_process):
                     if process is not None:
                         if process.poll() is None:
                             process.terminate()
