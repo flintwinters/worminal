@@ -53,6 +53,59 @@ def wait_kind(connection, wanted, wanted_tab=None):
 
 
 class WorkspaceServiceTest(unittest.TestCase):
+    def test_blocked_pty_does_not_pause_new_shells_or_parser_replies(self):
+        scope = f"blocked-{os.getpid()}-{uuid.uuid4().hex}"
+        env = {**os.environ, "WORMINAL_SHARED_SOCKET_SCOPE": scope}
+        service = subprocess.Popen([str(ROOT / "worminald"), "--serve"], env=env,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        peers = []
+        try:
+            for index, command in enumerate(("stty raw -echo; printf R; exec sleep 30",
+                                             "stty raw -echo; printf R; exec cat")):
+                deadline = time.monotonic() + 3
+                while True:
+                    peer = socket.socket(socket.AF_UNIX)
+                    peer.settimeout(2)
+                    try:
+                        peer.connect(f"\0worminal-workspace-{os.getuid()}-{scope}")
+                        break
+                    except OSError:
+                        peer.close()
+                        if time.monotonic() > deadline: self.fail("workspace did not start")
+                        time.sleep(.01)
+                peers.append(peer)
+                payload = b"".join((number(20), number(4), number(1), number(3), number(0),
+                                    string("backpressure"), string(str(ROOT)), string(""), string("-"),
+                                    string(""), string("/bin/sh"), string("-c"), string(command)))
+                send(peer, HELLO, payload=payload)
+                _, catalog = wait_kind(peer, CATALOG)
+                printed = b""
+                while b"R" not in printed:
+                    tab, chunk = wait_kind(peer, PRINT)
+                    printed += chunk
+                if index == 0:
+                    # Saturate a PTY whose application never reads. ttywriteraw used
+                    # to block inside pselect here, preventing every subsequent launch.
+                    send(peer, INPUT, tab, b"x" * 65536)
+                else:
+                    send(peer, INPUT, tab, b"responsive")
+                    printed = b""
+                    while b"responsive" not in printed:
+                        _, chunk = wait_kind(peer, PRINT, tab)
+                        printed += chunk
+                    self.assertIn(b"responsive", printed)
+                    send(peer, INPUT, tab, b"\x1b[6n")
+                    printed = b""
+                    while b"R" not in printed:
+                        _, chunk = wait_kind(peer, PRINT, tab)
+                        printed += chunk
+                    self.assertRegex(printed, br"\x1b\[[0-9]+;[0-9]+R")
+            self.assertIsNone(service.poll())
+        finally:
+            for peer in peers: peer.close()
+            service.terminate()
+            service.communicate(timeout=3)
+
     def test_partial_client_packet_does_not_pause_other_tab(self):
         scope = f"partial-{os.getpid()}-{uuid.uuid4().hex}"
         env = {**os.environ, "WORMINAL_SHARED_SOCKET_SCOPE": scope}
