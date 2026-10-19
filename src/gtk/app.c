@@ -9,6 +9,7 @@
 #include <glib-unix.h>
 #include "preview.h"
 #include "workspace_client.h"
+#include "tab_label.h"
 
 extern char **environ;
 static int windows;
@@ -74,7 +75,7 @@ app_send(App *app, uint32_t type, uint32_t tab, const void *bytes, size_t length
 		return;
 	}
 	wire_append_packet(&app->output_queue, type, tab, bytes, length);
-	if (!app->writer)
+	if (!app->writer && flush(app->fd, 0, app) == G_SOURCE_CONTINUE)
 		app->writer = g_unix_fd_add(app->fd, G_IO_OUT | G_IO_HUP | G_IO_ERR, flush, app);
 }
 
@@ -97,10 +98,16 @@ void app_resize(Page *page) { size_message(page, WIRE_RESIZE); }
 void
 app_page_title(Page *page, const char *title)
 {
-	gtk_label_set_text(GTK_LABEL(page->label), title ? title : "Worminal");
-	gtk_widget_set_tooltip_text(page->label, title ? title : "Worminal");
+	g_free(page->title);
+	page->title = g_strdup(title ? title : "Worminal");
+	int length;
+	const char *name = page->terminal ? tab_label(page->directory ? page->directory : "?", &length) : page->title;
+	char *label = page->terminal ? g_strndup(name, length) : g_strdup(name);
+	gtk_label_set_text(GTK_LABEL(page->label), label);
+	g_free(label);
 	if (page->app->active == page)
-		gtk_window_set_title(GTK_WINDOW(page->app->window), title ? title : "Worminal preview");
+		gtk_window_set_title(GTK_WINDOW(page->app->window), page->title);
+	tabs_refresh(page->app);
 }
 
 static void
@@ -121,7 +128,8 @@ activate(Page *page)
 		app_focus(page);
 		gtk_widget_grab_focus(page->widget);
 	}
-	gtk_window_set_title(GTK_WINDOW(app->window), gtk_label_get_text(GTK_LABEL(page->label)));
+	gtk_window_set_title(GTK_WINDOW(app->window), page->title ? page->title : "Worminal");
+	tabs_refresh(app);
 	/* Map early without dropping keys received before the first service catalog. */
 	while (!g_queue_is_empty(&app->early_keys)) {
 		GdkEvent *event = g_queue_pop_head(&app->early_keys);
@@ -151,7 +159,7 @@ page_free(Page *page)
 	if (page->browser) browser_free(page->browser);
 	if (!page->app->closing) gtk_widget_destroy(page->widget);
 	g_object_unref(page->widget);
-	g_free(page->url); g_free(page->directory);
+	g_free(page->url); g_free(page->directory); g_free(page->title);
 	g_free(page);
 }
 
@@ -174,10 +182,6 @@ new_page(App *app, uint32_t id, gboolean browser)
 	page->cursor = 2;
 	for (size_t i = 0; i < G_N_ELEMENTS(page->colors); i++) terminal_palette(page, i, NULL);
 	page->label = gtk_label_new(browser ? "Browser" : "Worminal");
-	gtk_label_set_ellipsize(GTK_LABEL(page->label), PANGO_ELLIPSIZE_END);
-	/* Scrollable notebooks allocate ellipsized labels at their minimum width. */
-	gtk_label_set_width_chars(GTK_LABEL(page->label), 12);
-	gtk_label_set_max_width_chars(GTK_LABEL(page->label), 25);
 	if (browser) page->widget = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	else page->terminal = terminal_new(page);
 	g_object_ref_sink(page->widget);
@@ -430,6 +434,7 @@ shortcut(GtkWidget *window, GdkEventKey *event, App *app)
 		if (p->terminal) terminal_zoom(p->terminal);
 		if (p->browser) browser_zoom(p->browser, app->zoom);
 	}
+	tabs_refresh(app);
 	return TRUE;
 }
 
@@ -549,7 +554,10 @@ show_app(App *app)
 	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_container_add(GTK_CONTAINER(app->window), box);
 	app->notebook = gtk_notebook_new();
-	gtk_notebook_set_scrollable(GTK_NOTEBOOK(app->notebook), TRUE);
+	gtk_notebook_set_show_tabs(GTK_NOTEBOOK(app->notebook), FALSE);
+	gtk_notebook_set_show_border(GTK_NOTEBOOK(app->notebook), FALSE);
+	app->tabstrip = tabs_new(app);
+	gtk_box_pack_start(GTK_BOX(box), app->tabstrip, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(box), app->notebook, TRUE, TRUE, 0);
 	app->status = gtk_label_new("");
 	gtk_widget_set_no_show_all(app->status, TRUE);

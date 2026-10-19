@@ -4,6 +4,7 @@
 #undef main
 #include "../src/gtk/terminal.c"
 #include "../src/gtk/browser.c"
+#include "../src/gtk/tabs.c"
 #include <glib/gstdio.h>
 
 static App *diagnostic_app, *diagnostic_peer;
@@ -48,6 +49,69 @@ screen_has(Terminal *t, const char *wanted)
 	gboolean found = strstr(screen->str, wanted) != NULL;
 	g_string_free(screen, TRUE);
 	return found;
+}
+
+typedef struct { Terminal *terminal; const char *wanted; gboolean painted; } PaintProbe;
+
+static gboolean
+paint_probe(GtkWidget *widget, cairo_t *cr, PaintProbe *probe)
+{
+	(void)widget; (void)cr;
+	if (probe->wanted && screen_has(probe->terminal, probe->wanted)) probe->painted = TRUE;
+	return FALSE;
+}
+
+static void
+input_paint_latency(Terminal *t)
+{
+	PaintProbe probe = {.terminal = t};
+	gulong handler = g_signal_connect_after(t->page->widget, "draw", G_CALLBACK(paint_probe), &probe);
+	GString *wanted = g_string_new("KEYPAINT");
+	input(t, "\r\nKEYPAINT", 10);
+	WAIT(screen_has(t, wanted->str));
+	gint64 elapsed = 0;
+	for (int i = 0; i < 20; i++) {
+		g_string_append_c(wanted, 'a' + i);
+		probe.wanted = wanted->str;
+		probe.painted = FALSE;
+		gint64 start = g_get_monotonic_time();
+		input(t, wanted->str + wanted->len - 1, 1);
+		WAIT(probe.painted);
+		elapsed += g_get_monotonic_time() - start;
+	}
+	g_print("Input to GTK paint: %.2f ms mean (20 echoes)\n", elapsed / 20000.0);
+	g_signal_handler_disconnect(t->page->widget, handler);
+	g_string_free(wanted, TRUE);
+}
+
+static void select_page(Page *);
+
+static void
+check_tabs(App *app, Page *terminal, Page *browser)
+{
+	TabStrip *strip = g_object_get_data(G_OBJECT(app->tabstrip), "tabs");
+	g_assert_cmpint(strip->cw, ==, terminal->terminal->cw);
+	g_assert_cmpint(strip->ch, ==, terminal->terminal->ch);
+	g_assert_cmpint(gtk_widget_get_allocated_height(app->tabstrip), ==, strip->ch + 2);
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(browser->label)), ==, "Fixture");
+	int width = gtk_widget_get_allocated_width(app->tabstrip), height = strip->ch + 2;
+	cairo_surface_t *image = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+	cairo_t *cr = cairo_create(image);
+	tabs_draw(app->tabstrip, cr, strip);
+	g_assert_cmpint(cairo_surface_write_to_png(image, ".checks/preview-tabs.png"), ==, CAIRO_STATUS_SUCCESS);
+	cairo_destroy(cr); cairo_surface_destroy(image);
+	/* Hit testing uses exactly the same variable widths and visible range as drawing. */
+	GList *first = first_visible(strip, width - 2);
+	GdkEventButton click = {.button = 1, .x = 3, .y = 3};
+	g_assert_true(tabs_click(app->tabstrip, &click, strip));
+	g_assert_true(app->active == first->data);
+	select_page(browser);
+	/* Long names scroll the strip to keep the active tab visible. */
+	char *name = g_strdup(gtk_label_get_text(GTK_LABEL(terminal->label)));
+	gtk_label_set_text(GTK_LABEL(terminal->label), "a-very-long-directory-name-before-the-browser-tab");
+	g_assert_true(first_visible(strip, 20)->data == browser);
+	gtk_label_set_text(GTK_LABEL(terminal->label), name);
+	g_free(name);
 }
 
 static char *script_result;
@@ -99,8 +163,6 @@ open_browser(App *app, const char *url)
 	WAIT(g_list_length(app->pages) == before + 1 && app->active && app->active->browser);
 	Page *page = app->active;
 	WAIT(!webkit_web_view_is_loading(page->browser->view) && webkit_web_view_get_title(page->browser->view));
-	/* Short page titles must remain readable even in a strip with many tabs. */
-	WAIT(!pango_layout_is_ellipsized(gtk_label_get_layout(GTK_LABEL(page->label))));
 	return page;
 }
 
@@ -201,10 +263,16 @@ main(int argc, char **argv)
 	Terminal *t = terminal->terminal;
 	WAIT(screen_has(t, "READY"));
 	WAIT(screen_has(t, "q"));
+	input_paint_latency(t);
+	/* Terminal titles belong to the window; directory basenames name tabs. */
 	app_page_title(terminal, "Shell");
-	WAIT(gtk_widget_get_allocated_width(terminal->label) > 30 &&
-	     !pango_layout_is_ellipsized(gtk_label_get_layout(GTK_LABEL(terminal->label))));
-	g_assert_cmpstr(gtk_widget_get_tooltip_text(terminal->label), ==, "Shell");
+	int label_length;
+	const char *label_name = tab_label(terminal->directory, &label_length);
+	char *expected_label = g_strndup(label_name, label_length);
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(terminal->label)), ==, expected_label);
+	g_assert_cmpstr(gtk_window_get_title(GTK_WINDOW(app->window)), ==, "Shell");
+	g_assert_false(gtk_notebook_get_show_tabs(GTK_NOTEBOOK(app->notebook)));
+	g_free(expected_label);
 	input(t, " hello UTF-8: \303\251 \344\270\255", strlen(" hello UTF-8: \303\251 \344\270\255"));
 	WAIT(screen_has(t, "hello UTF-8: \303\251 \344\270\255"));
 	g_assert_cmpuint(t->page->mode & MODE_MOUSE, ==, 0);
@@ -266,6 +334,7 @@ main(int argc, char **argv)
 	g_assert_nonnull(base);
 	char *url = g_strconcat(base, "/page", NULL);
 	Page *web = open_browser(app, url);
+	check_tabs(app, terminal, web);
 	expect_script(web->browser, "document.title", "Fixture");
 	expect_script(web->browser, "document.querySelector('input').value='local form'; localStorage.setItem('saved','yes');"
 	              "document.cookie='session=local;path=/'; document.querySelector('input').value", "local form");

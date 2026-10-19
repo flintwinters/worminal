@@ -42,6 +42,7 @@ struct Tab {
 	Client *controller;
 	Client *print_client;
 	int pending_frame;
+	int input_frame;
 	Tab *next;
 };
 
@@ -182,6 +183,9 @@ flush_input(Tab *tab)
 	ssize_t count = write(tsessionfd(tab->session), tab->input.data + tab->input_sent,
 	                      MIN(left, 16384));
 	if (count > 0) {
+		/* Boost only a PTY read after input actually reached the child. Older
+		 * pending output must not consume the first-response latency allowance. */
+		tab->input_frame = 1;
 		tab->input_sent += count;
 		if (tab->input_sent == tab->input.len)
 			tab->input_sent = tab->input.len = 0;
@@ -230,11 +234,17 @@ send_catalog(Client *client)
 	wire_buffer_free(&buffer);
 }
 
+static void flush_frame(Tab *);
+
 static void
 broadcast_catalog(void)
 {
 	if (!catalog_dirty)
 		return;
+	/* Input modes and the imported screen (notably alternate-screen state)
+	 * must agree when clients observe a changed title or directory. */
+	for (Tab *tab = tabs; tab; tab = tab->next)
+		if (tab->pending_frame) flush_frame(tab);
 	for (Client *client = clients; client; client = client->next)
 		if (client->ready)
 			send_catalog(client);
@@ -283,6 +293,14 @@ send_frame(Client *client, Tab *tab, int full)
 	client_send(client, WIRE_FRAME_FINISH, tab->id, NULL);
 done:
 	wire_buffer_free(&buffer);
+}
+
+static void
+flush_frame(Tab *tab)
+{
+	send_frame(tab->controller, tab, 0);
+	tsessioncleandirty(tab->session);
+	tab->pending_frame = 0;
 }
 
 static void
@@ -646,6 +664,11 @@ serve(void)
 			ttyread();
 			refresh_directory(tab);
 			tab->pending_frame = 1;
+			if (tab->input_frame) {
+				/* The first reply bypasses batching; subsequent output still batches. */
+				flush_frame(tab);
+				tab->input_frame = 0;
+			}
 		}
 		if (FD_ISSET(listener, &readers)) {
 			int fd = accept4(listener, NULL, NULL, SOCK_CLOEXEC);
@@ -680,17 +703,17 @@ serve(void)
 				client_flush(client);
 		struct timespec now;
 		clock_gettime(CLOCK_MONOTONIC, &now);
-		if (!last_frame.tv_sec ||
+		int due = !last_frame.tv_sec ||
 		    (now.tv_sec - last_frame.tv_sec) * 1000000000LL +
-		    now.tv_nsec - last_frame.tv_nsec >= 16000000) {
-			for (Tab *tab = tabs; tab; tab = tab->next)
-				if (tab->pending_frame) {
-					send_frame(tab->controller, tab, 0);
-					tsessioncleandirty(tab->session);
-					tab->pending_frame = 0;
-				}
-			last_frame = now;
-		}
+		    now.tv_nsec - last_frame.tv_nsec >= 16000000;
+		int emitted = 0;
+		for (Tab *tab = tabs; tab; tab = tab->next)
+			if (tab->pending_frame && due) {
+				flush_frame(tab);
+				emitted = 1;
+			}
+		/* Only emitted PTY frames advance the output batching deadline. */
+		if (emitted) last_frame = now;
 		broadcast_catalog();
 		Client **slot = &clients;
 		while (*slot) {

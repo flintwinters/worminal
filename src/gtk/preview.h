@@ -15,7 +15,7 @@ typedef struct Terminal Terminal;
 struct Page {
 	App *app;
 	uint32_t id, mode, cursor;
-	char *url, *directory;
+	char *url, *directory, *title;
 	GtkWidget *widget, *label;
 	Terminal *terminal;
 	Browser *browser;
@@ -23,7 +23,7 @@ struct Page {
 	GdkRGBA colors[270];
 };
 struct App {
-	GtkWidget *window, *notebook, *status;
+	GtkWidget *window, *notebook, *status, *tabstrip;
 	GList *pages;
 	Page *active;
 	char *master, *title, *cwd, *line, *output, *font;
@@ -43,6 +43,10 @@ struct App {
 	uint32_t created_id;
 	gboolean attached, closing, syncing;
 };
+
+void tabs_refresh(App *);
+GtkWidget *tabs_new(App *);
+PangoFontDescription *terminal_font(App *, PangoLayout *, int *, int *, int *, int *);
 
 void app_send(App *, uint32_t, uint32_t, const void *, size_t);
 void app_terminal(App *, gboolean);

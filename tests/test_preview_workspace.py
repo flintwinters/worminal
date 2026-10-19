@@ -2,6 +2,7 @@
 
 from functools import partial
 import os
+import shlex
 from pathlib import Path
 import socket
 import struct
@@ -135,6 +136,30 @@ class PreviewWorkspaceTest(unittest.TestCase):
             _, chunk = wait_kind(self.peer, 14, tab)
             output += chunk
         self.assertIn(digest, output)
+
+    def test_input_reply_frame_precedes_its_mode_catalog(self):
+        # Catalog titles are also frontend readiness barriers. A client must not
+        # see a new input mode while its imported alternate screen is stale.
+        code = ("import os\nos.write(1,b'READY')\n"
+                "for i in range(12):\n"
+                " os.read(0,1)\n"
+                " mode = 'h' if i%2==0 else 'l'\n"
+                " os.write(1,f'\\x1b[?1049{mode}\\x1b]2;mode-{i}\\a'.encode())\n"
+                "os.read(0,1)\n")
+        tab = self.launch("stty raw -echo; exec python3 -u -c " + shlex.quote(code))
+        alternate = 0
+        for index in range(12):
+            send(self.peer, 3, tab, b"x")
+            for _ in range(512):
+                kind, identity, payload = wire_packet(self.peer, version=2)
+                if identity == tab and kind == 8:
+                    alternate = struct.unpack("!6I", payload)[5]
+                if kind == 7 and records(payload)[0][5] == f"mode-{index}":
+                    self.assertEqual(alternate, int(index % 2 == 0),
+                                     "mode catalog preceded its corresponding frame")
+                    break
+            else:
+                self.fail("missing mode catalog")
 
     def test_stale_resize_cannot_reclaim_another_controller(self):
         tab = self.launch("stty raw -echo; printf READY; exec cat")
