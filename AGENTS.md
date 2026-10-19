@@ -14,6 +14,11 @@ The upstream source and license remain in the repository. Keep machine destinati
 and use anonymous commit identities. Run `manage.py privacy-setup` in fresh clones; privacy hooks and CI guard
 staged content and history.
 
-Current jobs: diagnose live daemon stalls before resuming browser integration; diagnose Codex mouse-wheel scrolling
-through remote masters; measure service and window memory, then compare launch and memory against the earlier in-
-process owner.
+`src/gtk` is the separate GTK 3/Pango-Cairo/WebKitGTK 4.1 preview for native Wayland and X11. It imports the
+same terminal cells and shares the terminal key table. `worminald-preview` uses the isolated v2 endpoint; browser
+records have no PTY. Only saved links cross clients; browser profiles and existing local pages stay local. GTK and
+WebKit never enter the service. `manage.py build-preview`, `check-preview*`, and `preview-perf` own preview work.
+
+Current jobs: validate preview parity and reduce its measured launch/memory overhead before considering launcher
+replacement; review independent popup-link semantics and remaining compatibility gaps. Keep the original launcher
+and live v1 services available for rollback; investigate remote Codex scrolling separately from tested wheel modes.

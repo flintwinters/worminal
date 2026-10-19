@@ -10,53 +10,19 @@ import unittest
 import uuid
 
 
+from workspace_protocol import number, string, send, wait_kind
+
+
 ROOT = Path(__file__).resolve().parent.parent
+DAEMON = ROOT / os.environ.get("WORMINAL_TEST_WORKSPACE_DAEMON", "worminald")
 HELLO, INPUT, FOCUS, CATALOG, FRAME, ROW, FINISH, CLIPBOARD, STOP, PRINT = 1, 3, 4, 7, 8, 9, 10, 11, 13, 14
-
-
-def number(value):
-    return struct.pack("!I", value)
-
-
-def string(value):
-    encoded = value.encode()
-    return number(len(encoded)) + encoded
-
-
-def read_exact(connection, count):
-    data = bytearray()
-    while len(data) < count:
-        part = connection.recv(count - len(data))
-        if not part:
-            raise AssertionError("workspace closed its connection")
-        data.extend(part)
-    return bytes(data)
-
-
-def packet(connection):
-    version, kind, tab, length = struct.unpack("!4I", read_exact(connection, 16))
-    if version != 1 or length > 8 * 1024 * 1024:
-        raise AssertionError("invalid workspace packet")
-    return kind, tab, read_exact(connection, length)
-
-
-def send(connection, kind, tab=0, payload=b""):
-    connection.sendall(struct.pack("!4I", 1, kind, tab, len(payload)) + payload)
-
-
-def wait_kind(connection, wanted, wanted_tab=None):
-    for _ in range(512):
-        kind, tab, payload = packet(connection)
-        if kind == wanted and (wanted_tab is None or tab == wanted_tab):
-            return tab, payload
-    raise AssertionError(f"workspace did not send packet {wanted}")
 
 
 class WorkspaceServiceTest(unittest.TestCase):
     def test_blocked_pty_does_not_pause_new_shells_or_parser_replies(self):
         scope = f"blocked-{os.getpid()}-{uuid.uuid4().hex}"
         env = {**os.environ, "WORMINAL_SHARED_SOCKET_SCOPE": scope}
-        service = subprocess.Popen([str(ROOT / "worminald"), "--serve"], env=env,
+        service = subprocess.Popen([str(DAEMON), "--serve"], env=env,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         peers = []
         try:
@@ -110,7 +76,7 @@ class WorkspaceServiceTest(unittest.TestCase):
         scope = f"partial-{os.getpid()}-{uuid.uuid4().hex}"
         env = {**os.environ, "WORMINAL_SHARED_SOCKET_SCOPE": scope}
         address = f"\0worminal-workspace-{os.getuid()}-{scope}"
-        service = subprocess.Popen([str(ROOT / "worminald"), "--serve"], env=env,
+        service = subprocess.Popen([str(DAEMON), "--serve"], env=env,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         connections = []
         try:
@@ -163,7 +129,7 @@ class WorkspaceServiceTest(unittest.TestCase):
         finally:
             for connection in reversed(connections):
                 connection.close()
-            subprocess.run([str(ROOT / "worminald"), "--stop"], env=env,
+            subprocess.run([str(DAEMON), "--stop"], env=env,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
             try:
                 service.communicate(timeout=3)
@@ -179,7 +145,7 @@ class WorkspaceServiceTest(unittest.TestCase):
             for index in range(2):
                 local, remote = socket.socketpair()
                 local.settimeout(3)
-                process = subprocess.Popen([str(ROOT / "worminald"), "--bridge"],
+                process = subprocess.Popen([str(DAEMON), "--bridge"],
                                            env=env, stdin=remote, stdout=remote,
                                            stderr=subprocess.PIPE)
                 remote.close()
@@ -199,7 +165,7 @@ class WorkspaceServiceTest(unittest.TestCase):
                     process.wait(timeout=3)
                     self.assertEqual(process.returncode, 0)
         finally:
-            subprocess.run([str(ROOT / "worminald"), "--stop"], env=env,
+            subprocess.run([str(DAEMON), "--stop"], env=env,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             for process, connection in bridges:
                 connection.close()
@@ -211,7 +177,7 @@ class WorkspaceServiceTest(unittest.TestCase):
         scope = f"wire-{os.getpid()}-{uuid.uuid4().hex}"
         env = {**os.environ, "WORMINAL_SHARED_SOCKET_SCOPE": scope}
         address = f"\0worminal-workspace-{os.getuid()}-{scope}"
-        service = subprocess.Popen([str(ROOT / "worminald"), "--serve"], env=env,
+        service = subprocess.Popen([str(DAEMON), "--serve"], env=env,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         connections = []
         try:

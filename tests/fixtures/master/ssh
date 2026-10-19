@@ -1,4 +1,7 @@
 #!/bin/sh
 # Exercise the real master socket/bridge path without an SSH server or desktop state.
-[ "$*" = "-T -C wheel-test worminald --bridge" ] || exit 64
+case "$*" in
+  "-T -C wheel-test worminald --bridge" | "-T -C key-test worminald --bridge") ;;
+  *) exit 64 ;;
+esac
 exec "$WORMINAL_TEST_DAEMON" --bridge

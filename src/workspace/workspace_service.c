@@ -20,12 +20,6 @@
 #include "workspace_socket.h"
 #include WORMINAL_THEME_HEADER
 
-char *utmp, *scroll, *stty_args = "stty raw pass8 nl -echo -iexten -cstopb 38400";
-char *vtiden = "\033[?6c", *termname = "xterm-256color";
-wchar_t *worddelimiters = L" ";
-int allowaltscreen = 1;
-unsigned int defaultfg = 258, defaultbg = 259, defaultcs = 256, tabspaces = 8;
-
 typedef struct Client Client;
 typedef struct Tab Tab;
 struct Client {
@@ -42,6 +36,7 @@ struct Tab {
 	WireBuffer input;
 	size_t input_sent;
 	char *title, *initial_title, *directory, *clipboard;
+	char *url; /* Non-NULL marks a browser record: no terminal or PTY. */
 	char **colors;
 	uint32_t mode, cursor;
 	Client *controller;
@@ -219,6 +214,10 @@ send_catalog(Client *client)
 	wire_put_u32(&buffer, fallback_id);
 	for (Tab *tab = tabs; tab; tab = tab->next) {
 		wire_put_u32(&buffer, tab->id);
+#ifdef WORMINAL_PREVIEW_PROTOCOL
+		wire_put_u32(&buffer, tab->url != NULL);
+		wire_put_string(&buffer, tab->url);
+#endif
 		wire_put_u32(&buffer, tab->mode);
 		wire_put_u32(&buffer, tab->cursor);
 		wire_put_string(&buffer, tab->title);
@@ -246,6 +245,8 @@ broadcast_catalog(void)
 static void
 send_frame(Client *client, Tab *tab, int full)
 {
+	if (!tab->session)
+		return;
 	SessionFrame frame = tsessionframe(tab->session);
 	WireBuffer buffer = {0};
 	if (!client || client->fd < 0 || !client->ready)
@@ -374,7 +375,9 @@ tab_start(Client *client, Launch *launch)
 	else
 		tabs = tab;
 	lasttab = tab;
-	ttysetlaunch(cwd, launch->env, *launch->windowid ? launch->windowid : NULL);
+	/* An omitted environment means inherit the daemon (not an empty environment),
+	 * as required by SSH launches that must keep the remote account settings. */
+	ttysetlaunch(cwd, launch->envc ? launch->env : NULL, *launch->windowid ? launch->windowid : NULL);
 	ttynew(*launch->line ? launch->line : NULL, "/bin/sh",
 	       *launch->output ? launch->output : NULL,
 	       launch->argc ? launch->args : NULL);
@@ -406,7 +409,9 @@ tab_close(Tab *tab)
 			lasttab = lasttab->next;
 	}
 	wire_buffer_free(&tab->input);
-	tsessionremove(tab->session);
+	if (tab->session)
+		tsessionremove(tab->session);
+	free(tab->url);
 	free(tab->title);
 	free(tab->initial_title);
 	free(tab->directory);
@@ -430,6 +435,44 @@ client_message(Client *client, WirePacket *packet)
 		running = 0;
 		return;
 	}
+#ifdef WORMINAL_PREVIEW_PROTOCOL
+	if (packet->type == WIRE_ATTACH) {
+		client->ready = 1;
+		send_catalog(client);
+		return;
+	}
+	if (packet->type == WIRE_BROWSER || packet->type == WIRE_BROWSER_NAVIGATE) {
+		char *url = wire_get_string(packet);
+		if (!url || !*url || strlen(url) > 65536 || packet->pos != packet->len) {
+			free(url);
+			return;
+		}
+		if (packet->type == WIRE_BROWSER) {
+			tab = calloc(1, sizeof(*tab));
+			if (!tab)
+				abort();
+			tab->id = next_id++;
+			tab->title = xstrdup("Browser");
+			tab->directory = xstrdup("");
+			tab->initial_title = xstrdup("Browser");
+			if (lasttab)
+				lasttab->next = tab;
+			else
+				tabs = tab;
+			lasttab = tab;
+			client->ready = 1;
+			client_send(client, WIRE_CREATED, tab->id, NULL);
+		} else if (!client->ready || !tab || !tab->url) {
+			free(url);
+			return;
+		}
+		free(tab->url);
+		tab->url = url;
+		catalog_dirty = 1;
+		broadcast_catalog();
+		return;
+	}
+#endif
 	if (packet->type == WIRE_HELLO || packet->type == WIRE_NEW) {
 		if (!launch_read(packet, &launch)) {
 			launch_free(&launch);
@@ -438,6 +481,9 @@ client_message(Client *client, WirePacket *packet)
 		}
 		client->ready = 1;
 		tab = tab_start(client, &launch);
+#ifdef WORMINAL_PREVIEW_PROTOCOL
+		client_send(client, WIRE_CREATED, tab->id, NULL);
+#endif
 		launch_free(&launch);
 		broadcast_catalog();
 		send_frame(client, tab, 1);
@@ -445,7 +491,37 @@ client_message(Client *client, WirePacket *packet)
 	}
 	if (!client->ready || !tab)
 		return;
+	if (tab->url) {
+		if (packet->type == WIRE_CLOSE)
+			tab_close(tab);
+		return;
+	}
 	switch (packet->type) {
+#ifdef WORMINAL_PREVIEW_PROTOCOL
+	case WIRE_CONTROL:
+		if (!wire_get_u32(packet, &direction) || direction > 2 || packet->pos != packet->len) break;
+		take_control(tab, client);
+		tsessionuse(tab->session);
+		tab->print_client = client;
+		if (direction == 0) toggleprinter(NULL);
+		else if (direction == 1) printscreen(NULL);
+		else sendbreak(NULL);
+		break;
+	case WIRE_FOCUS_STATE:
+		/* Focus reports describe the current controller; they are not input
+		 * gestures and must never steal a tab back from a newer controller. */
+		if (tab->controller == client && (tab->mode & MODE_FOCUS) &&
+		    wire_get_u32(packet, &direction) && direction <= 1 && packet->pos == packet->len) {
+			tsessionuse(tab->session);
+			ttywrite(direction ? "\033[I" : "\033[O", 3, 0);
+		}
+		break;
+	case WIRE_RESIZE:
+		/* Allocation events can arrive after a controller transfer. Only the
+		 * service can reject stale resizes without reclaiming another view. */
+		if (tab->controller != client) break;
+		/* fall through */
+#endif
 	case WIRE_FOCUS: {
 		if (!wire_get_u32(packet, &cols) || !wire_get_u32(packet, &rows) ||
 		    cols < 1 || cols > 400 || rows < 1 || rows > 200 || packet->pos != packet->len)
@@ -523,7 +599,7 @@ serve(void)
 		tsessionreap();
 		for (Tab *tab = tabs, *next; tab; tab = next) {
 			next = tab->next;
-			if (tsessionfd(tab->session) < 0)
+			if (tab->session && tsessionfd(tab->session) < 0)
 				tab_close(tab);
 		}
 		broadcast_catalog();
@@ -545,7 +621,7 @@ serve(void)
 			}
 		for (Tab *tab = tabs; tab; tab = tab->next) {
 			pending |= tab->pending_frame;
-			int fd = tsessionfd(tab->session);
+			int fd = tab->session ? tsessionfd(tab->session) : -1;
 			if (fd >= 0) {
 				FD_SET(fd, &readers);
 				if (tab->input.len > tab->input_sent)
@@ -561,10 +637,10 @@ serve(void)
 			return 1;
 		}
 		for (Tab *tab = tabs; tab; tab = tab->next) {
-			int fd = tsessionfd(tab->session);
+			int fd = tab->session ? tsessionfd(tab->session) : -1;
 			if (fd >= 0 && FD_ISSET(fd, &writers))
 				flush_input(tab);
-			if (tsessionfd(tab->session) < 0 || !FD_ISSET(fd, &readers))
+			if (fd < 0 || tsessionfd(tab->session) < 0 || !FD_ISSET(fd, &readers))
 				continue;
 			tsessionuse(tab->session);
 			ttyread();
@@ -688,7 +764,11 @@ main(int argc, char **argv)
 }
 
 /* st's terminal parser reports changes through these callbacks. */
-void xbell(void) {}
+void xbell(void)
+{
+	Tab *tab = tab_for_session(tsessioncurrent());
+	if (tab && tab->controller) client_send(tab->controller, WIRE_BELL, tab->id, NULL);
+}
 void xclipcopy(void)
 {
 	Tab *tab = tab_for_session(tsessioncurrent());

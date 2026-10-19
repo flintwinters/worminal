@@ -944,7 +944,7 @@ ttyread(void)
 	int ret, written;
 
 	/* append read bytes to unprocessed bytes */
-	ret = read(cmdfd, buf+buflen, LEN(buf)-buflen);
+	ret = read(cmdfd, buf+buflen, sizeof(session->ttybuf)-buflen);
 
 	switch (ret) {
 	case 0:
@@ -1024,12 +1024,7 @@ ttywriteraw(const char *s, size_t n)
 	ssize_t r;
 	size_t lim = 256;
 
-	/*
-	 * Remember that we are using a pty, which might be a modem line.
-	 * Writing too much will clog the line. That's why we are doing this
-	 * dance.
-	 * FIXME: Migrate the world to Plan 9.
-	 */
+	/* Legacy local writes drain PTY output while waiting for input capacity. */
 	while (n > 0) {
 		FD_ZERO(&wfd);
 		FD_ZERO(&rfd);

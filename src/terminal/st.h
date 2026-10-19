@@ -8,8 +8,12 @@
 #include <sys/types.h>
 
 /* macros */
+#ifndef MIN
 #define MIN(a, b)		((a) < (b) ? (a) : (b))
+#endif
+#ifndef MAX
 #define MAX(a, b)		((a) < (b) ? (b) : (a))
+#endif
 #define LEN(a)			(sizeof(a) / sizeof(a)[0])
 #define BETWEEN(x, a, b)	((a) <= (x) && (x) <= (b))
 #define DIVCEIL(n, d)		(((n) + ((d) - 1)) / (d))

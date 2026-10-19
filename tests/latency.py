@@ -59,7 +59,7 @@ def measure_one(env, index, shell=False):
             raise RuntimeError(f"Trial {index}: key injector did not become ready")
         started = time.monotonic_ns()
         terminal = subprocess.Popen(
-            [str(ROOT / "worminal"), "-T", title, "-o", "-", "-e", *command],
+            [str(ROOT / env.get("WORMINAL_FRONTEND", "worminal")), "-T", title, "-o", "-", "-e", *command],
             cwd=ROOT,
             env=env,
             stdout=subprocess.PIPE,
@@ -111,11 +111,12 @@ def measure_one(env, index, shell=False):
         parts = line.split()
         if len(parts) == 3 and parts[0] == b"worminal-timing":
             points[parts[1].decode()] = int(parts[2])
-    missing = (set(PHASES) | {"captured"}) - points.keys()
+    phases = PHASES if env.get("WORMINAL_FRONTEND", "worminal") == "worminal" else ("echo",)
+    missing = (set(phases) | {"captured"}) - points.keys()
     if missing:
         raise RuntimeError(f"Trial {index}: missing timing phases {sorted(missing)}: {trace.decode()}")
     return {phase: (points[phase] - started) / 1_000_000
-            for phase in (*PHASES, "captured")}
+            for phase in (*phases, "captured")}
 
 
 def main():
@@ -131,7 +132,7 @@ def main():
         print(f"Launch to {label}: median {statistics.median(ordered):.1f} ms, "
               f"p95 {p95:.1f} ms (n={TRIALS}, private Xvfb)")
     previous = "start"
-    for phase in PHASES:
+    for phase in PHASES if "main" in samples[0] else ():
         duration = statistics.median(sample[phase] - sample.get(previous, 0) for sample in samples)
         print(f"  {previous} -> {phase}: {duration:.1f} ms")
         previous = phase

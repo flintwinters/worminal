@@ -5,7 +5,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef WORMINAL_PREVIEW_PROTOCOL
+#define WIRE_VERSION 2
+#define WORKSPACE_ENDPOINT "worminal-workspace-v2"
+#define WORKSPACE_DAEMON "worminald-preview"
+#else
 #define WIRE_VERSION 1
+#define WORKSPACE_ENDPOINT "worminal-workspace"
+#define WORKSPACE_DAEMON "worminald"
+#endif
 #define WIRE_MAX_BYTES (8u * 1024u * 1024u)
 
 enum wire_type {
@@ -25,6 +33,13 @@ enum wire_type {
 	WIRE_PRINT,
 	WIRE_RELEASE,
 	WIRE_ERROR,
+	WIRE_BROWSER,
+	WIRE_BROWSER_NAVIGATE,
+	WIRE_ATTACH,
+	WIRE_CREATED,
+	WIRE_FOCUS_STATE,
+	WIRE_CONTROL,
+	WIRE_RESIZE,
 };
 
 typedef struct {
