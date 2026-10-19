@@ -1,0 +1,8 @@
+#!/bin/sh
+# Exercise the production SSH bridge arguments without a remote host.
+case "$*" in
+  "-T -C preview-test worminald-preview --bridge" | "-T -C wheel-test worminald-preview --bridge" | \
+  "-T -C key-test worminald-preview --bridge") ;;
+  *) exit 64 ;;
+esac
+exec "$WORMINAL_TEST_DAEMON" --bridge

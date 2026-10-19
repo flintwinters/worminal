@@ -71,7 +71,6 @@ static void zoom(const Arg *);
 static void zoomabs(const Arg *);
 static void zoomreset(const Arg *);
 static void ttysend(const Arg *);
-
 /* config.h for applying patches and the configuration. */
 #include "config.h"
 #include "icon.h"

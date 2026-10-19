@@ -18,9 +18,9 @@ The priorities are fast launch to usable input, low memory use, and a small inte
 - **Your Alacritty theme, compiled in.** Reuse colors, fonts, spacing, and scrollback settings.
 - **Everyday conveniences.** Clickable URLs, clipboard support, mouse-wheel history, and font-size shortcuts.
 
-Worminal targets X11. It is under active development: live daemon stalls and mouse-wheel scrolling in Codex
-through remote masters are current investigation areas. Launch and memory measurements are ongoing;
-performance goals are not benchmark claims.
+The default launcher targets X11. A separate GTK/WebKit preview adds native Wayland and browser tabs;
+its measured startup and memory overhead is substantially higher. The default remains unchanged.
+Remote Codex scrolling remains an investigation area beyond the tested terminal mouse modes.
 
 ## Try it
 
@@ -54,6 +54,33 @@ Use `--prefix /your/prefix` for another installation location; `DESTDIR` stages 
 `python3 manage.py uninstall` removes installed files using the same prefix and staging settings.
 The build honors `CC`, `PKG_CONFIG`, `CPPFLAGS`, `CFLAGS`, and `LDFLAGS`; `CFLAGS` defaults to `-O3`.
 `PREFIX` defaults to `/usr/local`, and `MANPREFIX` defaults to `$PREFIX/share/man`.
+
+## Combined terminal/browser preview
+
+Install `libgtk-3-dev libwebkit2gtk-4.1-dev`, then build the separate preview:
+
+```sh
+python3 manage.py build-preview
+./worminal-preview
+./worminal-preview --surf https://example.org
+GDK_BACKEND=wayland ./worminal-preview
+```
+
+The preview starts `worminald-preview` on an isolated v2 endpoint. Existing `worminald` sessions continue running.
+For a remote workspace, install both preview executables remotely and use `--master user@host`.
+`--attach` opens existing preview tabs without creating another shell. Closing a window preserves its service tabs.
+
+Ctrl+Shift+T opens a terminal, Ctrl+Shift+B asks for a browser URL, Ctrl+Shift+N opens another window,
+and Ctrl+Shift+W closes the active tab. Ctrl+Tab/Shift+Ctrl+Tab and Alt+1 through Alt+9 switch tabs.
+Browser tabs provide Back, Forward, Reload/Stop and a location entry (Ctrl+L). User popup links open as independent
+tabs; scripts cannot retain `window.opener`. Cookies and local storage stay in the local XDG `worminal-preview`
+profile. A peer's navigation updates the saved link without replacing an already open local page.
+
+Run `python3 manage.py check-preview`, `check-preview-keys`, `check-preview-wayland`, and `check-preview-qtile`
+for isolated checks. Wayland checks require Weston and forbid X11 fallback; on Debian, the optional
+`setup-preview-wayland` command downloads a runtime into `.checks` without installing system packages.
+`preview-perf` compares the original and preview, including WebKit helper memory.
+See [preview validation and limitations](docs/browser-integration.txt) before considering a launcher switch.
 
 ## Keep your workspace running
 

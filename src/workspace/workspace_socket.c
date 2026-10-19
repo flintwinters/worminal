@@ -11,6 +11,7 @@
 #include <time.h>
 #include <unistd.h>
 #include "workspace_socket.h"
+#include "wire.h"
 
 static socklen_t
 workspace_address(struct sockaddr_un *address)
@@ -20,7 +21,7 @@ workspace_address(struct sockaddr_un *address)
 	memset(address, 0, sizeof(*address));
 	address->sun_family = AF_UNIX;
 	length = snprintf(address->sun_path + 1, sizeof(address->sun_path) - 1,
-	                  "worminal-workspace-%lu-%s", (unsigned long)getuid(), scope ? scope : "");
+	                  WORKSPACE_ENDPOINT "-%lu-%s", (unsigned long)getuid(), scope ? scope : "");
 	if (length < 0 || length >= (int)sizeof(address->sun_path) - 1)
 		return 0;
 	return offsetof(struct sockaddr_un, sun_path) + 1 + length;
@@ -73,13 +74,18 @@ workspace_spawn(void)
 		return 0;
 	path[length] = '\0';
 	slash = strrchr(path, '/');
-	if (!slash || (size_t)(slash - path) + sizeof("/worminald") >= sizeof(path))
+	if (!slash || (size_t)(slash - path) + sizeof("/" WORKSPACE_DAEMON) >= sizeof(path))
 		return 0;
-	strcpy(slash + 1, "worminald");
+	strcpy(slash + 1, WORKSPACE_DAEMON);
 	child = fork();
 	if (child < 0)
 		return 0;
 	if (child == 0) {
+		/* The service outlives its launching view. Reap this short-lived child
+		 * and let the service be adopted, rather than leaving a zombie on stop. */
+		pid_t daemon = fork();
+		if (daemon < 0) _exit(127);
+		if (daemon > 0) _exit(0);
 		int nullfd = open("/dev/null", O_RDWR);
 		setsid();
 		if (nullfd >= 0) {
@@ -92,7 +98,10 @@ workspace_spawn(void)
 		execl(path, path, "--serve", (char *)NULL);
 		_exit(127);
 	}
-	return 1;
+	int status;
+	while (waitpid(child, &status, 0) < 0)
+		if (errno != EINTR) return 0;
+	return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
 int
