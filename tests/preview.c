@@ -157,6 +157,13 @@ select_page(Page *page)
 	if (page->terminal) g_assert_true(gtk_window_get_focus(GTK_WINDOW(page->app->window)) == page->widget);
 }
 
+static void
+press_browser_key(Page *page, guint key, guint mods)
+{
+	GdkEventKey event = {.type = GDK_KEY_PRESS, .keyval = key, .state = mods};
+	g_assert_true(shortcut(page->app->window, &event, page->app));
+}
+
 static Page *
 open_browser(App *app, const char *url)
 {
@@ -165,6 +172,9 @@ open_browser(App *app, const char *url)
 	WAIT(g_list_length(app->pages) == before + 1 && app->active && app->active->browser);
 	Page *page = app->active;
 	WAIT(!webkit_web_view_is_loading(page->browser->view) && webkit_web_view_get_title(page->browser->view));
+	g_assert_false(gtk_widget_get_visible(page->browser->entry));
+	gtk_widget_show_all(browser_widget(page->browser));
+	g_assert_false(gtk_widget_get_visible(page->browser->entry));
 	return page;
 }
 
@@ -337,6 +347,15 @@ main(int argc, char **argv)
 	char *url = g_strconcat(base, "/page", NULL);
 	Page *web = open_browser(app, url);
 	check_tabs(app, terminal, web);
+	press_browser_key(web, GDK_KEY_k, GDK_CONTROL_MASK);
+	g_assert_true(gtk_widget_get_visible(web->browser->entry));
+	g_assert_true(gtk_window_get_focus(GTK_WINDOW(app->window)) == web->browser->entry);
+	press_browser_key(web, GDK_KEY_Escape, 0);
+	g_assert_false(gtk_widget_get_visible(web->browser->entry));
+	press_browser_key(web, GDK_KEY_k, GDK_CONTROL_MASK);
+	g_signal_emit_by_name(web->browser->entry, "activate");
+	g_assert_false(gtk_widget_get_visible(web->browser->entry));
+	WAIT(!webkit_web_view_is_loading(web->browser->view));
 	expect_script(web->browser, "document.title", "Fixture");
 	expect_script(web->browser, "document.querySelector('input').value='local form'; localStorage.setItem('saved','yes');"
 	              "document.cookie='session=local;path=/'; document.querySelector('input').value", "local form");
@@ -352,7 +371,7 @@ main(int argc, char **argv)
 	WAIT(!webkit_web_view_is_loading(shared->browser->view) &&
 	     !g_strcmp0(webkit_web_view_get_title(shared->browser->view), "Other"));
 	WAIT(!g_strcmp0(web->url, other));
-	webkit_web_view_go_back(shared->browser->view);
+	press_browser_key(shared, GDK_KEY_Left, GDK_MOD1_MASK);
 	WAIT(!webkit_web_view_is_loading(shared->browser->view) &&
 	     !g_strcmp0(webkit_web_view_get_title(shared->browser->view), "Fixture"));
 	select_page(web);
@@ -361,7 +380,13 @@ main(int argc, char **argv)
 	expect_script(web->browser, "localStorage.getItem('saved') + ':' + document.cookie", "yes:session=local");
 	webkit_web_view_load_uri(web->browser->view, other);
 	WAIT(!webkit_web_view_is_loading(web->browser->view) && webkit_web_view_can_go_back(web->browser->view));
-	webkit_web_view_go_back(web->browser->view);
+	press_browser_key(web, GDK_KEY_Left, GDK_MOD1_MASK);
+	WAIT(!webkit_web_view_is_loading(web->browser->view) &&
+	     !g_strcmp0(webkit_web_view_get_title(web->browser->view), "Fixture"));
+	press_browser_key(web, GDK_KEY_Right, GDK_MOD1_MASK);
+	WAIT(!webkit_web_view_is_loading(web->browser->view) &&
+	     !g_strcmp0(webkit_web_view_get_title(web->browser->view), "Other"));
+	press_browser_key(web, GDK_KEY_Left, GDK_MOD1_MASK);
 	WAIT(!webkit_web_view_is_loading(web->browser->view) &&
 	     !g_strcmp0(webkit_web_view_get_title(web->browser->view), "Fixture"));
 	reload_wait(web->browser);
@@ -378,7 +403,7 @@ main(int argc, char **argv)
 	select_page(web);
 	webkit_web_view_terminate_web_process(web->browser->view);
 	WAIT(gtk_widget_get_visible(web->browser->notice));
-	navigate(GTK_BUTTON(web->browser->reload), web->browser);
+	press_browser_key(web, GDK_KEY_r, GDK_CONTROL_MASK);
 	WAIT(!webkit_web_view_is_loading(web->browser->view) &&
 	     !g_strcmp0(webkit_web_view_get_title(web->browser->view), "Fixture"));
 	/* Permission decisions use a real WebKit request and a GTK response. */
@@ -452,7 +477,8 @@ main(int argc, char **argv)
 	Browser *converted_browser = converter->active->browser;
 	WAIT(peer->active && peer->active->id == converted_id && peer->active->url);
 	g_assert_null(peer->active->browser);
-	WAIT(gtk_window_get_focus(GTK_WINDOW(converter->window)) == converted_browser->entry);
+	g_assert_false(gtk_widget_get_visible(converted_browser->entry));
+	WAIT(gtk_window_get_focus(GTK_WINDOW(converter->window)) == browser_view(converted_browser));
 	GdkEventKey control_t = {.type = GDK_KEY_PRESS, .keyval = GDK_KEY_t, .state = GDK_CONTROL_MASK};
 	g_assert_true(shortcut(converter->window, &control_t, converter));
 	WAIT(converter->active && converter->active->terminal && converter->active->id != converted_id);

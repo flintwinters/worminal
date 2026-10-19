@@ -5,7 +5,7 @@
 struct Browser {
 	App *app;
 	Page *page;
-	GtkWidget *box, *entry, *back, *forward, *reload, *notice;
+	GtkWidget *box, *entry, *notice;
 	WebKitWebView *view;
 };
 static WebKitWebContext *context;
@@ -25,16 +25,8 @@ location(GtkEntry *entry, Browser *b)
 	char *url = g_uri_peek_scheme(text) ? g_strdup(text) : g_strconcat("https://", text, NULL);
 	webkit_web_view_load_uri(b->view, url);
 	g_free(url);
+	gtk_widget_hide(b->entry);
 	gtk_widget_grab_focus(GTK_WIDGET(b->view));
-}
-
-static void
-navigate(GtkButton *button, Browser *b)
-{
-	if (GTK_WIDGET(button) == b->back) webkit_web_view_go_back(b->view);
-	else if (GTK_WIDGET(button) == b->forward) webkit_web_view_go_forward(b->view);
-	else if (webkit_web_view_is_loading(b->view)) webkit_web_view_stop_loading(b->view);
-	else { notice(b, NULL); webkit_web_view_reload(b->view); }
 }
 
 static void
@@ -43,9 +35,6 @@ changed(WebKitWebView *view, GParamSpec *property, Browser *b)
 	(void)property;
 	const char *url = webkit_web_view_get_uri(view);
 	const char *title = webkit_web_view_get_title(view);
-	gtk_widget_set_sensitive(b->back, webkit_web_view_can_go_back(view));
-	gtk_widget_set_sensitive(b->forward, webkit_web_view_can_go_forward(view));
-	gtk_button_set_label(GTK_BUTTON(b->reload), webkit_web_view_is_loading(view) ? "Stop" : "Reload");
 	if (url && !gtk_widget_has_focus(b->entry))
 		gtk_entry_set_text(GTK_ENTRY(b->entry), url);
 	if (b->page) {
@@ -92,8 +81,7 @@ static void
 renderer_failed(WebKitWebView *view, WebKitWebProcessTerminationReason reason, Browser *b)
 {
 	(void)view; (void)reason;
-	notice(b, "The page renderer stopped. Press Reload to reopen this page.");
-	gtk_button_set_label(GTK_BUTTON(b->reload), "Reload");
+	notice(b, "The page renderer stopped. Press Ctrl+R to reopen this page.");
 }
 
 static GtkWidget *
@@ -268,17 +256,11 @@ browser_new(App *app)
 	b->app = app;
 	b->box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	g_object_ref_sink(b->box);
-	GtkWidget *toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
-	b->back = gtk_button_new_with_label("Back");
-	b->forward = gtk_button_new_with_label("Forward");
-	b->reload = gtk_button_new_with_label("Reload");
 	b->entry = gtk_entry_new();
 	gtk_entry_set_placeholder_text(GTK_ENTRY(b->entry), "URL");
-	gtk_box_pack_start(GTK_BOX(toolbar), b->back, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(toolbar), b->forward, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(toolbar), b->reload, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(toolbar), b->entry, TRUE, TRUE, 0);
-	gtk_box_pack_start(GTK_BOX(b->box), toolbar, FALSE, FALSE, 0);
+	/* Tab activation/reparenting uses show_all. Only Ctrl+K reveals this entry. */
+	gtk_widget_set_no_show_all(b->entry, TRUE);
+	gtk_box_pack_start(GTK_BOX(b->box), b->entry, FALSE, FALSE, 0);
 	b->notice = gtk_label_new("");
 	gtk_label_set_line_wrap(GTK_LABEL(b->notice), TRUE);
 	gtk_widget_set_no_show_all(b->notice, TRUE);
@@ -295,9 +277,6 @@ browser_new(App *app)
 	g_object_unref(settings);
 	gtk_box_pack_start(GTK_BOX(b->box), GTK_WIDGET(b->view), TRUE, TRUE, 0);
 	g_signal_connect(b->entry, "activate", G_CALLBACK(location), b);
-	g_signal_connect(b->back, "clicked", G_CALLBACK(navigate), b);
-	g_signal_connect(b->forward, "clicked", G_CALLBACK(navigate), b);
-	g_signal_connect(b->reload, "clicked", G_CALLBACK(navigate), b);
 	g_signal_connect(b->view, "notify::title", G_CALLBACK(changed), b);
 	g_signal_connect(b->view, "notify::uri", G_CALLBACK(changed), b);
 	g_signal_connect(b->view, "notify::is-loading", G_CALLBACK(changed), b);
@@ -315,11 +294,40 @@ browser_new(App *app)
 
 GtkWidget *browser_widget(Browser *b) { return b->box; }
 GtkWidget *browser_view(Browser *b) { return GTK_WIDGET(b->view); }
-void browser_location(Browser *b)
+static void browser_location(Browser *b)
 {
+	const char *url = webkit_web_view_get_uri(b->view);
+	gtk_entry_set_text(GTK_ENTRY(b->entry), url && strcmp(url, "about:blank") ? url : "");
+	gtk_widget_show(b->entry);
 	gtk_widget_grab_focus(b->entry);
 	gtk_editable_select_region(GTK_EDITABLE(b->entry), 0, -1);
 }
+gboolean
+browser_shortcut(Page *page, guint key, guint mods)
+{
+	gboolean location_key = mods == GDK_CONTROL_MASK && key == GDK_KEY_k;
+	gboolean history_key = mods == GDK_MOD1_MASK && (key == GDK_KEY_Left || key == GDK_KEY_Right);
+	gboolean reload_key = (mods == GDK_CONTROL_MASK && key == GDK_KEY_r) || (!mods && key == GDK_KEY_F5);
+	gboolean escape = !mods && key == GDK_KEY_Escape && page->browser &&
+	    (gtk_widget_get_visible(page->browser->entry) || webkit_web_view_is_loading(page->browser->view));
+	if (!location_key && !history_key && !reload_key && !escape) return FALSE;
+	app_select(page);
+	Browser *b = page->browser;
+	if (location_key) browser_location(b);
+	else if (history_key) {
+		if (key == GDK_KEY_Left) webkit_web_view_go_back(b->view);
+		else webkit_web_view_go_forward(b->view);
+	} else if (reload_key) {
+		notice(b, NULL);
+		webkit_web_view_reload(b->view);
+	} else {
+		if (gtk_widget_get_visible(b->entry)) gtk_widget_hide(b->entry);
+		else webkit_web_view_stop_loading(b->view);
+		gtk_widget_grab_focus(GTK_WIDGET(b->view));
+	}
+	return TRUE;
+}
+
 void browser_zoom(Browser *b, double zoom) { webkit_web_view_set_zoom_level(b->view, MAX(.25, 1 + zoom / 10)); }
 void browser_bind(Browser *b, Page *page, const char *url)
 {

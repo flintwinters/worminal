@@ -74,7 +74,7 @@ Browser *browser_new(App *);
 GtkWidget *browser_widget(Browser *);
 GtkWidget *browser_view(Browser *);
 void browser_bind(Browser *, Page *, const char *);
-void browser_location(Browser *);
+gboolean browser_shortcut(Page *, guint, guint);
 void browser_zoom(Browser *, double);
 void browser_free(Browser *);
 #endif
