@@ -173,8 +173,7 @@ activate(Page *page)
 	if (page->url) {
 		app->geometry_pending = FALSE;
 		claim_browser(page);
-		if (!strcmp(page->url, "about:blank")) browser_location(page->browser);
-		else gtk_widget_grab_focus(browser_view(page->browser));
+		gtk_widget_grab_focus(browser_view(page->browser));
 	} else {
 		app_focus(page);
 		gtk_widget_grab_focus(page->widget);
@@ -462,6 +461,7 @@ shortcut(GtkWidget *window, GdkEventKey *event, App *app)
 	guint key = gdk_keyval_to_lower(event->keyval);
 	guint mods = event->state & (GDK_CONTROL_MASK | GDK_SHIFT_MASK | GDK_MOD1_MASK);
 	Page *page = app->active;
+	if (page->url && browser_shortcut(page, key, mods)) return TRUE;
 	if (mods == GDK_CONTROL_MASK && (key == GDK_KEY_t || key == GDK_KEY_n || key == GDK_KEY_w)) {
 		if (key == GDK_KEY_t) app_terminal(app, FALSE);
 		else if (key == GDK_KEY_n) app_new_window(app);
@@ -492,10 +492,6 @@ shortcut(GtkWidget *window, GdkEventKey *event, App *app)
 		int count = gtk_notebook_get_n_pages(GTK_NOTEBOOK(app->notebook));
 		int index = key == GDK_KEY_9 ? count - 1 : key == GDK_KEY_0 ? 9 : (int)(key - GDK_KEY_1);
 		select_index(app, MIN(index, count - 1));
-		return TRUE;
-	} else if (page && page->url && mods == GDK_CONTROL_MASK && key == GDK_KEY_l) {
-		app_select(page);
-		browser_location(page->browser);
 		return TRUE;
 	} else return FALSE;
 	app->zoom = CLAMP(app->zoom, -10, 40);
