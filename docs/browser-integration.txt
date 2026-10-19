@@ -1,0 +1,83 @@
+Combined Worminal / surf scope
+=============================
+
+Status: proposal only. No frontend replacement or deployment is authorized by
+this document. Existing XEmbed experiments remain isolated on surf-tabs.
+
+Recommendation
+--------------
+Use one GTK-owned frontend containing the existing terminal and WebKit browser
+widgets. Adapt useful surf code into a browser module; remove its standalone
+window, main loop, GtkPlug, and X-property command transport. No external surf
+executable or cross-process window embedding is needed.
+
+Ownership
+---------
+worminald continues owning PTYs, terminal state, ordered tabs, and saved browser
+URLs. It has no GTK/WebKit dependency. Each local frontend owns a GTK top-level
+window, shared tab strip, and content stack containing terminal or WebKit views.
+WebKit still uses helper processes; one app does not mean one OS process.
+Only URLs cross masters. Cookies, logins, history, forms, and page execution stay
+local. Another client's navigation must not replace an already open local page.
+
+Required work
+-------------
+1. Establish terminal-only launch, input latency, and memory baselines using the
+   existing manage.py infrastructure. Preserve the working launcher throughout.
+2. Build a GTK terminal frontend without a browser. Replace xinitview's raw
+   top-level window and run's pselect/XNextEvent loop with GTK lifecycle, input,
+   layout, GLib socket watches, and redraw timers. Preserve terminal/session and
+   workspace code. Port clipboard, selection, IME, mouse, and shortcut handling.
+3. Adapt the existing Xft/pixmap renderer to a GTK-owned drawing surface on X11.
+   Verify drawable lifetime, clipping, and GTK repaint ownership in a prototype
+   before committing to this renderer path. A Cairo renderer port is the fallback
+   if that adaptation requires brittle GDK/Xlib interactions. Do not replace the
+   terminal engine with VTE as part of this work.
+4. Add WebKit views and reuse surf's relevant settings/navigation callbacks.
+   GTK allocates both view types. A terminal allocation computes rows/columns and
+   sends its normal workspace resize; a browser allocation stays entirely local.
+5. Add navigation, back/forward/reload, URL entry, page titles, popup-to-tab policy,
+   downloads, permission prompts, certificate-error behavior, and renderer-crash
+   recovery. Explicitly define these behaviors rather than silently dropping surf
+   functionality. Keep window-global shortcuts separate from page key handling.
+6. Integrate builds and tests through manage.py. Remove XEmbed transport and the
+   surf executable requirement from the combined frontend once replacement passes.
+
+Dependencies and failure boundaries
+-----------------------------------
+GTK becomes a frontend dependency, including terminal-only launches. Initially
+link WebKit normally but create its context/views only on the first browser tab;
+measure startup and resident memory rather than assuming deferred construction
+eliminates cost. Consider a lazily loaded browser module only if measurements
+justify its extra lifecycle and build complexity.
+The service remains lightweight and independent. A WebKit renderer failure can
+be handled per view; a frontend-process crash can close that frontend's windows,
+but the service's terminal sessions survive. UI blocking can affect all tabs in
+the frontend, so callbacks must avoid blocking I/O.
+
+Acceptance gates
+----------------
+First prove GTK terminal parity before adding WebKit: shell readiness, sustained
+output/input, resize/reflow, clipboard, IME, mouse reporting, tab/window ownership,
+remote masters, and reconnect. Then test mixed tabs under private Xvfb and Qtile:
+repeated resize, focus/shortcuts, forms, local browser state, popups, downloads,
+renderer failure, close/reopen, and old-service compatibility. Regression tests
+and measurements belong behind manage.py. No live session termination is needed.
+
+Assessment
+----------
+This is a substantial frontend refactor, not a linker change. The highest-risk
+work is preserving the terminal's rendering/input behavior and launch latency
+under GTK. Browser layout should become simpler because GTK owns the full widget
+tree. WebKit compatibility limits remain; combining apps cannot guarantee every
+website works. Estimate effort only after the terminal-widget prototype and
+baseline measurements expose the renderer and startup costs.
+
+Inspected sources
+-----------------
+src/x11/x.c: xinitview, run, Xft/pixmap drawing and input handlers.
+build/surf/surf.c: setup, newview, showview, createwindow, main.
+tools/build.py: distinct client/server sources and dependency selection.
+https://docs.gtk.org/gtk3/class.DrawingArea.html
+https://webkitgtk.org/reference/webkit2gtk/stable/class.WebView.html
+https://webkitgtk.org/reference/webkit2gtk/stable/signal.WebView.web-process-terminated.html
