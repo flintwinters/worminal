@@ -388,7 +388,6 @@ static int xtabwidth(Tab *);
 static void xselecttab(Tab *);
 static Tab *xtabslot(int);
 static void xclosetab(Tab *);
-static void xaddview(void);
 static XView *xlivefor(TermSession *);
 static void workspace_send_launch(uint32_t, const char *, int, int);
 static void workspace_message(WirePacket *);
@@ -1836,39 +1835,6 @@ xinit(int cols, int rows)
 }
 
 static void
-xaddview(void)
-{
-	XView *previous = view;
-	XView *source = views;
-	XView *created = xmalloc(sizeof(*created));
-	int cols, rows;
-
-	memset(created, 0, sizeof(*created));
-	cols = MAX(1, (source->win.w - 2 * borderpx) / source->win.cw);
-	rows = MAX(1, (source->win.h - 2 * borderpx - source->win.ch) / source->win.ch);
-	if (requested_geometry) {
-		cols = requested_cols;
-		rows = requested_rows;
-	}
-	created->terminal = previous->terminal;
-	created->live = 0;
-	created->next = source->next;
-	source->next = created;
-	pending_view = created;
-	pending_new_tab = 1;
-	xsetview(created);
-	if (requested_geometry) {
-		xw.l = requested_x;
-		xw.t = requested_y;
-		xw.gm = requested_gm;
-		xw.isfixed = requested_fixed;
-	}
-	xinitview(cols, rows, 0, 0);
-	xsetview(previous);
-	xrefreshtabs();
-}
-
-static void
 xactivate(void)
 {
 	XView *candidate;
@@ -3081,19 +3047,6 @@ kpress(XEvent *ev)
 		switch (ksym) {
 		case XK_t: case XK_T:
 			xnewtab(); return;
-		case XK_n: case XK_N: {
-			char *old_title = opt_title, *old_line = opt_line, *old_io = opt_io;
-			char **old_cmd = opt_cmd;
-			opt_title = "Worminal";
-			opt_line = opt_io = NULL;
-			opt_cmd = NULL;
-			xaddview();
-			opt_title = old_title;
-			opt_line = old_line;
-			opt_io = old_io;
-			opt_cmd = old_cmd;
-			return;
-		}
 		case XK_w: case XK_W:
 			xclosetab(selected); return;
 		case XK_Tab: case XK_ISO_Left_Tab:

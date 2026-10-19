@@ -91,7 +91,6 @@ ssh user@host worminald --stop   # Remote master
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab |
 | Select tab 1–8 / last tab | Ctrl+1–8 / Ctrl+9 |
 | Select exact slot 1–8 / last / slot 10 | Alt+1–8 / Alt+9 / Alt+0 |
-| New window and tab | Ctrl+N |
 | Smaller / larger font | Ctrl+- / Ctrl++ or Ctrl+= |
 | Browse scrollback | Mouse wheel or Shift+PageUp / Shift+PageDown |
 | Copy selected text | Ctrl+Shift+C |
