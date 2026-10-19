@@ -24,7 +24,7 @@ performance goals are not benchmark claims.
 
 ## Try it
 
-You need Python 3.11+, a C compiler, GNU make, `pkg-config`, and development headers for
+You need Python 3.11+, a C compiler, `pkg-config`, and development headers for
 X11, Xft, Fontconfig, and FreeType. On Debian or Ubuntu:
 
 ```sh
@@ -47,8 +47,13 @@ Python dependencies are for the management tools; the compiled terminal runs dir
 To install both `worminal` and `worminald`, the manual, desktop launcher, and icon:
 
 ```sh
-sudo make install
+sudo .venv/bin/python manage.py install
 ```
+
+Use `--prefix /your/prefix` for another installation location; `DESTDIR` stages an installation for packaging.
+`python3 manage.py uninstall` removes installed files using the same prefix and staging settings.
+The build honors `CC`, `PKG_CONFIG`, `CPPFLAGS`, `CFLAGS`, and `LDFLAGS`; `CFLAGS` defaults to `-O3`.
+`PREFIX` defaults to `/usr/local`, and `MANPREFIX` defaults to `$PREFIX/share/man`.
 
 ## Keep your workspace running
 
