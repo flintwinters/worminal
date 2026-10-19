@@ -98,6 +98,7 @@ void
 app_page_title(Page *page, const char *title)
 {
 	gtk_label_set_text(GTK_LABEL(page->label), title ? title : "Worminal");
+	gtk_widget_set_tooltip_text(page->label, title ? title : "Worminal");
 	if (page->app->active == page)
 		gtk_window_set_title(GTK_WINDOW(page->app->window), title ? title : "Worminal preview");
 }
@@ -175,6 +176,8 @@ new_page(App *app, uint32_t id, gboolean browser)
 	for (size_t i = 0; i < G_N_ELEMENTS(page->colors); i++) terminal_palette(page, i, NULL);
 	page->label = gtk_label_new(browser ? "Browser" : "Worminal");
 	gtk_label_set_ellipsize(GTK_LABEL(page->label), PANGO_ELLIPSIZE_END);
+	/* Scrollable notebooks allocate ellipsized labels at their minimum width. */
+	gtk_label_set_width_chars(GTK_LABEL(page->label), 12);
 	gtk_label_set_max_width_chars(GTK_LABEL(page->label), 25);
 	GtkWidget *tab = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
 	GtkWidget *close = gtk_button_new_with_label("×");

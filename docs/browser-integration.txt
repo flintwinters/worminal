@@ -111,6 +111,15 @@ Comparison recorded on 2026-10-18 (20 launch trials):
   Preview mixed: input median 7.45 ms; frontend/helpers RSS/PSS 398.6/192.4 MiB (3 processes)
   Service plus shell RSS stayed approximately 3.4-3.6 MiB.
 
+Terminal repaint follow-up: check-preview now times 30 offscreen repaints and
+compares warmed rendering against freshly shaped layouts pixel for pixel. On the
+same local Xvfb fixture, the sparse-screen cost fell from 4.26 to 0.30 ms/frame
+by caching ASCII layouts by font style and avoiding space glyph shaping. Dense
+scrollback repaints measured 0.41 ms/frame. These measure drawing work, not total
+key-to-display latency. The cache is bounded to 380 layouts per terminal and is
+invalidated when font metrics change; Unicode and IME text retain Pango fallback.
+Tab labels reserve 12 characters before ellipsizing and expose full title tooltips.
+
 The detailed machine-local results are .checks/preview-performance.json. The
 preview's startup and memory overhead is substantial; retaining the original
 launcher is the current rollout decision, pending review and optimization.

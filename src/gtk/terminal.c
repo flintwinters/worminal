@@ -16,6 +16,7 @@ struct Terminal {
 	GtkIMContext *im;
 	PangoFontDescription *font;
 	PangoLayout *layout;
+	PangoLayout *ascii[4][95];
 	char *preedit;
 	int cw, ch, height, ascent, cols, rows;
 	int button, last_x, last_y;
@@ -71,10 +72,19 @@ resize(GtkWidget *widget, GtkAllocation *allocation, Terminal *t)
 		app_resize(t->page);
 }
 
+static void
+clear_layouts(Terminal *t)
+{
+	for (size_t style = 0; style < G_N_ELEMENTS(t->ascii); style++)
+		for (size_t c = 0; c < G_N_ELEMENTS(t->ascii[style]); c++)
+			g_clear_object(&t->ascii[style][c]);
+}
+
 void
 terminal_zoom(Terminal *t)
 {
 	App *app = t->page->app;
+	clear_layouts(t);
 	if (t->font)
 		pango_font_description_free(t->font);
 	/* Pango's Fontconfig backend selects FreeType fonts and fallback faces.
@@ -175,15 +185,25 @@ cell_colors(Terminal *t, Glyph g, int x, int y, GdkRGBA *fg, GdkRGBA *bg)
 static void
 text(Terminal *t, cairo_t *cr, const char *value, int x, int y, ushort mode)
 {
-	pango_font_description_set_weight(t->font, mode & ATTR_BOLD ? PANGO_WEIGHT_BOLD : PANGO_WEIGHT_NORMAL);
-	pango_font_description_set_style(t->font, mode & ATTR_ITALIC ? PANGO_STYLE_ITALIC : PANGO_STYLE_NORMAL);
-	pango_layout_set_font_description(t->layout, t->font);
-	pango_layout_set_text(t->layout, value, -1);
+	/* ASCII shaping repeats across almost every cell and frame. Keep a bounded
+	 * cache by glyph and font style; colors and decorations do not affect shape.
+	 * Unicode/preedit still use Pango fallback without an unbounded text cache. */
+	unsigned int style = !!(mode & ATTR_BOLD) | (!!(mode & ATTR_ITALIC) << 1);
+	PangoLayout **cached = value[0] >= ' ' && value[0] <= '~' && !value[1]
+	    ? &t->ascii[style][value[0] - ' '] : NULL;
+	PangoLayout *layout = cached ? *cached : t->layout;
+	if (!cached || !layout) {
+		if (cached) layout = *cached = gtk_widget_create_pango_layout(t->page->widget, "");
+		pango_font_description_set_weight(t->font, mode & ATTR_BOLD ? PANGO_WEIGHT_BOLD : PANGO_WEIGHT_NORMAL);
+		pango_font_description_set_style(t->font, mode & ATTR_ITALIC ? PANGO_STYLE_ITALIC : PANGO_STYLE_NORMAL);
+		pango_layout_set_font_description(layout, t->font);
+		pango_layout_set_text(layout, value, -1);
+	}
 	/* Anchor glyphs to cell bottoms, including compact spacing and glyph offset.
 	 * Draw every background first: tall glyphs may overlap adjacent compact rows. */
 	double top = 2 + (y + 1) * t->ch - t->height - theme_glyph_offset_y;
 	cairo_move_to(cr, 2 + x * t->cw, top);
-	pango_cairo_show_layout(cr, t->layout);
+	pango_cairo_show_layout(cr, layout);
 }
 
 static gboolean
@@ -219,7 +239,7 @@ draw_terminal(GtkWidget *widget, cairo_t *cr, Terminal *t)
 				char utf8[8] = {0};
 				g_unichar_to_utf8(g_unichar_validate(g.u) ? g.u : 0xfffd, utf8);
 				gdk_cairo_set_source_rgba(cr, &fg);
-				text(t, cr, utf8, x, y, g.mode);
+				if (g.u != ' ') text(t, cr, utf8, x, y, g.mode);
 				int width = t->cw * ((g.mode & ATTR_WIDE) ? 2 : 1);
 				if (g.mode & ATTR_UNDERLINE) {
 					cairo_rectangle(cr, 2 + x * t->cw, 2 + (y + 1) * t->ch - 1, width, 1);
@@ -598,6 +618,7 @@ terminal_free(Terminal *t)
 	g_source_remove(t->timer);
 	g_signal_handlers_disconnect_by_data(t->page->widget, t);
 	g_object_unref(t->im);
+	clear_layouts(t);
 	g_object_unref(t->layout);
 	pango_font_description_free(t->font);
 	g_free(t->preedit);
