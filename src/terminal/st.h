@@ -122,6 +122,7 @@ int ttynew(const char *, char *, const char *, char **);
 size_t ttyread(void);
 void ttyresize(int, int);
 void ttywrite(const char *, size_t, int);
+extern void (*ttyrawhook)(const char *, size_t);
 extern void (*ttywritehook)(const char *, size_t, int);
 extern void (*tscrollhook)(int, int);
 extern void (*tprinterhook)(const char *, size_t);

@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
 #include <stdint.h>
@@ -38,6 +39,8 @@ struct Client {
 struct Tab {
 	uint32_t id;
 	TermSession *session;
+	WireBuffer input;
+	size_t input_sent;
 	char *title, *initial_title, *directory, *clipboard;
 	char **colors;
 	uint32_t mode, cursor;
@@ -147,6 +150,49 @@ take_control(Tab *tab, Client *client)
 	if (tab->controller && tab->controller != client)
 		client_send(tab->controller, WIRE_RELEASE, tab->id, NULL);
 	tab->controller = client;
+}
+
+/* PTY backpressure must never wait in the shared event loop, including parser
+ * replies. Queue after ttywrite's echo/CRLF processing so those semantics have
+ * one owner. A saturated queue stops only this tab, with an explicit error. */
+static void
+service_input(const char *bytes, size_t length)
+{
+	Tab *tab = tab_for_session(tsessioncurrent());
+	if (!tab || tsessionfd(tab->session) < 0)
+		return;
+	if (tab->input_sent) {
+		memmove(tab->input.data, tab->input.data + tab->input_sent,
+		        tab->input.len - tab->input_sent);
+		tab->input.len -= tab->input_sent;
+		tab->input_sent = 0;
+	}
+	if (length > 1024u * 1024u - tab->input.len) {
+		WireBuffer error = {0};
+		wire_put_string(&error, "PTY input queue exceeded 1 MiB; tab stopped");
+		if (tab->controller)
+			client_send(tab->controller, WIRE_ERROR, tab->id, &error);
+		wire_buffer_free(&error);
+		tsessionstop(tab->session);
+		return;
+	}
+	wire_put_bytes(&tab->input, bytes, length);
+}
+
+static void
+flush_input(Tab *tab)
+{
+	/* One bounded write per readiness notification keeps other tabs runnable. */
+	size_t left = tab->input.len - tab->input_sent;
+	ssize_t count = write(tsessionfd(tab->session), tab->input.data + tab->input_sent,
+	                      MIN(left, 16384));
+	if (count > 0) {
+		tab->input_sent += count;
+		if (tab->input_sent == tab->input.len)
+			tab->input_sent = tab->input.len = 0;
+	} else if (count < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+		tsessionstop(tab->session);
+	}
 }
 
 static void
@@ -333,6 +379,9 @@ tab_start(Client *client, Launch *launch)
 	       *launch->output ? launch->output : NULL,
 	       launch->argc ? launch->args : NULL);
 	ttysetlaunch(NULL, NULL, NULL);
+	int fd = tsessionfd(tab->session);
+	if (fd >= 0 && fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) < 0)
+		tsessionstop(tab->session);
 	catalog_dirty = 1;
 	return tab;
 }
@@ -356,6 +405,7 @@ tab_close(Tab *tab)
 		while (lasttab && lasttab->next)
 			lasttab = lasttab->next;
 	}
+	wire_buffer_free(&tab->input);
 	tsessionremove(tab->session);
 	free(tab->title);
 	free(tab->initial_title);
@@ -460,6 +510,7 @@ serve(void)
 	struct timespec last_frame = {0}, flush_delay = {.tv_nsec = 16000000};
 	/* -o - follows the launching client's stdout across the service boundary. */
 	tprinterhook = service_print;
+	ttyrawhook = service_input;
 	if (listener < 0)
 		return 1;
 	for (; running;) {
@@ -497,6 +548,8 @@ serve(void)
 			int fd = tsessionfd(tab->session);
 			if (fd >= 0) {
 				FD_SET(fd, &readers);
+				if (tab->input.len > tab->input_sent)
+					FD_SET(fd, &writers);
 				if (fd > maxfd)
 					maxfd = fd;
 			}
@@ -509,7 +562,9 @@ serve(void)
 		}
 		for (Tab *tab = tabs; tab; tab = tab->next) {
 			int fd = tsessionfd(tab->session);
-			if (fd < 0 || !FD_ISSET(fd, &readers))
+			if (fd >= 0 && FD_ISSET(fd, &writers))
+				flush_input(tab);
+			if (tsessionfd(tab->session) < 0 || !FD_ISSET(fd, &readers))
 				continue;
 			tsessionuse(tab->session);
 			ttyread();
