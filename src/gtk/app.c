@@ -143,7 +143,6 @@ switched(GtkNotebook *notebook, GtkWidget *widget, guint index, App *app)
 }
 
 void app_close(Page *page) { app_send(page->app, WIRE_CLOSE, page->id, NULL, 0); }
-static void close_clicked(GtkButton *button, Page *page) { (void)button; app_close(page); }
 
 void
 page_free(Page *page)
@@ -179,18 +178,12 @@ new_page(App *app, uint32_t id, gboolean browser)
 	/* Scrollable notebooks allocate ellipsized labels at their minimum width. */
 	gtk_label_set_width_chars(GTK_LABEL(page->label), 12);
 	gtk_label_set_max_width_chars(GTK_LABEL(page->label), 25);
-	GtkWidget *tab = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
-	GtkWidget *close = gtk_button_new_with_label("×");
-	gtk_button_set_relief(GTK_BUTTON(close), GTK_RELIEF_NONE);
-	gtk_box_pack_start(GTK_BOX(tab), page->label, TRUE, TRUE, 0);
-	gtk_box_pack_start(GTK_BOX(tab), close, FALSE, FALSE, 0);
-	g_signal_connect(close, "clicked", G_CALLBACK(close_clicked), page);
 	if (browser) page->widget = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	else page->terminal = terminal_new(page);
 	g_object_ref_sink(page->widget);
 	app->pages = g_list_append(app->pages, page);
-	gtk_notebook_append_page(GTK_NOTEBOOK(app->notebook), page->widget, tab);
-	gtk_widget_show_all(tab);
+	gtk_notebook_append_page(GTK_NOTEBOOK(app->notebook), page->widget, page->label);
+	gtk_widget_show(page->label);
 	gtk_widget_show_all(page->widget);
 	return page;
 }
