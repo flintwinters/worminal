@@ -118,7 +118,19 @@ by caching ASCII layouts by font style and avoiding space glyph shaping. Dense
 scrollback repaints measured 0.41 ms/frame. These measure drawing work, not total
 key-to-display latency. The cache is bounded to 380 layouts per terminal and is
 invalidated when font metrics change; Unicode and IME text retain Pango fallback.
-Tab labels reserve 12 characters before ellipsizing and expose full title tooltips.
+The preview now draws the original compact tab strip with the terminal font,
+underlined names and inverted active colors. Both frontends use tab_label.h for
+terminal directory basenames; application titles remain window titles, and
+browser tabs show local page titles. Natural tab widths and active-tab overflow
+replace GTK notebook decoration and ellipsizing.
+
+check-preview also measures PTY input through the GTK draw callback (20 echoes).
+On private Xvfb, mean input-to-paint fell from 32.31 to 16.58 ms by sending input
+immediately and letting the first PTY reply bypass output batching. Later output
+still batches; only emitted frames advance the batching clock. Pending frames
+precede mode catalogs so alternate-screen mouse behavior cannot use stale state.
+The measure excludes physical input/compositor presentation. A running daemon
+retains its old code until restarted; do not stop it while sessions need saving.
 
 The detailed machine-local results are .checks/preview-performance.json. The
 preview's startup and memory overhead is substantial; retaining the original

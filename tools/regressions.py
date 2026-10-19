@@ -34,6 +34,17 @@ def prove():
                "-k", "stale_resize", "-q"]
     env = {**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(preview)}
     cases.append(("stale resize ownership", command, env, b"stale resize released the new controller"))
+    ordering = directory / "mode-ordering.c"
+    ordering.write_text((ROOT / "src/workspace/workspace_service.c").read_text().replace(
+        "if (tab->input_frame) {", "if (0) {").replace(
+        "if (tab->pending_frame) flush_frame(tab);", "/* Missing pre-catalog frame flush. */"))
+    ordered_daemon = directory / "unordered-preview"
+    builder.program(ordered_daemon, [*(f"src/{source}" for source in build.COMMON), str(ordering)],
+                    variant="ordering-proof", flags=["-DWORMINAL_PREVIEW_PROTOCOL"])
+    command = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_preview_workspace.py",
+               "-k", "input_reply_frame", "-q"]
+    env = {**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(ordered_daemon)}
+    cases.append(("input reply/mode ordering", command, env, b"mode catalog preceded its corresponding frame"))
     # Restore sizeof(pointer) as the read capacity in the native parser test.
     parser = directory / "st.c"
     parser.write_text((ROOT / "src/terminal/st.c").read_text().replace(

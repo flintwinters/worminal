@@ -80,18 +80,14 @@ clear_layouts(Terminal *t)
 			g_clear_object(&t->ascii[style][c]);
 }
 
-void
-terminal_zoom(Terminal *t)
+PangoFontDescription *
+terminal_font(App *app, PangoLayout *layout, int *cw, int *ch, int *height, int *ascent)
 {
-	App *app = t->page->app;
-	clear_layouts(t);
-	if (t->font)
-		pango_font_description_free(t->font);
 	/* Pango's Fontconfig backend selects FreeType fonts and fallback faces.
 	 * Point sizes follow the existing Xft renderer's default 96 dpi. */
-	PangoContext *context = gtk_widget_get_pango_context(t->page->widget);
+	PangoContext *context = pango_layout_get_context(layout);
 	pango_cairo_context_set_resolution(context, 96);
-	t->font = pango_font_description_new();
+	PangoFontDescription *font = pango_font_description_new();
 	double size = theme_font_size;
 	gboolean pixels = FALSE;
 	const char *family = theme_font_family;
@@ -102,21 +98,30 @@ terminal_zoom(Terminal *t)
 		pixels = FcPatternGetDouble(pattern, FC_PIXEL_SIZE, 0, &size) == FcResultMatch;
 		if (!pixels) FcPatternGetDouble(pattern, FC_SIZE, 0, &size);
 	}
-	pango_font_description_set_family(t->font, family);
+	pango_font_description_set_family(font, family);
 	if (pattern) FcPatternDestroy(pattern);
-	if (pixels) pango_font_description_set_absolute_size(t->font, MAX(4, size + app->zoom) * PANGO_SCALE);
-	else pango_font_description_set_size(t->font, MAX(4, size + app->zoom) * PANGO_SCALE);
-	pango_layout_set_font_description(t->layout, t->font);
-	pango_layout_set_text(t->layout,
+	if (pixels) pango_font_description_set_absolute_size(font, MAX(4, size + app->zoom) * PANGO_SCALE);
+	else pango_font_description_set_size(font, MAX(4, size + app->zoom) * PANGO_SCALE);
+	pango_layout_set_font_description(layout, font);
+	pango_layout_set_text(layout,
 	    " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~", -1);
 	int width;
-	pango_layout_get_size(t->layout, &width, NULL);
-	t->cw = MAX(1, (int)ceil(width / (95.0 * PANGO_SCALE)));
-	PangoFontMetrics *metrics = pango_context_get_metrics(context, t->font, pango_context_get_language(context));
-	t->ascent = PANGO_PIXELS_CEIL(pango_font_metrics_get_ascent(metrics));
-	t->height = t->ascent + PANGO_PIXELS_CEIL(pango_font_metrics_get_descent(metrics));
-	t->ch = MAX(1, t->height + theme_font_offset_y);
+	pango_layout_get_size(layout, &width, NULL);
+	*cw = MAX(1, (int)ceil(width / (95.0 * PANGO_SCALE)));
+	PangoFontMetrics *metrics = pango_context_get_metrics(context, font, pango_context_get_language(context));
+	*ascent = PANGO_PIXELS_CEIL(pango_font_metrics_get_ascent(metrics));
+	*height = *ascent + PANGO_PIXELS_CEIL(pango_font_metrics_get_descent(metrics));
+	*ch = MAX(1, *height + theme_font_offset_y);
 	pango_font_metrics_unref(metrics);
+	return font;
+}
+
+void
+terminal_zoom(Terminal *t)
+{
+	clear_layouts(t);
+	if (t->font) pango_font_description_free(t->font);
+	t->font = terminal_font(t->page->app, t->layout, &t->cw, &t->ch, &t->height, &t->ascent);
 	GtkAllocation allocation;
 	gtk_widget_get_allocation(t->page->widget, &allocation);
 	resize(t->page->widget, &allocation, t);

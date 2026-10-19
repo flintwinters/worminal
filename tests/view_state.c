@@ -235,7 +235,7 @@ main(void)
 	XColor gray = {.red = 0x7777, .green = 0x7777, .blue = 0x7777};
 	for (size_t i = 0; i < LEN(cases); i++) {
 		int length;
-		const char *label = xtablabel(cases[i].path, &length);
+		const char *label = tab_label(cases[i].path, &length);
 		if (length != strlen(cases[i].label) ||
 		    strncmp(label, cases[i].label, length) != 0)
 			die("tab label is not the final directory segment\n");
