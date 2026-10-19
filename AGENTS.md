@@ -14,12 +14,12 @@ The upstream source and license remain in the repository. Keep machine destinati
 and use anonymous commit identities. Run `manage.py privacy-setup` in fresh clones; privacy hooks and CI guard
 staged content and history.
 
-`src/gtk` is the separate GTK 3/Pango-Cairo/WebKitGTK 4.1 preview for native Wayland and X11. It imports the
-same terminal cells and shares the terminal key table and directory-basename tab labels. Its Cairo tab strip
-uses terminal font metrics and colors rather than GTK notebook decoration. `worminald-preview` uses the
-isolated v2 endpoint; browser records have no PTY. Only saved links cross clients; browser profiles and
-existing local pages stay local. GTK and WebKit never enter the service. `manage.py build-preview`, `check-
-preview*`, and `preview-perf` own preview work.
+`src/gtk` is the GTK 3/Pango-Cairo/WebKitGTK 4.1 preview for native Wayland and X11. It shares terminal cells,
+keys and directory-basename labels with the original frontend. Its Cairo tab strip uses terminal metrics and colors.
+One GTK owner per display/workspace accepts separate launches and moves live browser views between local windows;
+remote machines share saved URLs only. `worminald-preview` uses the isolated v2 endpoint; browser records have no PTY.
+Its shell command converts the calling PTY's ordered tab into a browser. GTK and WebKit never enter the service.
+`manage.py build-preview`, `check-preview*`, and `preview-perf` own preview work.
 
 Current jobs: validate preview parity and reduce its measured launch/memory overhead before considering launcher
 replacement; review independent popup-link semantics and remaining compatibility gaps. Keep the original launcher

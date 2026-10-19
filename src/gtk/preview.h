@@ -16,7 +16,7 @@ struct Page {
 	App *app;
 	uint32_t id, mode, cursor;
 	char *url, *directory, *title;
-	GtkWidget *widget, *label;
+	GtkWidget *widget, *label, *placeholder;
 	Terminal *terminal;
 	Browser *browser;
 	gboolean seen, live;
@@ -27,12 +27,12 @@ struct App {
 	GList *pages;
 	Page *active;
 	char *master, *title, *cwd, *line, *output, *font;
-	char **command;
+	char **command, **environment;
 	int cols, rows, allowalt, refs;
 	char *initial_url;
 	gboolean initial_attach, geometry_pending;
 	double zoom;
-	int fd;
+	int fd, print_fd;
 	pid_t connecting_child;
 	guint reader, writer, reconnect;
 	WireReader input;
@@ -51,10 +51,10 @@ PangoFontDescription *terminal_font(App *, PangoLayout *, int *, int *, int *, i
 void app_send(App *, uint32_t, uint32_t, const void *, size_t);
 void app_terminal(App *, gboolean);
 void app_browser(App *, const char *);
-void app_location(App *);
 void app_focus(Page *);
 void app_resize(Page *);
 void app_close(Page *);
+void app_select(Page *);
 void app_status(App *, const char *);
 void app_page_title(Page *, const char *);
 void app_new_window(App *);

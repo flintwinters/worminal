@@ -24,6 +24,7 @@ typedef struct Client Client;
 typedef struct Tab Tab;
 struct Client {
 	int fd, ready;
+	pid_t pid;
 	int needs_resync;
 	WireReader input;
 	WireBuffer output;
@@ -454,6 +455,33 @@ client_message(Client *client, WirePacket *packet)
 		return;
 	}
 #ifdef WORMINAL_PREVIEW_PROTOCOL
+	if (packet->type == WIRE_BROWSER_REPLACE) {
+		char *url = wire_get_string(packet);
+		pid_t session_id = getsid(client->pid);
+		for (tab = tabs; tab; tab = tab->next)
+			if (tab->session && tsessionpid(tab->session) == session_id) break;
+		if (!tab || !url || !*url || strlen(url) > 65536 || packet->pos != packet->len) {
+			WireBuffer error = {0};
+			wire_put_string(&error, "Run --new-browser-tab inside a preview terminal tab with a valid URL.");
+			client_send(client, WIRE_ERROR, 0, &error);
+			wire_buffer_free(&error); free(url);
+			return;
+		}
+		/* Peer credentials identify the calling PTY session, independent of which
+		 * window currently owns painting. Preserve ordered identity; discard its PTY. */
+		client_send(client, WIRE_COMMAND_DONE, tab->id, NULL);
+		tsessionremove(tab->session); tab->session = NULL;
+		wire_buffer_free(&tab->input); tab->input = (WireBuffer){0}; tab->input_sent = 0;
+		tab->pending_frame = tab->input_frame = 0;
+		tab->controller = tab->print_client = NULL;
+		tab->mode = 0;
+		free(tab->title); tab->title = xstrdup("Browser");
+		free(tab->directory); tab->directory = xstrdup("");
+		tab->url = url;
+		catalog_dirty = 1;
+		broadcast_catalog();
+		return;
+	}
 	if (packet->type == WIRE_ATTACH) {
 		client->ready = 1;
 		send_catalog(client);
@@ -682,6 +710,7 @@ serve(void)
 			if (fd >= 0) {
 				Client *client = calloc(1, sizeof(*client));
 				client->fd = fd;
+				client->pid = peer.pid;
 				client->next = clients;
 				clients = client;
 			}
@@ -767,9 +796,46 @@ out:
 	return 0;
 }
 
+#ifdef WORMINAL_PREVIEW_PROTOCOL
+static int
+browser_command(const char *url)
+{
+	int fd = workspace_connect();
+	if (fd < 0) { fputs("No preview workspace service is running.\n", stderr); return 1; }
+	/* Converting this PTY hangs up its shell. Let the short-lived command receive
+	 * its result and exit normally even if it is in the foreground process group. */
+	signal(SIGHUP, SIG_IGN);
+	struct timeval timeout = {.tv_sec = 3};
+	setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+	WireBuffer buffer = {0};
+	wire_put_string(&buffer, url);
+	int okay = wire_write(fd, WIRE_BROWSER_REPLACE, 0, buffer.data, buffer.len);
+	wire_buffer_free(&buffer);
+	WirePacket packet;
+	if (okay && wire_read(fd, &packet) > 0) {
+		okay = packet.type == WIRE_COMMAND_DONE;
+		if (!okay) {
+			char *error = packet.type == WIRE_ERROR ? wire_get_string(&packet) : NULL;
+			fprintf(stderr, "%s\n", error ? error : "Preview service rejected the browser command.");
+			free(error);
+		}
+		wire_packet_free(&packet);
+	} else {
+		fputs("Preview service did not reply; an older service may need restarting after its sessions end.\n", stderr);
+		okay = 0;
+	}
+	close(fd);
+	return okay ? 0 : 1;
+}
+#endif
+
 int
 main(int argc, char **argv)
 {
+#ifdef WORMINAL_PREVIEW_PROTOCOL
+	if ((argc == 2 || argc == 3) && strcmp(argv[1], "--new-browser-tab") == 0)
+		return browser_command(argc == 3 ? argv[2] : "about:blank");
+#endif
 	if (argc == 2 && strcmp(argv[1], "--serve") == 0)
 		return serve();
 	if (argc == 2 && strcmp(argv[1], "--bridge") == 0)
@@ -783,6 +849,9 @@ main(int argc, char **argv)
 		return okay ? 0 : 1;
 	}
 	fprintf(stderr, "usage: worminald --serve|--bridge|--stop\n");
+#ifdef WORMINAL_PREVIEW_PROTOCOL
+	fputs("       worminald-preview --new-browser-tab [URL]\n", stderr);
+#endif
 	return 2;
 }
 

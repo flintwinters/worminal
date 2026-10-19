@@ -10,9 +10,10 @@
 #include "preview.h"
 #include "workspace_client.h"
 #include "tab_label.h"
+#include "windows.h"
 
-extern char **environ;
 static int windows;
+static GList *apps;
 static void connect_async(App *);
 static void disconnected(App *);
 static gboolean shortcut(GtkWidget *, GdkEventKey *, App *);
@@ -23,7 +24,8 @@ app_unref(App *app)
 	if (--app->refs) return;
 	g_free(app->master); g_free(app->title); g_free(app->cwd); g_free(app->line);
 	g_free(app->output); g_free(app->font); g_free(app->initial_url);
-	g_strfreev(app->command);
+	g_strfreev(app->command); g_strfreev(app->environment);
+	if (app->print_fd != STDOUT_FILENO) close(app->print_fd);
 	g_free(app);
 }
 
@@ -95,8 +97,8 @@ size_message(Page *page, uint32_t type)
 void app_focus(Page *page) { size_message(page, WIRE_FOCUS); }
 void app_resize(Page *page) { size_message(page, WIRE_RESIZE); }
 
-void
-app_page_title(Page *page, const char *title)
+static void
+page_title(Page *page, const char *title)
 {
 	g_free(page->title);
 	page->title = g_strdup(title ? title : "Worminal");
@@ -110,6 +112,59 @@ app_page_title(Page *page, const char *title)
 	tabs_refresh(page->app);
 }
 
+void
+app_page_title(Page *page, const char *title)
+{
+	/* One local WebKit page supplies the title for every mirror of its identity. */
+	char *value = g_strdup(title ? title : "Worminal");
+	page_title(page, value);
+	if (page->url)
+		for (GList *item = apps; item; item = item->next) {
+			App *app = item->data;
+			if (app == page->app || app->closing || g_strcmp0(app->master, page->app->master)) continue;
+			for (GList *entry = app->pages; entry; entry = entry->next) {
+				Page *peer = entry->data;
+				if (peer->id == page->id && peer->url) page_title(peer, value);
+			}
+		}
+	g_free(value);
+}
+
+static Page *
+browser_peer(Page *page, gboolean live_only)
+{
+	for (GList *item = apps; item; item = item->next) {
+		App *app = item->data;
+		if (app == page->app || app->closing || g_strcmp0(app->master, page->app->master)) continue;
+		for (GList *entry = app->pages; entry; entry = entry->next) {
+			Page *peer = entry->data;
+			if (peer->id == page->id && peer->url && (!live_only || peer->browser)) return peer;
+		}
+	}
+	return NULL;
+}
+
+static void
+move_browser(Page *from, Page *to)
+{
+	to->browser = from ? from->browser : browser_new(to->app);
+	if (from) {
+		from->browser = NULL;
+		gtk_container_remove(GTK_CONTAINER(from->widget), browser_widget(to->browser));
+		gtk_widget_show(from->placeholder);
+	}
+	gtk_box_pack_start(GTK_BOX(to->widget), browser_widget(to->browser), TRUE, TRUE, 0);
+	browser_bind(to->browser, to, to->url);
+	gtk_widget_show_all(to->widget);
+	gtk_widget_hide(to->placeholder);
+}
+
+static void
+claim_browser(Page *page)
+{
+	if (!page->browser) move_browser(browser_peer(page, TRUE), page);
+}
+
 static void
 activate(Page *page)
 {
@@ -117,13 +172,9 @@ activate(Page *page)
 	app->active = page;
 	if (page->url) {
 		app->geometry_pending = FALSE;
-		if (!page->browser) {
-			page->browser = browser_new(app);
-			gtk_box_pack_start(GTK_BOX(page->widget), browser_widget(page->browser), TRUE, TRUE, 0);
-			browser_bind(page->browser, page, page->url);
-			gtk_widget_show_all(page->widget);
-		}
-		gtk_widget_grab_focus(browser_view(page->browser));
+		claim_browser(page);
+		if (!strcmp(page->url, "about:blank")) browser_location(page->browser);
+		else gtk_widget_grab_focus(browser_view(page->browser));
 	} else {
 		app_focus(page);
 		gtk_widget_grab_focus(page->widget);
@@ -136,6 +187,27 @@ activate(Page *page)
 		if (!shortcut(app->window, &event->key, app) && app->active->terminal)
 			terminal_key(app->active->terminal, &event->key);
 		gdk_event_free(event);
+	}
+}
+
+void
+app_select(Page *page)
+{
+	GtkNotebook *notebook = GTK_NOTEBOOK(page->app->notebook);
+	int index = gtk_notebook_page_num(notebook, page->widget);
+	gboolean same = index == gtk_notebook_get_current_page(notebook);
+	gtk_notebook_set_current_page(notebook, index);
+	/* Selecting an already selected mirror must still move its live browser. */
+	if (same) activate(page);
+}
+
+static void
+select_index(App *app, int index)
+{
+	GtkWidget *widget = gtk_notebook_get_nth_page(GTK_NOTEBOOK(app->notebook), index);
+	for (GList *item = app->pages; item; item = item->next) {
+		Page *page = item->data;
+		if (page->widget == widget) { app_select(page); return; }
 	}
 }
 
@@ -156,7 +228,12 @@ void
 page_free(Page *page)
 {
 	if (page->terminal) terminal_free(page->terminal);
-	if (page->browser) browser_free(page->browser);
+	if (page->placeholder) g_signal_handlers_disconnect_by_data(page->placeholder, page);
+	if (page->browser) {
+		Page *peer = browser_peer(page, FALSE);
+		if (peer) move_browser(page, peer);
+		if (page->browser) browser_free(page->browser);
+	}
 	if (!page->app->closing) gtk_widget_destroy(page->widget);
 	g_object_unref(page->widget);
 	g_free(page->url); g_free(page->directory); g_free(page->title);
@@ -182,7 +259,14 @@ new_page(App *app, uint32_t id, gboolean browser)
 	page->cursor = 2;
 	for (size_t i = 0; i < G_N_ELEMENTS(page->colors); i++) terminal_palette(page, i, NULL);
 	page->label = gtk_label_new(browser ? "Browser" : "Worminal");
-	if (browser) page->widget = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	if (browser) {
+		page->widget = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+		page->placeholder = gtk_button_new_with_label("Show browser here");
+		gtk_widget_set_halign(page->placeholder, GTK_ALIGN_CENTER);
+		gtk_widget_set_valign(page->placeholder, GTK_ALIGN_CENTER);
+		g_signal_connect_swapped(page->placeholder, "clicked", G_CALLBACK(app_select), page);
+		gtk_box_pack_start(GTK_BOX(page->widget), page->placeholder, TRUE, TRUE, 0);
+	}
 	else page->terminal = terminal_new(page);
 	g_object_ref_sink(page->widget);
 	app->pages = g_list_append(app->pages, page);
@@ -199,6 +283,7 @@ catalog(App *app, WirePacket *packet)
 	if (!wire_get_u32(packet, &count) || !wire_get_u32(packet, &closed) ||
 	    !wire_get_u32(packet, &fallback) || count > 4096) return FALSE;
 	(void)closed;
+	uint32_t selected_id = app->active ? app->active->id : 0, passive_conversion = 0;
 	app->syncing = TRUE;
 	for (GList *item = app->pages; item; item = item->next) ((Page *)item->data)->seen = FALSE;
 	for (uint32_t index = 0; index < count; index++) {
@@ -212,13 +297,25 @@ catalog(App *app, WirePacket *packet)
 			free(url); free(title); free(directory); goto invalid;
 		}
 		Page *page = find_page(app, id);
+		if (page && !!page->terminal != !kind) {
+			/* Only the live terminal owner automatically acquires the converted
+			 * browser. A passive mirror must not steal it during catalog delivery. */
+			if (!page->live) passive_conversion = id;
+			if (app->active == page) app->active = NULL;
+			app->pages = g_list_remove(app->pages, page);
+			page_free(page);
+			page = NULL;
+		}
 		if (!page) page = new_page(app, id, kind);
 		page->seen = TRUE;
 		page->mode = mode; page->cursor = cursor;
 		g_free(page->directory); page->directory = directory;
 		g_free(page->url); page->url = kind ? url : NULL;
 		if (!kind) free(url);
-		if (!page->browser) app_page_title(page, title);
+		if (!page->browser) {
+			Page *owner = kind ? browser_peer(page, TRUE) : NULL;
+			app_page_title(page, owner && owner->title ? owner->title : title);
+		}
 		free(title);
 		for (uint32_t c = 0; c < colors; c++) {
 			char *name = wire_get_string(packet);
@@ -241,13 +338,18 @@ catalog(App *app, WirePacket *packet)
 	app->syncing = FALSE;
 	Page *chosen = find_page(app, app->created_id);
 	app->created_id = 0;
+	if (!chosen) chosen = find_page(app, selected_id);
 	if (!chosen) chosen = app->active ? app->active : find_page(app, fallback);
 	if (!chosen && app->pages) chosen = app->pages->data;
 	if (chosen) {
 		int index = gtk_notebook_page_num(GTK_NOTEBOOK(app->notebook), chosen->widget);
 		gtk_notebook_set_current_page(GTK_NOTEBOOK(app->notebook), index);
 		/* A peer catalog update must preserve local focus, forms and navigation. */
-		if (chosen != app->active || !app->attached) activate(chosen);
+		if (chosen->id == passive_conversion) {
+			app->active = chosen;
+			gtk_window_set_title(GTK_WINDOW(app->window), chosen->title);
+			tabs_refresh(app);
+		} else if (chosen != app->active || !app->attached) activate(chosen);
 	} else if (app->attached && !app->pending) gtk_widget_destroy(app->window);
 	app->attached = TRUE;
 	return TRUE;
@@ -281,7 +383,7 @@ received_packets(int fd, GIOCondition condition, gpointer data)
 		} else if (packet.type == WIRE_PRINT) {
 			/* -o - retains the established CLI print stream. */
 			if (packet.len) {
-				ssize_t ignored = write(STDOUT_FILENO, packet.data, packet.len);
+				ssize_t ignored = write(app->print_fd, packet.data, packet.len);
 				(void)ignored;
 			}
 		} else if (page && packet.type == WIRE_RELEASE) {
@@ -322,7 +424,7 @@ app_terminal(App *app, gboolean initial)
 	WireBuffer b = {0};
 	wire_put_u32(&b, app->cols); wire_put_u32(&b, app->rows); wire_put_u32(&b, app->allowalt);
 	uint32_t argc = initial && app->command ? g_strv_length(app->command) : 0;
-	uint32_t envc = !app->master ? g_strv_length(environ) : 0;
+	uint32_t envc = !app->master ? g_strv_length(app->environment) : 0;
 	wire_put_u32(&b, argc);
 	wire_put_u32(&b, envc);
 	wire_put_string(&b, initial ? app->title : "Worminal");
@@ -331,7 +433,7 @@ app_terminal(App *app, gboolean initial)
 	wire_put_string(&b, initial ? app->line : NULL);
 	wire_put_string(&b, initial ? app->output : NULL); wire_put_string(&b, "");
 	for (uint32_t i = 0; i < argc; i++) wire_put_string(&b, app->command[i]);
-	for (uint32_t i = 0; i < envc; i++) wire_put_string(&b, environ[i]);
+	for (uint32_t i = 0; i < envc; i++) wire_put_string(&b, app->environment[i]);
 	app->pending++;
 	app_send(app, initial ? WIRE_HELLO : WIRE_NEW, 0, b.data, b.len);
 	wire_buffer_free(&b);
@@ -346,37 +448,6 @@ app_browser(App *app, const char *url)
 	app->pending++;
 	app_send(app, WIRE_BROWSER, 0, b.data, b.len);
 	wire_buffer_free(&b);
-}
-
-static void
-location_response(GtkDialog *dialog, int response, App *app)
-{
-	GtkWidget *entry = g_object_get_data(G_OBJECT(dialog), "entry");
-	if (response == GTK_RESPONSE_ACCEPT) {
-		const char *text = gtk_entry_get_text(GTK_ENTRY(entry));
-		if (*text) {
-			char *url = g_uri_peek_scheme(text) ? g_strdup(text) : g_strconcat("https://", text, NULL);
-			app_browser(app, url);
-			g_free(url);
-		}
-	}
-	gtk_widget_destroy(GTK_WIDGET(dialog));
-}
-
-void
-app_location(App *app)
-{
-	GtkWidget *dialog = gtk_dialog_new_with_buttons("Open browser tab", GTK_WINDOW(app->window),
-	    GTK_DIALOG_DESTROY_WITH_PARENT, "Cancel", GTK_RESPONSE_CANCEL, "Open", GTK_RESPONSE_ACCEPT, NULL);
-	GtkWidget *entry = gtk_entry_new();
-	gtk_entry_set_placeholder_text(GTK_ENTRY(entry), "URL");
-	gtk_entry_set_activates_default(GTK_ENTRY(entry), TRUE);
-	gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_ACCEPT);
-	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), entry, TRUE, TRUE, 8);
-	g_object_set_data(G_OBJECT(dialog), "entry", entry);
-	g_signal_connect(dialog, "response", G_CALLBACK(location_response), app);
-	gtk_widget_show_all(dialog);
-	gtk_widget_grab_focus(entry);
 }
 
 static gboolean
@@ -401,13 +472,11 @@ shortcut(GtkWidget *window, GdkEventKey *event, App *app)
 	           (key == GDK_KEY_Tab || key == GDK_KEY_ISO_Left_Tab)) {
 		int count = gtk_notebook_get_n_pages(GTK_NOTEBOOK(app->notebook));
 		int index = gtk_notebook_get_current_page(GTK_NOTEBOOK(app->notebook));
-		if (count) gtk_notebook_set_current_page(GTK_NOTEBOOK(app->notebook),
-		    (index + (event->state & GDK_SHIFT_MASK ? count - 1 : 1)) % count);
+		if (count) select_index(app, (index + (event->state & GDK_SHIFT_MASK ? count - 1 : 1)) % count);
 		return TRUE;
 	}
 	if (mods == (GDK_CONTROL_MASK | GDK_SHIFT_MASK)) {
 		if (key == GDK_KEY_t) app_terminal(app, FALSE);
-		else if (key == GDK_KEY_b) app_location(app);
 		else if (key == GDK_KEY_n) app_new_window(app);
 		else if (key == GDK_KEY_w && page) app_close(page);
 		else if (key == GDK_KEY_c && page && page->terminal) terminal_copy(page->terminal, GDK_SELECTION_CLIPBOARD);
@@ -422,9 +491,10 @@ shortcut(GtkWidget *window, GdkEventKey *event, App *app)
 	} else if ((mods == GDK_MOD1_MASK || mods == GDK_CONTROL_MASK) && key >= GDK_KEY_0 && key <= GDK_KEY_9) {
 		int count = gtk_notebook_get_n_pages(GTK_NOTEBOOK(app->notebook));
 		int index = key == GDK_KEY_9 ? count - 1 : key == GDK_KEY_0 ? 9 : (int)(key - GDK_KEY_1);
-		gtk_notebook_set_current_page(GTK_NOTEBOOK(app->notebook), MIN(index, count - 1));
+		select_index(app, MIN(index, count - 1));
 		return TRUE;
-	} else if (page && page->browser && mods == GDK_CONTROL_MASK && key == GDK_KEY_l) {
+	} else if (page && page->url && mods == GDK_CONTROL_MASK && key == GDK_KEY_l) {
+		app_select(page);
 		browser_location(page->browser);
 		return TRUE;
 	} else return FALSE;
@@ -531,6 +601,7 @@ destroyed(GtkWidget *widget, App *app)
 		page_free(page);
 	}
 	g_queue_clear_full(&app->early_keys, (GDestroyNotify)gdk_event_free);
+	apps = g_list_remove(apps, app);
 	app_unref(app);
 	if (!--windows && gtk_main_level()) gtk_main_quit();
 }
@@ -539,8 +610,10 @@ static App *
 new_app(void)
 {
 	App *app = g_new0(App, 1);
-	app->refs = 1; app->fd = -1; app->cols = 120; app->rows = 24; app->allowalt = 1; app->geometry_pending = TRUE;
+	app->refs = 1; app->fd = -1; app->print_fd = STDOUT_FILENO;
+	app->environment = g_get_environ(); app->cols = 120; app->rows = 24; app->allowalt = 1; app->geometry_pending = TRUE;
 	app->cwd = g_get_current_dir();
+	apps = g_list_append(apps, app);
 	return app;
 }
 
@@ -578,6 +651,8 @@ app_new_window(App *previous)
 	app->master = g_strdup(previous->master);
 	app->font = g_strdup(previous->font);
 	app->zoom = previous->zoom;
+	g_strfreev(app->environment); app->environment = g_strdupv(previous->environment);
+	app->print_fd = dup(previous->print_fd);
 	show_app(app);
 }
 
@@ -587,19 +662,20 @@ usage(void)
 	g_printerr("usage: worminal-preview [--master user@host] [--surf URL | --attach]\n"
 	           "       [-aiv] [-c class] [-n name] [-f font] [-g COLSxROWS] [-T title]\n"
 	           "       [-o file] [-l line] [-e command ...]\n");
-	exit(2);
 }
 
-int
-main(int argc, char **argv)
+static gboolean
+launch_window(int argc, char **argv, char **env, const char *cwd, int output)
 {
-	setlocale(LC_CTYPE, "");
 	App *app = new_app();
+	g_strfreev(app->environment); app->environment = g_strdupv(env);
+	g_free(app->cwd); app->cwd = g_strdup(cwd);
+	app->print_fd = output;
 	gboolean fixed = FALSE;
 	char *class = NULL, *name = NULL;
 	for (int i = 1; i < argc; i++) {
 		const char *arg = argv[i];
-		if (!strcmp(arg, "-v")) { g_print("worminal-preview " VERSION "\n"); app_unref(app); return 0; }
+		if (!strcmp(arg, "-v")) goto invalid;
 		if (!strcmp(arg, "--attach")) { app->initial_attach = TRUE; continue; }
 		if (!strcmp(arg, "-a")) { app->allowalt = 0; continue; }
 		if (!strcmp(arg, "-i")) { fixed = TRUE; continue; }
@@ -608,7 +684,7 @@ main(int argc, char **argv)
 			app->command = g_strdupv(argv + i);
 			break;
 		}
-		if (++i >= argc) usage();
+		if (++i >= argc) goto invalid;
 		char *value = argv[i];
 		if (!strcmp(arg, "--master")) app->master = g_strdup(value);
 		else if (!strcmp(arg, "--surf")) app->initial_url = g_strdup(value);
@@ -620,15 +696,43 @@ main(int argc, char **argv)
 		else if (!strcmp(arg, "-n")) name = value;
 		else if (!strcmp(arg, "-g")) {
 			if (sscanf(value, "%dx%d", &app->cols, &app->rows) != 2 ||
-			    app->cols < 1 || app->cols > 400 || app->rows < 1 || app->rows > 200) usage();
-		} else usage();
+			    app->cols < 1 || app->cols > 400 || app->rows < 1 || app->rows > 200) goto invalid;
+		} else goto invalid;
+	}
+	if ((!app->output || strcmp(app->output, "-")) && output != STDOUT_FILENO) {
+		close(output); app->print_fd = STDOUT_FILENO;
 	}
 	if (class) gdk_set_program_class(class);
-	g_set_prgname("worminal-preview");
-	gtk_init(NULL, NULL);
 	show_app(app);
 	if (fixed) gtk_window_set_resizable(GTK_WINDOW(app->window), FALSE);
 	if (name) gtk_widget_set_name(app->window, name);
-	gtk_main();
-	return 0;
+	return TRUE;
+invalid:
+	apps = g_list_remove(apps, app);
+	app_unref(app);
+	usage();
+	return FALSE;
+}
+
+int
+main(int argc, char **argv)
+{
+	setlocale(LC_CTYPE, "");
+	if (argc == 2 && !strcmp(argv[1], "-v")) { g_print("worminal-preview " VERSION "\n"); return 0; }
+	int listener = -1;
+	int forwarded = windows_forward(argc, argv, &listener);
+	if (forwarded) {
+		if (forwarded < 0) g_printerr("Could not open a window in the local preview frontend.\n");
+		return forwarded > 0 ? 0 : 1;
+	}
+	g_set_prgname("worminal-preview");
+	gtk_init(NULL, NULL);
+	guint source = windows_listen(listener, launch_window);
+	char **env = g_get_environ();
+	char *cwd = g_get_current_dir();
+	gboolean okay = launch_window(argc, argv, env, cwd, STDOUT_FILENO);
+	g_strfreev(env); g_free(cwd);
+	if (okay) gtk_main();
+	g_source_remove(source); close(listener);
+	return okay ? 0 : 2;
 }

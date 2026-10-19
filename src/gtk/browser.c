@@ -1,4 +1,4 @@
-/* Internal WebKit views: no surf process, embedding, X properties, or shared profile state. */
+/* Internal WebKit views move between local windows; profiles stay on this machine. */
 #include <webkit2/webkit2.h>
 #include "preview.h"
 
@@ -324,8 +324,10 @@ void browser_zoom(Browser *b, double zoom) { webkit_web_view_set_zoom_level(b->v
 void browser_bind(Browser *b, Page *page, const char *url)
 {
 	b->page = page;
+	b->app = page->app;
 	browser_zoom(b, b->app->zoom);
 	if (!webkit_web_view_get_uri(b->view)) webkit_web_view_load_uri(b->view, url);
+	changed(b->view, NULL, b);
 }
 void browser_free(Browser *b)
 {

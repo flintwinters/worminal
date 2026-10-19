@@ -40,6 +40,8 @@ enum wire_type {
 	WIRE_FOCUS_STATE,
 	WIRE_CONTROL,
 	WIRE_RESIZE,
+	WIRE_BROWSER_REPLACE,
+	WIRE_COMMAND_DONE,
 };
 
 typedef struct {
