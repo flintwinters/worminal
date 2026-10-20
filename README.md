@@ -73,6 +73,8 @@ install builds that rollback frontend and `worminald-x11`. No sessions are migra
 For a remote workspace, install the current release remotely and use `--master user@host`.
 The old preview executable names remain build aliases and share the v2 workspace.
 `--attach` opens existing tabs without creating another shell. Closing a window preserves its service tabs.
+Inside a Worminal terminal, `worminal --new-browser-tab [URL]` replaces that terminal with a browser,
+ending its shell. Omitting the URL opens a blank page; Ctrl+K reveals the address entry.
 
 Ctrl+Shift+T opens a terminal, Ctrl+Shift+B asks for a browser URL, Ctrl+Shift+N opens another window,
 and Ctrl+Shift+W closes the active tab. Ctrl+Tab/Shift+Ctrl+Tab and Alt+1 through Alt+9 switch tabs.

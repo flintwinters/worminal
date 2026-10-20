@@ -10,6 +10,7 @@
 #include <glib-unix.h>
 #include "preview.h"
 #include "workspace_client.h"
+#include "workspace_socket.h"
 #include "tab_label.h"
 #include "windows.h"
 
@@ -681,6 +682,7 @@ usage(FILE *stream)
 	        "usage: worminal [--master user@host] [--surf URL | --attach]\n"
 	        "       [-aiv] [-c class] [-n name] [-f font] [-g COLSxROWS] [-T title]\n"
 	        "       [-o file] [-l line] [-e command ...]\n"
+	        "       worminal --new-browser-tab [URL]  Replace this terminal with a browser\n"
 	        "       worminal -h | --help       Show help and version\n"
 	        "       worminal -v | --version    Show version\n");
 }
@@ -739,6 +741,15 @@ int
 main(int argc, char **argv)
 {
 	setlocale(LC_CTYPE, "");
+	if (argc >= 2 && !strcmp(argv[1], "--new-browser-tab")) {
+		if (argc > 3) { usage(stderr); return 2; }
+		char daemon[4096];
+		/* Exec preserves the calling PTY session and the daemon's command handling. */
+		if (workspace_daemon_path(daemon, sizeof(daemon)))
+			execl(daemon, daemon, "--new-browser-tab", argc == 3 ? argv[2] : "about:blank", (char *)NULL);
+		perror("Could not run the workspace browser command");
+		return 1;
+	}
 	if (argc == 2 && (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help"))) {
 		usage(stdout);
 		return 0;

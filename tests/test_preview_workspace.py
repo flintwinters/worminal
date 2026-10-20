@@ -1,6 +1,7 @@
 """Preview protocol records, version coexistence and PTY backpressure limits."""
 
 from functools import partial
+from itertools import product
 import os
 import shlex
 from pathlib import Path
@@ -138,9 +139,9 @@ class PreviewWorkspaceTest(unittest.TestCase):
         self.assertIn(digest, output)
 
     def test_command_converts_calling_terminal_and_preserves_order(self):
-        for url in ("https://example.invalid/converted", None):
-            with self.subTest(url=url):
-                command = shlex.quote(str(DAEMON)) + " --new-browser-tab"
+        for executable, url in product((DAEMON, ROOT / "worminal"), ("https://example.invalid/converted", None)):
+            with self.subTest(executable=executable.name, url=url):
+                command = shlex.quote(str(executable)) + " --new-browser-tab"
                 if url: command += " " + shlex.quote(url)
                 tab = self.launch("stty raw -echo; printf READY; dd bs=1 count=1 >/dev/null 2>&1; "
                                   + command + "; sleep 30")
@@ -165,12 +166,16 @@ class PreviewWorkspaceTest(unittest.TestCase):
                     output += chunk
 
     def test_browser_command_outside_a_terminal_is_rejected(self):
-        result = subprocess.run([str(DAEMON), "--new-browser-tab"], env=self.env,
-                                capture_output=True, timeout=5)
-        self.assertEqual(result.returncode, 1)
-        self.assertIn(b"Open worminal", result.stderr)
-        self.assertIn(b"keep WORMINAL_SHARED_SOCKET_SCOPE unchanged", result.stderr)
-        self.assertNotIn(b"Invalid browser URL", result.stderr)
+        for executable in (DAEMON, ROOT / "worminal"):
+            with self.subTest(executable=executable.name):
+                env = {key: value for key, value in self.env.items()
+                       if key not in ("DISPLAY", "WAYLAND_DISPLAY")}
+                result = subprocess.run([str(executable), "--new-browser-tab"], env=env,
+                                        capture_output=True, timeout=5)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn(b"Open worminal", result.stderr)
+                self.assertIn(b"keep WORMINAL_SHARED_SOCKET_SCOPE unchanged", result.stderr)
+                self.assertNotIn(b"Invalid browser URL", result.stderr)
 
     def test_empty_browser_url_keeps_the_calling_terminal(self):
         command = shlex.quote(str(DAEMON)) + " --new-browser-tab ''"

@@ -53,18 +53,19 @@ Ctrl+R or F5 reloads and Escape stops loading. Ctrl+K reveals and selects the
 normally hidden address entry; Enter navigates and hides it, and Escape dismisses
 it. Tab activation and moving a browser between windows cannot reveal the entry.
 Ctrl+T always creates a terminal. Ctrl+Shift+B has no browser action.
-Inside a preview terminal, worminald-preview --new-browser-tab [URL] replaces
+Inside a Worminal terminal, worminal --new-browser-tab [URL] replaces
 that terminal with a browser under the same ordered identity. This ends its shell
 and PTY; it does not allocate a hidden terminal. With no URL, about:blank opens;
 Ctrl+K reveals the address entry. For example:
 
-  alias s='worminald-preview --new-browser-tab'
+  alias s='worminal --new-browser-tab'
   s
   s https://example.com
 
 The service uses kernel peer credentials and the caller's process session to
 identify the terminal, independent of which window is focused. Calls outside a
-preview PTY fail. The additive v2 command requires an updated service; an older
+Worminal PTY fail. worminald --new-browser-tab remains available as well.
+The additive v2 command requires an updated service; an older
 service times out with an actionable message, without terminating its sessions.
 --surf URL still creates a browser tab directly. Terminal CLI commands, local launch
 environments, remote account environment inheritance, tab/window shortcuts,
