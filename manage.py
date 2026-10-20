@@ -264,11 +264,14 @@ def latency(forwarded: bool = typer.Option(
 
 
 @app.command("latency-visible")
-def latency_visible(trials: int = typer.Option(10, min=1), keys: int = typer.Option(50, min=1)):
+def latency_visible(trials: int = typer.Option(10, min=1), keys: int = typer.Option(50, min=1),
+                    snapshot: Path = typer.Option(None, help="Save current binaries/modules as a comparison baseline."),
+                    compare: Path = typer.Option(None, help="Alternate trials with a saved baseline directory.")):
     """Measure real key events to visible echo and fresh/additional window presentation."""
-    native_build.build_targets("worminal", "worminald")
+    native_build.build_targets("worminal", "worminald", "build/latency_echo")
+    options = (["--snapshot", str(snapshot)] if snapshot else []) + (["--compare", str(compare)] if compare else [])
     raise typer.Exit(run([sys.executable, "tests/visible_latency.py", "--trials", str(trials),
-                          "--keys", str(keys)]))
+                          "--keys", str(keys), *options]))
 
 
 @app.command("latency-shell")

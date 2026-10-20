@@ -248,6 +248,17 @@ Median, p95, maximum, and raw samples are saved in `.checks/visible-latency.json
 1 ms between observations and adds readback overhead. Xvfb excludes physical keyboard latency, desktop
 compositing, and monitor scanout; use the same host, theme, and load for comparisons.
 
+For launch changes, save a binary/module baseline before editing, then alternate baseline/candidate trials:
+
+```sh
+python3 manage.py latency-visible --snapshot .checks/launch-baseline
+python3 manage.py latency-visible --compare .checks/launch-baseline --trials 20 --keys 3
+```
+
+Each version gets a private display and workspace with the same growing tab workload; trial order alternates.
+The native echo fixture excludes interpreter startup and restores its ready canvas after startup resizes.
+`.checks/visible-latency-comparison.json` records raw pairs, differences, CPU count, and start/end system load.
+
 Lint requires `clang-tidy`. It enforces 120-character lines and a 1,000-line file limit, with existing larger
 files capped at their recorded lengths until split.
 
