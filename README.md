@@ -172,6 +172,9 @@ files capped at their recorded lengths until split.
 `python3 manage.py proof` runs the regression suite and all private-display proofs, including Qtile, KWin,
 and remote Cinnamon. Use `proof plasma` or `proof cinnamon` for one managed proof.
 The remote proof requires `WORMINAL_CINNAMON_HOST=user@host` in the environment.
+`python3 manage.py proof movement` checks that decorated and borderless windows stay above the screen
+after an Alt-drag under private Muffin, comparing Worminal with an `xmessage` control. It requires
+Muffin, `xmessage`, python-xlib, and Rich in addition to the display-test dependencies.
 The [shared-tab proof ledger](docs/shared-tabs.md) records earlier X11 proofs.
 
 `python3 manage.py master-perf user@host` measures full-frame SSH tab-switch traffic using an isolated service.

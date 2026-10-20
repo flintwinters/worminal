@@ -2917,8 +2917,14 @@ xseturgency(int add)
 {
 	XWMHints *h = XGetWMHints(xw.dpy, xw.win);
 
-	MODBIT(h->flags, add, XUrgencyHint);
-	XSetWMHints(xw.dpy, xw.win, h);
+	if (!h)
+		return;
+	/* Muffin reconstrains placement on WM_HINTS changes, including after an
+	 * offscreen Alt-drag. Publish only an actual urgency transition. */
+	if (!!(h->flags & XUrgencyHint) != !!add) {
+		MODBIT(h->flags, add, XUrgencyHint);
+		XSetWMHints(xw.dpy, xw.win, h);
+	}
 	XFree(h);
 }
 

@@ -253,6 +253,13 @@ def cinnamon():
 
 
 @proof_app.command()
+def movement():
+    """Check offscreen Alt-dragging under private Muffin."""
+    native_build.build_targets()
+    raise typer.Exit(run_proof_script(ROOT / "tests/proof_window_move.py"))
+
+
+@proof_app.command()
 def qtile():
     """Check zoom cell alignment under private Qtile."""
     native_build.build_targets("build/compact-worminal")
