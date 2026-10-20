@@ -17,8 +17,9 @@ COMMON = ("terminal/defaults.c", "terminal/st.c", "terminal/session_view.c",
 CLIENT = (*COMMON, "workspace/workspace_client.c", "x11/x.c", "x11/url.c")
 SERVER = (*COMMON, "workspace/workspace_service.c")
 PREVIEW = (*COMMON, "workspace/workspace_client.c", "gtk/app.c", "gtk/terminal.c",
-           "gtk/browser.c", "gtk/tabs.c", "gtk/windows.c")
+           "gtk/browser_loader.c", "gtk/tabs.c", "gtk/windows.c")
 PREVIEW_PACKAGES = ("gtk+-3.0", "pangocairo", "fontconfig", "freetype2", "webkit2gtk-4.1")
+TERMINAL_PACKAGES = ("gtk+-3.0", "pangocairo", "fontconfig", "freetype2", "gmodule-2.0")
 SOURCES = tuple(dict.fromkeys((*CLIENT, *SERVER)))
 CPPFLAGS = ("-I.", "-Isrc", "-Isrc/terminal", "-Isrc/x11", "-Isrc/workspace",
             f'-DVERSION="{VERSION}"', "-D_XOPEN_SOURCE=600")
@@ -95,11 +96,22 @@ class Builder:
         step(output, [*self.cc, *objects, *(self.libs if libs is None else libs)], objects)
 
     def target(self, target):
-        if target in ("worminal-x11", "worminald-x11"):
+        if target == "build/browser.so":
+            old_flags = self.cflags
+            self.cflags = [*CPPFLAGS, *words("CPPFLAGS"), *words("CFLAGS", "-O3"),
+                           *pkg_flags("--cflags", PREVIEW_PACKAGES)]
+            try:
+                self.program(target, ["src/gtk/browser.c"], variant="browser", flags=["-fPIC"],
+                             libs=["-shared", *pkg_flags("--libs", PREVIEW_PACKAGES), *words("LDFLAGS")])
+            finally:
+                self.cflags = old_flags
+        elif target in ("worminal-x11", "worminald-x11"):
             sources = CLIENT if target == "worminal-x11" else SERVER
             self.program(target, [f"src/{source}" for source in sources],
                          flags=['-DWORKSPACE_DAEMON="worminald-x11"'])
         elif target in ("worminal", "worminald", "worminal-preview", "worminald-preview", "build/preview_test"):
+            if target in ("worminal", "worminal-preview"):
+                self.target("build/browser.so")
             flags = ["-DWORMINAL_PREVIEW_PROTOCOL"]
             server = target in ("worminald", "worminald-preview")
             sources = SERVER if server else PREVIEW
@@ -111,8 +123,9 @@ class Builder:
             # Keep GTK, WebKit and X11 out of the preview daemon's build/link flags.
             self.cflags = [*CPPFLAGS, *words("CPPFLAGS"), *words("CFLAGS", "-O3")]
             if not server:
-                self.cflags += pkg_flags("--cflags", PREVIEW_PACKAGES)
-                libs += pkg_flags("--libs", PREVIEW_PACKAGES)
+                packages = PREVIEW_PACKAGES if target == "build/preview_test" else TERMINAL_PACKAGES
+                self.cflags += pkg_flags("--cflags", packages)
+                libs += pkg_flags("--libs", packages)
             try:
                 self.program(target, [f"src/{source}" for source in sources] or
                              ["tests/preview.c", *(f"src/{source}" for source in COMMON),
@@ -164,7 +177,7 @@ def analyze():
     invoke([*tidy, *(f"src/{source}" for source in SOURCES), "--", *compile_flags()])
     flags = [*CPPFLAGS, "-DWORMINAL_PREVIEW_PROTOCOL", *words("CPPFLAGS")]
     invoke([*tidy, "src/workspace/workspace_service.c", "--", *flags])
-    invoke([*tidy, "src/gtk/app.c", "src/gtk/terminal.c", "src/gtk/browser.c",
+    invoke([*tidy, "src/gtk/app.c", "src/gtk/terminal.c", "src/gtk/browser.c", "src/gtk/browser_loader.c",
             "src/gtk/tabs.c", "src/gtk/windows.c", "--",
             *flags, *pkg_flags("--cflags", PREVIEW_PACKAGES)])
 
@@ -187,6 +200,7 @@ def installation_files(prefix=None):
     files = [(name, prefix / "bin" / name, 0o755)
              for name in ("worminal", "worminald", "worminal-x11", "worminald-x11")]
     files += [("docs/man/worminal.1", manprefix / "man1/worminal.1", 0o644),
+              ("build/browser.so", prefix / "lib/worminal/browser.so", 0o755),
               ("assets/worminal.desktop", prefix / "share/applications/worminal.desktop", 0o644),
               ("assets/worminal.svg", prefix / "share/icons/hicolor/scalable/apps/worminal.svg", 0o644)]
     return [(ROOT / source, staging / str(destination).lstrip("/"), mode) for source, destination, mode in files]
@@ -197,11 +211,17 @@ def install(prefix=None):
     build_targets("worminal-x11", "worminald-x11")
     for source, destination, mode in files:
         destination.parent.mkdir(parents=True, exist_ok=True)
-        if source.suffix == ".1":
-            destination.write_text(source.read_text().replace("VERSION", VERSION))
-        else:
-            shutil.copyfile(source, destination)
-        destination.chmod(mode)
+        temporary = destination.with_name(destination.name + ".pending")
+        try:
+            if source.suffix == ".1":
+                temporary.write_text(source.read_text().replace("VERSION", VERSION))
+            else:
+                shutil.copyfile(source, temporary)
+            temporary.chmod(mode)
+            # Running clients may still map the old executable or browser module.
+            temporary.replace(destination)
+        finally:
+            temporary.unlink(missing_ok=True)
     print("Installed binaries, manual, desktop launcher, and icon.")
 
 

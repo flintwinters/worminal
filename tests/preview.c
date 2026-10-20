@@ -146,6 +146,15 @@ expect_script(Browser *b, const char *script, const char *expected)
 	g_free(value);
 }
 
+static gboolean
+script_equals(Browser *b, const char *script, const char *expected)
+{
+	char *value = evaluate(b, script);
+	gboolean equal = !strcmp(value, expected);
+	g_free(value);
+	return equal;
+}
+
 static void
 select_page(Page *page)
 {
@@ -249,6 +258,7 @@ paint(Terminal *t, const char *name)
 static void
 check_outline(App *app)
 {
+	gtk_container_check_resize(GTK_CONTAINER(app->window));
 	GtkWidget *content = gtk_bin_get_child(GTK_BIN(app->window));
 	int width = gtk_widget_get_allocated_width(content), height = gtk_widget_get_allocated_height(content);
 	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
@@ -434,7 +444,8 @@ main(int argc, char **argv)
 	expect_script(web->browser, "Notification.requestPermission().then(x=>window.permissionResult=x); 'asked'", "asked");
 	WAIT(dialog_of_type(GTK_TYPE_MESSAGE_DIALOG));
 	gtk_dialog_response(GTK_DIALOG(dialog_of_type(GTK_TYPE_MESSAGE_DIALOG)), GTK_RESPONSE_CANCEL);
-	expect_script(web->browser, "window.permissionResult", "denied");
+	/* The WebKit promise resolves asynchronously after the GTK dialog response. */
+	WAIT(script_equals(web->browser, "window.permissionResult", "denied"));
 	/* Complete an actual WebKit download through the save dialog. */
 	char *download = g_build_filename(g_get_current_dir(), ".checks", "preview-download.txt", NULL);
 	g_unlink(download);

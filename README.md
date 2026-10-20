@@ -19,7 +19,8 @@ The priorities are fast launch to usable input, low memory use, and a small inte
 - **Your Alacritty theme, compiled in.** Reuse colors, fonts, spacing, and scrollback settings.
 - **Everyday conveniences.** Clickable URLs, clipboard support, mouse-wheel history, and font-size shortcuts.
 
-The release launcher uses GTK on Wayland and X11. WebKit increases startup and memory costs.
+The release launcher uses GTK on Wayland and X11. WebKit loads only when opening a browser;
+installation includes its module under `lib/worminal`.
 Remote Codex scrolling remains an investigation area beyond the tested terminal mouse modes.
 
 ## Try it
@@ -192,11 +193,14 @@ python3 manage.py check-headless  # Native, service, theme, and privacy tests wi
 python3 manage.py check           # Local regression suite, including private-display checks
 python3 manage.py lint            # Text limits and Clang static analysis
 python3 manage.py latency         # Launch to first echoed input, using /bin/cat
+python3 manage.py latency --forwarded  # Another window in an existing GTK owner
 python3 manage.py latency-shell   # Launch to input received by your interactive shell
 ```
 
 Display checks and launch benchmarks use a private Xvfb display, keeping test windows and keystrokes off your
 desktop. They need `Xvfb`, `xdotool`, and XTest development headers (`libxtst-dev` on Debian).
+The forwarded-window benchmark also requires python-xlib. Latency samples and GTK startup phases are saved
+under `.checks/latency-*.json` for comparisons.
 Latency reports median and 95th percentile across 20 runs, excluding Xvfb startup; the `/bin/cat` probe also
 excludes shell startup. Windows map before fonts load so X can queue early keystrokes.
 

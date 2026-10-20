@@ -20,6 +20,13 @@ static void connect_async(App *);
 static void disconnected(App *);
 static gboolean shortcut(GtkWidget *, GdkEventKey *, App *);
 
+void
+app_startuptime(const char *event)
+{
+	if (g_getenv("WORMINAL_TRACE_TIMING"))
+		g_printerr("worminal-timing %s %" G_GINT64_FORMAT "\n", event, g_get_monotonic_time() * 1000);
+}
+
 static void
 app_unref(App *app)
 {
@@ -150,6 +157,7 @@ static void
 move_browser(Page *from, Page *to)
 {
 	to->browser = from ? from->browser : browser_new(to->app);
+	if (!to->browser) return;
 	if (from) {
 		from->browser = NULL;
 		gtk_container_remove(GTK_CONTAINER(from->widget), browser_widget(to->browser));
@@ -175,7 +183,7 @@ activate(Page *page)
 	if (page->url) {
 		app->geometry_pending = FALSE;
 		claim_browser(page);
-		gtk_widget_grab_focus(browser_view(page->browser));
+		if (page->browser) gtk_widget_grab_focus(browser_view(page->browser));
 	} else {
 		app_focus(page);
 		gtk_widget_grab_focus(page->widget);
@@ -553,6 +561,7 @@ connected(GObject *source, GAsyncResult *result, gpointer data)
 	(void)source;
 	App *app = data;
 	int fd = g_task_propagate_int(G_TASK(result), NULL);
+	app_startuptime("workspace");
 	if (app->connecting_child) g_child_watch_add(app->connecting_child, bridge_exited, NULL);
 	if (app->closing) { if (fd >= 0) close(fd); app_unref(app); return; }
 	if (fd < 0 || fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) < 0) {
@@ -660,6 +669,7 @@ show_app(App *app)
 	 * afterwards so a hidden WebKit child cannot retain keyboard ownership. */
 	g_signal_connect_after(app->notebook, "switch-page", G_CALLBACK(switched), app);
 	gtk_widget_show_all(app->window);
+	app_startuptime("map-request");
 	connect_async(app);
 }
 
@@ -740,6 +750,7 @@ invalid:
 int
 main(int argc, char **argv)
 {
+	app_startuptime("main");
 	setlocale(LC_CTYPE, "");
 	if (argc >= 2 && !strcmp(argv[1], "--new-browser-tab")) {
 		if (argc > 3) { usage(stderr); return 2; }
@@ -760,12 +771,14 @@ main(int argc, char **argv)
 	}
 	int listener = -1;
 	int forwarded = windows_forward(argc, argv, &listener);
+	app_startuptime("broker");
 	if (forwarded) {
 		if (forwarded < 0) g_printerr("Could not open a window in the local GTK frontend.\n");
 		return forwarded > 0 ? 0 : 1;
 	}
 	g_set_prgname("worminal");
 	gtk_init(NULL, NULL);
+	app_startuptime("gtk");
 	guint source = windows_listen(listener, launch_window);
 	char **env = g_get_environ();
 	char *cwd = g_get_current_dir();

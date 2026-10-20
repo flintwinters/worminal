@@ -1,6 +1,7 @@
 /* Internal WebKit views move between local windows; profiles stay on this machine. */
 #include <webkit2/webkit2.h>
 #include "preview.h"
+#include "browser_module.h"
 
 struct Browser {
 	App *app;
@@ -343,4 +344,14 @@ void browser_free(Browser *b)
 	if (!b->app->closing) gtk_widget_destroy(b->box);
 	g_object_unref(b->box);
 	g_free(b);
+}
+
+G_MODULE_EXPORT const BrowserModule *
+worminal_browser_module(unsigned int abi)
+{
+	static const BrowserModule module = {
+		browser_new, browser_widget, browser_view, browser_bind,
+		browser_shortcut, browser_zoom, browser_free
+	};
+	return abi == WORMINAL_BROWSER_ABI ? &module : NULL;
 }

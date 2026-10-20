@@ -200,6 +200,8 @@ def broker_check(env, url, log):
 
     try:
         read(first.stdout, b"BROKER_READY")
+        if "libwebkit2gtk" in Path(f"/proc/{first.pid}/maps").read_text():
+            raise RuntimeError("Terminal-only frontend loaded WebKit before opening a browser")
         terminal_window = window(title)
         invalid = subprocess.run([executable, "--invalid"], env=env,
                                  stdout=subprocess.PIPE, stderr=log, timeout=5)
@@ -209,6 +211,8 @@ def broker_check(env, url, log):
                                 stdout=subprocess.PIPE, stderr=log, timeout=10)
         if result.returncode: raise RuntimeError("Second launch did not join the frontend")
         browser_window = window("Fixture")
+        if "libwebkit2gtk" not in Path(f"/proc/{first.pid}/maps").read_text():
+            raise RuntimeError("Browser tab did not load its WebKit module")
         key("windowfocus", "--sync", browser_window)
         key("key", "--clearmodifiers", "ctrl+k")
         key("type", "--clearmodifiers", "--delay", "0", url + "/other")

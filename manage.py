@@ -245,10 +245,11 @@ def icon():
 
 
 @app.command()
-def latency():
+def latency(forwarded: bool = typer.Option(
+        False, "--forwarded", help="Measure another window in a running GTK owner.")):
     """Measure launch to usable input with /bin/cat on private Xvfb."""
     native_build.build_targets("build/key_injector")
-    raise typer.Exit(run([sys.executable, "tests/latency.py"]))
+    raise typer.Exit(run([sys.executable, "tests/latency.py", *(["--forwarded"] if forwarded else [])]))
 
 
 @app.command("latency-shell")

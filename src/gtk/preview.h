@@ -56,6 +56,7 @@ void app_resize(Page *);
 void app_close(Page *);
 void app_select(Page *);
 void app_status(App *, const char *);
+void app_startuptime(const char *);
 void app_page_title(Page *, const char *);
 void app_new_window(App *);
 void page_free(Page *);
@@ -70,11 +71,11 @@ gboolean terminal_key(Terminal *, GdkEventKey *);
 void terminal_palette(Page *, uint32_t, const char *);
 void terminal_dimensions(Terminal *, int *, int *);
 
-Browser *browser_new(App *);
-GtkWidget *browser_widget(Browser *);
-GtkWidget *browser_view(Browser *);
-void browser_bind(Browser *, Page *, const char *);
-gboolean browser_shortcut(Page *, guint, guint);
-void browser_zoom(Browser *, double);
-void browser_free(Browser *);
+G_GNUC_INTERNAL Browser *browser_new(App *);
+G_GNUC_INTERNAL GtkWidget *browser_widget(Browser *);
+G_GNUC_INTERNAL GtkWidget *browser_view(Browser *);
+G_GNUC_INTERNAL void browser_bind(Browser *, Page *, const char *);
+G_GNUC_INTERNAL gboolean browser_shortcut(Page *, guint, guint);
+G_GNUC_INTERNAL void browser_zoom(Browser *, double);
+G_GNUC_INTERNAL void browser_free(Browser *);
 #endif
