@@ -1,0 +1,187 @@
+Combined Worminal preview
+=========================
+
+Status: GTK is the main release frontend (worminal/worminald, v2). Preview build names
+remain compatible; worminal-x11/worminald-x11 preserve v1 rollback and existing sessions.
+Historical measurements below describe the preview evaluation before promotion.
+
+Architecture
+------------
+GTK 3 owns windows, the ordered notebook strip/content stack, input methods and
+clipboard. Pango/Cairo uses Fontconfig/FreeType fonts and fallback faces, with the
+compiled Alacritty palette, compact cell spacing and glyph offsets. The original
+st parser, history, selection and reflow remain authoritative. Both frontends use
+src/terminal/keymap.inc and all executable roles share src/terminal/defaults.c.
+There are no frontend XIDs, Xft calls, GtkPlug/XEmbed
+widgets, or dependencies on a surf executable.
+
+The preview daemon compiles the same service/terminal sources without GTK,
+WebKit, X11 or Xft libraries. Its v2 endpoint and SSH executable name are distinct
+from v1. Browser records carry an explicit kind and saved URL; no terminal session
+or PTY is allocated. Browser focus/resize cannot resize or create a PTY. Created
+records have explicit identity acknowledgments. Attach creates no shell.
+
+The frontend opens service connections off the GTK thread, reads framed messages
+incrementally through GLib watches, bounds outbound queues and yields output
+floods to GTK input/redraw work. Keys received before the first catalog are kept.
+Disconnect drops unsent input, reports it, and reconnects without replaying it.
+Stale focus reports and allocation-only resize messages cannot reclaim another window's controller. SSH child exits
+are watched; local services detach from the launching view.
+
+Every service PTY uses nonblocking writes and an ordered input queue bounded to
+1 MiB, including parser replies after echo/CRLF translation. One readiness turn
+writes at most 16 KiB. Saturation reports an error and stops only that tab; this
+is an explicit overload policy, not reliable delivery for arbitrarily large
+pastes. Other tabs and new shell creation remain responsive.
+
+Browser policy
+--------------
+WebKitGTK 4.1 is normally linked. Its context is constructed only when a browser
+page is selected; unselected shared browser links create no WebKit objects.
+Cookies, local storage, page execution, forms and navigation history stay local.
+Persistent data/cache use the XDG worminal-preview directories. Windows on the
+same display/workspace share one GTK owner, including independently launched
+executables. Selecting a browser tab moves its existing WebKit view, preserving
+forms, history and login state. The previous window offers Show browser here;
+closing the owning window transfers its view to a surviving local mirror.
+Caller cwd/environment and -o - stdout descriptors survive forwarded launches.
+Only saved URLs cross the workspace socket. Windows on different machines open
+independent pages; their navigation cannot replace an existing page on this machine.
+
+The browser has no navigation toolbar. Alt+Left/Right navigate history;
+Ctrl+R or F5 reloads and Escape stops loading. Ctrl+K reveals and selects the
+normally hidden address entry; Enter navigates and hides it, and Escape dismisses
+it. Tab activation and moving a browser between windows cannot reveal the entry.
+Ctrl+T always creates a terminal. Ctrl+Shift+B has no browser action.
+Inside a preview terminal, worminald-preview --new-browser-tab [URL] replaces
+that terminal with a browser under the same ordered identity. This ends its shell
+and PTY; it does not allocate a hidden terminal. With no URL, about:blank opens;
+Ctrl+K reveals the address entry. For example:
+
+  alias s='worminald-preview --new-browser-tab'
+  s
+  s https://example.com
+
+The service uses kernel peer credentials and the caller's process session to
+identify the terminal, independent of which window is focused. Calls outside a
+preview PTY fail. The additive v2 command requires an updated service; an older
+service times out with an actionable message, without terminating its sessions.
+--surf URL still creates a browser tab directly. Terminal CLI commands, local launch
+environments, remote account environment inheritance, tab/window shortcuts,
+selection, clipboard, input methods, mouse reporting and zoom use GTK equivalents.
+
+User popup requests open their requested link in an independent browser tab.
+window.open returns null and no window.opener relationship is retained. Related
+WebKit popup construction crashed in the installed WebKitGTK 2.50.6 during the
+integration test; the preview instead intercepts create/navigation requests and
+opens an ordinary independent page identity. Popup workflows that require an opener or
+write into a newly created blank window are therefore outside current parity.
+
+Downloads use a GTK save chooser with overwrite confirmation. Geolocation,
+camera/microphone and notifications use explicit allow/deny dialogs; unsupported
+permission types are denied. Page fullscreen requests are declined. Certificate
+failures are displayed and never bypassed. Renderer failures show a Reload action.
+JavaScript, images, strict TLS and local storage are enabled; media requires a
+user gesture, third-party cookies and WebGL are disabled, following the relevant
+conservative surf defaults. No surf configuration/scripts are implicitly loaded.
+
+Validation and measurements
+---------------------------
+All generated profiles, logs, fixture certificates, screenshots and compositor
+runtime files live under .checks. The project-local virtual input seat is pinned
+to the Weston 10 ABI (Debian 12); a custom WORMINAL_WESTON must provide a seat.
+Management entrypoints:
+
+  build-preview               compile the preview and its isolated daemon
+  check-headless              parser plus v1/v2 service regressions
+  check-preview               GTK/WebKit checks on private Xvfb
+  check-preview-keys          existing navigation and wheel tests through GTK
+  check-preview-wayland       headless Weston, GDK Wayland, DISPLAY absent
+  check-preview-qtile         private Xvfb/Qtile, two visible tiled windows
+  prove-preview-regressions  require counterfactual blocked-PTY/resize-ownership/read-capacity failures
+  preview-perf                compare launch/input latency and helper-inclusive memory
+
+Verified gates: all three frontend backends (local and SSH fixture), the five GTK
+input tests, all 54 original/headless unit tests, static analysis, and all three
+counterfactual regression proofs pass.
+
+The integration runner exercises local connections and the real SSH bridge via a
+local ssh fixture. It checks UTF-8 and early input, sustained output, scrollback,
+resize/zoom/reflow, selection, clipboard, IME commit, controller transfer,
+reconnect, browser allocation, navigation, forms, cookies/local storage,
+local live-view transfer, shell-to-browser conversion, popups, download saving, notification denial, invalid
+TLS, renderer recovery and tab close/reopen. GTK critical diagnostics are fatal.
+The original X11 suite remains the regression gate. Counterfactual builds prove
+the blocked-PTY, stale-resize ownership and sizeof(pointer) read-capacity regressions fail without fixes.
+
+Before implementation, private-Xvfb launch-to-echo measured 22.4 ms median,
+33.5 ms p95 (20 trials); interactive-shell input readiness measured 157.4 ms
+median, 164.5 ms p95. A later original/preview comparison is recorded below.
+These are warm-cache, local-machine measurements, not cold-cache guarantees.
+Input timings include the xdotool process/injection round trip. RSS sums can
+count shared pages more than once; PSS is also reported. Browser totals include
+its WebKit network and renderer helper processes. Daemon totals include its shell.
+
+Comparison recorded on 2026-10-18 (20 launch trials):
+
+                                Original       Preview
+  Launch to echo median/p95      24.2/33.2 ms   141.8/165.8 ms
+  Shell input median/p95         160.5/169.5 ms  280.0/291.5 ms
+  Original terminal: input median 3.18 ms; frontend RSS/PSS 8.0/3.2 MiB
+  Preview terminal: input median 3.01 ms; frontend RSS/PSS 117.5/59.5 MiB
+  Preview mixed: input median 7.45 ms; frontend/helpers RSS/PSS 398.6/192.4 MiB (3 processes)
+  Service plus shell RSS stayed approximately 3.4-3.6 MiB.
+
+Terminal repaint follow-up: check-preview now times 30 offscreen repaints and
+compares warmed rendering against freshly shaped layouts pixel for pixel. On the
+same local Xvfb fixture, the sparse-screen cost fell from 4.26 to 0.30 ms/frame
+by caching ASCII layouts by font style and avoiding space glyph shaping. Dense
+scrollback repaints measured 0.41 ms/frame. These measure drawing work, not total
+key-to-display latency. The cache is bounded to 380 layouts per terminal and is
+invalidated when font metrics change; Unicode and IME text retain Pango fallback.
+The preview now draws the original compact tab strip with the terminal font,
+underlined names and inverted active colors. Both frontends use tab_label.h for
+terminal directory basenames; application titles remain window titles, and
+browser tabs show local page titles. Natural tab widths and active-tab overflow
+replace GTK notebook decoration and ellipsizing.
+
+check-preview also measures PTY input through the GTK draw callback (20 echoes).
+On private Xvfb, mean input-to-paint fell from 32.31 to 16.58 ms by sending input
+immediately and letting the first PTY reply bypass output batching. Later output
+still batches; only emitted frames advance the batching clock. Pending frames
+precede mode catalogs so alternate-screen mouse behavior cannot use stale state.
+The measure excludes physical input/compositor presentation. A running daemon
+retains its old code until restarted; do not stop it while sessions need saving.
+
+After local-window sharing and the launch broker, the repeat measurement reported
+137.46 ms median launch, 321.54 ms shell-ready, and 3.51/3.31 ms PTY echo medians
+for terminal-only/mixed preview. Frontend/helpers RSS measured 119.1/401.5 MiB
+(PSS 61.6/197.0 MiB); service/shell stayed 3.4-3.6 MiB. These were warm-service
+trials alongside preview checks; they are not compositor presentation timings.
+
+The detailed machine-local results are .checks/preview-performance.json. The
+preview's startup and memory overhead is substantial; retaining the original
+launcher is the current rollout decision, pending review and optimization.
+
+Limits still requiring review
+-----------------------------
+This is a separate preview, not a terminal-parity or website-compatibility claim.
+Live remote hosts, compositor-specific IME composition/candidate windows, camera
+and geolocation allow paths, notification delivery, large real-world pages,
+restart-persistent browser history/forms, and pixel-exact Xft/Pango font parity
+have not all been established by the automated fixtures. Per-view back/forward
+history and forms survive hiding a tab, not destroying its browser view. Cookies
+and local storage persist in the local profile.
+
+Placement and resizing obey compositor/window-manager policy. -g accepts terminal
+cell dimensions; positional suffixes cannot force placement on Wayland. XEmbed
+-w is intentionally unsupported. Dedicated file-opening commands and inline
+terminal graphics remain outside this release. Frontend print-to-stdout (-o -)
+requires a consuming reader. The service and terminal sessions survive frontend
+exit; only explicit close/stop operations end them.
+
+API constraints consulted
+-------------------------
+https://docs.gtk.org/gtk3/class.IMMulticontext.html
+https://webkitgtk.org/reference/webkit2gtk/stable/signal.WebView.create.html
+https://webkitgtk.org/reference/webkit2gtk/stable/signal.WebView.permission-request.html

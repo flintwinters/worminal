@@ -15,3 +15,13 @@ archive/
 /worminald.command.json
 /worminal.pending
 /worminald.pending
+
+/worminal-preview
+/worminald-preview
+/worminal-preview.command.json
+/worminald-preview.command.json
+/worminal-preview.pending
+/worminald-preview.pending
+
+/worminal-x11*
+/worminald-x11*

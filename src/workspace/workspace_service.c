@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
 #include <stdint.h>
@@ -19,16 +20,11 @@
 #include "workspace_socket.h"
 #include WORMINAL_THEME_HEADER
 
-char *utmp, *scroll, *stty_args = "stty raw pass8 nl -echo -iexten -cstopb 38400";
-char *vtiden = "\033[?6c", *termname = "xterm-256color";
-wchar_t *worddelimiters = L" ";
-int allowaltscreen = 1;
-unsigned int defaultfg = 258, defaultbg = 259, defaultcs = 256, tabspaces = 8;
-
 typedef struct Client Client;
 typedef struct Tab Tab;
 struct Client {
 	int fd, ready;
+	pid_t pid;
 	int needs_resync;
 	WireReader input;
 	WireBuffer output;
@@ -38,12 +34,16 @@ struct Client {
 struct Tab {
 	uint32_t id;
 	TermSession *session;
+	WireBuffer input;
+	size_t input_sent;
 	char *title, *initial_title, *directory, *clipboard;
+	char *url; /* Non-NULL marks a browser record: no terminal or PTY. */
 	char **colors;
 	uint32_t mode, cursor;
 	Client *controller;
 	Client *print_client;
 	int pending_frame;
+	int input_frame;
 	Tab *next;
 };
 
@@ -149,6 +149,52 @@ take_control(Tab *tab, Client *client)
 	tab->controller = client;
 }
 
+/* PTY backpressure must never wait in the shared event loop, including parser
+ * replies. Queue after ttywrite's echo/CRLF processing so those semantics have
+ * one owner. A saturated queue stops only this tab, with an explicit error. */
+static void
+service_input(const char *bytes, size_t length)
+{
+	Tab *tab = tab_for_session(tsessioncurrent());
+	if (!tab || tsessionfd(tab->session) < 0)
+		return;
+	if (tab->input_sent) {
+		memmove(tab->input.data, tab->input.data + tab->input_sent,
+		        tab->input.len - tab->input_sent);
+		tab->input.len -= tab->input_sent;
+		tab->input_sent = 0;
+	}
+	if (length > 1024u * 1024u - tab->input.len) {
+		WireBuffer error = {0};
+		wire_put_string(&error, "PTY input queue exceeded 1 MiB; tab stopped");
+		if (tab->controller)
+			client_send(tab->controller, WIRE_ERROR, tab->id, &error);
+		wire_buffer_free(&error);
+		tsessionstop(tab->session);
+		return;
+	}
+	wire_put_bytes(&tab->input, bytes, length);
+}
+
+static void
+flush_input(Tab *tab)
+{
+	/* One bounded write per readiness notification keeps other tabs runnable. */
+	size_t left = tab->input.len - tab->input_sent;
+	ssize_t count = write(tsessionfd(tab->session), tab->input.data + tab->input_sent,
+	                      MIN(left, 16384));
+	if (count > 0) {
+		/* Boost only a PTY read after input actually reached the child. Older
+		 * pending output must not consume the first-response latency allowance. */
+		tab->input_frame = 1;
+		tab->input_sent += count;
+		if (tab->input_sent == tab->input.len)
+			tab->input_sent = tab->input.len = 0;
+	} else if (count < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+		tsessionstop(tab->session);
+	}
+}
+
 static void
 service_print(const char *bytes, size_t length)
 {
@@ -173,6 +219,10 @@ send_catalog(Client *client)
 	wire_put_u32(&buffer, fallback_id);
 	for (Tab *tab = tabs; tab; tab = tab->next) {
 		wire_put_u32(&buffer, tab->id);
+#ifdef WORMINAL_PREVIEW_PROTOCOL
+		wire_put_u32(&buffer, tab->url != NULL);
+		wire_put_string(&buffer, tab->url);
+#endif
 		wire_put_u32(&buffer, tab->mode);
 		wire_put_u32(&buffer, tab->cursor);
 		wire_put_string(&buffer, tab->title);
@@ -185,11 +235,17 @@ send_catalog(Client *client)
 	wire_buffer_free(&buffer);
 }
 
+static void flush_frame(Tab *);
+
 static void
 broadcast_catalog(void)
 {
 	if (!catalog_dirty)
 		return;
+	/* Input modes and the imported screen (notably alternate-screen state)
+	 * must agree when clients observe a changed title or directory. */
+	for (Tab *tab = tabs; tab; tab = tab->next)
+		if (tab->pending_frame) flush_frame(tab);
 	for (Client *client = clients; client; client = client->next)
 		if (client->ready)
 			send_catalog(client);
@@ -200,6 +256,8 @@ broadcast_catalog(void)
 static void
 send_frame(Client *client, Tab *tab, int full)
 {
+	if (!tab->session)
+		return;
 	SessionFrame frame = tsessionframe(tab->session);
 	WireBuffer buffer = {0};
 	if (!client || client->fd < 0 || !client->ready)
@@ -236,6 +294,14 @@ send_frame(Client *client, Tab *tab, int full)
 	client_send(client, WIRE_FRAME_FINISH, tab->id, NULL);
 done:
 	wire_buffer_free(&buffer);
+}
+
+static void
+flush_frame(Tab *tab)
+{
+	send_frame(tab->controller, tab, 0);
+	tsessioncleandirty(tab->session);
+	tab->pending_frame = 0;
 }
 
 static void
@@ -328,11 +394,16 @@ tab_start(Client *client, Launch *launch)
 	else
 		tabs = tab;
 	lasttab = tab;
-	ttysetlaunch(cwd, launch->env, *launch->windowid ? launch->windowid : NULL);
+	/* An omitted environment means inherit the daemon (not an empty environment),
+	 * as required by SSH launches that must keep the remote account settings. */
+	ttysetlaunch(cwd, launch->envc ? launch->env : NULL, *launch->windowid ? launch->windowid : NULL);
 	ttynew(*launch->line ? launch->line : NULL, "/bin/sh",
 	       *launch->output ? launch->output : NULL,
 	       launch->argc ? launch->args : NULL);
 	ttysetlaunch(NULL, NULL, NULL);
+	int fd = tsessionfd(tab->session);
+	if (fd >= 0 && fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) < 0)
+		tsessionstop(tab->session);
 	catalog_dirty = 1;
 	return tab;
 }
@@ -356,7 +427,10 @@ tab_close(Tab *tab)
 		while (lasttab && lasttab->next)
 			lasttab = lasttab->next;
 	}
-	tsessionremove(tab->session);
+	wire_buffer_free(&tab->input);
+	if (tab->session)
+		tsessionremove(tab->session);
+	free(tab->url);
 	free(tab->title);
 	free(tab->initial_title);
 	free(tab->directory);
@@ -380,6 +454,74 @@ client_message(Client *client, WirePacket *packet)
 		running = 0;
 		return;
 	}
+#ifdef WORMINAL_PREVIEW_PROTOCOL
+	if (packet->type == WIRE_BROWSER_REPLACE) {
+		char *url = wire_get_string(packet);
+		pid_t session_id = getsid(client->pid);
+		for (tab = tabs; tab; tab = tab->next)
+			if (tab->session && tsessionpid(tab->session) == session_id) break;
+		if (!tab || !url || !*url || strlen(url) > 65536 || packet->pos != packet->len) {
+			WireBuffer error = {0};
+			wire_put_string(&error, !tab
+			    ? "This shell is not in this workspace. Open worminal and run the command there; "
+			      "keep WORMINAL_SHARED_SOCKET_SCOPE unchanged."
+			    : "Invalid browser URL: omit it for a blank page, or supply one nonempty URL up to 65536 bytes.");
+			client_send(client, WIRE_ERROR, 0, &error);
+			wire_buffer_free(&error); free(url);
+			return;
+		}
+		/* Peer credentials identify the calling PTY session, independent of which
+		 * window currently owns painting. Preserve ordered identity; discard its PTY. */
+		client_send(client, WIRE_COMMAND_DONE, tab->id, NULL);
+		tsessionremove(tab->session); tab->session = NULL;
+		wire_buffer_free(&tab->input); tab->input = (WireBuffer){0}; tab->input_sent = 0;
+		tab->pending_frame = tab->input_frame = 0;
+		tab->controller = tab->print_client = NULL;
+		tab->mode = 0;
+		free(tab->title); tab->title = xstrdup("Browser");
+		free(tab->directory); tab->directory = xstrdup("");
+		tab->url = url;
+		catalog_dirty = 1;
+		broadcast_catalog();
+		return;
+	}
+	if (packet->type == WIRE_ATTACH) {
+		client->ready = 1;
+		send_catalog(client);
+		return;
+	}
+	if (packet->type == WIRE_BROWSER || packet->type == WIRE_BROWSER_NAVIGATE) {
+		char *url = wire_get_string(packet);
+		if (!url || !*url || strlen(url) > 65536 || packet->pos != packet->len) {
+			free(url);
+			return;
+		}
+		if (packet->type == WIRE_BROWSER) {
+			tab = calloc(1, sizeof(*tab));
+			if (!tab)
+				abort();
+			tab->id = next_id++;
+			tab->title = xstrdup("Browser");
+			tab->directory = xstrdup("");
+			tab->initial_title = xstrdup("Browser");
+			if (lasttab)
+				lasttab->next = tab;
+			else
+				tabs = tab;
+			lasttab = tab;
+			client->ready = 1;
+			client_send(client, WIRE_CREATED, tab->id, NULL);
+		} else if (!client->ready || !tab || !tab->url) {
+			free(url);
+			return;
+		}
+		free(tab->url);
+		tab->url = url;
+		catalog_dirty = 1;
+		broadcast_catalog();
+		return;
+	}
+#endif
 	if (packet->type == WIRE_HELLO || packet->type == WIRE_NEW) {
 		if (!launch_read(packet, &launch)) {
 			launch_free(&launch);
@@ -388,6 +530,9 @@ client_message(Client *client, WirePacket *packet)
 		}
 		client->ready = 1;
 		tab = tab_start(client, &launch);
+#ifdef WORMINAL_PREVIEW_PROTOCOL
+		client_send(client, WIRE_CREATED, tab->id, NULL);
+#endif
 		launch_free(&launch);
 		broadcast_catalog();
 		send_frame(client, tab, 1);
@@ -395,7 +540,37 @@ client_message(Client *client, WirePacket *packet)
 	}
 	if (!client->ready || !tab)
 		return;
+	if (tab->url) {
+		if (packet->type == WIRE_CLOSE)
+			tab_close(tab);
+		return;
+	}
 	switch (packet->type) {
+#ifdef WORMINAL_PREVIEW_PROTOCOL
+	case WIRE_CONTROL:
+		if (!wire_get_u32(packet, &direction) || direction > 2 || packet->pos != packet->len) break;
+		take_control(tab, client);
+		tsessionuse(tab->session);
+		tab->print_client = client;
+		if (direction == 0) toggleprinter(NULL);
+		else if (direction == 1) printscreen(NULL);
+		else sendbreak(NULL);
+		break;
+	case WIRE_FOCUS_STATE:
+		/* Focus reports describe the current controller; they are not input
+		 * gestures and must never steal a tab back from a newer controller. */
+		if (tab->controller == client && (tab->mode & MODE_FOCUS) &&
+		    wire_get_u32(packet, &direction) && direction <= 1 && packet->pos == packet->len) {
+			tsessionuse(tab->session);
+			ttywrite(direction ? "\033[I" : "\033[O", 3, 0);
+		}
+		break;
+	case WIRE_RESIZE:
+		/* Allocation events can arrive after a controller transfer. Only the
+		 * service can reject stale resizes without reclaiming another view. */
+		if (tab->controller != client) break;
+		/* fall through */
+#endif
 	case WIRE_FOCUS: {
 		if (!wire_get_u32(packet, &cols) || !wire_get_u32(packet, &rows) ||
 		    cols < 1 || cols > 400 || rows < 1 || rows > 200 || packet->pos != packet->len)
@@ -460,6 +635,7 @@ serve(void)
 	struct timespec last_frame = {0}, flush_delay = {.tv_nsec = 16000000};
 	/* -o - follows the launching client's stdout across the service boundary. */
 	tprinterhook = service_print;
+	ttyrawhook = service_input;
 	if (listener < 0)
 		return 1;
 	for (; running;) {
@@ -472,7 +648,7 @@ serve(void)
 		tsessionreap();
 		for (Tab *tab = tabs, *next; tab; tab = next) {
 			next = tab->next;
-			if (tsessionfd(tab->session) < 0)
+			if (tab->session && tsessionfd(tab->session) < 0)
 				tab_close(tab);
 		}
 		broadcast_catalog();
@@ -494,9 +670,11 @@ serve(void)
 			}
 		for (Tab *tab = tabs; tab; tab = tab->next) {
 			pending |= tab->pending_frame;
-			int fd = tsessionfd(tab->session);
+			int fd = tab->session ? tsessionfd(tab->session) : -1;
 			if (fd >= 0) {
 				FD_SET(fd, &readers);
+				if (tab->input.len > tab->input_sent)
+					FD_SET(fd, &writers);
 				if (fd > maxfd)
 					maxfd = fd;
 			}
@@ -508,13 +686,20 @@ serve(void)
 			return 1;
 		}
 		for (Tab *tab = tabs; tab; tab = tab->next) {
-			int fd = tsessionfd(tab->session);
-			if (fd < 0 || !FD_ISSET(fd, &readers))
+			int fd = tab->session ? tsessionfd(tab->session) : -1;
+			if (fd >= 0 && FD_ISSET(fd, &writers))
+				flush_input(tab);
+			if (fd < 0 || tsessionfd(tab->session) < 0 || !FD_ISSET(fd, &readers))
 				continue;
 			tsessionuse(tab->session);
 			ttyread();
 			refresh_directory(tab);
 			tab->pending_frame = 1;
+			if (tab->input_frame) {
+				/* The first reply bypasses batching; subsequent output still batches. */
+				flush_frame(tab);
+				tab->input_frame = 0;
+			}
 		}
 		if (FD_ISSET(listener, &readers)) {
 			int fd = accept4(listener, NULL, NULL, SOCK_CLOEXEC);
@@ -528,6 +713,7 @@ serve(void)
 			if (fd >= 0) {
 				Client *client = calloc(1, sizeof(*client));
 				client->fd = fd;
+				client->pid = peer.pid;
 				client->next = clients;
 				clients = client;
 			}
@@ -549,17 +735,17 @@ serve(void)
 				client_flush(client);
 		struct timespec now;
 		clock_gettime(CLOCK_MONOTONIC, &now);
-		if (!last_frame.tv_sec ||
+		int due = !last_frame.tv_sec ||
 		    (now.tv_sec - last_frame.tv_sec) * 1000000000LL +
-		    now.tv_nsec - last_frame.tv_nsec >= 16000000) {
-			for (Tab *tab = tabs; tab; tab = tab->next)
-				if (tab->pending_frame) {
-					send_frame(tab->controller, tab, 0);
-					tsessioncleandirty(tab->session);
-					tab->pending_frame = 0;
-				}
-			last_frame = now;
-		}
+		    now.tv_nsec - last_frame.tv_nsec >= 16000000;
+		int emitted = 0;
+		for (Tab *tab = tabs; tab; tab = tab->next)
+			if (tab->pending_frame && due) {
+				flush_frame(tab);
+				emitted = 1;
+			}
+		/* Only emitted PTY frames advance the output batching deadline. */
+		if (emitted) last_frame = now;
 		broadcast_catalog();
 		Client **slot = &clients;
 		while (*slot) {
@@ -613,9 +799,46 @@ out:
 	return 0;
 }
 
+#ifdef WORMINAL_PREVIEW_PROTOCOL
+static int
+browser_command(const char *url)
+{
+	int fd = workspace_connect();
+	if (fd < 0) { fputs("No preview workspace service is running.\n", stderr); return 1; }
+	/* Converting this PTY hangs up its shell. Let the short-lived command receive
+	 * its result and exit normally even if it is in the foreground process group. */
+	signal(SIGHUP, SIG_IGN);
+	struct timeval timeout = {.tv_sec = 3};
+	setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+	WireBuffer buffer = {0};
+	wire_put_string(&buffer, url);
+	int okay = wire_write(fd, WIRE_BROWSER_REPLACE, 0, buffer.data, buffer.len);
+	wire_buffer_free(&buffer);
+	WirePacket packet;
+	if (okay && wire_read(fd, &packet) > 0) {
+		okay = packet.type == WIRE_COMMAND_DONE;
+		if (!okay) {
+			char *error = packet.type == WIRE_ERROR ? wire_get_string(&packet) : NULL;
+			fprintf(stderr, "%s\n", error ? error : "Preview service rejected the browser command.");
+			free(error);
+		}
+		wire_packet_free(&packet);
+	} else {
+		fputs("Preview service did not reply; an older service may need restarting after its sessions end.\n", stderr);
+		okay = 0;
+	}
+	close(fd);
+	return okay ? 0 : 1;
+}
+#endif
+
 int
 main(int argc, char **argv)
 {
+#ifdef WORMINAL_PREVIEW_PROTOCOL
+	if ((argc == 2 || argc == 3) && strcmp(argv[1], "--new-browser-tab") == 0)
+		return browser_command(argc == 3 ? argv[2] : "about:blank");
+#endif
 	if (argc == 2 && strcmp(argv[1], "--serve") == 0)
 		return serve();
 	if (argc == 2 && strcmp(argv[1], "--bridge") == 0)
@@ -629,11 +852,18 @@ main(int argc, char **argv)
 		return okay ? 0 : 1;
 	}
 	fprintf(stderr, "usage: worminald --serve|--bridge|--stop\n");
+#ifdef WORMINAL_PREVIEW_PROTOCOL
+	fputs("       worminald --new-browser-tab [URL]\n", stderr);
+#endif
 	return 2;
 }
 
 /* st's terminal parser reports changes through these callbacks. */
-void xbell(void) {}
+void xbell(void)
+{
+	Tab *tab = tab_for_session(tsessioncurrent());
+	if (tab && tab->controller) client_send(tab->controller, WIRE_BELL, tab->id, NULL);
+}
 void xclipcopy(void)
 {
 	Tab *tab = tab_for_session(tsessioncurrent());
