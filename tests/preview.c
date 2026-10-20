@@ -246,6 +246,27 @@ paint(Terminal *t, const char *name)
 	cairo_destroy(cr); cairo_surface_destroy(surface);
 }
 
+static void
+check_outline(App *app)
+{
+	GtkWidget *content = gtk_bin_get_child(GTK_BIN(app->window));
+	int width = gtk_widget_get_allocated_width(content), height = gtk_widget_get_allocated_height(content);
+	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+	cairo_t *cr = cairo_create(surface);
+	gtk_widget_draw(content, cr);
+	cairo_surface_flush(surface);
+	unsigned char *pixels = cairo_image_surface_get_data(surface);
+	int stride = cairo_image_surface_get_stride(surface);
+	for (int y = 0; y < height; y++) {
+		uint32_t *row = (uint32_t *)(pixels + y * stride);
+		for (int x = 0; x < width; x++)
+			if (!x || !y || x == width - 1 || y == height - 1)
+				g_assert_cmphex(row[x], ==, 0xff999999);
+	}
+	cairo_destroy(cr);
+	cairo_surface_destroy(surface);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -275,6 +296,7 @@ main(int argc, char **argv)
 	Terminal *t = terminal->terminal;
 	WAIT(screen_has(t, "READY"));
 	WAIT(screen_has(t, "q"));
+	check_outline(app);
 	input_paint_latency(t);
 	/* Terminal titles belong to the window; directory basenames name tabs. */
 	app_page_title(terminal, "Shell");
@@ -304,6 +326,7 @@ main(int argc, char **argv)
 	int oldcols = t->frame.cols;
 	gtk_window_resize(GTK_WINDOW(app->window), 720, 420);
 	if (!g_getenv("WORMINAL_PREVIEW_TILED")) WAIT(t->frame.cols != oldcols && t->frame.cols == t->cols);
+	check_outline(app);
 	oldcols = t->frame.cols;
 	app->zoom = 2;
 	terminal_zoom(t);
@@ -356,6 +379,7 @@ main(int argc, char **argv)
 	g_signal_emit_by_name(web->browser->entry, "activate");
 	g_assert_false(gtk_widget_get_visible(web->browser->entry));
 	WAIT(!webkit_web_view_is_loading(web->browser->view));
+	check_outline(app);
 	expect_script(web->browser, "document.title", "Fixture");
 	expect_script(web->browser, "document.querySelector('input').value='local form'; localStorage.setItem('saved','yes');"
 	              "document.cookie='session=local;path=/'; document.querySelector('input').value", "local form");

@@ -613,6 +613,19 @@ new_app(void)
 	return app;
 }
 
+static gboolean
+draw_outline(GtkWidget *widget, cairo_t *cr, gpointer data)
+{
+	(void)data;
+	/* Match the original client-side outline, above terminal and WebKit paint. */
+	cairo_set_source_rgb(cr, 0.6, 0.6, 0.6);
+	cairo_set_line_width(cr, 1);
+	cairo_rectangle(cr, 0.5, 0.5, gtk_widget_get_allocated_width(widget) - 1,
+	    gtk_widget_get_allocated_height(widget) - 1);
+	cairo_stroke(cr);
+	return FALSE;
+}
+
 static void
 show_app(App *app)
 {
@@ -621,7 +634,15 @@ show_app(App *app)
 	gtk_window_set_title(GTK_WINDOW(app->window), app->title ? app->title : "Worminal preview");
 	gtk_window_set_default_size(GTK_WINDOW(app->window), app->cols * 10 + 4, app->rows * 18 + 42);
 	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	gtk_container_add(GTK_CONTAINER(app->window), box);
+	GtkWidget *overlay = gtk_overlay_new();
+	gtk_container_add(GTK_CONTAINER(app->window), overlay);
+	gtk_container_add(GTK_CONTAINER(overlay), box);
+	GtkWidget *outline = gtk_drawing_area_new();
+	/* An input window here would swallow scroll events above the terminal. */
+	gtk_widget_set_has_window(outline, FALSE);
+	gtk_overlay_add_overlay(GTK_OVERLAY(overlay), outline);
+	gtk_overlay_set_overlay_pass_through(GTK_OVERLAY(overlay), outline, TRUE);
+	g_signal_connect(outline, "draw", G_CALLBACK(draw_outline), NULL);
 	app->notebook = gtk_notebook_new();
 	gtk_notebook_set_show_tabs(GTK_NOTEBOOK(app->notebook), FALSE);
 	gtk_notebook_set_show_border(GTK_NOTEBOOK(app->notebook), FALSE);
