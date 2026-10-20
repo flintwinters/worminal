@@ -90,7 +90,8 @@ def run_headless_checks():
     code = run_native_checks()
     if code:
         return code
-    patterns = ("test_build.py", "test_workspace.py", "test_preview_workspace.py", "test_theme.py", "test_privacy.py")
+    patterns = ("test_build.py", "test_cli.py", "test_workspace.py", "test_preview_workspace.py",
+                "test_theme.py", "test_privacy.py")
     for pattern in patterns:
         code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                     "-p", pattern, "-q"])

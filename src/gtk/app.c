@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <locale.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -674,11 +675,14 @@ app_new_window(App *previous)
 }
 
 static void
-usage(void)
+usage(FILE *stream)
 {
-	g_printerr("usage: worminal [--master user@host] [--surf URL | --attach]\n"
-	           "       [-aiv] [-c class] [-n name] [-f font] [-g COLSxROWS] [-T title]\n"
-	           "       [-o file] [-l line] [-e command ...]\n");
+	fprintf(stream, "worminal " VERSION "\n\n"
+	        "usage: worminal [--master user@host] [--surf URL | --attach]\n"
+	        "       [-aiv] [-c class] [-n name] [-f font] [-g COLSxROWS] [-T title]\n"
+	        "       [-o file] [-l line] [-e command ...]\n"
+	        "       worminal -h | --help       Show help and version\n"
+	        "       worminal -v | --version    Show version\n");
 }
 
 static gboolean
@@ -727,7 +731,7 @@ launch_window(int argc, char **argv, char **env, const char *cwd, int output)
 invalid:
 	apps = g_list_remove(apps, app);
 	app_unref(app);
-	usage();
+	usage(stderr);
 	return FALSE;
 }
 
@@ -735,7 +739,14 @@ int
 main(int argc, char **argv)
 {
 	setlocale(LC_CTYPE, "");
-	if (argc == 2 && !strcmp(argv[1], "-v")) { g_print("worminal " VERSION "\n"); return 0; }
+	if (argc == 2 && (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help"))) {
+		usage(stdout);
+		return 0;
+	}
+	if (argc == 2 && (!strcmp(argv[1], "-v") || !strcmp(argv[1], "--version"))) {
+		g_print("worminal " VERSION "\n");
+		return 0;
+	}
 	int listener = -1;
 	int forwarded = windows_forward(argc, argv, &listener);
 	if (forwarded) {
