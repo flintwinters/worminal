@@ -13,7 +13,6 @@ import statistics
 import subprocess
 import sys
 import time
-import tty
 
 from Xlib import X, XK, display
 from Xlib.ext import xtest
@@ -24,13 +23,6 @@ from x11 import close_window, isolated_display
 
 ROOT = Path(__file__).resolve().parent.parent
 TIMEOUT = 10
-
-
-def echo_child():
-    tty.setraw(0)
-    os.write(1, b"\033[?25l\033[48;2;17;34;51m\033[2J\033[H")
-    while data := os.read(0, 1):
-        os.write(1, b"\033[12;40H" + data)
 
 
 def wait_for(probe):
@@ -65,7 +57,7 @@ def ready(window):
 def launch(env, connection, title, log):
     started = time.monotonic_ns()
     process = subprocess.Popen([str(ROOT / "worminal"), "-g", "80x24", "-T", title,
-                                "-e", sys.executable, str(Path(__file__).resolve()), "--echo-child"],
+                                "-e", sys.executable, "-S", str(ROOT / "tests/fixtures/latency_echo.py")],
                                env=env, stdout=log, stderr=log)
     try:
         window = wait_for(lambda: find_window(connection, title))
@@ -108,11 +100,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--trials", type=int, default=10)
     parser.add_argument("--keys", type=int, default=50)
-    parser.add_argument("--echo-child", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
-    if args.echo_child:
-        echo_child()
-        return
     if args.trials < 1 or args.keys < 1:
         parser.error("--trials and --keys must be positive")
     checks = ROOT / ".checks"
