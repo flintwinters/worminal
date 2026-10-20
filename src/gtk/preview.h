@@ -42,6 +42,10 @@ struct App {
 	GQueue early_keys;
 	uint32_t created_id;
 	gboolean attached, closing, syncing;
+	/* The font pattern is immutable per window; zoom invalidates these metrics. */
+	PangoFontDescription *cached_font;
+	double cached_font_zoom;
+	int font_cw, font_ch, font_height, font_ascent;
 };
 
 void tabs_refresh(App *);

@@ -33,6 +33,7 @@ app_unref(App *app)
 	if (--app->refs) return;
 	g_free(app->master); g_free(app->title); g_free(app->cwd); g_free(app->line);
 	g_free(app->output); g_free(app->font); g_free(app->initial_url);
+	g_clear_pointer(&app->cached_font, pango_font_description_free);
 	g_strfreev(app->command); g_strfreev(app->environment);
 	if (app->print_fd != STDOUT_FILENO) close(app->print_fd);
 	g_free(app);
