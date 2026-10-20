@@ -67,7 +67,7 @@ def key(env, *keys):
 
 def steady(frontend, mixed):
     preview = frontend == "worminal-preview"
-    daemon_name = "worminald-preview" if preview else "worminald"
+    daemon_name = "worminald-preview" if preview else "worminald-x11"
     with isolated_display() as display, profile(display) as env, fixture() as url:
         env["GDK_BACKEND"] = "x11"
         daemon = subprocess.Popen([str(ROOT / daemon_name), "--serve"], env=env,
@@ -132,7 +132,7 @@ def steady(frontend, mixed):
 
 def main():
     result = {"environment": "private Xvfb; warm service; 20 launch/input trials; helper-inclusive RSS/PSS"}
-    for frontend in ("worminal", "worminal-preview"):
+    for frontend in ("worminal-x11", "worminal-preview"):
         launch = {}
         with isolated_display() as env:
             env["WORMINAL_FRONTEND"] = frontend
@@ -148,7 +148,7 @@ def main():
         print(f"{frontend}: launch {launch['cat']['median_ms']} ms; shell {launch['shell']['median_ms']} ms")
     path = ROOT / ".checks/preview-performance.json"
     path.write_text(json.dumps(result, indent=2) + "\n")
-    for name in ("worminal", "worminal-preview"):
+    for name in ("worminal-x11", "worminal-preview"):
         for mode in ("terminal", "mixed"):
             if mode not in result[name]:
                 continue

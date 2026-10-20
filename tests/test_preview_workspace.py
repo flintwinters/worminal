@@ -168,8 +168,8 @@ class PreviewWorkspaceTest(unittest.TestCase):
         result = subprocess.run([str(DAEMON), "--new-browser-tab"], env=self.env,
                                 capture_output=True, timeout=5)
         self.assertEqual(result.returncode, 1)
-        self.assertIn(b"Open worminal-preview", result.stderr)
-        self.assertIn(b"worminal still opens the original terminal", result.stderr)
+        self.assertIn(b"Open worminal", result.stderr)
+        self.assertIn(b"keep WORMINAL_SHARED_SOCKET_SCOPE unchanged", result.stderr)
         self.assertNotIn(b"Invalid browser URL", result.stderr)
 
     def test_empty_browser_url_keeps_the_calling_terminal(self):
@@ -184,7 +184,7 @@ class PreviewWorkspaceTest(unittest.TestCase):
         send(self.peer, 19)
         _, payload = wait_kind(self.peer, 7)
         self.assertEqual([(row[0], row[1]) for row in records(payload)], [(tab, 0)])
-        self.assertNotIn(b"Open worminal-preview", output)
+        self.assertNotIn(b"Open worminal", output)
 
     def test_input_reply_frame_precedes_its_mode_catalog(self):
         # Catalog titles are also frontend readiness barriers. A client must not

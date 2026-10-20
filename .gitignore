@@ -22,3 +22,6 @@ archive/
 /worminald-preview.command.json
 /worminal-preview.pending
 /worminald-preview.pending
+
+/worminal-x11*
+/worminald-x11*

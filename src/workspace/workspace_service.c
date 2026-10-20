@@ -463,8 +463,8 @@ client_message(Client *client, WirePacket *packet)
 		if (!tab || !url || !*url || strlen(url) > 65536 || packet->pos != packet->len) {
 			WireBuffer error = {0};
 			wire_put_string(&error, !tab
-			    ? "This shell is not in this preview workspace. Open worminal-preview and run the command there; "
-			      "worminal still opens the original terminal. Keep WORMINAL_SHARED_SOCKET_SCOPE unchanged."
+			    ? "This shell is not in this workspace. Open worminal and run the command there; "
+			      "keep WORMINAL_SHARED_SOCKET_SCOPE unchanged."
 			    : "Invalid browser URL: omit it for a blank page, or supply one nonempty URL up to 65536 bytes.");
 			client_send(client, WIRE_ERROR, 0, &error);
 			wire_buffer_free(&error); free(url);
@@ -853,7 +853,7 @@ main(int argc, char **argv)
 	}
 	fprintf(stderr, "usage: worminald --serve|--bridge|--stop\n");
 #ifdef WORMINAL_PREVIEW_PROTOCOL
-	fputs("       worminald-preview --new-browser-tab [URL]\n", stderr);
+	fputs("       worminald --new-browser-tab [URL]\n", stderr);
 #endif
 	return 2;
 }

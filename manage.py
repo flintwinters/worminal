@@ -65,14 +65,16 @@ def run_checks():
     if check_privacy(ROOT):
         return 1
     native_build.build_targets(
-        "worminald-preview", "build/key_injector", "build/placement_wm", "build/compact-worminal",
+        "worminal-x11", "worminald-x11", "worminald-preview", "build/key_injector",
+        "build/placement_wm", "build/compact-worminal",
         "build/overlap_probe",
         "build/border_probe", "build/icon_probe", "build/view_state_test", "build/scrollback_test", "build/url_test",
     )
     code = run_native_checks()
     if code:
         return code
-    return run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-q"])
+    code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-q"])
+    return code or preview_checks("x11")
 
 
 def run_native_checks():
@@ -84,7 +86,7 @@ def run_native_checks():
 
 
 def run_headless_checks():
-    native_build.build_targets("build/scrollback_test", "build/url_test", "worminald-preview")
+    native_build.build_targets("build/scrollback_test", "build/url_test", "worminald-x11", "worminald-preview")
     code = run_native_checks()
     if code:
         return code
@@ -109,7 +111,7 @@ def build():
 
 @app.command("build-preview")
 def build_preview():
-    """Build the isolated GTK/WebKit frontend and v2 service; keep the launcher intact."""
+    """Build compatibility names for the GTK frontend and v2 service."""
     native_build.build_targets("worminal-preview", "worminald-preview")
 
 
@@ -141,7 +143,8 @@ def prove_preview_regressions():
 @app.command("preview-perf")
 def preview_perf():
     """Compare original and preview launch, shell/input latency, and helper-inclusive memory."""
-    native_build.build_targets("worminal-preview", "worminald-preview", "build/key_injector")
+    native_build.build_targets("worminal-preview", "worminal-x11", "worminald-x11",
+                               "worminald-preview", "build/key_injector")
     raise typer.Exit(run([sys.executable, "tests/frontend_perf.py"]))
 
 
@@ -196,7 +199,7 @@ def check_keys():
     """Check navigation and mouse input on private Xvfb displays."""
     native_build.build_targets()
     raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
-                          "-p", "test_keys.py", "-q"]))
+                          "-p", "test_keys.py", "-q"], env={**os.environ, "WORMINAL_FRONTEND": "worminal"}))
 
 
 @app.command("check-headless")
@@ -263,7 +266,7 @@ def master_perf(host: str):
 @app.command("window-perf")
 def window_perf():
     """Measure isolated tab repaint on the current X11 display (needs python-xlib)."""
-    native_build.build_targets()
+    native_build.build_targets("worminal-x11", "worminald-x11")
     raise typer.Exit(run([sys.executable, "tests/window_perf.py"]))
 
 

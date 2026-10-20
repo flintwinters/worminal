@@ -1,9 +1,9 @@
 Combined Worminal preview
 =========================
 
-Status: implemented on gtk-preview as separate worminal-preview and worminald-preview
-executables. The original launcher, installation files and live v1 services remain
-available. No default-launcher switch or deployment has been performed.
+Status: GTK is the main release frontend (worminal/worminald, v2). Preview build names
+remain compatible; worminal-x11/worminald-x11 preserve v1 rollback and existing sessions.
+Historical measurements below describe the preview evaluation before promotion.
 
 Architecture
 ------------

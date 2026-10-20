@@ -12,9 +12,9 @@ from x11 import isolated_display
 
 
 ROOT = Path(__file__).resolve().parent.parent
-FRONTEND = os.environ.get("WORMINAL_FRONTEND", "worminal")
-PREVIEW = FRONTEND == "worminal-preview"
-DAEMON = "worminald-preview" if PREVIEW else "worminald"
+FRONTEND = os.environ.get("WORMINAL_FRONTEND", "worminal-x11")
+PREVIEW = FRONTEND in ("worminal", "worminal-preview")
+DAEMON = "worminald" if PREVIEW else "worminald-x11"
 
 
 def read_bytes(stream, count):
@@ -146,7 +146,7 @@ class NavigationKeysTest(unittest.TestCase):
                 while time.monotonic() < deadline:
                     result = subprocess.run(
                         ["xdotool", "search", "--onlyvisible", "--class",
-                         "worminal-preview" if PREVIEW else "Worminal"],
+                         "worminal" if PREVIEW else "Worminal"],
                         env=env, capture_output=True, text=True,
                     )
                     if result.returncode == 0:
