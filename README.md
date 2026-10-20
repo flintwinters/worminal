@@ -70,7 +70,7 @@ GDK_BACKEND=wayland ./worminal
 ```
 
 Worminal starts `worminald` on the v2 endpoint. Existing v1 sessions remain available through `worminal-x11`;
-install builds that rollback frontend and `worminald-x11`. No sessions are migrated or stopped.
+install builds that rollback frontend and `worminald-x11`. Installation never migrates or stops sessions automatically.
 For a remote workspace, install the current release remotely and use `--master user@host`.
 The old preview executable names remain build aliases and share the v2 workspace.
 `--attach` opens existing tabs without creating another shell. Closing a window preserves its service tabs.
@@ -115,6 +115,38 @@ To stop a service **and end all its tabs**:
 worminald --stop                 # Local master
 ssh user@host worminald --stop   # Remote master
 ```
+
+### Transfer sessions between daemons
+
+Both daemon builds support an explicit, local ownership transfer. Arm a running destination, then ask the
+running source to transfer its entire workspace using the same one-time name:
+
+```sh
+worminald --handin cutover
+worminald-x11 --handoff cutover
+worminal --attach
+```
+
+Use each daemon's `WORMINAL_SHARED_SOCKET_SCOPE` when transferring between isolated workspaces. These commands
+connect to existing services and never start or restart one. **Both running processes must already contain the
+handoff implementation.** Replacing a binary on disk does not upgrade a running daemon that predates this protocol.
+
+The receiver appends the source's ordered tabs, assigns destination IDs, and takes sole ownership of their PTYs
+and lifecycle. The donor closes its descriptors and forgets those tabs after commit. Shell PIDs, environment,
+working directories, foreground jobs, both screens, scrollback, parser state, and pending input survive; the donor
+can exit afterward. Linux keeps the original parent relationship until that parent exits, but input, resize,
+signalling, and shutdown belong to the receiver. Imported shells use pidfds to prevent signalling a reused PID.
+Open views and their stdout/printer streams are not moved; attach a destination view to continue interacting.
+
+The receiver validates a sealed snapshot and duplicated descriptors before commit. Rejection, timeout, or a
+connection failure before commit leaves donor sessions in place. Once committed, ownership never automatically
+falls back, including if the receiver crashes or its acknowledgement is lost. This is a same-user Linux transfer,
+using a versioned native snapshot shared by these two daemon builds, with a limit of 100 tabs and 512 MiB per
+transfer. History must fit the destination's compiled capacity. Browser records transfer their saved URLs between
+v2 daemons; a v1 receiver rejects any workspace containing browsers without moving its terminals.
+
+Run `python3 manage.py check-handoff` for sanitizer-backed snapshot checks and isolated live transfers in all
+four protocol combinations, including queued input and failure rollback. These checks also run in `check-headless`.
 
 ### Keyboard and mouse
 
@@ -189,6 +221,7 @@ Run `python3 manage.py --help` for available commands. Builds use `-O3` by defau
 ### Checks and measurements
 
 ```sh
+python3 manage.py check-handoff   # Live ownership transfer between X11 and GTK daemons
 python3 manage.py check-headless  # Native, service, theme, and privacy tests without X11
 python3 manage.py check           # Local regression suite, including private-display checks
 python3 manage.py lint            # Text limits and Clang static analysis

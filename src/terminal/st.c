@@ -20,6 +20,7 @@
 #include "st.h"
 #include "win.h"
 #include "st_state.h"
+#include "session_transfer.h"
 #include WORMINAL_THEME_HEADER
 
 #if   defined(__linux)
@@ -206,7 +207,7 @@ tsessionfd(TermSession *chosen)
 pid_t
 tsessionpid(TermSession *chosen)
 {
-	return chosen->child_pid;
+	return tsessionlivepid(chosen);
 }
 
 void
@@ -253,8 +254,7 @@ tsessionhangupall(void)
 void
 tsessionstop(TermSession *chosen)
 {
-	if (chosen->child_pid > 0)
-		kill(chosen->child_pid, SIGHUP);
+	tsessionstopchild(chosen);
 	if (chosen->pty_fd >= 0) {
 		close(chosen->pty_fd);
 		chosen->pty_fd = -1;
@@ -1100,8 +1100,7 @@ void
 ttyhangup(void)
 {
 	/* Send SIGHUP to shell */
-	if (pid > 0)
-		kill(pid, SIGHUP);
+	tsessionsignal(session, SIGHUP);
 }
 
 int

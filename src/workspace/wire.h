@@ -43,6 +43,8 @@ enum wire_type {
 	WIRE_RESIZE,
 	WIRE_BROWSER_REPLACE,
 	WIRE_COMMAND_DONE,
+	WIRE_HANDIN,
+	WIRE_HANDOFF,
 };
 
 typedef struct {

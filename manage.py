@@ -91,7 +91,7 @@ def run_headless_checks():
     if code:
         return code
     patterns = ("test_build.py", "test_cli.py", "test_workspace.py", "test_preview_workspace.py",
-                "test_theme.py", "test_privacy.py")
+                "test_theme.py", "test_privacy.py", "test_handoff.py")
     for pattern in patterns:
         code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                     "-p", pattern, "-q"])
@@ -201,6 +201,17 @@ def check_keys():
     native_build.build_targets()
     raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                           "-p", "test_keys.py", "-q"], env={**os.environ, "WORMINAL_FRONTEND": "worminal"}))
+
+
+@app.command("check-handoff")
+def check_handoff():
+    """Check native state snapshots and live transfers between both daemon protocols."""
+    native_build.build_targets("build/scrollback_test", "worminald-x11", "worminald-preview")
+    code = run(["build/scrollback_test"], env={**os.environ, "ASAN_OPTIONS": "detect_leaks=0"})
+    if not code:
+        code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                    "-p", "test_handoff.py", "-q"])
+    raise typer.Exit(code)
 
 
 @app.command("check-headless")
