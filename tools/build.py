@@ -25,7 +25,7 @@ CPPFLAGS = ("-I.", "-Isrc", "-Isrc/terminal", "-Isrc/x11", "-Isrc/workspace",
             f'-DVERSION="{VERSION}"', "-D_XOPEN_SOURCE=600")
 PACKAGES = ("x11", "xft", "fontconfig", "freetype2")
 PROBES = {"key_injector": ("x11", "xtst"), "placement_wm": ("x11",),
-          "overlap_probe": ("x11",), "border_probe": ("x11",), "icon_probe": ("x11",)}
+          "overlap_probe": ("x11",), "border_probe": ("x11",), "icon_probe": ("x11",), "latency_echo": ()}
 
 
 def words(name, default=""):
@@ -37,6 +37,8 @@ def invoke(command):
 
 
 def pkg_flags(option, packages=PACKAGES):
+    if not packages:
+        return []
     return shlex.split(subprocess.check_output(
         [*words("PKG_CONFIG", "pkg-config"), option, *packages], cwd=ROOT, text=True))
 
