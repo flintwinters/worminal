@@ -55,9 +55,11 @@ def isolated_display():
         yield env
     finally:
         if workspace_env is not None:
-            subprocess.run([str(Path(__file__).resolve().parent.parent / "worminald"), "--stop"],
-                           env=workspace_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                           timeout=3)
+            for name in ("worminald", "worminald-x11", "worminald-preview"):
+                daemon = Path(__file__).resolve().parent.parent / name
+                if daemon.exists():
+                    subprocess.run([str(daemon), "--stop"], env=workspace_env,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
         os.close(read_fd)
         if write_fd != -1:
             os.close(write_fd)

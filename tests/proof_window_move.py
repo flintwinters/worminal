@@ -27,10 +27,10 @@ def geometry(env, window):
                 command(env, "xdotool", "getwindowgeometry", "--shell", window).splitlines())
 
 
-def check_drag(env, undecorated, control=False):
+def check_drag(env, undecorated, control=False, frontend="worminal"):
     title = "Offscreen move proof"
     args = (["xmessage", "-geometry", "640x320", "-title", title, "Control window"] if control else
-            [str(ROOT / "worminal"), "-T", title, "-e", "/bin/cat"])
+            [str(ROOT / frontend), "-T", title, "-e", "/bin/cat"])
     terminal = subprocess.Popen(args, env=env)
     try:
         window = command(env, "xdotool", "search", "--sync", "--onlyvisible", "--name", f"^{title}$")
@@ -61,7 +61,7 @@ def check_drag(env, undecorated, control=False):
             command(env, "xdotool", "mouseup", "1", "keyup", "Alt_L")
         time.sleep(.5)
         after = geometry(env, window)
-        console.print(f"control={control} undecorated={undecorated}: "
+        console.print(f"frontend={frontend} control={control} undecorated={undecorated}: "
                       f"before={origin['Y']} during={during['Y']} after={after['Y']}")
         assert int(during["Y"]) < 0, "Drag did not move the window above the screen"
         assert after["Y"] == during["Y"], "Window snapped back after releasing Alt-drag"
@@ -86,6 +86,12 @@ class MovementTest(unittest.TestCase):
 
     def test_undecorated_control(self):
         check_drag(self.env, True, control=True)
+
+    def test_decorated_x11(self):
+        check_drag(self.env, False, frontend="worminal-x11")
+
+    def test_undecorated_x11(self):
+        check_drag(self.env, True, frontend="worminal-x11")
 
 
 def main():
