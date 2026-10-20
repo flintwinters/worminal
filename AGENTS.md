@@ -7,10 +7,11 @@ The app is a GTK terminal/browser built on st 0.9.3. A per-user `worminald` serv
 terminal state, and bounded main-screen scrollback; views connect locally or through `--master user@host` over SSH.
 Main-screen width changes reflow soft-wrapped text. A tab has one live painting view and can run with no windows. Each
 window maps early while its connection worker sends the initial launch request; font loading and shell startup overlap.
-`manage.py build` compiles Alacritty
-colors, font family, size, spacing, and scrollback into a generated C header. `src/terminal` owns terminal state,
+`manage.py build` compiles Alacritty colors, font family, size, spacing, and scrollback into a generated C header.
+`src/terminal` owns terminal state,
 `src/gtk` paints release views, `src/x11` preserves the original renderer, and `src/workspace` connects the service.
-GTK redraws changed rows and cursor damage, including overlapping glyph ink; compact rows paint backgrounds before glyphs.
+GTK redraws changed rows and cursor damage, including overlapping glyph ink;
+compact rows paint backgrounds before glyphs.
 Unchanged frames do not repaint or consume the immediate paint allowance for the first changed keyboard response.
 `tools/build.py` owns builds and installation; `manage.py` owns
 checks and latency measurements on private displays.
@@ -27,6 +28,7 @@ remote machines share saved URLs only. `worminald` uses the v2 endpoint; browser
 Its shell command converts the calling PTY's ordered tab into a browser. GTK and WebKit never enter the service.
 Launchers link GLib only and forward to an existing owner before loading the GTK/Pango frontend module;
 the WebKit module loads when a browser view is first claimed.
+Hidden terminal views defer font layouts, input methods, and blink timers until mapped or used.
 `manage.py check-preview*` and `preview-perf` validate GTK; `build-preview` retains compatibility binary names.
 
 Current jobs: reduce GTK launch/memory overhead and review remaining compatibility gaps.

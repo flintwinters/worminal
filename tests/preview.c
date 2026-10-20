@@ -160,6 +160,9 @@ check_initial_dimensions(void)
 	Page page = {.app = &app};
 	Terminal *t = terminal_new(&page);
 	g_object_ref_sink(page.widget);
+	g_assert_null(t->layout);
+	g_assert_null(t->im);
+	g_assert_cmpuint(t->timer, ==, 0);
 	/* Font setup before realization must not send GTK's placeholder 1x1
 	 * allocation to a running shell as its initial terminal geometry. */
 	terminal_zoom(t);
@@ -168,7 +171,13 @@ check_initial_dimensions(void)
 	g_assert_cmpint(cols, ==, app.cols);
 	g_assert_cmpint(rows, ==, app.rows);
 	terminal_free(t);
-	pango_font_description_free(app.cached_font);
+	g_clear_pointer(&app.cached_font, pango_font_description_free);
+	gtk_widget_destroy(page.widget);
+	g_object_unref(page.widget);
+	/* A catalog tab may disappear before it is ever selected. */
+	t = terminal_new(&page);
+	g_object_ref_sink(page.widget);
+	terminal_free(t);
 	gtk_widget_destroy(page.widget);
 	g_object_unref(page.widget);
 }
