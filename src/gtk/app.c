@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include <glib-unix.h>
 #include "preview.h"
@@ -16,6 +17,7 @@
 
 static int windows;
 static GList *apps;
+enum { OUTPUT_LIMIT = 1024 * 1024 };
 static void connect_async(App *);
 static void disconnected(App *);
 static gboolean shortcut(GtkWidget *, GdkEventKey *, App *);
@@ -81,7 +83,7 @@ app_send(App *app, uint32_t type, uint32_t tab, const void *bytes, size_t length
 		app->output_queue.len -= app->sent;
 		app->sent = 0;
 	}
-	if (length + 16 > 1024u * 1024u - app->output_queue.len) {
+	if (length + 16 > OUTPUT_LIMIT - app->output_queue.len) {
 		disconnected(app);
 		app_status(app, "Input queue full. Some input was not delivered; reconnecting.");
 		return;
@@ -427,10 +429,9 @@ received(int fd, GIOCondition condition, gpointer data)
 	return result;
 }
 
-void
-app_terminal(App *app, gboolean initial)
+static WireBuffer
+terminal_request(App *app, gboolean initial)
 {
-	if (app->fd < 0) return;
 	WireBuffer b = {0};
 	wire_put_u32(&b, app->cols); wire_put_u32(&b, app->rows); wire_put_u32(&b, app->allowalt);
 	uint32_t argc = initial && app->command ? g_strv_length(app->command) : 0;
@@ -444,6 +445,22 @@ app_terminal(App *app, gboolean initial)
 	wire_put_string(&b, initial ? app->output : NULL); wire_put_string(&b, "");
 	for (uint32_t i = 0; i < argc; i++) wire_put_string(&b, app->command[i]);
 	for (uint32_t i = 0; i < envc; i++) wire_put_string(&b, app->environment[i]);
+	return b;
+}
+
+static WireBuffer
+browser_request(const char *url)
+{
+	WireBuffer b = {0};
+	wire_put_string(&b, url && *url ? url : "about:blank");
+	return b;
+}
+
+void
+app_terminal(App *app, gboolean initial)
+{
+	if (app->fd < 0) return;
+	WireBuffer b = terminal_request(app, initial);
 	app->pending++;
 	app_send(app, initial ? WIRE_HELLO : WIRE_NEW, 0, b.data, b.len);
 	wire_buffer_free(&b);
@@ -453,8 +470,7 @@ void
 app_browser(App *app, const char *url)
 {
 	if (app->fd < 0) return;
-	WireBuffer b = {0};
-	wire_put_string(&b, url && *url ? url : "about:blank");
+	WireBuffer b = browser_request(url);
 	app->pending++;
 	app_send(app, WIRE_BROWSER, 0, b.data, b.len);
 	wire_buffer_free(&b);
@@ -541,12 +557,39 @@ disconnected(App *app)
 	if (!app->closing && !app->reconnect) app->reconnect = g_timeout_add(1000, retry, app);
 }
 
+typedef struct {
+	App *app;
+	WireBuffer payload;
+	uint32_t type;
+} ConnectionRequest;
+
+static void
+connection_request_free(gpointer data)
+{
+	ConnectionRequest *request = data;
+	wire_buffer_free(&request->payload);
+	g_free(request);
+}
+
 static void
 connect_worker(GTask *task, gpointer source, gpointer data, GCancellable *cancel)
 {
 	(void)source; (void)cancel;
-	App *app = data;
-	g_task_return_int(task, workspace_client_open_process(app->master, &app->connecting_child));
+	ConnectionRequest *request = data;
+	App *app = request->app;
+	int fd = workspace_client_open_process(app->master, &app->connecting_child);
+	if (fd >= 0) {
+		/* Launch the child while GTK maps the window. Only immutable wire data
+		 * crosses this worker; all widgets and response parsing stay on GTK. */
+		struct timeval timeout = {.tv_sec = 3};
+		if (request->payload.len + 16 > OUTPUT_LIMIT ||
+		    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0 ||
+		    !wire_write(fd, request->type, 0, request->payload.data, request->payload.len)) {
+			close(fd);
+			fd = -1;
+		} else app_startuptime("launch-sent");
+	}
+	g_task_return_int(task, fd);
 }
 
 static void
@@ -561,6 +604,7 @@ connected(GObject *source, GAsyncResult *result, gpointer data)
 {
 	(void)source;
 	App *app = data;
+	ConnectionRequest *request = g_task_get_task_data(G_TASK(result));
 	int fd = g_task_propagate_int(G_TASK(result), NULL);
 	app_startuptime("workspace");
 	if (app->connecting_child) g_child_watch_add(app->connecting_child, bridge_exited, NULL);
@@ -574,11 +618,7 @@ connected(GObject *source, GAsyncResult *result, gpointer data)
 		/* Output floods must yield to GTK input and frame-clock redraw sources. */
 		app->reader = g_unix_fd_add_full(G_PRIORITY_DEFAULT_IDLE, fd,
 		    G_IO_IN | G_IO_HUP | G_IO_ERR, received, app, NULL);
-		if (app->attached || app->initial_attach) {
-			app_send(app, WIRE_ATTACH, 0, NULL, 0);
-			app->attached = FALSE;
-		} else if (app->initial_url) app_browser(app, app->initial_url);
-		else app_terminal(app, TRUE);
+		if (request->type == WIRE_ATTACH) app->attached = FALSE;
 	}
 	app_unref(app);
 }
@@ -587,8 +627,16 @@ static void
 connect_async(App *app)
 {
 	app->refs++;
+	ConnectionRequest *request = g_new0(ConnectionRequest, 1);
+	request->app = app;
+	if (app->attached || app->initial_attach) request->type = WIRE_ATTACH;
+	else {
+		app->pending++;
+		request->type = app->initial_url ? WIRE_BROWSER : WIRE_HELLO;
+		request->payload = app->initial_url ? browser_request(app->initial_url) : terminal_request(app, TRUE);
+	}
 	GTask *task = g_task_new(NULL, NULL, connected, app);
-	g_task_set_task_data(task, app, NULL);
+	g_task_set_task_data(task, request, connection_request_free);
 	g_task_run_in_thread(task, connect_worker);
 	g_object_unref(task);
 }
@@ -669,9 +717,9 @@ show_app(App *app)
 	/* GtkNotebook maps the new child in its default switch handler. Focus it
 	 * afterwards so a hidden WebKit child cannot retain keyboard ownership. */
 	g_signal_connect_after(app->notebook, "switch-page", G_CALLBACK(switched), app);
+	connect_async(app);
 	gtk_widget_show_all(app->window);
 	app_startuptime("map-request");
-	connect_async(app);
 }
 
 void
