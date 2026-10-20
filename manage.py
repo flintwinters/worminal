@@ -263,6 +263,14 @@ def latency(forwarded: bool = typer.Option(
     raise typer.Exit(run([sys.executable, "tests/latency.py", *(["--forwarded"] if forwarded else [])]))
 
 
+@app.command("latency-visible")
+def latency_visible(trials: int = typer.Option(10, min=1), keys: int = typer.Option(50, min=1)):
+    """Measure real key events to visible echo and fresh/additional window presentation."""
+    native_build.build_targets("worminal", "worminald")
+    raise typer.Exit(run([sys.executable, "tests/visible_latency.py", "--trials", str(trials),
+                          "--keys", str(keys)]))
+
+
 @app.command("latency-shell")
 def latency_shell():
     """Measure when the interactive shell receives early input."""

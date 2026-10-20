@@ -12,6 +12,8 @@ colors, font family, size, spacing, and scrollback into a generated C header. `s
 GTK redraws changed rows and cursor damage, including overlapping glyph ink; compact rows paint backgrounds before glyphs.
 `tools/build.py` owns builds and installation; `manage.py` owns
 checks and latency measurements on private displays.
+`manage.py latency-visible` measures real key events to visible echo and fresh/additional window presentation
+using private Xvfb pixels; it excludes desktop compositing and physical display latency.
 The upstream source and license remain in the repository. Keep machine destinations in environment configuration
 and use anonymous commit identities. Run `manage.py privacy-setup` in fresh clones; privacy hooks and CI guard
 staged content and history.
