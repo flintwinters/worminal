@@ -585,6 +585,7 @@ terminal_new(Page *page)
 	g_signal_connect(page->widget, "scroll-event", G_CALLBACK(wheel), t);
 	t->timer = g_timeout_add(800, blink, t);
 	terminal_zoom(t);
+	app_startuptime("font");
 	return t;
 }
 

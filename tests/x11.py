@@ -10,6 +10,24 @@ import time
 import uuid
 
 
+def close_window(env, title, timeout=5):
+    """Close one shared-owner window without XKillClient terminating all its peers."""
+    from Xlib import X, display, protocol
+
+    window = subprocess.check_output(
+        ["xdotool", "search", "--onlyvisible", "--name", f"^{title}$"],
+        env=env, text=True, timeout=timeout).splitlines()[0]
+    connection = display.Display(env["DISPLAY"])
+    try:
+        client = connection.create_resource_object("window", int(window))
+        client.send_event(protocol.event.ClientMessage(window=client,
+            client_type=connection.intern_atom("WM_PROTOCOLS"),
+            data=(32, [connection.intern_atom("WM_DELETE_WINDOW"), X.CurrentTime, 0, 0, 0])))
+        connection.sync()
+    finally:
+        connection.close()
+
+
 @contextmanager
 def isolated_display():
     for tool in ("Xvfb", "xdotool"):

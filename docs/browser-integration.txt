@@ -160,9 +160,23 @@ for terminal-only/mixed preview. Frontend/helpers RSS measured 119.1/401.5 MiB
 (PSS 61.6/197.0 MiB); service/shell stayed 3.4-3.6 MiB. These were warm-service
 trials alongside preview checks; they are not compositor presentation timings.
 
-The detailed machine-local results are .checks/preview-performance.json. The
-preview's startup and memory overhead is substantial; retaining the original
-launcher is the current rollout decision, pending review and optimization.
+Those measurements predate the GTK promotion; the canonical launcher now uses
+GTK, with the original X11 frontend retained as an explicit rollback binary.
+
+WebKit now loads from lib/worminal/browser.so only when a browser view is claimed.
+Terminal-only launches and forwarded window requests do not link WebKit. The
+module stays resident after its first use so live browser callbacks remain valid.
+Installation replaces binaries and the module atomically, preserving mapped old
+files in running processes. The source-tree module lives in build/browser.so.
+
+On a later private-Xvfb comparison (20 trials per mode, warm filesystem caches),
+fresh-frontend first-key echo median/p95 changed from 161.4/180.5 ms to
+128.2/150.3 ms. Additional-window median/p95 changed from 56.2/63.1 ms to
+31.3/44.2 ms. These are process-to-PTY timings, not compositor presentation
+timings or a guarantee for other machines. GTK initialization and initial widget
+and font setup remain the largest fresh-frontend costs. Run manage.py latency
+and manage.py latency --forwarded separately, without concurrent test workloads;
+their phase samples are saved under .checks/latency-*.json.
 
 Limits still requiring review
 -----------------------------

@@ -7,15 +7,16 @@ The optional shell mode also measures interactive shell startup. Neither mode
 includes Xvfb startup or uses the host display.
 """
 
+import argparse
+import json
 import os
 from pathlib import Path
 import select
 import statistics
 import subprocess
-import sys
 import time
 
-from x11 import isolated_display
+from x11 import close_window, isolated_display
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -23,6 +24,7 @@ TRIALS = 20
 TIMEOUT = 5
 PHASES = ("main", "workspace", "display", "map-request", "fontconfig", "font",
           "map-observed", "resize", "key", "echo")
+GTK_PHASES = ("main", "broker", "gtk", "map-request", "workspace", "font", "echo")
 SHELL_MARKER = b"__WORMINAL_SHELL_READY__"
 
 
@@ -78,6 +80,11 @@ def measure_one(env, index, shell=False):
                 if not data:
                     break
     finally:
+        if terminal is not None and env.get("WORMINAL_LATENCY_FORWARDED"):
+            try:
+                close_window(env, title, TIMEOUT)
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, IndexError):
+                pass  # A failed launch may never have mapped its window.
         if terminal is not None:
             if terminal.poll() is None:
                 terminal.terminate()
@@ -85,7 +92,13 @@ def measure_one(env, index, shell=False):
                 _, trace = terminal.communicate(timeout=2)
             except subprocess.TimeoutExpired:
                 terminal.kill()
-                _, trace = terminal.communicate()
+                if env.get("WORMINAL_LATENCY_FORWARDED"):
+                    # The owner may still hold the launcher's stdout descriptor.
+                    terminal.stdout.close()
+                    terminal.stderr.close()
+                    terminal.wait(timeout=2)
+                else:
+                    _, trace = terminal.communicate(timeout=2)
         if injector is not None:
             if injector.poll() is None:
                 injector.terminate()
@@ -111,7 +124,8 @@ def measure_one(env, index, shell=False):
         parts = line.split()
         if len(parts) == 3 and parts[0] == b"worminal-timing":
             points[parts[1].decode()] = int(parts[2])
-    phases = PHASES if env.get("WORMINAL_FRONTEND", "worminal") == "worminal-x11" else ("echo",)
+    phases = (PHASES if Path(env.get("WORMINAL_FRONTEND", "worminal")).name == "worminal-x11" else
+              GTK_PHASES if "main" in points and not env.get("WORMINAL_LATENCY_FORWARDED") else ("echo",))
     missing = (set(phases) | {"captured"}) - points.keys()
     if missing:
         raise RuntimeError(f"Trial {index}: missing timing phases {sorted(missing)}: {trace.decode()}")
@@ -120,11 +134,40 @@ def measure_one(env, index, shell=False):
 
 
 def main():
-    shell = sys.argv[1:] == ["--shell"]
-    if sys.argv[1:] and not shell:
-        raise SystemExit("Usage: latency.py [--shell]")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--shell", action="store_true")
+    parser.add_argument("--forwarded", action="store_true")
+    options = parser.parse_args()
+    shell = options.shell
     with isolated_display() as env:
-        samples = [measure_one(env, index, shell=shell) for index in range(TRIALS)]
+        owner = None
+        checks = ROOT / ".checks"
+        checks.mkdir(exist_ok=True)
+        with (checks / "latency-owner.log").open("wb") as log:
+            try:
+                if options.forwarded:
+                    if env.get("WORMINAL_FRONTEND", "worminal") == "worminal-x11":
+                        raise SystemExit("Forwarded launches require the GTK frontend")
+                    title = f"Worminal latency owner {os.getpid()}"
+                    owner = subprocess.Popen(
+                        [str(ROOT / env.get("WORMINAL_FRONTEND", "worminal")), "-T", title, "-e", "/bin/cat"],
+                        env=env, stdout=log, stderr=log)
+                    subprocess.run(["xdotool", "search", "--sync", "--onlyvisible", "--name", f"^{title}$"],
+                                   env=env, check=True, stdout=subprocess.DEVNULL, timeout=TIMEOUT)
+                    env["WORMINAL_LATENCY_FORWARDED"] = "1"
+                samples = [measure_one(env, index, shell=shell) for index in range(TRIALS)]
+            finally:
+                if owner:
+                    owner.terminate()
+                    try:
+                        owner.communicate(timeout=TIMEOUT)
+                    except subprocess.TimeoutExpired:
+                        owner.kill()
+                        owner.communicate(timeout=TIMEOUT)
+    mode = "forwarded" if options.forwarded else "fresh-frontend"
+    path = checks / f"latency-{mode}{'-shell' if shell else ''}.json"
+    path.write_text(json.dumps({"mode": mode, "frontend": env.get("WORMINAL_FRONTEND", "worminal"),
+                                "trials": TRIALS, "samples_ms": samples}, indent=2) + "\n")
     for phase, label in (("captured", "key queued by X"),
                          ("echo", "shell input read" if shell else "first key echo")):
         ordered = sorted(sample[phase] for sample in samples)
@@ -132,10 +175,11 @@ def main():
         print(f"Launch to {label}: median {statistics.median(ordered):.1f} ms, "
               f"p95 {p95:.1f} ms (n={TRIALS}, private Xvfb)")
     previous = "start"
-    for phase in PHASES if "main" in samples[0] else ():
+    for phase in PHASES if "display" in samples[0] else GTK_PHASES if "main" in samples[0] else ():
         duration = statistics.median(sample[phase] - sample.get(previous, 0) for sample in samples)
         print(f"  {previous} -> {phase}: {duration:.1f} ms")
         previous = phase
+    print(f"Measurements: {path.relative_to(ROOT)} ({mode})")
 
 
 if __name__ == "__main__":

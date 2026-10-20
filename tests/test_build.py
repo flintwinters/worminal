@@ -77,15 +77,28 @@ class BuildTests(unittest.TestCase):
             self.assertEqual(invoked.call_count, 3)
 
     def test_staged_install_uninstall_and_modes(self):
-        for source in ("worminal", "worminald", "worminal-x11", "worminald-x11", "docs/man/worminal.1",
+        for source in ("worminal", "worminald", "worminal-x11", "worminald-x11", "build/browser.so",
+                       "docs/man/worminal.1",
                        "assets/worminal.desktop", "assets/worminal.svg"):
             path = self.root / source
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("VERSION\n")
         stage = self.root / "stage"
+        installed = stage / "opt/worminal"
+        (installed / "bin").mkdir(parents=True)
+        previous = stage / "previous-client"
+        previous.write_text("previous client")
+        (installed / "bin/worminal").symlink_to(previous)
+        module = installed / "lib/worminal/browser.so"
+        module.parent.mkdir(parents=True)
+        module.write_text("running module")
         with patch.dict(os.environ, {"DESTDIR": str(stage), "MANPREFIX": "/manuals"}), \
                 patch.object(build, "build_targets") as compile_build:
-            build.install("/opt/worminal")
+            with module.open() as running_module:
+                build.install("/opt/worminal")
+                self.assertEqual(running_module.read(), "running module")
+            self.assertFalse((installed / "bin/worminal").is_symlink())
+            self.assertEqual(previous.read_text(), "previous client")
             compile_build.assert_called_once_with("worminal-x11", "worminald-x11")
             files = build.installation_files("/opt/worminal")
             for _, destination, mode in files:
