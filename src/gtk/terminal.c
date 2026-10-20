@@ -143,8 +143,12 @@ terminal_zoom(Terminal *t)
 	if (t->font) pango_font_description_free(t->font);
 	t->font = terminal_font(t->page->app, t->layout, &t->cw, &t->ch, &t->height, &t->ascent);
 	GtkAllocation allocation;
-	gtk_widget_get_allocation(t->page->widget, &allocation);
-	resize(t->page->widget, &allocation, t);
+	/* A new widget still has GTK's placeholder 1x1 allocation. Keep the
+	 * requested PTY geometry until GTK has actually laid the terminal out. */
+	if (gtk_widget_get_realized(t->page->widget)) {
+		gtk_widget_get_allocation(t->page->widget, &allocation);
+		resize(t->page->widget, &allocation, t);
+	}
 	gtk_widget_queue_draw(t->page->widget);
 }
 
@@ -605,6 +609,8 @@ terminal_new(Page *page)
 {
 	Terminal *t = g_new0(Terminal, 1);
 	t->page = page;
+	t->cols = page->app->cols;
+	t->rows = page->app->rows;
 	t->numlock = TRUE;
 	t->frame = (SessionFrame){.cols = 80, .rows = 24};
 	t->session = tsessionnew(80, 24);
