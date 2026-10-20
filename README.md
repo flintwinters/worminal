@@ -228,6 +228,7 @@ python3 manage.py lint            # Text limits and Clang static analysis
 python3 manage.py latency         # Launch to first echoed input, using /bin/cat
 python3 manage.py latency --forwarded  # Another window in an existing GTK owner
 python3 manage.py latency-shell   # Launch to input received by your interactive shell
+python3 manage.py latency-visible # Keypress to visible echo; fresh and additional windows
 ```
 
 Display checks and launch benchmarks use a private Xvfb display, keeping test windows and keystrokes off your
@@ -236,6 +237,16 @@ The forwarded-window benchmark also requires python-xlib. Latency samples and GT
 under `.checks/latency-*.json` for comparisons.
 Latency reports median and 95th percentile across 20 runs, excluding Xvfb startup; the `/bin/cat` probe also
 excludes shell startup. Windows map before fonts load so X can queue early keystrokes.
+
+`latency-visible --trials 10 --keys 50` measures real XTest key events through the PTY and GTK renderer
+until changed glyph pixels are readable from the X server. A raw-mode echo fixture hides the cursor to
+avoid blink false positives. Each trial measures both a fresh frontend and another window in its running
+owner, reporting launch-to-map and launch-to-visible-fixture readiness separately. Filesystem caches and
+the private daemon remain warm after the first trial starts it; this is not a cold-boot benchmark or
+interactive-shell startup measurement.
+Median, p95, maximum, and raw samples are saved in `.checks/visible-latency.json`. Pixel polling sleeps
+1 ms between observations and adds readback overhead. Xvfb excludes physical keyboard latency, desktop
+compositing, and monitor scanout; use the same host, theme, and load for comparisons.
 
 Lint requires `clang-tidy`. It enforces 120-character lines and a 1,000-line file limit, with existing larger
 files capped at their recorded lengths until split.
