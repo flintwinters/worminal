@@ -21,8 +21,12 @@ struct Terminal {
 	int cw, ch, height, ascent, cols, rows;
 	int button, last_x, last_y;
 	gboolean selecting, blink, numlock;
+	gboolean full_damage;
+	guint8 damaged_rows[200];
 	guint timer;
 };
+
+static void damage_row(Terminal *, int);
 
 static void
 input(Terminal *t, const char *bytes, size_t length)
@@ -31,7 +35,10 @@ input(Terminal *t, const char *bytes, size_t length)
 		return;
 	app_focus(t->page);
 	tsessionuse(t->session);
+	tsessioncleandirty(t->session);
 	selclear();
+	for (int row = 0; row < t->frame.rows; row++)
+		if (tsessionrowdirty(t->session, row)) damage_row(t, row);
 	app_send(t->page->app, WIRE_INPUT, t->page->id, bytes, length);
 }
 
@@ -222,6 +229,12 @@ text(Terminal *t, cairo_t *cr, const char *value, int x, int y, ushort mode)
 	pango_cairo_show_layout(cr, layout);
 }
 
+static int
+glyph_overlap(Terminal *t)
+{
+	return t->height + abs(theme_glyph_offset_y);
+}
+
 static gboolean
 draw_terminal(GtkWidget *widget, cairo_t *cr, Terminal *t)
 {
@@ -231,8 +244,15 @@ draw_terminal(GtkWidget *widget, cairo_t *cr, Terminal *t)
 	gdk_cairo_set_source_rgba(cr, &base);
 	cairo_paint(cr);
 	SessionFrame f = t->frame;
+	double clip_x1, clip_y1, clip_x2, clip_y2;
+	cairo_clip_extents(cr, &clip_x1, &clip_y1, &clip_x2, &clip_y2);
+	/* Compact glyphs can extend beyond their row. Include every source row
+	 * whose background or glyph ink can intersect the damaged area. */
+	int overlap = glyph_overlap(t) + t->ch;
+	int first = MAX(0, (int)floor((clip_y1 - 2 - overlap) / t->ch));
+	int end = MIN(f.rows, (int)ceil((clip_y2 - 2 + overlap) / t->ch));
 	for (int pass = 0; pass < 2; pass++)
-		for (int y = 0; y < f.rows; y++) {
+		for (int y = first; y < end; y++) {
 			Line line = tsessionviewline(t->session, y);
 			for (int x = 0; x < f.cols; x++) {
 				Glyph g = line[x];
@@ -290,6 +310,16 @@ draw_terminal(GtkWidget *widget, cairo_t *cr, Terminal *t)
 	GdkRectangle spot = {2 + f.cursor_x * t->cw, 2 + f.cursor_y * t->ch, t->cw, t->ch};
 	gtk_im_context_set_cursor_location(t->im, &spot);
 	return FALSE;
+}
+
+static void
+damage_row(Terminal *t, int row)
+{
+	/* Include ink spilling into adjacent rows, then let draw_terminal restore
+	 * their backgrounds and overlapping glyphs in the usual two passes. */
+	int overlap = glyph_overlap(t);
+	gtk_widget_queue_draw_area(t->page->widget, 0, 2 + row * t->ch - overlap,
+	    gtk_widget_get_allocated_width(t->page->widget), t->ch + 2 * overlap);
 }
 
 static gboolean
@@ -608,7 +638,11 @@ terminal_packet(Terminal *t, WirePacket *p)
 		for (size_t i = 0; i < G_N_ELEMENTS(v); i++)
 			if (!wire_get_u32(p, &v[i])) return;
 		if (v[0] < 1 || v[0] > 400 || v[1] < 1 || v[1] > 200 || v[2] >= v[0] || v[3] >= v[1]) return;
+		if (v[0] != (uint32_t)t->frame.cols || v[1] != (uint32_t)t->frame.rows)
+			t->full_damage = TRUE;
+		t->damaged_rows[t->frame.cursor_y] = TRUE;
 		t->frame = (SessionFrame){v[0], v[1], v[2], v[3], v[4], v[5]};
+		t->damaged_rows[t->frame.cursor_y] = TRUE;
 		tsessionimportframe(t->session, &t->frame);
 		t->page->live = TRUE;
 	} else if (p->type == WIRE_ROW) {
@@ -623,8 +657,14 @@ terminal_packet(Terminal *t, WirePacket *p)
 			wire_get_u32(p, &cells[x].fg); wire_get_u32(p, &cells[x].bg);
 		}
 		tsessionimportrow(t->session, row, cells, t->frame.cols);
+		t->damaged_rows[row] = TRUE;
 	} else if (p->type == WIRE_FRAME_FINISH) {
-		gtk_widget_queue_draw(t->page->widget);
+		/* Publish damage only when the service's complete frame has arrived. */
+		if (t->full_damage) gtk_widget_queue_draw(t->page->widget);
+		else for (int row = 0; row < t->frame.rows; row++)
+			if (t->damaged_rows[row]) damage_row(t, row);
+		t->full_damage = FALSE;
+		memset(t->damaged_rows, 0, sizeof(t->damaged_rows));
 	}
 }
 

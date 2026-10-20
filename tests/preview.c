@@ -52,14 +52,58 @@ screen_has(Terminal *t, const char *wanted)
 	return found;
 }
 
-typedef struct { Terminal *terminal; const char *wanted; gboolean painted; } PaintProbe;
+typedef struct { Terminal *terminal; const char *wanted; gboolean painted, partial; } PaintProbe;
 
 static gboolean
 paint_probe(GtkWidget *widget, cairo_t *cr, PaintProbe *probe)
 {
-	(void)widget; (void)cr;
-	if (probe->wanted && screen_has(probe->terminal, probe->wanted)) probe->painted = TRUE;
+	if (probe->wanted && screen_has(probe->terminal, probe->wanted)) {
+		double x1, y1, x2, y2;
+		cairo_clip_extents(cr, &x1, &y1, &x2, &y2);
+		probe->partial |= y2 - y1 < gtk_widget_get_allocated_height(widget);
+		probe->painted = TRUE;
+	}
 	return FALSE;
+}
+
+static void
+check_clipped_paint(Terminal *t)
+{
+	int width = gtk_widget_get_allocated_width(t->page->widget);
+	int height = gtk_widget_get_allocated_height(t->page->widget);
+	cairo_surface_t *full = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+	cairo_surface_t *partial = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+	cairo_t *cr = cairo_create(full);
+	draw_terminal(t->page->widget, cr, t);
+	cairo_destroy(cr);
+	cr = cairo_create(partial);
+	/* Non-cell-aligned clips exercise glyphs that spill across compact rows. */
+	for (int y = 0; y < height; y += 7) {
+		cairo_save(cr);
+		cairo_rectangle(cr, 0, y, width, 7);
+		cairo_clip(cr);
+		draw_terminal(t->page->widget, cr, t);
+		cairo_restore(cr);
+	}
+	cairo_surface_flush(full);
+	cairo_surface_flush(partial);
+	g_assert_cmpmem(cairo_image_surface_get_data(full), cairo_image_surface_get_stride(full) * height,
+	    cairo_image_surface_get_data(partial), cairo_image_surface_get_stride(partial) * height);
+	for (int clipped = 0; clipped < 2; clipped++) {
+		cairo_save(cr);
+		if (clipped) {
+			cairo_rectangle(cr, 0, height / 2, width, t->ch + 2 * glyph_overlap(t));
+			cairo_clip(cr);
+		}
+		gint64 start = g_get_monotonic_time();
+		for (int i = 0; i < 30; i++) draw_terminal(t->page->widget, cr, t);
+		g_print("Dense GTK %s paint: %.2f ms mean\n", clipped ? "row" : "full",
+		    (g_get_monotonic_time() - start) / 30000.0);
+		cairo_restore(cr);
+	}
+	cairo_destroy(cr);
+	cairo_surface_destroy(full);
+	cairo_surface_destroy(partial);
 }
 
 static void
@@ -68,8 +112,17 @@ input_paint_latency(Terminal *t)
 	PaintProbe probe = {.terminal = t};
 	gulong handler = g_signal_connect_after(t->page->widget, "draw", G_CALLBACK(paint_probe), &probe);
 	GString *wanted = g_string_new("KEYPAINT");
+	GString *dense = g_string_new("\033[2J\033[H");
+	for (int y = 0; y < t->frame.rows - 2; y++) {
+		g_string_append(dense, "\033[1;3;4m");
+		for (int x = 0; x < t->frame.cols - 2; x++) g_string_append_c(dense, 'A' + x % 26);
+		g_string_append(dense, "\033[0m\r\n");
+	}
+	input(t, dense->str, dense->len);
+	g_string_free(dense, TRUE);
 	input(t, "\r\nKEYPAINT", 10);
 	WAIT(screen_has(t, wanted->str));
+	check_clipped_paint(t);
 	gint64 elapsed = 0;
 	for (int i = 0; i < 20; i++) {
 		g_string_append_c(wanted, 'a' + i);
@@ -81,6 +134,7 @@ input_paint_latency(Terminal *t)
 		elapsed += g_get_monotonic_time() - start;
 	}
 	g_print("Input to GTK paint: %.2f ms mean (20 echoes)\n", elapsed / 20000.0);
+	g_assert_true(probe.partial);
 	g_signal_handler_disconnect(t->page->widget, handler);
 	g_string_free(wanted, TRUE);
 }

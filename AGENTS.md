@@ -9,7 +9,8 @@ Main-screen width changes reflow soft-wrapped text. A tab has one live painting 
 window maps early, then loads fonts while the service starts its shell. `manage.py build` compiles Alacritty
 colors, font family, size, spacing, and scrollback into a generated C header. `src/terminal` owns terminal state,
 `src/gtk` paints release views, `src/x11` preserves the original renderer, and `src/workspace` connects the service.
-Compact rows repaint backgrounds before glyphs. `tools/build.py` owns builds and installation; `manage.py` owns
+GTK redraws changed rows and cursor damage, including overlapping glyph ink; compact rows paint backgrounds before glyphs.
+`tools/build.py` owns builds and installation; `manage.py` owns
 checks and latency measurements on private displays.
 The upstream source and license remain in the repository. Keep machine destinations in environment configuration
 and use anonymous commit identities. Run `manage.py privacy-setup` in fresh clones; privacy hooks and CI guard
