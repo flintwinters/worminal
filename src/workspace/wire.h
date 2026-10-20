@@ -8,10 +8,11 @@
 #ifdef WORMINAL_PREVIEW_PROTOCOL
 #define WIRE_VERSION 2
 #define WORKSPACE_ENDPOINT "worminal-workspace-v2"
-#define WORKSPACE_DAEMON "worminald-preview"
 #else
 #define WIRE_VERSION 1
 #define WORKSPACE_ENDPOINT "worminal-workspace"
+#endif
+#ifndef WORKSPACE_DAEMON
 #define WORKSPACE_DAEMON "worminald"
 #endif
 #define WIRE_MAX_BYTES (8u * 1024u * 1024u)

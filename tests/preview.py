@@ -81,7 +81,7 @@ def profile(env):
 
 @contextmanager
 def service(env):
-    daemon = subprocess.Popen([str(ROOT / "worminald-preview"), "--serve"], env=env,
+    daemon = subprocess.Popen([str(ROOT / "worminald"), "--serve"], env=env,
                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     try:
         address = f"\0worminal-workspace-v2-{os.getuid()}-{env['WORMINAL_SHARED_SOCKET_SCOPE']}"
@@ -97,7 +97,7 @@ def service(env):
                     time.sleep(.01)
         yield
     finally:
-        subprocess.run([str(ROOT / "worminald-preview"), "--stop"], env=env,
+        subprocess.run([str(ROOT / "worminald"), "--stop"], env=env,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
         try:
             _, errors = daemon.communicate(timeout=3)
@@ -169,7 +169,7 @@ def qtile_display():
 
 def broker_check(env, url, log):
     """Independent launches must share the GTK owner and the live DOM, not reload a URL."""
-    executable = str(ROOT / "worminal-preview")
+    executable = str(ROOT / "worminal")
     title = f"Broker terminal {os.getpid()}"
     first = subprocess.Popen([executable, "-T", title, "-o", "-", "-e", "/bin/sh", "-c",
                               "stty raw -echo; printf BROKER_READY; exec cat"],
@@ -267,7 +267,7 @@ def main():
             if remote:
                 trial_env["PATH"] = str(ROOT / "tests/fixtures/preview-master") + os.pathsep + env["PATH"]
                 trial_env["WORMINAL_PREVIEW_TEST_MASTER"] = "preview-test"
-                trial_env["WORMINAL_TEST_DAEMON"] = str(ROOT / "worminald-preview")
+                trial_env["WORMINAL_TEST_DAEMON"] = str(ROOT / "worminald")
             log_path = ROOT / f".checks/preview-{backend}-{'remote' if remote else 'local'}.log"
             with service(trial_env), log_path.open("wb") as log:
                 command = [str(ROOT / "build/preview_test")]

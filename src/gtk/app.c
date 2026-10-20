@@ -655,7 +655,7 @@ app_new_window(App *previous)
 static void
 usage(void)
 {
-	g_printerr("usage: worminal-preview [--master user@host] [--surf URL | --attach]\n"
+	g_printerr("usage: worminal [--master user@host] [--surf URL | --attach]\n"
 	           "       [-aiv] [-c class] [-n name] [-f font] [-g COLSxROWS] [-T title]\n"
 	           "       [-o file] [-l line] [-e command ...]\n");
 }
@@ -714,14 +714,14 @@ int
 main(int argc, char **argv)
 {
 	setlocale(LC_CTYPE, "");
-	if (argc == 2 && !strcmp(argv[1], "-v")) { g_print("worminal-preview " VERSION "\n"); return 0; }
+	if (argc == 2 && !strcmp(argv[1], "-v")) { g_print("worminal " VERSION "\n"); return 0; }
 	int listener = -1;
 	int forwarded = windows_forward(argc, argv, &listener);
 	if (forwarded) {
-		if (forwarded < 0) g_printerr("Could not open a window in the local preview frontend.\n");
+		if (forwarded < 0) g_printerr("Could not open a window in the local GTK frontend.\n");
 		return forwarded > 0 ? 0 : 1;
 	}
-	g_set_prgname("worminal-preview");
+	g_set_prgname("worminal");
 	gtk_init(NULL, NULL);
 	guint source = windows_listen(listener, launch_window);
 	char **env = g_get_environ();

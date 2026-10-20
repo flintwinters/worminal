@@ -90,7 +90,7 @@ def check_placement(env, geometry, expected):
         ready, _, _ = select.select([manager.stdout], [], [], 5)
         if not ready or manager.stdout.readline() != b"ready\n":
             raise AssertionError("Private test window manager did not start")
-        command = [str(ROOT / "worminal"), "-T", title]
+        command = [str(ROOT / "worminal-x11"), "-T", title]
         if geometry:
             command += ["-g", geometry]
         command += ["-e", "/bin/cat"]
@@ -146,7 +146,7 @@ def smoke_x11(env):
     env = env.copy()
     env["WORMINAL_TRACE_STARTUP"] = "1"
     process = subprocess.Popen(
-        [str(ROOT / "worminal"), "-T", title, "-e", "/bin/sh", "-c", script, "sh", str(result_path)],
+        [str(ROOT / "worminal-x11"), "-T", title, "-e", "/bin/sh", "-c", script, "sh", str(result_path)],
         cwd=ROOT,
         env=env,
         stdout=subprocess.PIPE,
@@ -367,7 +367,7 @@ class NativeTerminalTest(unittest.TestCase):
         with isolated_display() as env:
             title = f"Worminal zoom {os.getpid()}"
             process = subprocess.Popen(
-                [str(ROOT / "worminal"), "-T", title, "-e", "/bin/cat"],
+                [str(ROOT / "worminal-x11"), "-T", title, "-e", "/bin/cat"],
                 env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
             )
             try:
@@ -543,10 +543,10 @@ class NativeTerminalTest(unittest.TestCase):
     def test_new_executable_joins_existing_workspace(self):
         with isolated_display() as env:
             copy = ROOT / "build" / f"worminal-copy-{os.getpid()}"
-            shutil.copy2(ROOT / "worminal", copy)
+            shutil.copy2(ROOT / "worminal-x11", copy)
             owners = []
             try:
-                for binary, title in ((ROOT / "worminal", "Earlier build"),
+                for binary, title in ((ROOT / "worminal-x11", "Earlier build"),
                                       (copy, "Later build")):
                     owner = subprocess.Popen(
                         [str(binary), "-T", title, "-e", "/bin/cat"], env=env,
@@ -589,7 +589,7 @@ class NativeTerminalTest(unittest.TestCase):
             marker.unlink(missing_ok=True)
             new_tab_pwd.unlink(missing_ok=True)
             process = subprocess.Popen(
-                [str(ROOT / "worminal"), "-T", title, "-e", "/bin/sh", "-c",
+                [str(ROOT / "worminal-x11"), "-T", title, "-e", "/bin/sh", "-c",
                  'while IFS= read -r command; do eval "$command"; done'],
                 cwd=ROOT, env=env, stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE)
@@ -658,7 +658,7 @@ class NativeTerminalTest(unittest.TestCase):
         with isolated_display() as env:
             master, slave = pty.openpty()
             owner = subprocess.Popen(
-                [str(ROOT / "worminal"), "-e", "/bin/cat"],
+                [str(ROOT / "worminal-x11"), "-e", "/bin/cat"],
                 env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             second = None
 
@@ -674,7 +674,7 @@ class NativeTerminalTest(unittest.TestCase):
                     time.sleep(.05)
                 self.assertEqual(len(windows()), 1)
                 stdin_before = os.readlink(f"/proc/{owner.pid}/fd/0")
-                second = subprocess.Popen([str(ROOT / "worminal"), "-l", os.ttyname(slave)],
+                second = subprocess.Popen([str(ROOT / "worminal-x11"), "-l", os.ttyname(slave)],
                                           env=env, stdout=subprocess.DEVNULL,
                                           stderr=subprocess.PIPE)
                 deadline = time.monotonic() + 5
@@ -709,7 +709,7 @@ class NativeTerminalTest(unittest.TestCase):
             for path in (info, gate, done):
                 path.unlink(missing_ok=True)
             owner = subprocess.Popen(
-                [str(ROOT / "worminal"), "-T", a_title, "-e", "/bin/cat"],
+                [str(ROOT / "worminal-x11"), "-T", a_title, "-e", "/bin/cat"],
                 env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             second_process = None
 
@@ -743,7 +743,7 @@ class NativeTerminalTest(unittest.TestCase):
                           'yes hidden | head -c 1048576; printf done > "$3"; '
                           'while :; do sleep 1; done')
                 second_process = subprocess.Popen(
-                    [str(ROOT / "worminal"), "-T", b_title, "-g", "40x10",
+                    [str(ROOT / "worminal-x11"), "-T", b_title, "-g", "40x10",
                      "-e", "/bin/sh", "-c", script, "sh",
                      str(info), str(gate), str(done)],
                     cwd=ROOT / "build", env=second_env,
@@ -850,7 +850,7 @@ class NativeTerminalTest(unittest.TestCase):
                       'printf "%s\\n" "$line" >> "$2"; '
                       'printf "[%s]\\n" "$line"; done')
             owner = subprocess.Popen(
-                [str(ROOT / "worminal"), "-T", title, "-e", "/bin/sh",
+                [str(ROOT / "worminal-x11"), "-T", title, "-e", "/bin/sh",
                  "-c", script, "sh", str(first_tty), str(first_input)],
                 env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
             )
@@ -894,7 +894,7 @@ class NativeTerminalTest(unittest.TestCase):
             try:
                 first = windows(1)[0]
                 wait_file(first_tty)
-                second_process = subprocess.Popen([str(ROOT / "worminal")], env=env,
+                second_process = subprocess.Popen([str(ROOT / "worminal-x11")], env=env,
                                                   stdout=subprocess.DEVNULL,
                                                   stderr=subprocess.PIPE)
                 second = next(window for window in windows(2) if window != first)
@@ -946,7 +946,7 @@ class NativeTerminalTest(unittest.TestCase):
                 owner.stderr.close()
                 for path in paths:
                     path.unlink(missing_ok=True)
-                subprocess.run([str(ROOT / "worminald"), "--stop"], env=env, check=True)
+                subprocess.run([str(ROOT / "worminald-x11"), "--stop"], env=env, check=True)
     def test_close_during_early_map(self):
         with isolated_display() as env:
             manager = subprocess.Popen(
@@ -959,7 +959,7 @@ class NativeTerminalTest(unittest.TestCase):
                 ready, _, _ = select.select([manager.stdout], [], [], 5)
                 self.assertTrue(ready and manager.stdout.readline() == b"ready\n")
                 terminal = subprocess.Popen(
-                    [str(ROOT / "worminal"), "-e", "/bin/cat"],
+                    [str(ROOT / "worminal-x11"), "-e", "/bin/cat"],
                     env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                 )
                 ready, _, _ = select.select([manager.stdout], [], [], 5)
@@ -981,7 +981,7 @@ class NativeTerminalTest(unittest.TestCase):
             title = f"Worminal race {os.getpid()}"
             child_pids = ROOT / "build" / f"shared-race-pids-{os.getpid()}"
             child_pids.unlink(missing_ok=True)
-            command = [str(ROOT / "worminal"), "-T", title,
+            command = [str(ROOT / "worminal-x11"), "-T", title,
                        "-e", "/bin/sh", "-c",
                        'trap "" HUP; printf "%s\n" "$$" >> "$1"; exec sleep 30',
                        "sh", str(child_pids)]
@@ -1064,7 +1064,7 @@ class NativeTerminalTest(unittest.TestCase):
                 'printf "%s\\n" "$line" >> "$1"; done'
             )
             owner = subprocess.Popen(
-                [str(ROOT / "worminal"), "-T", title, "-e", "/bin/sh",
+                [str(ROOT / "worminal-x11"), "-T", title, "-e", "/bin/sh",
                  "-c", script, "sh", str(received), str(sizes), str(drained)],
                 env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
             )
@@ -1122,7 +1122,7 @@ class NativeTerminalTest(unittest.TestCase):
 
             try:
                 first = windows(1)[0]
-                second_process = subprocess.Popen([str(ROOT / "worminal")], env=env,
+                second_process = subprocess.Popen([str(ROOT / "worminal-x11")], env=env,
                                                   stdout=subprocess.DEVNULL,
                                                   stderr=subprocess.PIPE)
                 deadline = time.monotonic() + 5
@@ -1227,7 +1227,7 @@ class NativeTerminalTest(unittest.TestCase):
                 received.unlink(missing_ok=True)
                 sizes.unlink(missing_ok=True)
                 drained.unlink(missing_ok=True)
-                subprocess.run([str(ROOT / "worminald"), "--stop"], env=env, check=True)
+                subprocess.run([str(ROOT / "worminald-x11"), "--stop"], env=env, check=True)
     def test_view_contexts_draw_independently(self):
         with isolated_display() as env:
             subprocess.run([str(ROOT / "build/view_state_test")], env=env, check=True)
@@ -1245,7 +1245,7 @@ class NativeTerminalTest(unittest.TestCase):
                 'printf done > "$2"; sleep 5'
             )
             process = subprocess.Popen(
-                [str(ROOT / "worminal"), "-T", title, "-e", "/bin/sh", "-c",
+                [str(ROOT / "worminal-x11"), "-T", title, "-e", "/bin/sh", "-c",
                  script, "sh", str(gate), str(done)],
                 env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
             )
@@ -1286,7 +1286,7 @@ class NativeTerminalTest(unittest.TestCase):
 
     def test_first_keystroke_latency_probe(self):
         with isolated_display() as env:
-            sample = measure_one(env, 0)
+            sample = measure_one({**env, "WORMINAL_FRONTEND": "worminal-x11"}, 0)
             self.assertGreater(sample["echo"], sample["key"])
             self.assertLess(sample["map-request"], sample["fontconfig"])
             self.assertLess(sample["captured"], sample["echo"])

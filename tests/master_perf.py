@@ -113,6 +113,6 @@ def measure(host, daemon, compress):
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         raise SystemExit("Usage: python3 manage.py master-perf HOST")
-    daemon = os.environ.get("WORMINAL_MASTER_DAEMON", "worminald")
+    daemon = os.environ.get("WORMINAL_MASTER_DAEMON", "worminald-x11")
     for compress in (False, True):
         measure(sys.argv[1], daemon, compress)

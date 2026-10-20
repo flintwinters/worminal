@@ -14,7 +14,7 @@ from workspace_protocol import number, string, send, wait_kind
 
 
 ROOT = Path(__file__).resolve().parent.parent
-DAEMON = ROOT / os.environ.get("WORMINAL_TEST_WORKSPACE_DAEMON", "worminald")
+DAEMON = ROOT / os.environ.get("WORMINAL_TEST_WORKSPACE_DAEMON", "worminald-x11")
 HELLO, INPUT, FOCUS, CATALOG, FRAME, ROW, FINISH, CLIPBOARD, STOP, PRINT = 1, 3, 4, 7, 8, 9, 10, 11, 13, 14
 
 

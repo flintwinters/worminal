@@ -95,12 +95,13 @@ class Builder:
         step(output, [*self.cc, *objects, *(self.libs if libs is None else libs)], objects)
 
     def target(self, target):
-        if target in ("worminal", "worminald"):
-            sources = CLIENT if target == "worminal" else SERVER
-            self.program(target, [f"src/{source}" for source in sources])
-        elif target in ("worminal-preview", "worminald-preview", "build/preview_test"):
+        if target in ("worminal-x11", "worminald-x11"):
+            sources = CLIENT if target == "worminal-x11" else SERVER
+            self.program(target, [f"src/{source}" for source in sources],
+                         flags=['-DWORKSPACE_DAEMON="worminald-x11"'])
+        elif target in ("worminal", "worminald", "worminal-preview", "worminald-preview", "build/preview_test"):
             flags = ["-DWORMINAL_PREVIEW_PROTOCOL"]
-            server = target == "worminald-preview"
+            server = target in ("worminald", "worminald-preview")
             sources = SERVER if server else PREVIEW
             if target == "build/preview_test":
                 sources = ()
@@ -172,7 +173,7 @@ def clean():
     # Own only build outputs: preserve .checks logs and captures used to diagnose failures.
     if (ROOT / "build").exists():
         shutil.rmtree(ROOT / "build")
-    for name in ("worminal", "worminald", "worminal-preview", "worminald-preview"):
+    for name in ("worminal", "worminald", "worminal-x11", "worminald-x11", "worminal-preview", "worminald-preview"):
         for suffix in ("", ".command.json", ".pending"):
             (ROOT / (name + suffix)).unlink(missing_ok=True)
 
@@ -183,7 +184,8 @@ def installation_files(prefix=None):
     if not prefix.is_absolute() or not manprefix.is_absolute():
         raise ValueError("PREFIX and MANPREFIX must be absolute paths")
     staging = Path(os.environ.get("DESTDIR", "/"))
-    files = [(name, prefix / "bin" / name, 0o755) for name in ("worminal", "worminald")]
+    files = [(name, prefix / "bin" / name, 0o755)
+             for name in ("worminal", "worminald", "worminal-x11", "worminald-x11")]
     files += [("docs/man/worminal.1", manprefix / "man1/worminal.1", 0o644),
               ("assets/worminal.desktop", prefix / "share/applications/worminal.desktop", 0o644),
               ("assets/worminal.svg", prefix / "share/icons/hicolor/scalable/apps/worminal.svg", 0o644)]
@@ -192,7 +194,7 @@ def installation_files(prefix=None):
 
 def install(prefix=None):
     files = installation_files(prefix)
-    build_targets()
+    build_targets("worminal-x11", "worminald-x11")
     for source, destination, mode in files:
         destination.parent.mkdir(parents=True, exist_ok=True)
         if source.suffix == ".1":

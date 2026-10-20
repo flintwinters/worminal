@@ -455,7 +455,7 @@ main(int argc, char **argv)
 	App *converter = new_app();
 	converter->master = g_strdup(master);
 	char *test_cwd = g_get_current_dir();
-	char *daemon_path = g_build_filename(test_cwd, "worminald-preview", NULL);
+	char *daemon_path = g_build_filename(test_cwd, "worminald", NULL);
 	g_free(test_cwd);
 	char *quoted_daemon = g_shell_quote(daemon_path);
 	char *convert_script = g_strdup_printf("stty raw -echo; printf CONVERT_READY; "

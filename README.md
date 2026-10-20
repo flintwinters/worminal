@@ -4,12 +4,13 @@
 
 # Worminal
 
-**A small X11 terminal. Tabs that outlive your windows.**
+**A small GTK terminal and browser. Tabs that outlive your windows.**
 
 Worminal keeps your shells in a per-user service, so you can close every window and return to your tabs later.
 Open another window on the same machine, or connect to a remote master over SSH: your tabs travel with the service.
 
-Built on [st 0.9.3](https://git.suckless.org/st/), with native X11 rendering and a C core.
+Built on [st 0.9.3](https://git.suckless.org/st/), with GTK 3/Pango-Cairo rendering, WebKitGTK browser tabs, and a C
+core.
 The priorities are fast launch to usable input, low memory use, and a small interface.
 
 - **Persistent, shared tabs.** Windows share an ordered tab list and select tabs independently.
@@ -18,17 +19,17 @@ The priorities are fast launch to usable input, low memory use, and a small inte
 - **Your Alacritty theme, compiled in.** Reuse colors, fonts, spacing, and scrollback settings.
 - **Everyday conveniences.** Clickable URLs, clipboard support, mouse-wheel history, and font-size shortcuts.
 
-The default launcher targets X11. A separate GTK/WebKit preview adds native Wayland and browser tabs;
-its measured startup and memory overhead is substantially higher. The default remains unchanged.
+The release launcher uses GTK on Wayland and X11. WebKit increases startup and memory costs.
 Remote Codex scrolling remains an investigation area beyond the tested terminal mouse modes.
 
 ## Try it
 
 You need Python 3.11+, a C compiler, `pkg-config`, and development headers for
-X11, Xft, Fontconfig, and FreeType. On Debian or Ubuntu:
+GTK 3, WebKitGTK 4.1, X11, Xft, Fontconfig, and FreeType. On Debian or Ubuntu:
 
 ```sh
-sudo apt install build-essential pkg-config python3-venv libx11-dev libxft-dev libfontconfig-dev libfreetype-dev
+sudo apt install build-essential pkg-config python3-venv libx11-dev libxft-dev libfontconfig-dev libfreetype-dev \
+  libgtk-3-dev libwebkit2gtk-4.1-dev
 ```
 
 From the repository root:
@@ -44,7 +45,8 @@ python3 manage.py build
 Python dependencies are for the management tools; the compiled terminal runs directly.
 `python3 manage.py run` also launches the existing binary without rebuilding.
 
-To install both `worminal` and `worminald`, the manual, desktop launcher, and icon:
+To install `worminal`, `worminald`, and the `worminal-x11`/`worminald-x11` rollback pair, the manual, desktop
+launcher, and icon:
 
 ```sh
 sudo .venv/bin/python manage.py install
@@ -55,20 +57,22 @@ Use `--prefix /your/prefix` for another installation location; `DESTDIR` stages 
 The build honors `CC`, `PKG_CONFIG`, `CPPFLAGS`, `CFLAGS`, and `LDFLAGS`; `CFLAGS` defaults to `-O3`.
 `PREFIX` defaults to `/usr/local`, and `MANPREFIX` defaults to `$PREFIX/share/man`.
 
-## Combined terminal/browser preview
+## Terminal and browser
 
-Install `libgtk-3-dev libwebkit2gtk-4.1-dev`, then build the separate preview:
+The main build includes terminal and browser tabs:
 
 ```sh
-python3 manage.py build-preview
-./worminal-preview
-./worminal-preview --surf https://example.org
-GDK_BACKEND=wayland ./worminal-preview
+python3 manage.py build
+./worminal
+./worminal --surf https://example.org
+GDK_BACKEND=wayland ./worminal
 ```
 
-The preview starts `worminald-preview` on an isolated v2 endpoint. Existing `worminald` sessions continue running.
-For a remote workspace, install both preview executables remotely and use `--master user@host`.
-`--attach` opens existing preview tabs without creating another shell. Closing a window preserves its service tabs.
+Worminal starts `worminald` on the v2 endpoint. Existing v1 sessions remain available through `worminal-x11`;
+install builds that rollback frontend and `worminald-x11`. No sessions are migrated or stopped.
+For a remote workspace, install the current release remotely and use `--master user@host`.
+The old preview executable names remain build aliases and share the v2 workspace.
+`--attach` opens existing tabs without creating another shell. Closing a window preserves its service tabs.
 
 Ctrl+Shift+T opens a terminal, Ctrl+Shift+B asks for a browser URL, Ctrl+Shift+N opens another window,
 and Ctrl+Shift+W closes the active tab. Ctrl+Tab/Shift+Ctrl+Tab and Alt+1 through Alt+9 switch tabs.
@@ -80,7 +84,7 @@ Run `python3 manage.py check-preview`, `check-preview-keys`, `check-preview-wayl
 for isolated checks. Wayland checks require Weston and forbid X11 fallback; on Debian, the optional
 `setup-preview-wayland` command downloads a runtime into `.checks` without installing system packages.
 `preview-perf` compares the original and preview, including WebKit helper memory.
-See [preview validation and limitations](docs/browser-integration.txt) before considering a launcher switch.
+See [preview validation and limitations](docs/browser-integration.txt) for measured costs and compatibility constraints.
 
 ## Keep your workspace running
 
@@ -147,7 +151,7 @@ Other st settings live in [src/config.h](src/config.h).
 | --- | --- |
 | Colors | Primary, normal, bright, explicit dim, indexed, and cursor colors |
 | `draw_bold_text_with_bright_colors` | Controls bright colors for bold text |
-| `font.normal.family` | Xft font family; override for one launch with `-f` |
+| `font.normal.family` | Font family; override for one launch with `-f` |
 | `font.size` | Font point size |
 | `font.offset.y` | Extra cell height; negative values make rows more compact |
 | `font.glyph_offset.y` | Moves glyphs within the grid without moving cursor or selection backgrounds |
@@ -156,7 +160,7 @@ Other st settings live in [src/config.h](src/config.h).
 
 Colors accept `#RRGGBB` and `0xRRGGBB`. Missing colors use Alacritty defaults, including derived dim colors.
 `CellForeground` and `CellBackground` cursor references resolve to the primary colors.
-Selection colors and opacity retain st behavior. Xft font metrics can differ from Alacritty's renderer;
+Selection colors and opacity retain st behavior. Frontend font metrics can differ from Alacritty's renderer;
 glyphs start at the cell bottom before the glyph offset is applied, and overlapping rows repaint behind them.
 
 Resizing the window or font reflows soft-wrapped main-screen text and history. History storage grows as output
@@ -172,7 +176,8 @@ Run `python3 manage.py --help` for available commands. Builds use `-O3` by defau
 | Path | Responsibility |
 | --- | --- |
 | [src/terminal](src/terminal) | Terminal state and scrollback |
-| [src/x11](src/x11) | Windows, input, and rendering |
+| [src/gtk](src/gtk) | Release windows, terminal rendering, and browser tabs |
+| [src/x11](src/x11) | Original X11 frontend for rollback |
 | [src/workspace](src/workspace) | Service, client connections, and wire protocol |
 | [tools](tools) | Build configuration and management helpers |
 | [tests](tests) | Regression tests, display proofs, and benchmarks |

@@ -111,7 +111,7 @@ def measure_one(env, index, shell=False):
         parts = line.split()
         if len(parts) == 3 and parts[0] == b"worminal-timing":
             points[parts[1].decode()] = int(parts[2])
-    phases = PHASES if env.get("WORMINAL_FRONTEND", "worminal") == "worminal" else ("echo",)
+    phases = PHASES if env.get("WORMINAL_FRONTEND", "worminal") == "worminal-x11" else ("echo",)
     missing = (set(phases) | {"captured"}) - points.keys()
     if missing:
         raise RuntimeError(f"Trial {index}: missing timing phases {sorted(missing)}: {trace.decode()}")
