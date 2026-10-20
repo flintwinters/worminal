@@ -22,8 +22,6 @@ worminal \- simple terminal based on st
 .IR title ]
 .RB [ \-l
 .IR line ]
-.RB [ \-w
-.IR windowid ]
 .RB [[ \-e ]
 .IR command
 .RI [ arguments ...]]
@@ -44,14 +42,16 @@ worminal \- simple terminal based on st
 .IR title ]
 .RB [ \-t
 .IR title ]
-.RB [ \-w
-.IR windowid ]
 .RB \-l
 .IR line
 .RI [ stty_args ...]
 .SH DESCRIPTION
 .B worminal
-is a simple terminal emulator.
+is a GTK terminal emulator with WebKitGTK browser tabs on Wayland and X11.
+Use --surf URL to open a browser tab or --attach to open existing tabs without a new shell.
+The geometry option accepts COLSxROWS; X11 position offsets and embedding (-w) are unsupported.
+The original X11 frontend is available as worminal-x11 with worminald-x11 on its separate v1 workspace.
+Existing v1 sessions are preserved. The release uses the v2 workspace.
 Each launch opens a window and tab in the local per-user workspace service.
 The service owns the PTYs and ordered tabs and persists after all windows close.
 Use
@@ -62,6 +62,8 @@ connects over SSH to a service on that host; the remote account needs
 .B worminald
 in its PATH. Further hosts can be reached with ordinary SSH inside a tab.
 .SH OPTIONS
+GTK accepts the options below except -w. X11 geometry positioning and stty_args apply only
+to worminal-x11. --surf URL opens a browser; --attach creates no new terminal tab.
 .TP
 .B \-a
 disable alternate screens in terminal

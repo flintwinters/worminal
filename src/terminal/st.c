@@ -147,6 +147,7 @@ static int last_child_status;
 int allowwindowops = 1;
 static const char *launch_cwd, *launch_windowid;
 static char **launch_env;
+void (*ttyrawhook)(const char *, size_t);
 void (*ttywritehook)(const char *, size_t, int);
 void (*tscrollhook)(int, int);
 void (*tprinterhook)(const char *, size_t);
@@ -943,7 +944,7 @@ ttyread(void)
 	int ret, written;
 
 	/* append read bytes to unprocessed bytes */
-	ret = read(cmdfd, buf+buflen, LEN(buf)-buflen);
+	ret = read(cmdfd, buf+buflen, sizeof(session->ttybuf)-buflen);
 
 	switch (ret) {
 	case 0:
@@ -951,7 +952,7 @@ ttyread(void)
 		cmdfd = -1;
 		return 0;
 	case -1:
-		if (errno == EINTR)
+		if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
 			return 0;
 		if (errno == EIO) {
 			close(cmdfd);
@@ -1015,16 +1016,15 @@ ttywrite(const char *s, size_t n, int may_echo)
 void
 ttywriteraw(const char *s, size_t n)
 {
+	if (ttyrawhook) {
+		ttyrawhook(s, n);
+		return;
+	}
 	fd_set wfd, rfd;
 	ssize_t r;
 	size_t lim = 256;
 
-	/*
-	 * Remember that we are using a pty, which might be a modem line.
-	 * Writing too much will clog the line. That's why we are doing this
-	 * dance.
-	 * FIXME: Migrate the world to Plan 9.
-	 */
+	/* Legacy local writes drain PTY output while waiting for input capacity. */
 	while (n > 0) {
 		FD_ZERO(&wfd);
 		FD_ZERO(&rfd);

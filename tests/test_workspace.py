@@ -10,54 +10,73 @@ import unittest
 import uuid
 
 
+from workspace_protocol import number, string, send, wait_kind
+
+
 ROOT = Path(__file__).resolve().parent.parent
+DAEMON = ROOT / os.environ.get("WORMINAL_TEST_WORKSPACE_DAEMON", "worminald-x11")
 HELLO, INPUT, FOCUS, CATALOG, FRAME, ROW, FINISH, CLIPBOARD, STOP, PRINT = 1, 3, 4, 7, 8, 9, 10, 11, 13, 14
 
 
-def number(value):
-    return struct.pack("!I", value)
-
-
-def string(value):
-    encoded = value.encode()
-    return number(len(encoded)) + encoded
-
-
-def read_exact(connection, count):
-    data = bytearray()
-    while len(data) < count:
-        part = connection.recv(count - len(data))
-        if not part:
-            raise AssertionError("workspace closed its connection")
-        data.extend(part)
-    return bytes(data)
-
-
-def packet(connection):
-    version, kind, tab, length = struct.unpack("!4I", read_exact(connection, 16))
-    if version != 1 or length > 8 * 1024 * 1024:
-        raise AssertionError("invalid workspace packet")
-    return kind, tab, read_exact(connection, length)
-
-
-def send(connection, kind, tab=0, payload=b""):
-    connection.sendall(struct.pack("!4I", 1, kind, tab, len(payload)) + payload)
-
-
-def wait_kind(connection, wanted, wanted_tab=None):
-    for _ in range(512):
-        kind, tab, payload = packet(connection)
-        if kind == wanted and (wanted_tab is None or tab == wanted_tab):
-            return tab, payload
-    raise AssertionError(f"workspace did not send packet {wanted}")
-
-
 class WorkspaceServiceTest(unittest.TestCase):
+    def test_blocked_pty_does_not_pause_new_shells_or_parser_replies(self):
+        scope = f"blocked-{os.getpid()}-{uuid.uuid4().hex}"
+        env = {**os.environ, "WORMINAL_SHARED_SOCKET_SCOPE": scope}
+        service = subprocess.Popen([str(DAEMON), "--serve"], env=env,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        peers = []
+        try:
+            for index, command in enumerate(("stty raw -echo; printf R; exec sleep 30",
+                                             "stty raw -echo; printf R; exec cat")):
+                deadline = time.monotonic() + 3
+                while True:
+                    peer = socket.socket(socket.AF_UNIX)
+                    peer.settimeout(2)
+                    try:
+                        peer.connect(f"\0worminal-workspace-{os.getuid()}-{scope}")
+                        break
+                    except OSError:
+                        peer.close()
+                        if time.monotonic() > deadline: self.fail("workspace did not start")
+                        time.sleep(.01)
+                peers.append(peer)
+                payload = b"".join((number(20), number(4), number(1), number(3), number(0),
+                                    string("backpressure"), string(str(ROOT)), string(""), string("-"),
+                                    string(""), string("/bin/sh"), string("-c"), string(command)))
+                send(peer, HELLO, payload=payload)
+                _, catalog = wait_kind(peer, CATALOG)
+                printed = b""
+                while b"R" not in printed:
+                    tab, chunk = wait_kind(peer, PRINT)
+                    printed += chunk
+                if index == 0:
+                    # Saturate a PTY whose application never reads. ttywriteraw used
+                    # to block inside pselect here, preventing every subsequent launch.
+                    send(peer, INPUT, tab, b"x" * 65536)
+                else:
+                    send(peer, INPUT, tab, b"responsive")
+                    printed = b""
+                    while b"responsive" not in printed:
+                        _, chunk = wait_kind(peer, PRINT, tab)
+                        printed += chunk
+                    self.assertIn(b"responsive", printed)
+                    send(peer, INPUT, tab, b"\x1b[6n")
+                    printed = b""
+                    while b"R" not in printed:
+                        _, chunk = wait_kind(peer, PRINT, tab)
+                        printed += chunk
+                    self.assertRegex(printed, br"\x1b\[[0-9]+;[0-9]+R")
+            self.assertIsNone(service.poll())
+        finally:
+            for peer in peers: peer.close()
+            service.terminate()
+            service.communicate(timeout=3)
+
     def test_partial_client_packet_does_not_pause_other_tab(self):
         scope = f"partial-{os.getpid()}-{uuid.uuid4().hex}"
         env = {**os.environ, "WORMINAL_SHARED_SOCKET_SCOPE": scope}
         address = f"\0worminal-workspace-{os.getuid()}-{scope}"
-        service = subprocess.Popen([str(ROOT / "worminald"), "--serve"], env=env,
+        service = subprocess.Popen([str(DAEMON), "--serve"], env=env,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         connections = []
         try:
@@ -110,7 +129,7 @@ class WorkspaceServiceTest(unittest.TestCase):
         finally:
             for connection in reversed(connections):
                 connection.close()
-            subprocess.run([str(ROOT / "worminald"), "--stop"], env=env,
+            subprocess.run([str(DAEMON), "--stop"], env=env,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
             try:
                 service.communicate(timeout=3)
@@ -126,7 +145,7 @@ class WorkspaceServiceTest(unittest.TestCase):
             for index in range(2):
                 local, remote = socket.socketpair()
                 local.settimeout(3)
-                process = subprocess.Popen([str(ROOT / "worminald"), "--bridge"],
+                process = subprocess.Popen([str(DAEMON), "--bridge"],
                                            env=env, stdin=remote, stdout=remote,
                                            stderr=subprocess.PIPE)
                 remote.close()
@@ -146,7 +165,7 @@ class WorkspaceServiceTest(unittest.TestCase):
                     process.wait(timeout=3)
                     self.assertEqual(process.returncode, 0)
         finally:
-            subprocess.run([str(ROOT / "worminald"), "--stop"], env=env,
+            subprocess.run([str(DAEMON), "--stop"], env=env,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             for process, connection in bridges:
                 connection.close()
@@ -158,7 +177,7 @@ class WorkspaceServiceTest(unittest.TestCase):
         scope = f"wire-{os.getpid()}-{uuid.uuid4().hex}"
         env = {**os.environ, "WORMINAL_SHARED_SOCKET_SCOPE": scope}
         address = f"\0worminal-workspace-{os.getuid()}-{scope}"
-        service = subprocess.Popen([str(ROOT / "worminald"), "--serve"], env=env,
+        service = subprocess.Popen([str(DAEMON), "--serve"], env=env,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         connections = []
         try:

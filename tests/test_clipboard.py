@@ -20,7 +20,7 @@ class ClipboardShortcutTest(unittest.TestCase):
         with isolated_display() as env:
             title = f"Worminal copy {os.getpid()}"
             terminal = subprocess.Popen(
-                [str(ROOT / "worminal"), "-g", "40x10", "-T", title,
+                [str(ROOT / "worminal-x11"), "-g", "40x10", "-T", title,
                  "-e", "/bin/sh", "-c",
                  "printf '\\033]52;c;Q09ERVg=\\a\\033[?25l\\033[?1000hCOPY TEST\\n'; exec cat"],
                 env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,

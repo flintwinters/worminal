@@ -16,6 +16,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <libgen.h>
+#include "tab_label.h"
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
 #include <X11/cursorfont.h>
@@ -71,7 +72,6 @@ static void zoom(const Arg *);
 static void zoomabs(const Arg *);
 static void zoomreset(const Arg *);
 static void ttysend(const Arg *);
-
 /* config.h for applying patches and the configuration. */
 #include "config.h"
 #include "icon.h"
@@ -2471,30 +2471,12 @@ xsettitle(char *p)
 	tsessionuse(terminal);
 }
 
-static const char *
-xtablabel(const char *directory, int *length)
-{
-	size_t end = strlen(directory), start;
-
-	while (end > 1 && directory[end - 1] == '/')
-		end--;
-	if (end == 1 && directory[0] == '/') {
-		*length = 1;
-		return directory;
-	}
-	start = end;
-	while (start > 0 && directory[start - 1] != '/')
-		start--;
-	*length = end - start;
-	return directory + start;
-}
-
 static int
 xtabwidth(Tab *tab)
 {
 	XGlyphInfo extents;
 	int length;
-	const char *title = xtablabel(tab->directory, &length);
+	const char *title = tab_label(tab->directory, &length);
 	XftTextExtentsUtf8(xw.dpy, dc.font.match, (const FcChar8 *)title,
 	                    length, &extents);
 	return extents.xOff + 2 * current_window.cw;
@@ -2536,7 +2518,7 @@ xdrawtabs(void)
 	for (tab = xfirsttab(); tab && x < right; tab = tab->next) {
 		int width = xtabwidth(tab), selected = tab->terminal == view->terminal;
 		int length;
-		const char *title = xtablabel(tab->directory, &length);
+		const char *title = tab_label(tab->directory, &length);
 		Color *ink = xcolor(selected ? defaultbg : defaultfg);
 		if (selected)
 			XftDrawRect(xw.draw, xcolor(defaultfg), x, borderpx,

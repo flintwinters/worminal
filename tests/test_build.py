@@ -21,6 +21,21 @@ class BuildTests(unittest.TestCase):
         self.root_patch.start()
         self.addCleanup(self.root_patch.stop)
 
+    def test_release_and_rollback_own_matching_protocols(self):
+        with patch.object(build, "pkg_flags", return_value=[]):
+            builder = build.Builder()
+            with patch.object(builder, "program") as program:
+                for name in ("worminal", "worminald", "worminal-preview", "worminald-preview"):
+                    builder.target(name)
+                    args, kwargs = program.call_args
+                    self.assertIn("-DWORMINAL_PREVIEW_PROTOCOL", kwargs["flags"])
+                    self.assertEqual("src/gtk/app.c" in args[1], name in ("worminal", "worminal-preview"))
+                for name in ("worminal-x11", "worminald-x11"):
+                    builder.target(name)
+                    args, kwargs = program.call_args
+                    self.assertNotIn("-DWORMINAL_PREVIEW_PROTOCOL", kwargs["flags"])
+                    self.assertIn('-DWORKSPACE_DAEMON="worminald-x11"', kwargs["flags"])
+
     def test_defaults_and_environment_flags(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(build, "pkg_flags", return_value=[]):
             self.assertIn("-O3", build.compile_flags())
@@ -62,7 +77,7 @@ class BuildTests(unittest.TestCase):
             self.assertEqual(invoked.call_count, 3)
 
     def test_staged_install_uninstall_and_modes(self):
-        for source in ("worminal", "worminald", "docs/man/worminal.1",
+        for source in ("worminal", "worminald", "worminal-x11", "worminald-x11", "docs/man/worminal.1",
                        "assets/worminal.desktop", "assets/worminal.svg"):
             path = self.root / source
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -71,7 +86,7 @@ class BuildTests(unittest.TestCase):
         with patch.dict(os.environ, {"DESTDIR": str(stage), "MANPREFIX": "/manuals"}), \
                 patch.object(build, "build_targets") as compile_build:
             build.install("/opt/worminal")
-            compile_build.assert_called_once_with()
+            compile_build.assert_called_once_with("worminal-x11", "worminald-x11")
             files = build.installation_files("/opt/worminal")
             for _, destination, mode in files:
                 self.assertTrue(destination.is_relative_to(stage))

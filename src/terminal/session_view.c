@@ -1,4 +1,4 @@
-/* Copy terminal cells between the headless owner and an X11 view. */
+/* Copy terminal cells between the headless owner and a frontend view. */
 #include <string.h>
 #include "st_state.h"
 #include "session_view.h"

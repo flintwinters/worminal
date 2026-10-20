@@ -273,5 +273,15 @@ main(void)
 	tresize(2, 2);
 	assert(term.histlen == theme_history_size);
 	assert(term.hist[(term.histi - 1 + theme_history_size) % theme_history_size][0].u == 's');
+	/* Read capacity belongs to the session buffer, not its local char pointer. */
+	tsessionnew(80, 2);
+	int descriptors[2];
+	assert(pipe(descriptors) == 0);
+	cmdfd = descriptors[0];
+	const char *batch = "abcdefghijklmnopqrstuvwxyz0123456789";
+	assert(write(descriptors[1], batch, strlen(batch)) == (ssize_t)strlen(batch));
+	assert(ttyread() == strlen(batch));
+	assert(term.line[0][35].u == '9');
+	close(descriptors[1]);
 	return 0;
 }
