@@ -479,11 +479,11 @@ main(int argc, char **argv)
 	App *converter = new_app();
 	converter->master = g_strdup(master);
 	char *test_cwd = g_get_current_dir();
-	char *daemon_path = g_build_filename(test_cwd, "worminald", NULL);
+	char *frontend_path = g_build_filename(test_cwd, "worminal", NULL);
 	g_free(test_cwd);
-	char *quoted_daemon = g_shell_quote(daemon_path);
+	char *quoted_frontend = g_shell_quote(frontend_path);
 	char *convert_script = g_strdup_printf("stty raw -echo; printf CONVERT_READY; "
-	    "dd bs=1 count=1 >/dev/null 2>&1; %s --new-browser-tab; sleep 30", quoted_daemon);
+	    "dd bs=1 count=1 >/dev/null 2>&1; %s --new-browser-tab; sleep 30", quoted_frontend);
 	char *convert_command[] = {"/bin/sh", "-c", convert_script, NULL};
 	converter->command = g_strdupv(convert_command);
 	show_app(converter);
@@ -513,7 +513,7 @@ main(int argc, char **argv)
 	gtk_widget_destroy(converter->window);
 	select_page(find_page(app, converted_id));
 	WAIT(app->active->browser == converted_browser);
-	g_free(convert_script); g_free(quoted_daemon); g_free(daemon_path);
+	g_free(convert_script); g_free(quoted_frontend); g_free(frontend_path);
 	int before_window = g_list_length(app->pages);
 	app_new_window(app);
 	WAIT(windows == 3 && g_list_length(app->pages) == before_window + 1);

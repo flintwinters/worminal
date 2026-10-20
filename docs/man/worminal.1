@@ -62,6 +62,11 @@ connects over SSH to a service on that host; the remote account needs
 .B worminald
 in its PATH. Further hosts can be reached with ordinary SSH inside a tab.
 .SH OPTIONS
+.TP
+.BI --new-browser-tab " [URL]"
+Replace the calling Worminal terminal with a browser, ending its shell and PTY.
+Omit the URL to open a blank page. Run this command inside a Worminal terminal.
+.PP
 GTK accepts the options below except -w. X11 geometry positioning and stty_args apply only
 to worminal-x11. --surf URL opens a browser; --attach creates no new terminal tab.
 .TP

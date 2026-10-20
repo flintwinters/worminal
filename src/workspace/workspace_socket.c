@@ -63,20 +63,30 @@ workspace_listen(void)
 	return fd;
 }
 
+int
+workspace_daemon_path(char *path, size_t capacity)
+{
+	if (capacity < 2) { errno = ENAMETOOLONG; return 0; }
+	ssize_t length = readlink("/proc/self/exe", path, capacity - 1);
+	char *slash;
+	if (length < 0) return 0;
+	if ((size_t)length >= capacity - 1) { errno = ENAMETOOLONG; return 0; }
+	path[length] = '\0';
+	slash = strrchr(path, '/');
+	if (!slash || (size_t)(slash + 1 - path) + sizeof(WORKSPACE_DAEMON) > capacity) {
+		errno = ENAMETOOLONG;
+		return 0;
+	}
+	strcpy(slash + 1, WORKSPACE_DAEMON);
+	return 1;
+}
+
 static int
 workspace_spawn(void)
 {
 	char path[4096];
-	ssize_t length = readlink("/proc/self/exe", path, sizeof(path) - 1);
-	char *slash;
 	pid_t child;
-	if (length < 0 || length >= (ssize_t)sizeof(path) - 1)
-		return 0;
-	path[length] = '\0';
-	slash = strrchr(path, '/');
-	if (!slash || (size_t)(slash - path) + sizeof("/" WORKSPACE_DAEMON) >= sizeof(path))
-		return 0;
-	strcpy(slash + 1, WORKSPACE_DAEMON);
+	if (!workspace_daemon_path(path, sizeof(path))) return 0;
 	child = fork();
 	if (child < 0)
 		return 0;
