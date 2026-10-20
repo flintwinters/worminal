@@ -749,9 +749,8 @@ invalid:
 }
 
 int
-main(int argc, char **argv)
+worminal_frontend_v1(int argc, char **argv, int listener)
 {
-	app_startuptime("main");
 	setlocale(LC_CTYPE, "");
 	if (argc >= 2 && !strcmp(argv[1], "--new-browser-tab")) {
 		if (argc > 3) { usage(stderr); return 2; }
@@ -769,13 +768,6 @@ main(int argc, char **argv)
 	if (argc == 2 && (!strcmp(argv[1], "-v") || !strcmp(argv[1], "--version"))) {
 		g_print("worminal " VERSION "\n");
 		return 0;
-	}
-	int listener = -1;
-	int forwarded = windows_forward(argc, argv, &listener);
-	app_startuptime("broker");
-	if (forwarded) {
-		if (forwarded < 0) g_printerr("Could not open a window in the local GTK frontend.\n");
-		return forwarded > 0 ? 0 : 1;
 	}
 	g_set_prgname("worminal");
 	gtk_init(NULL, NULL);

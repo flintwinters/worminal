@@ -200,7 +200,10 @@ def broker_check(env, url, log):
 
     try:
         read(first.stdout, b"BROKER_READY")
-        if "libwebkit2gtk" in Path(f"/proc/{first.pid}/maps").read_text():
+        mappings = Path(f"/proc/{first.pid}/maps").read_text()
+        if "frontend.so" not in mappings:
+            raise RuntimeError("Window owner did not load the GTK frontend module")
+        if "libwebkit2gtk" in mappings:
             raise RuntimeError("Terminal-only frontend loaded WebKit before opening a browser")
         terminal_window = window(title)
         invalid = subprocess.run([executable, "--invalid"], env=env,

@@ -109,16 +109,31 @@ class Builder:
             sources = CLIENT if target == "worminal-x11" else SERVER
             self.program(target, [f"src/{source}" for source in sources],
                          flags=['-DWORKSPACE_DAEMON="worminald-x11"'])
-        elif target in ("worminal", "worminald", "worminal-preview", "worminald-preview", "build/preview_test"):
-            if target in ("worminal", "worminal-preview"):
-                self.target("build/browser.so")
+        elif target in ("worminal", "worminal-preview"):
+            self.target("build/browser.so")
+            self.target("build/frontend.so")
+            old_flags = self.cflags
+            packages = ("gmodule-2.0",)
+            self.cflags = [*CPPFLAGS, *words("CPPFLAGS"), *words("CFLAGS", "-O3"),
+                           *pkg_flags("--cflags", packages)]
+            try:
+                self.program(target, ["src/gtk/launcher.c", "src/gtk/windows_forward.c", "src/workspace/wire.c"],
+                             variant="launcher", flags=["-DWORMINAL_PREVIEW_PROTOCOL"],
+                             libs=[*pkg_flags("--libs", packages), *words("LDFLAGS")])
+            finally:
+                self.cflags = old_flags
+        elif target in ("worminald", "worminald-preview", "build/frontend.so", "build/preview_test"):
             flags = ["-DWORMINAL_PREVIEW_PROTOCOL"]
+            if target == "build/frontend.so":
+                flags += ["-fPIC"]
             server = target in ("worminald", "worminald-preview")
             sources = SERVER if server else PREVIEW
             if target == "build/preview_test":
                 sources = ()
                 flags += ["-O1", "-g"]
             libs = ["-lm", "-lrt", "-lutil", *words("LDFLAGS")]
+            if target == "build/frontend.so":
+                libs += ["-shared"]
             old_flags = self.cflags
             # Keep GTK, WebKit and X11 out of the preview daemon's build/link flags.
             self.cflags = [*CPPFLAGS, *words("CPPFLAGS"), *words("CFLAGS", "-O3")]
@@ -130,7 +145,7 @@ class Builder:
                 self.program(target, [f"src/{source}" for source in sources] or
                              ["tests/preview.c", *(f"src/{source}" for source in COMMON),
                               "src/workspace/workspace_client.c"],
-                             variant="preview-service" if server else "preview-test" if not sources else "preview",
+                             variant="preview-service" if server else "preview-test" if not sources else "frontend",
                              flags=flags, libs=libs)
             finally:
                 self.cflags = old_flags
@@ -179,7 +194,7 @@ def analyze():
     flags = [*CPPFLAGS, "-DWORMINAL_PREVIEW_PROTOCOL", *words("CPPFLAGS")]
     invoke([*tidy, "src/workspace/workspace_service.c", "--", *flags])
     invoke([*tidy, "src/gtk/app.c", "src/gtk/terminal.c", "src/gtk/browser.c", "src/gtk/browser_loader.c",
-            "src/gtk/tabs.c", "src/gtk/windows.c", "--",
+            "src/gtk/tabs.c", "src/gtk/windows.c", "src/gtk/windows_forward.c", "src/gtk/launcher.c", "--",
             *flags, *pkg_flags("--cflags", PREVIEW_PACKAGES)])
 
 
@@ -198,10 +213,12 @@ def installation_files(prefix=None):
     if not prefix.is_absolute() or not manprefix.is_absolute():
         raise ValueError("PREFIX and MANPREFIX must be absolute paths")
     staging = Path(os.environ.get("DESTDIR", "/"))
-    files = [(name, prefix / "bin" / name, 0o755)
-             for name in ("worminal", "worminald", "worminal-x11", "worminald-x11")]
+    # Publish modules before a launcher that may immediately need them.
+    files = [("build/browser.so", prefix / "lib/worminal/browser.so", 0o755),
+             ("build/frontend.so", prefix / "lib/worminal/frontend.so", 0o755)]
+    files += [(name, prefix / "bin" / name, 0o755)
+              for name in ("worminal", "worminald", "worminal-x11", "worminald-x11")]
     files += [("docs/man/worminal.1", manprefix / "man1/worminal.1", 0o644),
-              ("build/browser.so", prefix / "lib/worminal/browser.so", 0o755),
               ("assets/worminal.desktop", prefix / "share/applications/worminal.desktop", 0o644),
               ("assets/worminal.svg", prefix / "share/icons/hicolor/scalable/apps/worminal.svg", 0o644)]
     return [(ROOT / source, staging / str(destination).lstrip("/"), mode) for source, destination, mode in files]

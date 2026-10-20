@@ -107,6 +107,7 @@ def main():
     checks.mkdir(exist_ok=True)
     samples = {name: [] for name in ("fresh_map", "fresh_ready", "additional_map", "additional_ready", "typing")}
     with isolated_display() as env, (checks / "visible-latency.log").open("wb") as log:
+        env["GDK_BACKEND"] = "x11"
         connection = display.Display(env["DISPLAY"])
         try:
             for trial in range(args.trials):
