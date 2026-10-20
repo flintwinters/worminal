@@ -1,7 +1,5 @@
 /* Exercise the real frontend widgets and service together, on either GDK backend. */
-#define main preview_main
 #include "../src/gtk/app.c"
-#undef main
 #include "../src/gtk/terminal.c"
 #include "../src/gtk/browser.c"
 #include "../src/gtk/tabs.c"

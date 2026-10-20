@@ -12,6 +12,11 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class CommandLineTest(unittest.TestCase):
+    def test_launcher_does_not_link_graphics_libraries(self):
+        dependencies = subprocess.check_output(["ldd", str(ROOT / "worminal")], text=True)
+        for name in ("libgtk", "libgdk", "libpango", "libwebkit"):
+            self.assertNotIn(name, dependencies)
+
     def invoke(self, option):
         env = {key: value for key, value in os.environ.items()
                if key not in ("DISPLAY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS")}

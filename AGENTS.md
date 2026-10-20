@@ -24,7 +24,8 @@ keys and directory-basename labels with the original frontend. Its Cairo tab str
 One GTK owner per display/workspace accepts separate launches and moves live browser views between local windows;
 remote machines share saved URLs only. `worminald` uses the v2 endpoint; browser records have no PTY.
 Its shell command converts the calling PTY's ordered tab into a browser. GTK and WebKit never enter the service.
-Terminal launches link GTK/Pango only; the WebKit module loads when a browser view is first claimed.
+Launchers link GLib only and forward to an existing owner before loading the GTK/Pango frontend module;
+the WebKit module loads when a browser view is first claimed.
 `manage.py check-preview*` and `preview-perf` validate GTK; `build-preview` retains compatibility binary names.
 
 Current jobs: reduce GTK launch/memory overhead and review remaining compatibility gaps.

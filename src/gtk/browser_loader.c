@@ -1,5 +1,6 @@
 /* Terminal launches must not load WebKit. Keep its callbacks resident once used. */
 #include "browser_module.h"
+#include "modules.h"
 
 static const BrowserModule *browser;
 
@@ -7,16 +8,8 @@ static gboolean
 load_browser(App *app)
 {
 	if (browser) return TRUE;
-	char *executable = g_file_read_link("/proc/self/exe", NULL);
-	char *directory = executable ? g_path_get_dirname(executable) : NULL;
-	g_free(executable);
-	if (!directory) { app_status(app, "Cannot locate the browser module."); return FALSE; }
-	char *path = g_build_filename(directory, "..", "lib", "worminal", "browser.so", NULL);
-	if (!g_file_test(path, G_FILE_TEST_EXISTS)) {
-		g_free(path);
-		path = g_build_filename(directory, "build", "browser.so", NULL);
-	}
-	g_free(directory);
+	char *path = module_path("browser.so");
+	if (!path) { app_status(app, "Cannot locate the browser module."); return FALSE; }
 	GModule *library = g_module_open(path, G_MODULE_BIND_LAZY | G_MODULE_BIND_LOCAL);
 	g_free(path);
 	const BrowserModule *(*entry)(unsigned int) = NULL;

@@ -169,6 +169,12 @@ module stays resident after its first use so live browser callbacks remain valid
 Installation replaces binaries and the module atomically, preserving mapped old
 files in running processes. The source-tree module lives in build/browser.so.
 
+The GLib-only launcher now forwards requests before loading any graphics libraries.
+The first owner loads lib/worminal/frontend.so (build/frontend.so in the source tree),
+which owns GTK/Pango and exposes the versioned frontend entry point. Module lookup
+shares one installation-layout helper with the browser loader. Both release and
+preview launchers use this path; legacy X11 binaries remain self-contained.
+
 On a later private-Xvfb comparison (20 trials per mode, warm filesystem caches),
 fresh-frontend first-key echo median/p95 changed from 161.4/180.5 ms to
 128.2/150.3 ms. Additional-window median/p95 changed from 56.2/63.1 ms to

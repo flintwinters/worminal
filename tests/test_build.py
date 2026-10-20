@@ -29,7 +29,12 @@ class BuildTests(unittest.TestCase):
                     builder.target(name)
                     args, kwargs = program.call_args
                     self.assertIn("-DWORMINAL_PREVIEW_PROTOCOL", kwargs["flags"])
-                    self.assertEqual("src/gtk/app.c" in args[1], name in ("worminal", "worminal-preview"))
+                    self.assertEqual("src/gtk/launcher.c" in args[1], name in ("worminal", "worminal-preview"))
+                builder.target("build/frontend.so")
+                args, kwargs = program.call_args
+                self.assertIn("src/gtk/app.c", args[1])
+                self.assertIn("-fPIC", kwargs["flags"])
+                self.assertIn("-shared", kwargs["libs"])
                 for name in ("worminal-x11", "worminald-x11"):
                     builder.target(name)
                     args, kwargs = program.call_args
@@ -77,7 +82,8 @@ class BuildTests(unittest.TestCase):
             self.assertEqual(invoked.call_count, 3)
 
     def test_staged_install_uninstall_and_modes(self):
-        for source in ("worminal", "worminald", "worminal-x11", "worminald-x11", "build/browser.so",
+        for source in ("worminal", "worminald", "worminal-x11", "worminald-x11",
+                       "build/browser.so", "build/frontend.so",
                        "docs/man/worminal.1",
                        "assets/worminal.desktop", "assets/worminal.svg"):
             path = self.root / source
@@ -101,6 +107,8 @@ class BuildTests(unittest.TestCase):
             self.assertEqual(previous.read_text(), "previous client")
             compile_build.assert_called_once_with("worminal-x11", "worminald-x11")
             files = build.installation_files("/opt/worminal")
+            self.assertLess(next(i for i, (source, _, _) in enumerate(files) if source.name == "frontend.so"),
+                            next(i for i, (source, _, _) in enumerate(files) if source.name == "worminal"))
             for _, destination, mode in files:
                 self.assertTrue(destination.is_relative_to(stage))
                 self.assertEqual(destination.stat().st_mode & 0o777, mode)

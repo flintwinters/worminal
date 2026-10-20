@@ -19,8 +19,8 @@ The priorities are fast launch to usable input, low memory use, and a small inte
 - **Your Alacritty theme, compiled in.** Reuse colors, fonts, spacing, and scrollback settings.
 - **Everyday conveniences.** Clickable URLs, clipboard support, mouse-wheel history, and font-size shortcuts.
 
-The release launcher uses GTK on Wayland and X11. WebKit loads only when opening a browser;
-installation includes its module under `lib/worminal`.
+The small GLib launcher forwards additional windows before loading graphics libraries. The first window loads
+GTK on Wayland or X11; WebKit loads when opening a browser. Both modules install under `lib/worminal`.
 Remote Codex scrolling remains an investigation area beyond the tested terminal mouse modes.
 
 ## Try it
