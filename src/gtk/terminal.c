@@ -87,6 +87,12 @@ terminal_font(App *app, PangoLayout *layout, int *cw, int *ch, int *height, int 
 	 * Point sizes follow the existing Xft renderer's default 96 dpi. */
 	PangoContext *context = pango_layout_get_context(layout);
 	pango_cairo_context_set_resolution(context, 96);
+	if (app->cached_font && app->cached_font_zoom == app->zoom) {
+		pango_layout_set_font_description(layout, app->cached_font);
+		*cw = app->font_cw; *ch = app->font_ch;
+		*height = app->font_height; *ascent = app->font_ascent;
+		return pango_font_description_copy(app->cached_font);
+	}
 	PangoFontDescription *font = pango_font_description_new();
 	double size = theme_font_size;
 	gboolean pixels = FALSE;
@@ -113,6 +119,11 @@ terminal_font(App *app, PangoLayout *layout, int *cw, int *ch, int *height, int 
 	*height = *ascent + PANGO_PIXELS_CEIL(pango_font_metrics_get_descent(metrics));
 	*ch = MAX(1, *height + theme_font_offset_y);
 	pango_font_metrics_unref(metrics);
+	g_clear_pointer(&app->cached_font, pango_font_description_free);
+	app->cached_font = pango_font_description_copy(font);
+	app->cached_font_zoom = app->zoom;
+	app->font_cw = *cw; app->font_ch = *ch;
+	app->font_height = *height; app->font_ascent = *ascent;
 	return font;
 }
 
