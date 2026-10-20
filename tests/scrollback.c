@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 /* Exercise terminal history without opening an X window. */
 #include <assert.h>
 
@@ -23,9 +24,16 @@ int xsetcolorname(int index, const char *name) { return 0; }
 void xsetsel(char *selection) {}
 void xclipcopy(void) {}
 
+#undef term
+#undef strescseq
+#include "session_transfer_checks.h"
+#define term (session->term)
+#define strescseq (session->strescseq)
+
 int
 main(void)
 {
+	check_session_transfer();
 	Arg one = { .i = 1 }, page = { .i = -1 };
 	int i, before;
 

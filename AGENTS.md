@@ -26,4 +26,8 @@ Terminal launches link GTK/Pango only; the WebKit module loads when a browser vi
 Current jobs: reduce GTK launch/memory overhead and review remaining compatibility gaps.
 `worminal`/`worminald` are GTK/v2; preview build aliases share that workspace and existing browser profiles.
 Keep `worminal-x11`/`worminald-x11` and live v1 sessions available for rollback; never migrate or stop them implicitly.
+Both daemon builds share explicit `--handin`/`--handoff` ownership transfer via sealed native snapshots and SCM_RIGHTS.
+The receiver stages and validates state before commit; the donor then closes PTYs and forgets transferred tabs.
+`manage.py check-handoff` covers parser state, queued input, ownership, rollback, and all v1/v2 transfer combinations.
+Running daemons that predate the protocol cannot gain it through installation; preserve their live sessions.
 Investigate remote Codex scrolling separately from tested wheel modes.

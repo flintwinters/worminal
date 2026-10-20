@@ -16,37 +16,13 @@
 #include "st.h"
 #include "win.h"
 #include "session_view.h"
+#include "session_transfer.h"
 #include "wire.h"
 #include "workspace_socket.h"
 #include WORMINAL_THEME_HEADER
 
-typedef struct Client Client;
-typedef struct Tab Tab;
-struct Client {
-	int fd, ready;
-	pid_t pid;
-	int needs_resync;
-	WireReader input;
-	WireBuffer output;
-	size_t sent;
-	Client *next;
-};
-struct Tab {
-	uint32_t id;
-	TermSession *session;
-	WireBuffer input;
-	size_t input_sent;
-	char *title, *initial_title, *directory, *clipboard;
-	char *url; /* Non-NULL marks a browser record: no terminal or PTY. */
-	char **colors;
-	uint32_t mode, cursor;
-	Client *controller;
-	Client *print_client;
-	int pending_frame;
-	int input_frame;
-	Tab *next;
-};
-
+#include "service_state.h"
+#include "workspace_handoff.h"
 typedef struct {
 	uint32_t cols, rows, allowalt, argc, envc;
 	char *title, *cwd, *line, *output, *windowid;
@@ -59,6 +35,7 @@ static uint32_t next_id = 1;
 static uint32_t closed_id, fallback_id;
 static int catalog_dirty;
 static int running = 1;
+static int handin_listener = -1;
 
 static Tab *
 tab_for_session(TermSession *session)
@@ -402,7 +379,8 @@ tab_start(Client *client, Launch *launch)
 	       launch->argc ? launch->args : NULL);
 	ttysetlaunch(NULL, NULL, NULL);
 	int fd = tsessionfd(tab->session);
-	if (fd >= 0 && fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) < 0)
+	if (!tsessionprivatefds(tab->session) ||
+	    (fd >= 0 && fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) < 0))
 		tsessionstop(tab->session);
 	catalog_dirty = 1;
 	return tab;
@@ -450,6 +428,23 @@ client_message(Client *client, WirePacket *packet)
 	Tab *tab = tab_for_id(packet->tab);
 	uint32_t cols, rows, direction, amount;
 	Launch launch;
+	if (packet->type == WIRE_HANDIN || packet->type == WIRE_HANDOFF) {
+		char *name = wire_get_string(packet);
+		int okay = 0;
+		if (name && packet->pos == packet->len) {
+			if (packet->type == WIRE_HANDIN && handin_listener < 0) {
+				handin_listener = handin_listen(name);
+				okay = handin_listener >= 0;
+			} else if (packet->type == WIRE_HANDOFF) {
+				okay = handoff_send(name, tabs, tab_close);
+			}
+		}
+		WireBuffer reply = {0};
+		wire_put_string(&reply, okay ? "" : "Transfer failed before commit; donor sessions retained.");
+		client_send(client, okay ? WIRE_COMMAND_DONE : WIRE_ERROR, 0, &reply);
+		wire_buffer_free(&reply); free(name);
+		return;
+	}
 	if (packet->type == WIRE_STOP) {
 		running = 0;
 		return;
@@ -645,6 +640,10 @@ serve(void)
 		FD_ZERO(&readers);
 		FD_ZERO(&writers);
 		FD_SET(listener, &readers);
+		if (handin_listener >= 0) {
+			FD_SET(handin_listener, &readers);
+			maxfd = MAX(maxfd, handin_listener);
+		}
 		tsessionreap();
 		for (Tab *tab = tabs, *next; tab; tab = next) {
 			next = tab->next;
@@ -699,6 +698,13 @@ serve(void)
 				/* The first reply bypasses batching; subsequent output still batches. */
 				flush_frame(tab);
 				tab->input_frame = 0;
+			}
+		}
+		if (handin_listener >= 0 && FD_ISSET(handin_listener, &readers)) {
+			if (handin_accept(handin_listener, &tabs, &lasttab, &next_id)) {
+				catalog_dirty = 1;
+				close(handin_listener);
+				handin_listener = -1;
 			}
 		}
 		if (FD_ISSET(listener, &readers)) {
@@ -835,6 +841,8 @@ browser_command(const char *url)
 int
 main(int argc, char **argv)
 {
+	if (argc == 3 && (!strcmp(argv[1], "--handoff") || !strcmp(argv[1], "--handin")))
+		return handoff_command(argv[2], !strcmp(argv[1], "--handin"));
 #ifdef WORMINAL_PREVIEW_PROTOCOL
 	if ((argc == 2 || argc == 3) && strcmp(argv[1], "--new-browser-tab") == 0)
 		return browser_command(argc == 3 ? argv[2] : "about:blank");
@@ -851,7 +859,7 @@ main(int argc, char **argv)
 		close(fd);
 		return okay ? 0 : 1;
 	}
-	fprintf(stderr, "usage: worminald --serve|--bridge|--stop\n");
+	fprintf(stderr, "usage: worminald --serve|--bridge|--stop\n       worminald --handin NAME | --handoff NAME\n");
 #ifdef WORMINAL_PREVIEW_PROTOCOL
 	fputs("       worminald --new-browser-tab [URL]\n", stderr);
 #endif

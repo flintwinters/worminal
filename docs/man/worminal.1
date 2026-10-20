@@ -61,6 +61,19 @@ to stop it and end its tabs.
 connects over SSH to a service on that host; the remote account needs
 .B worminald
 in its PATH. Further hosts can be reached with ordinary SSH inside a tab.
+.SH SESSION TRANSFER
+Arm a running destination with
+.B worminald --handin NAME
+and transfer a running source with
+.BR "worminald-x11 --handoff NAME" .
+Both daemon builds accept both commands. Set WORMINAL_SHARED_SOCKET_SCOPE separately for each workspace.
+The receiver appends the source tabs and takes ownership of their PTYs, input, resize, and shutdown.
+The donor forgets the transferred tabs and may exit. Shell PIDs, terminal state, scrollback, and pending input survive.
+Attach a destination view to interact with the transferred tabs; existing views and their stdout streams do not move.
+Failures before commit leave the source intact. Committed transfers never automatically fall back.
+Both running daemons must already implement this protocol; installation cannot upgrade an older running process.
+Transfers are local, same-user Linux operations, limited to 100 tabs and a 512 MiB native snapshot.
+A v1 receiver rejects workspaces containing browser records.
 .SH OPTIONS
 .TP
 .BI --new-browser-tab " [URL]"

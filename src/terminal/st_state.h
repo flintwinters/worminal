@@ -70,6 +70,7 @@ struct TermSession {
 	STREscape strescseq;
 	int output_fd, pty_fd;
 	pid_t child_pid;
+	int child_handle; /* Imported pidfd + 1; zero for a child, -1 after exit. */
 	int altscreen_allowed;
 	char ttybuf[BUFSIZ];
 	int ttybuflen;
