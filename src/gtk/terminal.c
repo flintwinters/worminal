@@ -21,7 +21,7 @@ struct Terminal {
 	int cw, ch, height, ascent, cols, rows;
 	int button, last_x, last_y;
 	gboolean selecting, blink, numlock;
-	gboolean full_damage;
+	gboolean full_damage, input_pending;
 	guint8 damaged_rows[200];
 	guint timer;
 };
@@ -33,13 +33,15 @@ input(Terminal *t, const char *bytes, size_t length)
 {
 	if (t->page->mode & MODE_KBDLOCK)
 		return;
-	app_focus(t->page);
+	app_startuptime("input");
+	if (!t->page->live) app_focus(t->page);
 	tsessionuse(t->session);
 	tsessioncleandirty(t->session);
 	selclear();
 	for (int row = 0; row < t->frame.rows; row++)
 		if (tsessionrowdirty(t->session, row)) damage_row(t, row);
 	app_send(t->page->app, WIRE_INPUT, t->page->id, bytes, length);
+	if (length) t->input_pending = TRUE;
 }
 
 static void
@@ -238,6 +240,7 @@ glyph_overlap(Terminal *t)
 static gboolean
 draw_terminal(GtkWidget *widget, cairo_t *cr, Terminal *t)
 {
+	app_startuptime("paint");
 	Page *p = t->page;
 	tsessionuse(t->session);
 	GdkRGBA base = color(p, p->mode & MODE_REVERSE ? defaultfg : defaultbg);
@@ -638,11 +641,14 @@ terminal_packet(Terminal *t, WirePacket *p)
 		for (size_t i = 0; i < G_N_ELEMENTS(v); i++)
 			if (!wire_get_u32(p, &v[i])) return;
 		if (v[0] < 1 || v[0] > 400 || v[1] < 1 || v[1] > 200 || v[2] >= v[0] || v[3] >= v[1]) return;
-		if (v[0] != (uint32_t)t->frame.cols || v[1] != (uint32_t)t->frame.rows)
+		if (v[0] != (uint32_t)t->frame.cols || v[1] != (uint32_t)t->frame.rows ||
+		    v[4] != (uint32_t)t->frame.scroll || v[5] != (uint32_t)t->frame.alternate || !t->page->live)
 			t->full_damage = TRUE;
-		t->damaged_rows[t->frame.cursor_y] = TRUE;
+		if (v[2] != (uint32_t)t->frame.cursor_x || v[3] != (uint32_t)t->frame.cursor_y) {
+			t->damaged_rows[t->frame.cursor_y] = TRUE;
+			t->damaged_rows[v[3]] = TRUE;
+		}
 		t->frame = (SessionFrame){v[0], v[1], v[2], v[3], v[4], v[5]};
-		t->damaged_rows[t->frame.cursor_y] = TRUE;
 		tsessionimportframe(t->session, &t->frame);
 		t->page->live = TRUE;
 	} else if (p->type == WIRE_ROW) {
@@ -659,12 +665,22 @@ terminal_packet(Terminal *t, WirePacket *p)
 		tsessionimportrow(t->session, row, cells, t->frame.cols);
 		t->damaged_rows[row] = TRUE;
 	} else if (p->type == WIRE_FRAME_FINISH) {
+		app_startuptime("frame");
 		/* Publish damage only when the service's complete frame has arrived. */
+		gboolean changed = t->full_damage;
 		if (t->full_damage) gtk_widget_queue_draw(t->page->widget);
 		else for (int row = 0; row < t->frame.rows; row++)
-			if (t->damaged_rows[row]) damage_row(t, row);
+			if (t->damaged_rows[row]) { damage_row(t, row); changed = TRUE; }
 		t->full_damage = FALSE;
 		memset(t->damaged_rows, 0, sizeof(t->damaged_rows));
+		if (changed && t->input_pending && gtk_widget_get_mapped(t->page->widget)) {
+			/* The first complete response to keyboard input should not wait
+			 * another refresh interval. Bulk output keeps GTK's frame clock. */
+			t->input_pending = FALSE;
+			G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+			gdk_window_process_updates(gtk_widget_get_window(t->page->widget), TRUE);
+			G_GNUC_END_IGNORE_DEPRECATIONS
+		}
 	}
 }
 

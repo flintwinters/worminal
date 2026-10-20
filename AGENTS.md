@@ -10,6 +10,7 @@ window maps early, then loads fonts while the service starts its shell. `manage.
 colors, font family, size, spacing, and scrollback into a generated C header. `src/terminal` owns terminal state,
 `src/gtk` paints release views, `src/x11` preserves the original renderer, and `src/workspace` connects the service.
 GTK redraws changed rows and cursor damage, including overlapping glyph ink; compact rows paint backgrounds before glyphs.
+Unchanged frames do not repaint or consume the immediate paint allowance for the first changed keyboard response.
 `tools/build.py` owns builds and installation; `manage.py` owns
 checks and latency measurements on private displays.
 `manage.py latency-visible` measures real key events to visible echo and fresh/additional window presentation

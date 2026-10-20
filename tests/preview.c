@@ -123,6 +123,19 @@ input_paint_latency(Terminal *t)
 	input(t, "\r\nKEYPAINT", 10);
 	WAIT(screen_has(t, wanted->str));
 	check_clipped_paint(t);
+	/* Input acknowledgements may carry unchanged frame metadata before the
+	 * PTY echoes anything. They must not consume the prompt-paint allowance. */
+	WireBuffer unchanged = {0};
+	int metadata[] = {t->frame.cols, t->frame.rows, t->frame.cursor_x, t->frame.cursor_y,
+	                  t->frame.scroll, t->frame.alternate};
+	for (size_t i = 0; i < G_N_ELEMENTS(metadata); i++) wire_put_u32(&unchanged, metadata[i]);
+	WirePacket packet = {.type = WIRE_FRAME, .data = unchanged.data, .len = unchanged.len};
+	t->input_pending = TRUE;
+	terminal_packet(t, &packet);
+	packet.type = WIRE_FRAME_FINISH;
+	terminal_packet(t, &packet);
+	g_assert_true(t->input_pending);
+	wire_buffer_free(&unchanged);
 	gint64 elapsed = 0;
 	for (int i = 0; i < 20; i++) {
 		g_string_append_c(wanted, 'a' + i);
@@ -131,6 +144,7 @@ input_paint_latency(Terminal *t)
 		gint64 start = g_get_monotonic_time();
 		input(t, wanted->str + wanted->len - 1, 1);
 		WAIT(probe.painted);
+		g_assert_false(t->input_pending);
 		elapsed += g_get_monotonic_time() - start;
 	}
 	g_print("Input to GTK paint: %.2f ms mean (20 echoes)\n", elapsed / 20000.0);
