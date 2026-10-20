@@ -154,6 +154,26 @@ input_paint_latency(Terminal *t)
 static void select_page(Page *);
 
 static void
+check_initial_dimensions(void)
+{
+	App app = {.cols = 93, .rows = 17};
+	Page page = {.app = &app};
+	Terminal *t = terminal_new(&page);
+	g_object_ref_sink(page.widget);
+	/* Font setup before realization must not send GTK's placeholder 1x1
+	 * allocation to a running shell as its initial terminal geometry. */
+	terminal_zoom(t);
+	int cols, rows;
+	terminal_dimensions(t, &cols, &rows);
+	g_assert_cmpint(cols, ==, app.cols);
+	g_assert_cmpint(rows, ==, app.rows);
+	terminal_free(t);
+	pango_font_description_free(app.cached_font);
+	gtk_widget_destroy(page.widget);
+	g_object_unref(page.widget);
+}
+
+static void
 check_tabs(App *app, Page *terminal, Page *browser)
 {
 	TabStrip *strip = g_object_get_data(G_OBJECT(app->tabstrip), "tabs");
@@ -348,6 +368,7 @@ main(int argc, char **argv)
 {
 	setlocale(LC_CTYPE, "");
 	gtk_init(&argc, &argv);
+	check_initial_dimensions();
 	const char *backend = g_getenv("GDK_BACKEND");
 	if (backend && !strcmp(backend, "wayland")) {
 		g_assert_null(g_getenv("DISPLAY"));
