@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=Worminal
-Comment=Small X11 terminal
+Comment=GTK terminal and browser
 Exec=worminal -c Worminal
 TryExec=worminal
 Icon=worminal

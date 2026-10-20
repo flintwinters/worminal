@@ -65,13 +65,16 @@ def run_checks():
     if check_privacy(ROOT):
         return 1
     native_build.build_targets(
-        "build/key_injector", "build/placement_wm", "build/compact-worminal", "build/overlap_probe",
+        "worminal-x11", "worminald-x11", "worminald-preview", "build/key_injector",
+        "build/placement_wm", "build/compact-worminal",
+        "build/overlap_probe",
         "build/border_probe", "build/icon_probe", "build/view_state_test", "build/scrollback_test", "build/url_test",
     )
     code = run_native_checks()
     if code:
         return code
-    return run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-q"])
+    code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-q"])
+    return code or preview_checks("x11")
 
 
 def run_native_checks():
@@ -83,11 +86,12 @@ def run_native_checks():
 
 
 def run_headless_checks():
-    native_build.build_targets("build/scrollback_test", "build/url_test")
+    native_build.build_targets("build/scrollback_test", "build/url_test", "worminald-x11", "worminald-preview")
     code = run_native_checks()
     if code:
         return code
-    for pattern in ("test_build.py", "test_workspace.py", "test_theme.py", "test_privacy.py"):
+    patterns = ("test_build.py", "test_workspace.py", "test_preview_workspace.py", "test_theme.py", "test_privacy.py")
+    for pattern in patterns:
         code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                     "-p", pattern, "-q"])
         if code:
@@ -103,6 +107,65 @@ def run_proof_script(path):
 def build():
     """Compile Worminal with the current Alacritty theme."""
     native_build.build_targets()
+
+
+@app.command("build-preview")
+def build_preview():
+    """Build compatibility names for the GTK frontend and v2 service."""
+    native_build.build_targets("worminal-preview", "worminald-preview")
+
+
+def preview_checks(backend):
+    native_build.build_targets("worminal-preview", "worminald-preview", "build/preview_test")
+    return run([sys.executable, "tests/preview.py", backend])
+
+
+@app.command("check-preview")
+def check_preview():
+    """Check combined terminal/browser behavior on private Xvfb, locally and through SSH fixtures."""
+    raise typer.Exit(preview_checks("x11"))
+
+
+@app.command("setup-preview-wayland")
+def setup_preview_wayland():
+    """Download/extract an optional Debian Weston runtime under .checks; no system installation."""
+    from tools.weston import setup
+    setup()
+
+
+@app.command("prove-preview-regressions")
+def prove_preview_regressions():
+    """Compile project-local counterfactuals and require critical regression tests to fail."""
+    from tools.regressions import prove
+    prove()
+
+
+@app.command("preview-perf")
+def preview_perf():
+    """Compare original and preview launch, shell/input latency, and helper-inclusive memory."""
+    native_build.build_targets("worminal-preview", "worminal-x11", "worminald-x11",
+                               "worminald-preview", "build/key_injector")
+    raise typer.Exit(run([sys.executable, "tests/frontend_perf.py"]))
+
+
+@app.command("check-preview-keys")
+def check_preview_keys():
+    """Run existing keyboard and mouse regressions through the GTK frontend."""
+    native_build.build_targets("worminal-preview", "worminald-preview")
+    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                          "-p", "test_keys.py", "-q"], env={**os.environ, "WORMINAL_FRONTEND": "worminal-preview"}))
+
+
+@app.command("check-preview-wayland")
+def check_preview_wayland():
+    """Require native Wayland on headless Weston with DISPLAY unset."""
+    raise typer.Exit(preview_checks("wayland"))
+
+
+@app.command("check-preview-qtile")
+def check_preview_qtile():
+    """Check the combined frontend under private Qtile."""
+    raise typer.Exit(preview_checks("qtile"))
 
 
 @app.command()
@@ -136,7 +199,7 @@ def check_keys():
     """Check navigation and mouse input on private Xvfb displays."""
     native_build.build_targets()
     raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
-                          "-p", "test_keys.py", "-q"]))
+                          "-p", "test_keys.py", "-q"], env={**os.environ, "WORMINAL_FRONTEND": "worminal"}))
 
 
 @app.command("check-headless")
@@ -203,7 +266,7 @@ def master_perf(host: str):
 @app.command("window-perf")
 def window_perf():
     """Measure isolated tab repaint on the current X11 display (needs python-xlib)."""
-    native_build.build_targets()
+    native_build.build_targets("worminal-x11", "worminald-x11")
     raise typer.Exit(run([sys.executable, "tests/window_perf.py"]))
 
 

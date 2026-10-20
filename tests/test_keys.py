@@ -12,6 +12,9 @@ from x11 import isolated_display
 
 
 ROOT = Path(__file__).resolve().parent.parent
+FRONTEND = os.environ.get("WORMINAL_FRONTEND", "worminal-x11")
+PREVIEW = FRONTEND in ("worminal", "worminal-preview")
+DAEMON = "worminald" if PREVIEW else "worminald-x11"
 
 
 def read_bytes(stream, count):
@@ -37,6 +40,18 @@ def read_through(stream, final):
     return data
 
 
+def wait_title(env, window, title):
+    # PTY print output precedes parser/catalog updates. The title is a frontend
+    # acknowledgment that the same catalog carrying the input modes was applied.
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        actual = subprocess.check_output(["xdotool", "getwindowname", window], env=env, text=True).strip()
+        if actual == title:
+            return
+        time.sleep(.01)
+    raise AssertionError("frontend did not apply the ready input modes")
+
+
 class NavigationKeysTest(unittest.TestCase):
     def test_alternate_scroll_sends_cursor_keys(self):
         self.check_alternate_scroll([])
@@ -47,8 +62,9 @@ class NavigationKeysTest(unittest.TestCase):
     def check_alternate_scroll(self, connection):
         with isolated_display() as env:
             if connection:
-                env["PATH"] = str(ROOT / "tests" / "fixtures" / "master") + os.pathsep + env["PATH"]
-                env["WORMINAL_TEST_DAEMON"] = str(ROOT / "worminald")
+                fixtures = ROOT / "tests/fixtures" / ("preview-master" if PREVIEW else "master")
+                env["PATH"] = str(fixtures) + os.pathsep + env["PATH"]
+                env["WORMINAL_TEST_DAEMON"] = str(ROOT / DAEMON)
             for appcursor, mouse_report in ((False, False), (True, False), (False, True)):
                 title = f"Worminal alternate scroll {os.getpid()} {appcursor} {mouse_report}"
                 mode = b"\033[?1049h\033[?1007h"
@@ -56,10 +72,11 @@ class NavigationKeysTest(unittest.TestCase):
                     mode += b"\033[?1h"
                 if mouse_report:
                     mode += b"\033[?1000h\033[?1006h"
+                mode += f"\033]2;{title} ready\a".encode()
                 escapes = "".join(f"\\{byte:03o}" for byte in mode)
                 command = f"stty raw -echo; printf '{escapes}R'; exec cat"
                 terminal = subprocess.Popen(
-                    [str(ROOT / "worminal"), *connection, "-T", title, "-o", "-",
+                    [str(ROOT / FRONTEND), *connection, "-T", title, "-o", "-",
                      "-e", "/bin/sh", "-c", command],
                     env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 )
@@ -84,10 +101,11 @@ class NavigationKeysTest(unittest.TestCase):
                         self.fail(f"Worminal did not open an X11 window: exit={status}, "
                                   f"display={env['DISPLAY']} server={display.returncode} "
                                   f"stderr={detail!r}")
+                    wait_title(env, window, title + " ready")
                     self.assertEqual(read_bytes(terminal.stdout, len(mode) + 1), mode + b"R")
                     subprocess.run(["xdotool", "windowfocus", "--sync", window],
                                    env=env, check=True)
-                    subprocess.run(["xdotool", "mousemove", "--window", window, "20", "20"],
+                    subprocess.run(["xdotool", "mousemove", "--window", window, "20", "80"],
                                    env=env, check=True)
                     for button, normal, application in (
                         ("4", b"\033[A", b"\033OA"),
@@ -110,15 +128,15 @@ class NavigationKeysTest(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("micro"), "micro is not installed")
     def test_ctrl_end_in_micro(self):
-        path = ROOT / "build" / "micro-key-test.txt"
-        log = ROOT / "build" / "micro-output"
+        path = ROOT / "build" / f"micro-key-test-{os.getpid()}.txt"
+        log = ROOT / "build" / f"micro-output-{os.getpid()}"
         config = ROOT / "build" / f"micro-config-{os.getpid()}"
         config.mkdir()
         path.write_text("first\nlast")
         title = f"Worminal micro keys {os.getpid()}"
         with isolated_display() as env:
             terminal = subprocess.Popen(
-                [str(ROOT / "worminal"), "-T", title, "-o", str(log), "-e", "micro",
+                [str(ROOT / FRONTEND), "-T", title, "-o", str(log), "-e", "micro",
                  "-config-dir", str(config), str(path)],
                 env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
             )
@@ -127,7 +145,8 @@ class NavigationKeysTest(unittest.TestCase):
                 window = None
                 while time.monotonic() < deadline:
                     result = subprocess.run(
-                        ["xdotool", "search", "--onlyvisible", "--class", "Worminal"],
+                        ["xdotool", "search", "--onlyvisible", "--class",
+                         "worminal" if PREVIEW else "Worminal"],
                         env=env, capture_output=True, text=True,
                     )
                     if result.returncode == 0:
@@ -184,15 +203,17 @@ class NavigationKeysTest(unittest.TestCase):
         )
         with isolated_display() as env:
             if connection:
-                env["PATH"] = str(ROOT / "tests" / "fixtures" / "master") + os.pathsep + env["PATH"]
-                env["WORMINAL_TEST_DAEMON"] = str(ROOT / "worminald")
+                fixtures = ROOT / "tests/fixtures" / ("preview-master" if PREVIEW else "master")
+                env["PATH"] = str(fixtures) + os.pathsep + env["PATH"]
+                env["WORMINAL_TEST_DAEMON"] = str(ROOT / DAEMON)
             for appcursor, appkeypad in ((False, False), (False, True), (True, False), (True, True)):
                 title = f"Worminal keys {os.getpid()} {appcursor} {appkeypad}"
                 mode = (b"\033[?1h" if appcursor else b"") + (b"\033=" if appkeypad else b"")
+                mode += f"\033]2;{title} ready\a".encode()
                 escapes = "".join(f"\\{byte:03o}" for byte in mode)
                 command = f"stty raw -echo; printf '{escapes}R'; exec cat"
                 terminal = subprocess.Popen(
-                    [str(ROOT / "worminal"), *connection, "-T", title, "-o", "-",
+                    [str(ROOT / FRONTEND), *connection, "-T", title, "-o", "-",
                      "-e", "/bin/sh", "-c", command],
                     env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 )
@@ -211,6 +232,7 @@ class NavigationKeysTest(unittest.TestCase):
                     if window is None:
                         detail = terminal.stderr.read(4096) if terminal.poll() is not None else b""
                         self.fail(f"Worminal did not open: exit={terminal.poll()}, stderr={detail!r}")
+                    wait_title(env, window, title + " ready")
                     self.assertEqual(read_bytes(terminal.stdout, len(mode) + 1), mode + b"R")
                     focused = subprocess.run(["xdotool", "windowfocus", "--sync", window],
                                              env=env, capture_output=True)
