@@ -27,12 +27,14 @@ struct Terminal {
 };
 
 static void damage_row(Terminal *, int);
+static void prepare(Terminal *);
 
 static void
 input(Terminal *t, const char *bytes, size_t length)
 {
 	if (t->page->mode & MODE_KBDLOCK)
 		return;
+	prepare(t);
 	app_startuptime("input");
 	if (!t->page->live) app_focus(t->page);
 	tsessionuse(t->session);
@@ -66,6 +68,7 @@ static void
 resize(GtkWidget *widget, GtkAllocation *allocation, Terminal *t)
 {
 	(void)widget;
+	if (!t->layout) return;
 	App *app = t->page->app;
 	if (app->geometry_pending && app->active == t->page && gtk_widget_get_mapped(app->window)) {
 		int width, height;
@@ -139,6 +142,7 @@ terminal_font(App *app, PangoLayout *layout, int *cw, int *ch, int *height, int 
 void
 terminal_zoom(Terminal *t)
 {
+	if (!t->layout) { prepare(t); return; }
 	clear_layouts(t);
 	if (t->font) pango_font_description_free(t->font);
 	t->font = terminal_font(t->page->app, t->layout, &t->cw, &t->ch, &t->height, &t->ascent);
@@ -244,6 +248,7 @@ glyph_overlap(Terminal *t)
 static gboolean
 draw_terminal(GtkWidget *widget, cairo_t *cr, Terminal *t)
 {
+	prepare(t);
 	app_startuptime("paint");
 	Page *p = t->page;
 	tsessionuse(t->session);
@@ -341,6 +346,7 @@ blink(gpointer data)
 static gboolean
 focus(GtkWidget *widget, GdkEventFocus *event, Terminal *t)
 {
+	prepare(t);
 	gtk_im_context_set_client_window(t->im, gtk_widget_get_window(widget));
 	if (event->in) {
 		gtk_im_context_focus_in(t->im);
@@ -435,6 +441,7 @@ keymap(Terminal *t, GdkEventKey *e)
 gboolean
 terminal_key(Terminal *t, GdkEventKey *e)
 {
+	prepare(t);
 	if (e->type == GDK_KEY_RELEASE)
 		return gtk_im_context_filter_keypress(t->im, e);
 	if ((e->state & (GDK_CONTROL_MASK | GDK_SHIFT_MASK)) == (GDK_CONTROL_MASK | GDK_SHIFT_MASK) &&
@@ -604,6 +611,28 @@ wheel(GtkWidget *widget, GdkEventScroll *e, Terminal *t)
 	return TRUE;
 }
 
+static void
+prepare(Terminal *t)
+{
+	if (t->layout) return;
+	/* Catalogs include every tab. Hidden views need cells, but their Pango
+	 * layouts, input methods and blink timers can wait until first use. */
+	t->layout = gtk_widget_create_pango_layout(t->page->widget, "");
+	t->im = gtk_im_multicontext_new();
+	g_signal_connect(t->im, "commit", G_CALLBACK(commit), t);
+	g_signal_connect(t->im, "preedit-changed", G_CALLBACK(preedit), t);
+	t->timer = g_timeout_add(800, blink, t);
+	terminal_zoom(t);
+	app_startuptime("font");
+}
+
+static void
+mapped(GtkWidget *widget, Terminal *t)
+{
+	(void)widget;
+	prepare(t);
+}
+
 Terminal *
 terminal_new(Page *page)
 {
@@ -619,10 +648,7 @@ terminal_new(Page *page)
 	gtk_widget_set_can_focus(page->widget, TRUE);
 	gtk_widget_add_events(page->widget, GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK |
 	    GDK_POINTER_MOTION_MASK | GDK_SCROLL_MASK | GDK_SMOOTH_SCROLL_MASK | GDK_FOCUS_CHANGE_MASK);
-	t->layout = gtk_widget_create_pango_layout(page->widget, "");
-	t->im = gtk_im_multicontext_new();
-	g_signal_connect(t->im, "commit", G_CALLBACK(commit), t);
-	g_signal_connect(t->im, "preedit-changed", G_CALLBACK(preedit), t);
+	g_signal_connect(page->widget, "map", G_CALLBACK(mapped), t);
 	g_signal_connect(page->widget, "draw", G_CALLBACK(draw_terminal), t);
 	g_signal_connect(page->widget, "size-allocate", G_CALLBACK(resize), t);
 	g_signal_connect(page->widget, "focus-in-event", G_CALLBACK(focus), t);
@@ -633,9 +659,6 @@ terminal_new(Page *page)
 	g_signal_connect(page->widget, "button-release-event", G_CALLBACK(button), t);
 	g_signal_connect(page->widget, "motion-notify-event", G_CALLBACK(motion), t);
 	g_signal_connect(page->widget, "scroll-event", G_CALLBACK(wheel), t);
-	t->timer = g_timeout_add(800, blink, t);
-	terminal_zoom(t);
-	app_startuptime("font");
 	return t;
 }
 
@@ -694,12 +717,12 @@ void
 terminal_free(Terminal *t)
 {
 	g_object_set_data(G_OBJECT(t->page->widget), "terminal", NULL);
-	g_source_remove(t->timer);
+	if (t->timer) g_source_remove(t->timer);
 	g_signal_handlers_disconnect_by_data(t->page->widget, t);
-	g_object_unref(t->im);
+	g_clear_object(&t->im);
 	clear_layouts(t);
-	g_object_unref(t->layout);
-	pango_font_description_free(t->font);
+	g_clear_object(&t->layout);
+	if (t->font) pango_font_description_free(t->font);
 	g_free(t->preedit);
 	tsessionremove(t->session);
 	g_free(t);
