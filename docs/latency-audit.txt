@@ -285,3 +285,47 @@ These are rendering/callback measurements, excluding physical key delivery and
 compositor presentation; they are not native key-to-visible-pixel measurements
 and do not demonstrate a new performance improvement. Dense foreground work
 and native presentation remain part of the wider latency audit.
+
+Native test clients pass, but the private compositor logs a layer-finalization
+warning during teardown. Its cause and shutdown status have not been audited;
+this remains a harness validation limit, not a passing absence-of-warnings claim.
+
+Cached ASCII drawing
+---------------------
+Cached printable ASCII layouts now draw their single Pango line at that layout's
+own baseline. Bold/italic and fallback metrics are retained; other strings keep
+the full-layout path. This adds no glyph cache or persistent per-view state.
+
+The new manage.py render-perf command loads the actual release frontend module
+and imports dense ASCII, mixed Unicode, and a clipped ASCII stripe through the
+real terminal packet API. GTK draws the real widget into Cairo images. It checks
+exact RGBA hashes and geometry across variants, alternates order, excludes 20
+warm-up frames per case, and records wall time, CLOCK_PROCESS_CPUTIME_ID CPU,
+and PSS with the shaped layouts alive. Snapshots need a compatible internal
+frontend view ABI. This measures rendering, not input or display presentation.
+
+Ten alternating pairs, 60 measured frames per case, gave these median CPU costs
+in milliseconds per frame (candidate / previous full-layout implementation):
+
+  backend   dense ASCII     mixed Unicode    clipped ASCII
+  X11       6.652 / 7.432   8.447 / 9.347    0.990 / 1.153
+  Wayland   7.257 / 7.933   8.442 / 9.292    1.049 / 1.142
+
+These workloads reduce repaint CPU by about 8--14%. Every rendered image matches
+the baseline exactly. PSS medians were 46366/46427 KiB on X11 and 20175/20181 KiB
+on Wayland, providing no evidence of a memory increase in this workload.
+Frozen reports: .checks/ascii-line-release-{x11,wayland}-verified.json. Reports
+record the loaded module hashes; native runs assert Wayland with DISPLAY absent.
+
+Independent legacy Pango layouts also verify all 95 printable ASCII glyphs and
+four font styles against the production path, before and after zoom, in LTR/RTL
+contexts, with transparency, clipping, integer scaling and fractional transforms.
+Full local/SSH X11 and native Wayland integration suites pass. File-limit checks
+pass; clang-tidy remains unavailable. The initial new release probe caught a
+buffer ownership bug in its own fixture, fixed by clearing consumed buffers;
+no product state or live session was involved.
+
+The final 20-pair visible comparison measured fresh readiness 99.78/99.23 ms,
+with paired median +0.15 ms; additional readiness paired -0.79 ms. Typing median
+and p95 were 2.96/4.27 ms versus 3.06/4.35 ms. This does not establish a separate
+end-to-end typing improvement. Frozen data: .checks/ascii-line-input-launch-verified.json.

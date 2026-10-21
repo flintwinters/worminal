@@ -269,8 +269,15 @@ text(Terminal *t, cairo_t *cr, const char *value, int x, int y, ushort mode)
 	/* Anchor glyphs to cell bottoms, including compact spacing and glyph offset.
 	 * Draw every background first: tall glyphs may overlap adjacent compact rows. */
 	double top = 2 + (y + 1) * t->ch - t->height - theme_glyph_offset_y;
-	cairo_move_to(cr, 2 + x * t->cw, top);
-	pango_cairo_show_layout(cr, layout);
+	if (cached) {
+		/* Cached ASCII layouts contain exactly one line. Keep its own baseline
+		 * for style/fallback metrics and draw that line directly. */
+		cairo_move_to(cr, 2 + x * t->cw, top + pango_layout_get_baseline(layout) / (double)PANGO_SCALE);
+		pango_cairo_show_layout_line(cr, pango_layout_get_line_readonly(layout, 0));
+	} else {
+		cairo_move_to(cr, 2 + x * t->cw, top);
+		pango_cairo_show_layout(cr, layout);
+	}
 }
 
 static int

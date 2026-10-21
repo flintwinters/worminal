@@ -151,6 +151,15 @@ class Builder:
                              flags=flags, libs=libs)
             finally:
                 self.cflags = old_flags
+        elif target == "build/render_probe":
+            old_flags = self.cflags
+            self.cflags = [*CPPFLAGS, *words("CPPFLAGS"), *words("CFLAGS", "-O3"),
+                           *pkg_flags("--cflags", TERMINAL_PACKAGES)]
+            try:
+                self.program(target, ["tests/render_probe.c", "src/workspace/wire.c"], variant="render-probe",
+                             libs=[*pkg_flags("--libs", TERMINAL_PACKAGES), *words("LDFLAGS")])
+            finally:
+                self.cflags = old_flags
         elif target in ("build/compact-worminal", "build/worminald"):
             generate_theme(ROOT / "tests/fixtures/alacritty/compact.toml", ROOT / "build/compact_theme.h")
             flags = ['-DWORMINAL_THEME_HEADER="build/compact_theme.h"']

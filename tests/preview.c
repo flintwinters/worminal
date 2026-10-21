@@ -5,6 +5,7 @@
 #include "../src/gtk/tabs.c"
 #include "../src/gtk/windows.c"
 #include <glib/gstdio.h>
+#include "preview_text.c"
 
 static void diagnostics(void);
 
@@ -203,6 +204,7 @@ input_paint_latency(Terminal *t)
 	input(t, "\r\nKEYPAINT", 10);
 	WAIT(screen_has(t, wanted->str));
 	check_clipped_paint(t);
+	check_ascii_line_rendering(t);
 	/* Input acknowledgements may carry unchanged frame metadata before the
 	 * PTY echoes anything. They must not consume the prompt-paint allowance. */
 	WireBuffer unchanged = {0};
@@ -708,6 +710,7 @@ main(int argc, char **argv)
 		for (size_t c = 0; c < G_N_ELEMENTS(t->ascii[style]); c++)
 			g_assert_null(t->ascii[style][c]);
 	WAIT(t->frame.cols != oldcols && t->frame.cols == t->cols);
+	check_ascii_line_rendering(t);
 	paint(t, ".checks/preview-terminal.png");
 	GString *flood = g_string_new(NULL);
 	for (int i = 0; i < 2000; i++) g_string_append_printf(flood, "\r\noutput-%04d", i);
