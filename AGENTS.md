@@ -7,6 +7,7 @@ The app is a GTK terminal/browser built on st 0.9.3. A per-user `worminald` serv
 terminal state, and bounded main-screen scrollback; views connect locally or through `--master user@host` over SSH.
 Main-screen width changes reflow soft-wrapped text. A tab has one live painting view and can run with no windows. Each
 window maps early while its connection worker sends the initial launch request; font loading and shell startup overlap.
+A fresh remote owner starts SSH after display/argument validation and overlaps transport setup with widget construction.
 `manage.py build` compiles Alacritty colors, font family, size, spacing, and scrollback into a generated C header.
 `src/terminal` owns terminal state,
 `src/gtk` paints release views, `src/x11` preserves the original renderer, and `src/workspace` connects the service.

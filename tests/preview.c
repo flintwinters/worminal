@@ -452,6 +452,21 @@ check_initial_dimensions(void)
 }
 
 static void
+check_failed_preconnected_transport(void)
+{
+	int sockets[2];
+	g_assert_cmpint(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), ==, 0);
+	App *app = new_app();
+	app->startup_fd = sockets[0];
+	close(sockets[1]);
+	show_app(app);
+	WAIT(app->reconnect);
+	g_assert_cmpint(app->startup_fd, ==, -1);
+	g_assert_cmpint(app->fd, ==, -1);
+	gtk_widget_destroy(app->window);
+}
+
+static void
 check_tabs(App *app, Page *terminal, Page *browser)
 {
 	TabStrip *strip = g_object_get_data(G_OBJECT(app->tabstrip), "tabs");
@@ -648,6 +663,7 @@ main(int argc, char **argv)
 	gtk_init(&argc, &argv);
 	check_initial_dimensions();
 	check_blink_damage();
+	check_failed_preconnected_transport();
 	const char *backend = g_getenv("GDK_BACKEND");
 	if (backend && !strcmp(backend, "wayland")) {
 		g_assert_null(g_getenv("DISPLAY"));

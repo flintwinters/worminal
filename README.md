@@ -21,6 +21,7 @@ The priorities are fast launch to usable input, low memory use, and a small inte
 
 The small GLib launcher forwards additional windows before loading graphics libraries. The first window loads
 GTK on Wayland or X11; WebKit loads when opening a browser. Both modules install under `lib/worminal`.
+Fresh remote windows overlap SSH setup with widget construction after validating the display and arguments.
 Remote Codex scrolling remains an investigation area beyond the tested terminal mouse modes.
 
 ## Try it

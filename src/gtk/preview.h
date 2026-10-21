@@ -47,6 +47,7 @@ struct App {
 	double cached_font_zoom;
 	int font_cw, font_ch, font_height, font_ascent;
 	gint64 last_selection;
+	int startup_fd;
 };
 
 void tabs_refresh(App *);
