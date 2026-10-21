@@ -22,6 +22,7 @@ proof_app = typer.Typer(help="Run proofs on private Xvfb displays.")
 app.add_typer(proof_app, name="proof")
 MAX_FILE_LINES = 1000
 MAX_LINE_LENGTH = 120
+NATIVE_CHECKS = ("build/scrollback_test", "build/url_test", "build/frame_schedule_test")
 # These merged files exceed the limit; prevent further growth until they are split.
 LEGACY_FILE_LINES = {"src/terminal/st.c": 3225, "src/x11/x.c": 3417,
                      "tests/test_native.py": 1333}
@@ -68,7 +69,7 @@ def run_checks():
         "worminal-x11", "worminald-x11", "worminald-preview", "build/key_injector",
         "build/placement_wm", "build/compact-worminal",
         "build/overlap_probe",
-        "build/border_probe", "build/icon_probe", "build/view_state_test", "build/scrollback_test", "build/url_test",
+        "build/border_probe", "build/icon_probe", "build/view_state_test", *NATIVE_CHECKS,
     )
     code = run_native_checks()
     if code:
@@ -78,7 +79,7 @@ def run_checks():
 
 
 def run_native_checks():
-    for binary in ("build/scrollback_test", "build/url_test"):
+    for binary in NATIVE_CHECKS:
         code = run([binary], env={**os.environ, "ASAN_OPTIONS": "detect_leaks=0"})
         if code:
             return code
@@ -86,7 +87,7 @@ def run_native_checks():
 
 
 def run_headless_checks():
-    native_build.build_targets("build/scrollback_test", "build/url_test", "worminald-x11", "worminald-preview")
+    native_build.build_targets(*NATIVE_CHECKS, "worminald-x11", "worminald-preview")
     code = run_native_checks()
     if code:
         return code
@@ -272,6 +273,28 @@ def latency_visible(trials: int = typer.Option(10, min=1), keys: int = typer.Opt
     options = (["--snapshot", str(snapshot)] if snapshot else []) + (["--compare", str(compare)] if compare else [])
     raise typer.Exit(run([sys.executable, "tests/visible_latency.py", "--trials", str(trials),
                           "--keys", str(keys), *options]))
+
+
+@app.command("frame-perf")
+def frame_perf(compare: Path = typer.Option(None, help="Saved latency-visible baseline directory.")):
+    """Measure paced PTY output to complete frames without keyboard-response boosting."""
+    native_build.build_targets("worminald-preview", "build/frame_schedule_test")
+    code = run(["build/frame_schedule_test"])
+    if code:
+        raise typer.Exit(code)
+    variants = [("candidate", ROOT / "worminald-preview")]
+    if compare:
+        daemon = compare.resolve() / "worminald"
+        if not daemon.is_file():
+            raise typer.BadParameter("Comparison directory must contain worminald")
+        variants.insert(0, ("baseline", daemon))
+    for label, daemon in variants:
+        code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p",
+                    "test_preview_workspace.py", "-k", "paced_output", "-q"],
+                   env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(daemon),
+                        "WORMINAL_FRAME_PERF_NAME": label})
+        if code:
+            raise typer.Exit(code)
 
 
 @app.command("latency-shell")

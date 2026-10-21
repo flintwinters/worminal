@@ -259,6 +259,13 @@ Each version gets a private display and workspace with the same growing tab work
 The native echo fixture excludes interpreter startup and restores its ready canvas after startup resizes.
 `.checks/visible-latency-comparison.json` records raw pairs, differences, CPU count, and start/end system load.
 
+`python3 manage.py frame-perf --compare .checks/launch-baseline` measures ordinary PTY output to a complete
+service frame without keyboard-response boosting. Its paired writes exercise the end of the batching interval;
+raw results are saved under `.checks/frame-output-latency-*.json`. `check-headless` also checks scheduler
+deadline boundaries and verifies that the final paced output reaches a complete frame.
+The probe records frame count, daemon CPU time and its counter resolution, and daemon RSS/PSS. Correct deadline
+handling can deliver more intermediate frames while retaining the same configured batching-rate limit.
+
 Lint requires `clang-tidy`. It enforces 120-character lines and a 1,000-line file limit, with existing larger
 files capped at their recorded lengths until split.
 

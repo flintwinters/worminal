@@ -2,10 +2,13 @@
 
 from functools import partial
 from itertools import product
+import json
 import os
+import re
 import shlex
 from pathlib import Path
 import socket
+import statistics
 import struct
 import subprocess
 import time
@@ -13,6 +16,7 @@ import unittest
 import uuid
 
 from workspace_protocol import number, string, send as wire_send, wait_kind as wire_wait, packet as wire_packet
+from perf_metrics import cpu_time, memory
 
 ROOT = Path(__file__).resolve().parent.parent
 DAEMON = ROOT / os.environ.get("WORMINAL_TEST_PREVIEW_DAEMON", "worminald-preview")
@@ -229,6 +233,54 @@ class PreviewWorkspaceTest(unittest.TestCase):
             send(peer, 19)
             kind, _, _ = wire_packet(peer, version=2)
             self.assertEqual(kind, 7, "stale resize released the new controller")
+
+    def test_paced_output_frame_latency(self):
+        # The second write arrives near the previous frame's deadline. No
+        # WIRE_INPUT is sent: this measures the ordinary output batching path.
+        count = 40
+        code = ("import os,time\nos.write(1,b'READY')\n"
+                f"for i in range({count}):\n"
+                " time.sleep(.030)\n os.write(1,f'\\x1b[HS{i:03d}A'.encode())\n"
+                " time.sleep(.014)\n os.write(1,f'\\x1b[HS{i:03d}B'.encode())\n"
+                "os.read(0,1)\n")
+        tab = self.launch("stty raw -echo; exec python3 -u -c " + shlex.quote(code))
+        pending, samples, stream, visible = {}, [], b"", b""
+        started_cpu, frames = cpu_time(self.daemon.pid), 0
+        while True:
+            kind, identity, payload = wire_packet(self.peer, version=2)
+            observed = time.monotonic_ns()
+            if identity != tab:
+                continue
+            if kind == 14:
+                stream += payload
+                matches = list(re.finditer(rb"\x1b\[H(S\d{3}B)", stream))
+                for match in matches:
+                    pending[match[1]] = observed
+                stream = stream[matches[-1].end():] if matches else stream[-16:]
+            elif kind == 9 and len(payload) >= 84 and struct.unpack_from("!I", payload)[0] == 0:
+                visible = bytes(struct.unpack_from("!I", payload, 4 + 16 * x)[0] for x in range(5))
+            elif kind == 10:
+                frames += 1
+                if visible in pending:
+                    samples.append((observed - pending.pop(visible)) / 1e6)
+                    if visible == f"S{count - 1:03d}B".encode():
+                        break
+        self.assertTrue(samples)
+        ordered = sorted(samples)
+        result = {"samples_ms": samples, "n": len(samples), "writes": count,
+                  "frames": frames, "daemon_cpu_ms": (cpu_time(self.daemon.pid) - started_cpu) * 1000,
+                  "cpu_resolution_ms": 1000 / os.sysconf("SC_CLK_TCK"),
+                  "daemon_memory": memory({self.daemon.pid}),
+                  "median_ms": statistics.median(samples), "p95_ms": ordered[(95 * len(samples) + 99) // 100 - 1]}
+        label = os.environ.get("WORMINAL_FRAME_PERF_NAME", "candidate")
+        directory = ROOT / ".checks"
+        directory.mkdir(exist_ok=True)
+        path = directory / f"frame-output-latency-{label}.json"
+        path.write_text(json.dumps(result, indent=2) + "\n")
+        print(f"{label} PTY output to complete frame: median {result['median_ms']:.2f} ms, "
+              f"p95 {result['p95_ms']:.2f} ms (n={len(samples)}/{count}); {path.relative_to(ROOT)}")
+        print(f"  {frames} frames; daemon CPU {result['daemon_cpu_ms']:.1f} ms; "
+              f"PSS {result['daemon_memory']['pss_kib']} KiB")
 
     def test_queue_saturation_stops_only_affected_tab(self):
         blocked = self.launch("stty raw -echo; printf READY; exec sleep 30")

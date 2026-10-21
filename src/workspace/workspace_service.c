@@ -22,6 +22,7 @@
 #include WORMINAL_THEME_HEADER
 
 #include "service_state.h"
+#include "frame_schedule.h"
 #include "workspace_handoff.h"
 typedef struct {
 	uint32_t cols, rows, allowalt, argc, envc;
@@ -627,7 +628,7 @@ static int
 serve(void)
 {
 	int listener = workspace_listen();
-	struct timespec last_frame = {0}, flush_delay = {.tv_nsec = 16000000};
+	struct timespec last_frame = {0};
 	/* -o - follows the launching client's stdout across the service boundary. */
 	tprinterhook = service_print;
 	ttyrawhook = service_input;
@@ -677,6 +678,11 @@ serve(void)
 				if (fd > maxfd)
 					maxfd = fd;
 			}
+		}
+		struct timespec before_wait, flush_delay = {0};
+		if (pending) {
+			clock_gettime(CLOCK_MONOTONIC, &before_wait);
+			flush_delay.tv_nsec = frame_delay_ns(last_frame, before_wait);
 		}
 		if (pselect(maxfd + 1, &readers, &writers, NULL,
 		            pending ? &flush_delay : NULL, NULL) < 0) {
@@ -741,9 +747,7 @@ serve(void)
 				client_flush(client);
 		struct timespec now;
 		clock_gettime(CLOCK_MONOTONIC, &now);
-		int due = !last_frame.tv_sec ||
-		    (now.tv_sec - last_frame.tv_sec) * 1000000000LL +
-		    now.tv_nsec - last_frame.tv_nsec >= 16000000;
+		int due = frame_delay_ns(last_frame, now) == 0;
 		int emitted = 0;
 		for (Tab *tab = tabs; tab; tab = tab->next)
 			if (tab->pending_frame && due) {

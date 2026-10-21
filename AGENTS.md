@@ -29,9 +29,11 @@ Its shell command converts the calling PTY's ordered tab into a browser. GTK and
 Launchers link GLib only and forward to an existing owner before loading the GTK/Pango frontend module;
 the WebKit module loads when a browser view is first claimed.
 Hidden terminal views defer font layouts, input methods, and blink timers until mapped or used.
+Service output batching sleeps to its existing deadline rather than adding a fresh interval after partial bursts.
 `manage.py check-preview*` and `preview-perf` validate GTK; `build-preview` retains compatibility binary names.
 
-Current jobs: reduce GTK launch/memory overhead and review remaining compatibility gaps.
+Current jobs: audit and reduce remaining latency across launch, input, rendering, output delivery, and view switching
+until further gains require correctness, resource, or compatibility compromises; review remaining compatibility gaps.
 `worminal`/`worminald` are GTK/v2; preview build aliases share that workspace and existing browser profiles.
 Keep `worminal-x11`/`worminald-x11` and live v1 sessions available for rollback; never migrate or stop them implicitly.
 Both daemon builds share explicit `--handin`/`--handoff` ownership transfer via sealed native snapshots and SCM_RIGHTS.
