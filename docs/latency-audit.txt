@@ -721,3 +721,9 @@ regression; raw-fixture ASCII input does not exercise the new uncached path.
 The verified optimization is dense-Unicode drawing CPU. Frozen reports:
 .checks/unicode-single-line-{shell,raw}-input.json. The full latency audit stays
 open, including whole-application resources and remaining presentation costs.
+
+Installed db9314f with the existing Alacritty configuration through atomic
+module replacement. Installed launcher/frontend/browser artifacts match the
+verified build byte-for-byte. No GTK owner, browser session, PTY, workspace
+daemon or legacy session was restarted or migrated. Fresh owners load the
+single-line Unicode path; existing owners retain their mapped frontend.
