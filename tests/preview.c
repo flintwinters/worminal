@@ -323,6 +323,19 @@ check_blink_damage(void)
 	g_assert_cmpuint(probe.draws, ==, 0);
 	g_print("Steady idle blink: %u redraws in 20 ticks (%.2f ms total)\n",
 	    probe.draws, (g_get_monotonic_time() - start) / 1000.0);
+	/* Focus-following pointer entry changes the cursor, not the whole viewport. */
+	GdkEventFocus focus_event = {.type = GDK_FOCUS_CHANGE, .in = TRUE};
+	focus(page.widget, &focus_event, t);
+	flush_paint(t);
+	g_assert_cmpuint(probe.draws, ==, 1);
+	g_assert_true(probe.partial);
+	focus_event.in = FALSE;
+	probe.draws = 0;
+	focus(page.widget, &focus_event, t);
+	flush_paint(t);
+	g_assert_cmpuint(probe.draws, ==, 1);
+	g_assert_true(probe.partial);
+	probe.draws = 0;
 	/* Metadata alone must paint immediately without waiting for blink or
 	 * inventing a row update. Unchanged metadata must not damage anything. */
 	terminal_configure(t, page.mode, page.cursor, FALSE);

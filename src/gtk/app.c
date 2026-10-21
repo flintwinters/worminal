@@ -718,6 +718,18 @@ draw_outline(GtkWidget *widget, cairo_t *cr, gpointer data)
 }
 
 static void
+outline_activity(GtkWidget *outline)
+{
+	int width = gtk_widget_get_allocated_width(outline);
+	int height = gtk_widget_get_allocated_height(outline);
+	/* The windowless overlay shares its damage with the content below it. */
+	gtk_widget_queue_draw_area(outline, 0, 0, width, 1);
+	gtk_widget_queue_draw_area(outline, 0, height - 1, width, 1);
+	gtk_widget_queue_draw_area(outline, 0, 0, 1, height);
+	gtk_widget_queue_draw_area(outline, width - 1, 0, 1, height);
+}
+
+static void
 show_app(App *app)
 {
 	/* Only the first window pays GTK theme/type initialization. Later
@@ -739,7 +751,7 @@ show_app(App *app)
 	gtk_overlay_set_overlay_pass_through(GTK_OVERLAY(overlay), outline, TRUE);
 	g_signal_connect(outline, "draw", G_CALLBACK(draw_outline), app->window);
 	g_signal_connect_object(app->window, "notify::is-active",
-	    G_CALLBACK(gtk_widget_queue_draw), outline, G_CONNECT_SWAPPED);
+	    G_CALLBACK(outline_activity), outline, G_CONNECT_SWAPPED);
 	app->notebook = gtk_notebook_new();
 	gtk_notebook_set_show_tabs(GTK_NOTEBOOK(app->notebook), FALSE);
 	gtk_notebook_set_show_border(GTK_NOTEBOOK(app->notebook), FALSE);
