@@ -463,7 +463,7 @@ focus(GtkWidget *widget, GdkEventFocus *event, Terminal *t)
 	gtk_im_context_set_client_window(t->im, gtk_widget_get_window(widget));
 	if (event->in) {
 		gtk_im_context_focus_in(t->im);
-		app_focus(t->page);
+		if (!t->page->live) app_focus(t->page);
 	} else {
 		gtk_im_context_focus_out(t->im);
 	}
@@ -473,7 +473,7 @@ focus(GtkWidget *widget, GdkEventFocus *event, Terminal *t)
 		app_send(t->page->app, WIRE_FOCUS_STATE, t->page->id, b.data, b.len);
 		wire_buffer_free(&b);
 	}
-	gtk_widget_queue_draw(widget);
+	damage_row(t, t->frame.cursor_y);
 	return FALSE;
 }
 
