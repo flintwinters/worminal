@@ -42,3 +42,27 @@ def cpu_time(pid):
 def main_cpu_time(pid):
     """Main-thread scheduled runtime in seconds, from Linux's nanosecond counter."""
     return int(Path(f"/proc/{pid}/schedstat").read_text().split()[0]) / 1e9
+
+
+def startup_usage(pid):
+    """Observed frontend/helper CPU and approximate process RSS high-water counters.
+
+    Linux status VmHWM/VmRSS counters are approximate. Separate process peaks
+    need not be simultaneous. See proc_pid_status(5); these are not peak PSS.
+    Daemon-owned shells are outside this tree; this is not whole-app peak PSS.
+    """
+    processes = []
+    for child in sorted(descendants(pid)):
+        try:
+            status = dict(line.split(":", 1) for line in Path(f"/proc/{child}/status").read_text().splitlines())
+            if "VmHWM" not in status:
+                continue  # An exited/reaped helper has no resident address space to sample.
+            processes.append({"pid": child, "approx_rss_peak_kib": int(status["VmHWM"].split()[0]),
+                              "rss_kib": int(status["VmRSS"].split()[0]),
+                              "cpu_ms": cpu_time(child) * 1000,
+                              "main_thread_cpu_ms": main_cpu_time(child) * 1000})
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+    return {"processes": processes, "cpu_ms": sum(item["cpu_ms"] for item in processes),
+            "main_thread_cpu_ms": sum(item["main_thread_cpu_ms"] for item in processes),
+            "sum_approx_process_peak_rss_kib": sum(item["approx_rss_peak_kib"] for item in processes)}

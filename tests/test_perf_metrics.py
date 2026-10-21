@@ -2,12 +2,13 @@
 
 import os
 from pathlib import Path
+import select
 import subprocess
 import sys
 import threading
 import unittest
 
-from perf_metrics import descendants, memory
+from perf_metrics import descendants, memory, startup_usage
 
 
 class PerfMetricsTests(unittest.TestCase):
@@ -47,3 +48,40 @@ class PerfMetricsTests(unittest.TestCase):
             release.set()
             thread.join(timeout=10)
         self.assertFalse(thread.is_alive())
+
+
+    def test_rss_high_water_survives_released_allocation(self):
+        code = """import gc, sys
+payload = bytearray(32 * 1024 * 1024)
+for offset in range(0, len(payload), 4096): payload[offset] = 1
+print('allocated', flush=True)
+sys.stdin.readline()
+del payload
+gc.collect()
+print('released', flush=True)
+sys.stdin.readline()
+"""
+        child = subprocess.Popen([sys.executable, "-c", code], stdin=subprocess.PIPE,
+                                 stdout=subprocess.PIPE, text=True)
+        try:
+            def stage(expected):
+                self.assertTrue(select.select([child.stdout], [], [], 5)[0])
+                self.assertEqual(child.stdout.readline().strip(), expected)
+
+            stage("allocated")
+            before = startup_usage(child.pid)["processes"][0]
+            child.stdin.write("release\n"); child.stdin.flush()
+            stage("released")
+            after = startup_usage(child.pid)["processes"][0]
+            self.assertEqual(after["pid"], child.pid)
+            # Kernel RSS counters are approximate; verify the large allocation
+            # survives as a high-water observation without asserting exact ordering.
+            self.assertGreater(before["rss_kib"], 24 * 1024)
+            self.assertGreater(after["approx_rss_peak_kib"], 24 * 1024)
+            self.assertGreater(after["approx_rss_peak_kib"] - after["rss_kib"], 16 * 1024)
+            self.assertGreaterEqual(after["cpu_ms"], before["cpu_ms"])
+            self.assertGreaterEqual(after["main_thread_cpu_ms"], before["main_thread_cpu_ms"])
+        finally:
+            child.terminate()
+            child.wait(timeout=5)
+            child.stdin.close(); child.stdout.close()

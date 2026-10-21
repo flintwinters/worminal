@@ -22,7 +22,7 @@ from rich.console import Console
 from rich.table import Table
 
 from x11 import close_window, isolated_display
-from perf_metrics import descendants, memory
+from perf_metrics import descendants, memory, startup_usage
 
 ROOT = Path(__file__).resolve().parent.parent
 TIMEOUT = 10
@@ -175,8 +175,13 @@ def sample_round(env, connection, label, trial, count, log, master=None):
         if env.get("WORMINAL_TRACE_TIMING"):
             result.update({f"trace_{name}_from_main": [value]
                            for name, value in startup_trace(log, trace_offset).items()})
+        startup = startup_usage(owner.pid) if env.get("WORMINAL_LATENCY_STARTUP_RESOURCES") else None
+        if startup is not None and owner.pid not in {item["pid"] for item in startup["processes"]}:
+            raise RuntimeError("Frontend disappeared from first-ready resource accounting")
         result["typing"] = typing(connection, window, count)
         resources = memory(descendants(owner.pid))
+        if startup is not None:
+            resources["first_ready_usage"] = startup
         title = f"Latency {label} additional {os.getpid()} {trial}"
         trace_offset = os.fstat(log.fileno()).st_size
         child, _, timing = launch(env, connection, title, log, color=color + 1, master=master)
@@ -237,6 +242,7 @@ def main():
     parser.add_argument("--saved-tabs", type=int, default=0)
     parser.add_argument("--trace-startup", action="store_true")
     parser.add_argument("--shell", action="store_true")
+    parser.add_argument("--startup-resources", action="store_true")
     parser.add_argument("--bridge-delay-ms", type=int)
     parser.add_argument("--snapshot", type=Path)
     parser.add_argument("--compare", type=Path)
@@ -267,6 +273,9 @@ def main():
         for label, executable in variants.items():
             env = stack.enter_context(isolated_display())
             env.update(GDK_BACKEND="x11", WORMINAL_FRONTEND=str(executable))
+            env.pop("WORMINAL_LATENCY_STARTUP_RESOURCES", None)
+            if args.startup_resources:
+                env["WORMINAL_LATENCY_STARTUP_RESOURCES"] = "1"
             env.pop("WORMINAL_LATENCY_SHELL", None)
             if args.shell:
                 env["WORMINAL_LATENCY_SHELL"] = env.get("SHELL", "/bin/sh")
@@ -299,6 +308,12 @@ def main():
               "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
               "cpu_count": os.cpu_count(), "saved_tabs": args.saved_tabs,
               "readiness": "unique RGB per trial and fresh/additional launch",
+              "startup_resources": args.startup_resources,
+              "startup_resource_notes": "Observed frontend/helper lifetime CPU at first pixel readiness; "
+                                        "process CPU counters have clock-tick granularity. "
+                                        "Approximate VmHWM counters are not simultaneous peak RSS or PSS. "
+                                        "Daemon-owned shell CPU/memory is excluded. "
+                                        "Sampling occurs after readiness and can perturb later timings.",
               "transport": "private SSH bridge fixture" if master else "local",
               "bridge_delay_ms": args.bridge_delay_ms, "trace_startup": args.trace_startup,
               "interactive_shell": os.environ.get("SHELL", "/bin/sh") if args.shell else None,
@@ -344,6 +359,16 @@ def main():
         for name, summary in report["paired_summary_ms"].items():
             console.print(f"  {name}: {summary['median']:+.2f} ms")
     console.print(report["notes"])
+    if args.startup_resources:
+        for label, values in resources.items():
+            usage = [value["first_ready_usage"] for value in values]
+            console.print(f"{label} first-ready frontend/helper CPU median: "
+                          f"{statistics.median(item['cpu_ms'] for item in usage):.2f} ms; "
+                          "sum of approximate per-process RSS high-water marks: "
+                          f"{statistics.median(item['sum_approx_process_peak_rss_kib'] for item in usage):.0f} KiB")
+        console.print("Resource samples follow fresh pixel readiness and can perturb subsequent timings. "
+                      "RSS high-water counters are approximate and peaks need not coincide; "
+                      "daemon-owned shell CPU/memory is excluded.")
     if args.shell:
         console.print(f"Interactive shell initialization: {report['interactive_shell']}; "
                       "the shell then execs the pixel/typing fixture.")
