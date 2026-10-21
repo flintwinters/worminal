@@ -369,7 +369,8 @@ def interaction_perf(trials: int = typer.Option(10, min=1), samples: int = typer
 
 
 @app.command("frame-perf")
-def frame_perf(compare: Path = typer.Option(None, help="Saved latency-visible baseline directory.")):
+def frame_perf(compare: Path = typer.Option(None, help="Saved latency-visible baseline directory."),
+               startup: bool = typer.Option(False, help="Measure new-tab output while another tab is writing.")):
     """Measure paced PTY output to complete frames without keyboard-response boosting."""
     native_build.build_targets("worminald-preview", "build/frame_schedule_test")
     code = run(["build/frame_schedule_test"])
@@ -383,7 +384,7 @@ def frame_perf(compare: Path = typer.Option(None, help="Saved latency-visible ba
         variants.insert(0, ("baseline", daemon))
     for label, daemon in variants:
         code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p",
-                    "test_preview_workspace.py", "-k", "paced_output", "-q"],
+                    "test_preview_workspace.py", "-k", "new_tab_output" if startup else "paced_output", "-q"],
                    env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(daemon),
                         "WORMINAL_FRAME_PERF_NAME": label})
         if code:

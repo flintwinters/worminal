@@ -2,6 +2,7 @@
 
 from functools import partial
 from itertools import product
+import hashlib
 import json
 import os
 import re
@@ -87,7 +88,7 @@ class PreviewWorkspaceTest(unittest.TestCase):
         self.daemon.terminate()
         self.daemon.communicate(timeout=3)
 
-    def launch(self, command):
+    def start_tab(self, command):
         args = ["/bin/sh", "-c", command]
         launch = b"".join((number(40), number(4), number(1), number(len(args)), number(0),
                            string("test"), string(str(ROOT)), string(""), string("-"), string(""),
@@ -95,6 +96,10 @@ class PreviewWorkspaceTest(unittest.TestCase):
         send(self.peer, 1, payload=launch)
         tab, _ = wait_kind(self.peer, 20)
         wait_kind(self.peer, 7)
+        return tab
+
+    def launch(self, command):
+        tab = self.start_tab(command)
         output = b""
         marker = b"READY:inherited" if "WORMINAL_INHERIT_TEST" in command else b"READY"
         while marker not in output:
@@ -256,6 +261,53 @@ class PreviewWorkspaceTest(unittest.TestCase):
             send(peer, 19)
             kind, _, _ = wire_packet(peer, version=2)
             self.assertEqual(kind, 7, "stale resize released the new controller")
+
+    def test_new_tab_output_frame_latency(self):
+        # A separately paced tab keeps the shared batching clock active.
+        background = ("import os,time\nos.write(1,b'READY')\nwhile True:\n"
+                      " os.write(1,b'\\x1b[H.'); time.sleep(.004)\n")
+        self.launch(f"exec python3 -u -c {shlex.quote(background)}")
+        samples, frames, count = [], 0, 40
+        started_cpu = cpu_time(self.daemon.pid)
+        for _ in range(count):
+            tab = self.start_tab("printf READY; exec cat")
+            started, visible, row_text, stream = None, False, b"", b""
+            for _ in range(10000):
+                kind, identity, payload = wire_packet(self.peer, version=2)
+                observed = time.monotonic_ns()
+                if identity != tab:
+                    continue
+                if kind == 14:
+                    stream += payload
+                    if b"READY" in stream and started is None:
+                        started = observed
+                elif kind == 9 and len(payload) >= 84 and struct.unpack_from("!I", payload)[0] == 0:
+                    row_text = bytes(struct.unpack_from("!I", payload, 4 + 16 * x)[0] for x in range(5))
+                    visible = row_text == b"READY"
+                elif kind == 10:
+                    frames += 1
+                    if visible and started is not None:
+                        samples.append((observed - started) / 1e6)
+                        break
+            else:
+                self.fail(f"new terminal {tab} output missing: print={started is not None}, row={row_text!r}")
+            send(self.peer, 5, tab)
+        self.assertEqual(len(samples), count)
+        ordered = sorted(samples)
+        result = {"samples_ms": samples, "n": len(samples), "frames": frames,
+                  "median_ms": statistics.median(samples), "p95_ms": ordered[(95 * len(samples) + 99) // 100 - 1],
+                  "daemon_sha256": hashlib.sha256(DAEMON.read_bytes()).hexdigest(),
+                  "daemon_cpu_ms": (cpu_time(self.daemon.pid) - started_cpu) * 1000,
+                  "cpu_resolution_ms": 1000 / os.sysconf("SC_CLK_TCK"),
+                  "daemon_memory": memory({self.daemon.pid}),
+                  "notes": "New tab first PTY print to complete matching frame; another tab writes every 4 ms. "
+                           "Includes no GTK paint, keyboard input or physical display."}
+        label = os.environ.get("WORMINAL_FRAME_PERF_NAME", "candidate")
+        path = ROOT / ".checks" / f"new-tab-output-latency-{label}.json"
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(json.dumps(result, indent=2) + "\n")
+        print(f"{label} new-tab output to frame: median {result['median_ms']:.2f} ms, "
+              f"p95 {result['p95_ms']:.2f} ms; {path.relative_to(ROOT)}")
 
     def test_paced_output_frame_latency(self):
         # The second write arrives near the previous frame's deadline. No
