@@ -329,3 +329,9 @@ The final 20-pair visible comparison measured fresh readiness 99.78/99.23 ms,
 with paired median +0.15 ms; additional readiness paired -0.79 ms. Typing median
 and p95 were 2.96/4.27 ms versus 3.06/4.35 ms. This does not establish a separate
 end-to-end typing improvement. Frozen data: .checks/ascii-line-input-launch-verified.json.
+
+Installed 9df854e with the existing Alacritty configuration; installed launcher,
+frontend and browser modules match the verified build byte-for-byte. Live GTK
+owners and daemon/browser sessions were preserved. Existing owners keep their
+loaded frontend until they exit; a new owner loads the optimized renderer.
+The broader startup, presentation and resource audit remains open.
