@@ -550,3 +550,10 @@ runs, including forwarded-window stages. The product source is unchanged from
 20c7b84, whose final X11, native Wayland and headless suites already pass. The
 installation hold on that checkpoint is lifted by this follow-up, while peak
 startup resource costs and the broader presentation/latency audit remain open.
+
+Installed the verified 20c7b84 product through the established atomic replacement
+path, using the existing Alacritty configuration. Current launcher/frontend/
+browser artifacts match the saved tested candidate, and installed artifacts
+match the current build byte-for-byte. No live GTK owner, workspace daemon,
+legacy session or PTY was restarted or migrated. New owners load the early
+worker; existing windows retain their mapped frontend until they exit.
