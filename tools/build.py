@@ -251,7 +251,7 @@ def clean():
 
 
 def installation_files(prefix=None):
-    prefix = Path(prefix if prefix is not None else os.environ.get("PREFIX", "/usr/local"))
+    prefix = Path(prefix if prefix is not None else os.environ.get("PREFIX", Path.home() / ".local"))
     manprefix = Path(os.environ.get("MANPREFIX", str(prefix / "share/man")))
     if not prefix.is_absolute() or not manprefix.is_absolute():
         raise ValueError("PREFIX and MANPREFIX must be absolute paths")

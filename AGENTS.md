@@ -12,6 +12,7 @@ font loading and shell startup overlap.
 Validated launches overlap connection requests and shell startup with widget construction;
 a per-request completion gate keeps GTK callbacks behind completed widget setup.
 `manage.py build` compiles Alacritty colors, font family, size, spacing, and scrollback into a generated C header.
+Install as the regular user into `~/.local` by default so builds retain that user's Alacritty configuration.
 `src/terminal` owns terminal state,
 `src/gtk` paints release views, `src/x11` preserves the original renderer, and `src/workspace` connects the service.
 GTK redraws changed rows and cursor damage, including overlapping glyph ink;
