@@ -27,6 +27,7 @@ void xclipcopy(void) {}
 #undef term
 #undef strescseq
 #include "session_transfer_checks.h"
+#include "session_view_checks.h"
 #define term (session->term)
 #define strescseq (session->strescseq)
 
@@ -34,6 +35,7 @@ int
 main(void)
 {
 	check_session_transfer();
+	check_session_view();
 	Arg one = { .i = 1 }, page = { .i = -1 };
 	int i, before;
 

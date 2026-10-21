@@ -69,10 +69,10 @@ class HandoffTest(unittest.TestCase):
                 service.kill()
                 service.communicate(timeout=3)
 
-    def start(self, version):
+    def start(self, version, binary=None):
         scope = f"handoff-{uuid.uuid4().hex}"
         env = {**os.environ, "WORMINAL_SHARED_SOCKET_SCOPE": scope}
-        service = subprocess.Popen([str(BINARIES[version]), "--serve"], env=env,
+        service = subprocess.Popen([str(binary or BINARIES[version]), "--serve"], env=env,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         self.services.append((service, version, env))
         prefix = "worminal-workspace-v2" if version == 2 else "worminal-workspace"
@@ -124,10 +124,16 @@ class HandoffTest(unittest.TestCase):
         self.fail(f"screen did not contain {expected!r}")
 
     def test_live_round_trips_merge_without_replacing_shells(self):
-        for source, destination in ((1, 2), (2, 1), (1, 1), (2, 2)):
-            with self.subTest(source=source, destination=destination):
-                donor, source_env, donor_process = self.start(source)
-                receiver, target_env, _ = self.start(destination)
+        pairs = [(source, destination, None, None) for source, destination in ((1, 2), (2, 1), (1, 1), (2, 2))]
+        baseline = os.environ.get("WORMINAL_TEST_HANDOFF_BASELINE")
+        if baseline:
+            self.assertTrue(Path(baseline).is_file())
+            pairs.extend(((2, 2, baseline, None), (2, 2, None, baseline)))
+        for source, destination, source_binary, target_binary in pairs:
+            with self.subTest(source=source, destination=destination, old_donor=bool(source_binary),
+                              old_receiver=bool(target_binary)):
+                donor, source_env, donor_process = self.start(source, source_binary)
+                receiver, target_env, _ = self.start(destination, target_binary)
                 _, existing_pid = self.launch(receiver, destination, "existing")
                 tab, pid = self.launch(donor, source, "incoming")
                 send(donor, 3, tab, b"before-transfer", version=source)

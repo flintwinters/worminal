@@ -46,6 +46,20 @@ def prove():
                "-k", "input_reply_frame", "-q"]
     env = {**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(ordered_daemon)}
     cases.append(("input reply/mode ordering", command, env, b"mode catalog preceded its corresponding frame"))
+    # A parser-backed replica must fail the no-local-history import invariant.
+    view_header = directory / "parser-view.h"
+    view_header.write_text((ROOT / "tests/session_view_checks.h").read_text().replace(
+        "view = tsessionviewnew(8, 3)", "view = tsessionnew(8, 3)"))
+    view_test = directory / "parser-view.c"
+    view_test.write_text((ROOT / "tests/scrollback.c").read_text().replace(
+        "../src/terminal/st.c", str(ROOT / "src/terminal/st.c")).replace(
+        '"session_view_checks.h"', f'"{view_header}"'))
+    view_binary = directory / "parser-view"
+    builder.program(view_binary, [str(view_test), *(f"src/{source}" for source in build.SESSION_SUPPORT)],
+                    variant="parser-view-proof", flags=["-Itests", "-ffunction-sections", "-fdata-sections"],
+                    libs=["-Wl,--gc-sections", "-lm"])
+    cases.append(("replica does not reflow", [str(view_binary)], os.environ,
+                  b"view->term.histlen == 0 && view->term.hist == NULL"))
     current_parser = (ROOT / "src/terminal/st.c").read_text()
 
     def parser_case(name, source, expected):
@@ -57,7 +71,8 @@ def prove():
         test.write_text((ROOT / "tests/scrollback.c").read_text().replace(
             '../src/terminal/st.c', str(parser)))
         binary = directory / name
-        builder.program(binary, [str(test), "src/terminal/session_transfer.c"], variant=f"{name}-proof",
+        builder.program(binary, [str(test), *(f"src/{source}" for source in build.SESSION_SUPPORT)],
+                        variant=f"{name}-proof",
                         flags=["-Itests", "-ffunction-sections", "-fdata-sections"],
                         libs=["-Wl,--gc-sections", "-lm"])
         cases.append((name, [str(binary)], os.environ, expected))

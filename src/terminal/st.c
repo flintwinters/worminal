@@ -167,7 +167,7 @@ tsessioncurrent(void)
 }
 
 TermSession *
-tsessionnew(int cols, int rows)
+tsessionalloc(void)
 {
 	TermSession *created = xmalloc(sizeof(*created));
 	TermSession **tail = &sessions;
@@ -179,6 +179,13 @@ tsessionnew(int cols, int rows)
 		tail = &(*tail)->next;
 	*tail = created;
 	session = created;
+	return created;
+}
+
+TermSession *
+tsessionnew(int cols, int rows)
+{
+	TermSession *created = tsessionalloc();
 	tnew(cols, rows);
 	selinit();
 	return created;
@@ -267,7 +274,6 @@ void
 tsessionremove(TermSession *chosen)
 {
 	TermSession **slot = &sessions;
-	int i;
 
 	while (*slot && *slot != chosen)
 		slot = &(*slot)->next;
@@ -277,19 +283,7 @@ tsessionremove(TermSession *chosen)
 	if (chosen->output_fd > 1)
 		close(chosen->output_fd);
 	*slot = chosen->next;
-	for (i = 0; i < chosen->term.row; i++) {
-		free(chosen->term.line[i]);
-		free(chosen->term.alt[i]);
-	}
-	free(chosen->term.line);
-	free(chosen->term.alt);
-	if (chosen->term.hist) {
-		for (i = 0; i < theme_history_size; i++)
-			free(chosen->term.hist[i]);
-	}
-	free(chosen->term.hist);
-	free(chosen->term.dirty);
-	free(chosen->term.tabs);
+	tsessionfreegrid(chosen);
 	free(chosen->strescseq.buf);
 	if (session == chosen)
 		session = sessions;
@@ -3147,6 +3141,7 @@ treflow(int col, int row)
 void
 tresize(int col, int row)
 {
+	if (session->view_only) { tsessionviewresize(session, col, row); return; }
 	if (col > 0 && row > 0 && term.row > 0 && col != term.col &&
 	    !IS_SET(MODE_ALTSCREEN)) {
 		if (sel.ob.x != -1)

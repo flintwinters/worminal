@@ -288,6 +288,9 @@ Baselines must have a compatible
 internal frontend view ABI. It checks exact RGBA pixels and geometry, alternates variant order, and measures
 wall time, process CPU and PSS after untimed warm-up frames. `--backend wayland` uses the private native
 compositor; the default uses Xvfb. Results and probe/module hashes are saved in `.checks/render-perf-*.json`.
+Use `render-perf --resize` to time two complete viewport imports per resize cycle;
+painting happens after the timed interval. It also checks final pixels and retained replica storage.
+`check-handoff --baseline PATH` adds transfers in both directions with a saved v2 daemon binary.
 These measurements isolate rendering; they exclude input/service delivery and compositor/display presentation.
 
 `python3 manage.py frame-perf --compare .checks/launch-baseline` measures ordinary PTY output to a complete

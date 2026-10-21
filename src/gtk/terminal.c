@@ -721,7 +721,7 @@ wheel(GtkWidget *widget, GdkEventScroll *e, Terminal *t)
 static void
 prepare(Terminal *t)
 {
-	if (!t->session) t->session = tsessionnew(t->frame.cols, t->frame.rows);
+	if (!t->session) t->session = tsessionviewnew(t->frame.cols, t->frame.rows);
 	if (t->layout) return;
 	/* Catalogs include every tab. Allocate cells only on first use or frame;
 	 * Pango layouts, input methods and blink timers wait until first use. */
@@ -778,7 +778,7 @@ terminal_packet(Terminal *t, WirePacket *p)
 			if (!wire_get_u32(p, &v[i])) return;
 		if (v[0] < 1 || v[0] > 400 || v[1] < 1 || v[1] > 200 || v[2] >= v[0] || v[3] >= v[1]) return;
 		if (!t->session) {
-			t->session = tsessionnew(v[0], v[1]);
+			t->session = tsessionviewnew(v[0], v[1]);
 			t->full_damage = TRUE;
 		}
 		if (v[0] != (uint32_t)t->frame.cols || v[1] != (uint32_t)t->frame.rows ||

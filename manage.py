@@ -205,13 +205,17 @@ def check_keys():
 
 
 @app.command("check-handoff")
-def check_handoff():
+def check_handoff(baseline: Path = typer.Option(
+        None, exists=True, dir_okay=False, help="Also transfer both ways with a saved v2 daemon binary.")):
     """Check native state snapshots and live transfers between both daemon protocols."""
     native_build.build_targets("build/scrollback_test", "worminald-x11", "worminald-preview")
     code = run(["build/scrollback_test"], env={**os.environ, "ASAN_OPTIONS": "detect_leaks=0"})
     if not code:
+        env = dict(os.environ)
+        if baseline:
+            env["WORMINAL_TEST_HANDOFF_BASELINE"] = str(baseline.resolve())
         code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
-                    "-p", "test_handoff.py", "-q"])
+                    "-p", "test_handoff.py", "-q"], env=env)
     raise typer.Exit(code)
 
 
@@ -290,11 +294,14 @@ def latency_visible(trials: int = typer.Option(10, min=1), keys: int = typer.Opt
 
 @app.command("render-perf")
 def render_perf(trials: int = typer.Option(10, min=1), frames: int = typer.Option(60, min=1),
+                resize: bool = typer.Option(False, help="Measure viewport imports instead of painting."),
                 backend: str = typer.Option("x11", help="Private display backend: x11 or wayland."),
                 compare: Path = typer.Option(None, help="Snapshot with a compatible internal frontend view ABI.")):
     """Compare release-module painting, exact pixels, CPU, and memory."""
     native_build.build_targets("worminal", "build/render_probe")
     options = ["--compare", str(compare)] if compare else []
+    if resize:
+        options += ["--resize"]
     raise typer.Exit(run([sys.executable, "tests/render_perf.py", "--trials", str(trials), "--frames", str(frames),
                           "--backend", backend, *options]))
 
