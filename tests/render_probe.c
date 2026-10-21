@@ -102,6 +102,65 @@ paint_case(Terminal *terminal, GtkWidget *widget, int cols, int rows,
 	cairo_destroy(cr); cairo_surface_destroy(image);
 }
 
+static void
+await_sample(void)
+{
+	g_print("]\n");
+	fflush(stdout);
+	(void)getchar();
+}
+
+static void
+tabs_case(GModule *module, int count, const char *prefix, int frames,
+          gboolean (*palette)(Page *, uint32_t, const char *))
+{
+	GtkWidget *(*create)(App *);
+	void (*refresh)(App *);
+	g_assert_true(g_module_symbol(module, "tabs_new", (gpointer *)&create));
+	g_assert_true(g_module_symbol(module, "tabs_refresh", (gpointer *)&refresh));
+	App app = {.fd = -1, .cols = 80, .rows = 1};
+	Page *pages = g_new0(Page, count);
+	for (int i = 0; i < count; i++) {
+		pages[i].app = &app; pages[i].id = i + 1;
+		char *name = g_strdup_printf("project-%05d", i);
+		pages[i].label = gtk_label_new(name);
+		g_object_ref_sink(pages[i].label);
+		g_free(name);
+		app.pages = g_list_append(app.pages, &pages[i]);
+	}
+	app.active = &pages[count - 1];
+	for (size_t i = 0; i < G_N_ELEMENTS(app.active->colors); i++) palette(app.active, i, NULL);
+	app.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	app.tabstrip = create(&app);
+	gtk_container_add(GTK_CONTAINER(app.window), app.tabstrip);
+	refresh(&app);
+	gtk_window_set_default_size(GTK_WINDOW(app.window), 80 * app.font_cw + 4, app.font_ch + 2);
+	gtk_widget_show_all(app.window);
+	gint64 settle = g_get_monotonic_time() + 200000;
+	while (g_get_monotonic_time() < settle) {
+		while (g_main_context_iteration(NULL, FALSE)) {}
+		g_usleep(1000);
+	}
+	int width = gtk_widget_get_allocated_width(app.tabstrip), height = gtk_widget_get_allocated_height(app.tabstrip);
+	cairo_surface_t *image = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+	cairo_t *cr = cairo_create(image);
+	for (int i = 0; i < 20; i++) gtk_widget_draw(app.tabstrip, cr);
+	gint64 start_cpu = process_ns(), start_wall = g_get_monotonic_time();
+	for (int i = 0; i < frames; i++) gtk_widget_draw(app.tabstrip, cr);
+	gint64 wall = g_get_monotonic_time() - start_wall, cpu = process_ns() - start_cpu;
+	char *path = g_strdup_printf("%s-tab_strip.png", prefix);
+	g_assert_cmpint(cairo_surface_write_to_png(image, path), ==, CAIRO_STATUS_SUCCESS);
+	g_print("[{\"case\":\"tab_strip\",\"tabs\":%d,\"frames\":%d,\"cols\":%d,\"rows\":%d,"
+	    "\"geometry_units\":\"pixels\",\"wall_us\":%" G_GINT64_FORMAT ",\"cpu_ns\":%" G_GINT64_FORMAT "}",
+	    count, frames, width, height, wall, cpu);
+	await_sample();
+	g_free(path); cairo_destroy(cr); cairo_surface_destroy(image);
+	gtk_widget_destroy(app.window);
+	for (int i = 0; i < count; i++) g_object_unref(pages[i].label);
+	g_list_free(app.pages); g_free(pages);
+	g_clear_pointer(&app.cached_font, pango_font_description_free);
+}
+
 /* A cycle imports two complete owner frames; it never parses or paints them. */
 static void
 resize_case(Terminal *terminal, GtkWidget *widget, int cols, int rows, const char *prefix, int frames)
@@ -160,7 +219,8 @@ main(int argc, char **argv)
 		g_assert_null(g_getenv("DISPLAY"));
 		g_assert_cmpstr(G_OBJECT_TYPE_NAME(gdk_display_get_default()), ==, "GdkWaylandDisplay");
 	}
-	if (argc != 4 && (argc != 5 || strcmp(argv[4], "--resize"))) return 2;
+	if (argc != 4 && (argc != 5 || strcmp(argv[4], "--resize")) &&
+	    (argc != 6 || strcmp(argv[4], "--tabs"))) return 2;
 	int frames = atoi(argv[3]);
 	if (frames < 1) return 2;
 	GModule *module = g_module_open(argv[1], G_MODULE_BIND_LAZY);
@@ -174,6 +234,13 @@ main(int argc, char **argv)
 	g_assert_true(g_module_symbol(module, "terminal_palette", (gpointer *)&palette));
 	g_assert_true(g_module_symbol(module, "terminal_packet", (gpointer *)&packet));
 	g_assert_true(g_module_symbol(module, "tsessioncurrent", (gpointer *)&current_session));
+	if (argc == 6) {
+		int count = atoi(argv[5]);
+		if (count < 1 || count > 4096) return 2;
+		tabs_case(module, count, argv[2], frames, palette);
+		g_module_close(module);
+		return 0;
+	}
 	App app = {.fd = -1, .cols = 100, .rows = 32, .geometry_pending = TRUE};
 	Page page = {.app = &app, .mode = MODE_HIDE, .cursor = 2};
 	app.active = &page;
@@ -201,10 +268,8 @@ main(int argc, char **argv)
 		g_print(",");
 		paint_case(page.terminal, page.widget, cols, rows, FALSE, TRUE, argv[2], frames);
 	}
-	g_print("]\n");
-	fflush(stdout);
 	/* Let the parent sample memory while the shaped layouts are still alive. */
-	(void)getchar();
+	await_sample();
 	destroy(page.terminal);
 	g_clear_pointer(&app.cached_font, pango_font_description_free);
 	gtk_widget_destroy(app.window);

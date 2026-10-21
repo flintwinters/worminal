@@ -292,6 +292,9 @@ wall time, process CPU and PSS after untimed warm-up frames. `--backend wayland`
 compositor; the default uses Xvfb. Results and probe/module hashes are saved in `.checks/render-perf-*.json`.
 Use `render-perf --resize` to time two complete viewport imports per resize cycle;
 painting happens after the timed interval. It also checks final pixels and retained replica storage.
+Use `render-perf --tabs 100` to isolate the real tab strip with distinct directory labels and the last
+tab active. This checks exact pixels and measures drawing CPU; use `latency-visible --saved-tabs 100
+--varied-labels` to measure the corresponding whole-window launch.
 `check-handoff --baseline PATH` adds transfers in both directions with a saved v2 daemon binary.
 These measurements isolate rendering; they exclude input/service delivery and compositor/display presentation.
 
