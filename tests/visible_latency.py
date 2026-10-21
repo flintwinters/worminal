@@ -73,10 +73,12 @@ def capture_failure(window):
 
 def launch(env, connection, title, log, color=0x112233, history=False, master=None):
     started = time.monotonic_ns()
+    command = [str(ROOT / "build/latency_echo"), "--color", f"{color:06x}",
+               *(["--history"] if history else [])]
+    if env.get("WORMINAL_LATENCY_SHELL"):
+        command = [env["WORMINAL_LATENCY_SHELL"], "-i", "-c", 'exec "$@"', "worminal-latency", *command]
     process = subprocess.Popen([env.get("WORMINAL_FRONTEND", str(ROOT / "worminal")), "-g", "80x24", "-T", title,
-                                *(["--master", master] if master else []),
-                                "-e", str(ROOT / "build/latency_echo"), "--color", f"{color:06x}",
-                                *(["--history"] if history else [])],
+                                *(["--master", master] if master else []), "-e", *command],
                                env=env, stdout=log, stderr=log)
     window = None
     try:
@@ -143,7 +145,9 @@ def typing(connection, window, count):
 def sample_round(env, connection, label, trial, count, log, master=None):
     title = f"Latency {label} fresh {os.getpid()} {trial}"
     trace_offset = os.fstat(log.fileno()).st_size
-    owner, window, timing = launch(env, connection, title, log, master=master)
+    # Retained tabs must never satisfy a later launch readiness observation.
+    color = 0x200000 + 2 * trial
+    owner, window, timing = launch(env, connection, title, log, color=color, master=master)
     result = {f"fresh_{phase}": [value] for phase, value in timing.items()}
     try:
         if env.get("WORMINAL_TRACE_TIMING"):
@@ -160,7 +164,7 @@ def sample_round(env, connection, label, trial, count, log, master=None):
         result["typing"] = typing(connection, window, count)
         resources = memory(descendants(owner.pid))
         title = f"Latency {label} additional {os.getpid()} {trial}"
-        child, _, timing = launch(env, connection, title, log, master=master)
+        child, _, timing = launch(env, connection, title, log, color=color + 1, master=master)
         try:
             result.update({f"additional_{phase}": [value] for phase, value in timing.items()})
         finally:
@@ -214,12 +218,15 @@ def main():
     parser.add_argument("--keys", type=int, default=50)
     parser.add_argument("--saved-tabs", type=int, default=0)
     parser.add_argument("--trace-startup", action="store_true")
+    parser.add_argument("--shell", action="store_true")
     parser.add_argument("--bridge-delay-ms", type=int)
     parser.add_argument("--snapshot", type=Path)
     parser.add_argument("--compare", type=Path)
     args = parser.parse_args()
     if args.trials < 1 or args.keys < 1 or args.saved_tabs < 0:
         parser.error("--trials and --keys must be positive; --saved-tabs must be nonnegative")
+    if args.trials > 0x700000:
+        parser.error("--trials exceeds the unique RGB readiness-color capacity")
     if args.bridge_delay_ms is not None and args.bridge_delay_ms < 0:
         parser.error("--bridge-delay-ms must be nonnegative")
     master = "preview-test" if args.bridge_delay_ms is not None else None
@@ -242,6 +249,9 @@ def main():
         for label, executable in variants.items():
             env = stack.enter_context(isolated_display())
             env.update(GDK_BACKEND="x11", WORMINAL_FRONTEND=str(executable))
+            env.pop("WORMINAL_LATENCY_SHELL", None)
+            if args.shell:
+                env["WORMINAL_LATENCY_SHELL"] = env.get("SHELL", "/bin/sh")
             env.pop("WORMINAL_TRACE_TIMING", None)
             if args.trace_startup:
                 env["WORMINAL_TRACE_TIMING"] = "1"
@@ -270,8 +280,10 @@ def main():
     report = {"backend": "private Xvfb, 1024x768x24", "poll_interval_ms": 1,
               "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
               "cpu_count": os.cpu_count(), "saved_tabs": args.saved_tabs,
+              "readiness": "unique RGB per trial and fresh/additional launch",
               "transport": "private SSH bridge fixture" if master else "local",
               "bridge_delay_ms": args.bridge_delay_ms, "trace_startup": args.trace_startup,
+              "interactive_shell": os.environ.get("SHELL", "/bin/sh") if args.shell else None,
               "frontend_memory_samples": resources,
               "load_start": load_start, "load_end": os.getloadavg(),
               "notes": "Fresh frontend with warm filesystem caches; "
@@ -314,6 +326,9 @@ def main():
         for name, summary in report["paired_summary_ms"].items():
             console.print(f"  {name}: {summary['median']:+.2f} ms")
     console.print(report["notes"])
+    if args.shell:
+        console.print(f"Interactive shell initialization: {report['interactive_shell']}; "
+                      "the shell then execs the pixel/typing fixture.")
     if args.trace_startup:
         console.print("Diagnostic traces are cumulative from launcher main, include logging overhead, "
                       "and do not replace visible-pixel observations.")

@@ -426,3 +426,31 @@ its GTK completion callback until widgets and signal handlers are ready.
 Frozen diagnostic: .checks/local-startup-milestones.json. Three comparison
 pairs against an older snapshot verify missing newer milestone compatibility;
 .checks/startup-trace-compatibility.json. These runs do not prove a speedup.
+
+Readiness identity and interactive initialization
+-------------------------------------------------
+latency-visible --shell now initializes the configured interactive shell before
+execing the same pixel/typing fixture. It uses the existing latency-shell
+convention of POSIX shell command syntax; local measurements here use zsh.
+Shell configuration is real and machine-dependent. This adds initialization to
+launch readiness; settled typing still runs the minimal raw fixture afterward.
+
+Investigating worker overlap exposed a flaw in the old ready-color invariant:
+every retained tab could contain the same canvas. In particular an additional
+window could temporarily paint an older tab while its own shell initialized,
+producing a false early readiness sample. Measured fresh/additional launches
+now use distinct RGB values for every trial, separate from seeded tabs. The
+report records this invariant. Prior additional-readiness figures must not be
+used as proof of shell or new-tab readiness; their mapping measurements remain
+independent. Earlier fresh samples should also be remeasured with this stronger
+identity check before drawing new conclusions.
+
+Ten experimental worker-overlap pairs with real zsh and unique readiness
+colors observed additional readiness 113.23/125.62 ms, versus the invalid
+6.22/7.66 ms medians in the earlier reused-color experiment. This confirms the
+material weakness of that old measurement. Fresh readiness remained promising
+at 144.37/185.43 ms, paired -40.44 ms, but product validation is still pending.
+Frozen experiments: .checks/worker-overlap-shell-unique-color-experiment.json
+and .checks/worker-overlap-shell-reused-color-rejected.json. These compare an
+uncommitted worker prototype against .checks/widget-worker-baseline; they are
+not final release claims.
