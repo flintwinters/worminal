@@ -89,8 +89,8 @@ conservative surf defaults. No surf configuration/scripts are implicitly loaded.
 Validation and measurements
 ---------------------------
 All generated profiles, logs, fixture certificates, screenshots and compositor
-runtime files live under .checks. The project-local virtual input seat is pinned
-to the Weston 10 ABI (Debian 12); a custom WORMINAL_WESTON must provide a seat.
+runtime files live under .checks. The project-local virtual input seat supports
+Weston 10 and 16 with matching runtime headers; a custom WORMINAL_WESTON must provide a seat.
 Management entrypoints:
 
   build-preview               compile the preview and its isolated daemon
@@ -101,10 +101,11 @@ Management entrypoints:
   check-preview-qtile         private Xvfb/Qtile, two visible tiled windows
   prove-preview-regressions  require counterfactual blocked-PTY/resize-ownership/read-capacity failures
   preview-perf                compare launch/input latency and helper-inclusive memory
+  interaction-perf            tab ownership, cached switching and scroll pixels on private Xvfb
+  render-perf                 release-module rendering, exact pixels, CPU and PSS on X11/Wayland
 
-Verified gates: all three frontend backends (local and SSH fixture), the five GTK
-input tests, all 54 original/headless unit tests, static analysis, and all three
-counterfactual regression proofs pass.
+Current latency checkpoints and validation limits are recorded in latency-audit.txt.
+The optional lint command requires clang-tidy; a historical pass does not replace a current run.
 
 The integration runner exercises local connections and the real SSH bridge via a
 local ssh fixture. It checks UTF-8 and early input, sustained output, scrollback,

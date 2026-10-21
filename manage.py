@@ -276,6 +276,17 @@ def latency_visible(trials: int = typer.Option(10, min=1), keys: int = typer.Opt
                           "--keys", str(keys), "--saved-tabs", str(saved_tabs), *options]))
 
 
+@app.command("render-perf")
+def render_perf(trials: int = typer.Option(10, min=1), frames: int = typer.Option(60, min=1),
+                backend: str = typer.Option("x11", help="Private display backend: x11 or wayland."),
+                compare: Path = typer.Option(None, help="Snapshot with a compatible internal frontend view ABI.")):
+    """Compare release-module painting, exact pixels, CPU, and memory."""
+    native_build.build_targets("worminal", "build/render_probe")
+    options = ["--compare", str(compare)] if compare else []
+    raise typer.Exit(run([sys.executable, "tests/render_perf.py", "--trials", str(trials), "--frames", str(frames),
+                          "--backend", backend, *options]))
+
+
 @app.command("interaction-perf")
 def interaction_perf(trials: int = typer.Option(10, min=1), samples: int = typer.Option(20, min=1),
                      pace_ms: float = typer.Option(0, min=0, help="Idle time before each measured interaction."),

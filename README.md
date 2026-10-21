@@ -84,8 +84,9 @@ tabs; scripts cannot retain `window.opener`. Cookies and local storage stay in t
 profile. A peer's navigation updates the saved link without replacing an already open local page.
 
 Run `python3 manage.py check-preview`, `check-preview-keys`, `check-preview-wayland`, and `check-preview-qtile`
-for isolated checks. Wayland checks require Weston and forbid X11 fallback; on Debian, the optional
-`setup-preview-wayland` command downloads a runtime into `.checks` without installing system packages.
+for isolated checks. Wayland checks require Weston and forbid X11 fallback; on Debian/Ubuntu, the optional
+`setup-preview-wayland` command downloads a supported Weston 10 or 16 runtime into `.checks` with matching
+virtual-seat headers, without installing system packages.
 `preview-perf` compares the original and preview, including WebKit helper memory.
 See [preview validation and limitations](docs/browser-integration.txt) for measured costs and compatibility constraints.
 
@@ -229,17 +230,20 @@ python3 manage.py latency         # Launch to first echoed input, using /bin/cat
 python3 manage.py latency --forwarded  # Another window in an existing GTK owner
 python3 manage.py latency-shell   # Launch to input received by your interactive shell
 python3 manage.py latency-visible # Keypress to visible echo; fresh and additional windows
+python3 manage.py interaction-perf # Tab ownership, cached switching, and wheel/page pixels
+python3 manage.py render-perf      # Release-module painting, exact pixels, CPU, and memory
 ```
 
-Display checks and launch benchmarks use a private Xvfb display, keeping test windows and keystrokes off your
+X11 checks and launch benchmarks use a private Xvfb display, keeping test windows and keystrokes off your
 desktop. They need `Xvfb`, `xdotool`, and XTest development headers (`libxtst-dev` on Debian).
-The forwarded-window benchmark also requires python-xlib. Latency samples and GTK startup phases are saved
+Pixel benchmarks require python-xlib and Pillow. Latency samples and GTK startup phases are saved
 under `.checks/latency-*.json` for comparisons.
-Latency reports median and 95th percentile across 20 runs, excluding Xvfb startup; the `/bin/cat` probe also
+`latency` reports median and 95th percentile across 20 runs, excluding Xvfb startup; the `/bin/cat` probe also
 excludes shell startup. Windows map before fonts load so X can queue early keystrokes.
 
 `latency-visible --trials 10 --keys 50` measures real XTest key events through the PTY and GTK renderer
-until changed glyph pixels are readable from the X server. A raw-mode echo fixture hides the cursor to
+until expected glyph pixels are readable from the X server. Unmeasured warm-up keys calibrate the expected
+images so resize repaints cannot masquerade as echoes. A raw-mode echo fixture hides the cursor to
 avoid blink false positives. Each trial measures both a fresh frontend and another window in its running
 owner, reporting launch-to-map and launch-to-visible-fixture readiness separately. Filesystem caches and
 the private daemon remain warm after the first trial starts it; this is not a cold-boot benchmark or
@@ -257,7 +261,19 @@ python3 manage.py latency-visible --compare .checks/launch-baseline --trials 20 
 
 Each version gets a private display and workspace with the same growing tab workload; trial order alternates.
 The native echo fixture excludes interpreter startup and restores its ready canvas after startup resizes.
+Use `--saved-tabs 100` to seed a populated workspace before measuring launch costs.
 `.checks/visible-latency-comparison.json` records raw pairs, differences, CPU count, and start/end system load.
+
+`interaction-perf` observes known tab and scrollback colors after real key/wheel input on private Xvfb.
+Use `--pace-ms 40` for isolated gestures; the default sends each request after its previous visible response.
+It also records repaint counts and a fixed 100-event wheel burst independent of response speed.
+
+`render-perf --compare .checks/launch-baseline` loads the actual release frontend module and draws dense ASCII,
+mixed Unicode and a clipped stripe through the real GTK terminal widget. Baselines must have a compatible
+internal frontend view ABI. It checks exact RGBA pixels and geometry, alternates variant order, and measures
+wall time, process CPU and PSS after untimed warm-up frames. `--backend wayland` uses the private native
+compositor; the default uses Xvfb. Results and module hashes are saved in `.checks/render-perf-*.json`.
+These measurements isolate rendering; they exclude input/service delivery and compositor/display presentation.
 
 `python3 manage.py frame-perf --compare .checks/launch-baseline` measures ordinary PTY output to a complete
 service frame without keyboard-response boosting. Its paired writes exercise the end of the batching interval;

@@ -13,6 +13,7 @@ window maps early while its connection worker sends the initial launch request; 
 GTK redraws changed rows and cursor damage, including overlapping glyph ink;
 blink ticks damage only visible blinking rows, while catalog style changes invalidate their own pixels.
 compact rows paint matching background runs before glyphs, with scalar fallback on fractional device grids.
+Cached ASCII glyphs use Pango line drawing; other strings keep full layout drawing and fallback.
 Unchanged frames do not repaint or consume the immediate paint allowance for the first changed keyboard response.
 Tab claims can present their first complete response early; cached mapping and rapid selections keep GTK's frame clock.
 `tools/build.py` owns builds and installation; `manage.py` owns
@@ -20,6 +21,7 @@ checks and latency measurements on private displays.
 `manage.py latency-visible` measures real key events to visible echo and fresh/additional window presentation
 using private Xvfb pixels; it excludes desktop compositing and physical display latency.
 `manage.py interaction-perf` measures first ownership claims, cached tab switches, and wheel/page scroll pixels.
+`manage.py render-perf` compares actual release-module painting, exact pixels, CPU and memory on private backends.
 The upstream source and license remain in the repository. Keep machine destinations in environment configuration
 and use anonymous commit identities. Run `manage.py privacy-setup` in fresh clones; privacy hooks and CI guard
 staged content and history.
