@@ -665,3 +665,9 @@ typing median/p95 2.63/4.22 vs 2.66/4.11 ms. This establishes no new end-to-end
 launch or typing improvement; the verified gain is paint CPU. Settled frontend
 PSS was 12771/12796 KiB. Frozen .checks/ascii-glyph-string-shell-input.json.
 The broader launch, resource, and presentation audit remains open.
+
+Installed dd10f68 with the existing Alacritty configuration through the atomic
+replacement path. Installed launcher, frontend and browser modules match the
+verified build byte-for-byte. Live owners, browser sessions, PTYs and daemons
+were not restarted or migrated; existing owners retain their mapped renderer.
+The glyph-string optimization applies when a new owner loads the module.
