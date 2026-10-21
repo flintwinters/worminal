@@ -1,0 +1,3 @@
+[submodule "file-explorer"]
+	path = file-explorer
+	url = ./.checks/repos/file-explorer.git

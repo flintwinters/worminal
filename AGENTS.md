@@ -46,3 +46,7 @@ The receiver stages and validates state before commit; the donor then closes PTY
 `manage.py check-handoff` covers parser state, queued input, ownership, rollback, and all v1/v2 transfer combinations.
 Running daemons that predate the protocol cannot gain it through installation; preserve their live sessions.
 Investigate remote Codex scrolling separately from tested wheel modes.
+
+`file-explorer` is an independent TypeScript npm-workspace submodule. It builds a plain dark,
+offline HTML explorer using a read-only folder picker; native filesystem integration is not implemented.
+Use `manage.py explorer-build` and `explorer-check` after `npm ci` in the submodule.
