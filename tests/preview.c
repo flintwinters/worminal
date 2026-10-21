@@ -667,14 +667,30 @@ check_outline(App *app)
 	cairo_surface_flush(surface);
 	unsigned char *pixels = cairo_image_surface_get_data(surface);
 	int stride = cairo_image_surface_get_stride(surface);
+	uint32_t expected = gtk_window_is_active(GTK_WINDOW(app->window)) ? 0xff999999 : 0xff4c4c4c;
 	for (int y = 0; y < height; y++) {
 		uint32_t *row = (uint32_t *)(pixels + y * stride);
 		for (int x = 0; x < width; x++)
 			if (!x || !y || x == width - 1 || y == height - 1)
-				g_assert_cmphex(row[x], ==, 0xff999999);
+				g_assert_cmphex(row[x], ==, expected);
 	}
 	cairo_destroy(cr);
 	cairo_surface_destroy(surface);
+}
+
+static void
+check_outline_focus(App *app)
+{
+	GtkWidget *other = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	gtk_widget_show(other);
+	gdk_window_focus(gtk_widget_get_window(other), GDK_CURRENT_TIME);
+	WAIT(gtk_window_is_active(GTK_WINDOW(other)) &&
+	    !gtk_window_is_active(GTK_WINDOW(app->window)));
+	check_outline(app);
+	gdk_window_focus(gtk_widget_get_window(app->window), GDK_CURRENT_TIME);
+	WAIT(gtk_window_is_active(GTK_WINDOW(app->window)));
+	check_outline(app);
+	gtk_widget_destroy(other);
 }
 
 int
@@ -955,6 +971,7 @@ main(int argc, char **argv)
 	gtk_widget_destroy(extra);
 	g_assert_cmpint(windows, ==, 2);
 	gtk_widget_destroy(peer->window);
+	check_outline_focus(app);
 	gtk_widget_destroy(app->window);
 	g_free(url); g_free(other);
 	g_print("Preview %s: terminal, resize, selection, clipboard, IME, ownership, reconnect, browser sharing, conversion, "
