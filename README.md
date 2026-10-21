@@ -254,6 +254,13 @@ Median, p95, maximum, and raw samples are saved in `.checks/visible-latency.json
 1 ms between observations and adds readback overhead. Xvfb excludes physical keyboard latency, desktop
 compositing, and monitor scanout; use the same host, theme, and load for comparisons.
 
+`python3 manage.py profile-startup` records startup syscalls with `strace` on a private display;
+add `--shell` to include interactive initialization. It reuses the visible-readiness fixture and writes
+`.checks/startup-syscalls.log`, startup milestones, and `.checks/startup-profile.json` with the actual
+window-owner PID and readiness cutoff in Unix nanoseconds. The trace follows private threads and children
+through cleanup, so filter at that cutoff when studying startup. Tracing adds substantial overhead;
+use `latency-visible` for latency comparisons.
+
 For launch changes, save a binary/module baseline before editing, then alternate baseline/candidate trials:
 
 ```sh

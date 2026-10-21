@@ -74,13 +74,14 @@ def capture_failure(window):
         pass  # Preserve the original failure even if its window has disappeared.
 
 
-def launch(env, connection, title, log, color=0x112233, history=False, master=None, cwd=None):
+def launch(env, connection, title, log, color=0x112233, history=False, master=None, cwd=None, prefix=()):
     started = time.monotonic_ns()
     command = [str(ROOT / "build/latency_echo"), "--color", f"{color:06x}",
                *(["--history"] if history else [])]
     if env.get("WORMINAL_LATENCY_SHELL"):
         command = [env["WORMINAL_LATENCY_SHELL"], "-i", "-c", 'exec "$@"', "worminal-latency", *command]
-    process = subprocess.Popen([env.get("WORMINAL_FRONTEND", str(ROOT / "worminal")), "-g", "80x24", "-T", title,
+    process = subprocess.Popen([*prefix, env.get("WORMINAL_FRONTEND", str(ROOT / "worminal")),
+                                "-g", "80x24", "-T", title,
                                 *(["--master", master] if master else []), "-e", *command],
                                env=env, cwd=cwd, stdout=log, stderr=log)
     window = None
