@@ -257,6 +257,8 @@ page_free(Page *page)
 static Page *
 find_page(App *app, uint32_t id)
 {
+	/* Frame rows usually target the selected page, even in large catalogs. */
+	if (app->active && app->active->id == id) return app->active;
 	for (GList *item = app->pages; item; item = item->next) {
 		Page *p = item->data;
 		if (p->id == id) return p;
@@ -666,6 +668,7 @@ destroyed(GtkWidget *widget, App *app)
 	if (app->reconnect) g_source_remove(app->reconnect);
 	app->reconnect = 0;
 	disconnected(app);
+	app->active = NULL;
 	while (app->pages) {
 		Page *page = app->pages->data;
 		app->pages = g_list_delete_link(app->pages, app->pages);
