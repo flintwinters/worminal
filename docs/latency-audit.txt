@@ -975,3 +975,8 @@ p95 differences10.58/13.17 ms. No end-to-end launch gain is established. The
 verified result is one catalog-selection activation instead of two, preserving
 explicit passive ownership handling without additional state or caches. Frozen
 .checks/catalog-selection-launch-verified.json. Launch optimization remains open.
+
+Installed b530a68 atomically with the existing configuration. All six installed
+product artifacts match verified builds byte-for-byte. No owner, service, PTY
+or browser state was restarted or migrated; fresh owners load the new selection
+transaction. The broader latency objective remains active.
