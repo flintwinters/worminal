@@ -46,6 +46,7 @@ struct App {
 	PangoFontDescription *cached_font;
 	double cached_font_zoom;
 	int font_cw, font_ch, font_height, font_ascent;
+	gint64 last_selection;
 };
 
 void tabs_refresh(App *);
@@ -74,6 +75,7 @@ void terminal_paste(Terminal *, GdkAtom);
 gboolean terminal_key(Terminal *, GdkEventKey *);
 gboolean terminal_palette(Page *, uint32_t, const char *);
 void terminal_configure(Terminal *, uint32_t, uint32_t, gboolean);
+void terminal_select(Terminal *);
 void terminal_dimensions(Terminal *, int *, int *);
 
 G_GNUC_INTERNAL Browser *browser_new(App *);

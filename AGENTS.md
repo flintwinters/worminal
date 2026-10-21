@@ -14,6 +14,7 @@ GTK redraws changed rows and cursor damage, including overlapping glyph ink;
 blink ticks damage only visible blinking rows, while catalog style changes invalidate their own pixels.
 compact rows paint matching background runs before glyphs, with scalar fallback on fractional device grids.
 Unchanged frames do not repaint or consume the immediate paint allowance for the first changed keyboard response.
+Tab claims can present their first complete response early; cached mapping and rapid selections keep GTK's frame clock.
 `tools/build.py` owns builds and installation; `manage.py` owns
 checks and latency measurements on private displays.
 `manage.py latency-visible` measures real key events to visible echo and fresh/additional window presentation
@@ -37,6 +38,7 @@ Service output batching sleeps to its existing deadline rather than adding a fre
 
 Current jobs: prioritize remaining launch latency, while auditing input, rendering, output delivery, and view switching
 until further gains require correctness, resource, or compatibility compromises; review remaining compatibility gaps.
+Restore private native Wayland coverage against the available Weston runtime.
 `worminal`/`worminald` are GTK/v2; preview build aliases share that workspace and existing browser profiles.
 Keep `worminal-x11`/`worminald-x11` and live v1 sessions available for rollback; never migrate or stop them implicitly.
 Both daemon builds share explicit `--handin`/`--handoff` ownership transfer via sealed native snapshots and SCM_RIGHTS.

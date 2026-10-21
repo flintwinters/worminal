@@ -278,12 +278,13 @@ def latency_visible(trials: int = typer.Option(10, min=1), keys: int = typer.Opt
 
 @app.command("interaction-perf")
 def interaction_perf(trials: int = typer.Option(10, min=1), samples: int = typer.Option(20, min=1),
+                     pace_ms: float = typer.Option(0, min=0, help="Idle time before each measured interaction."),
                      compare: Path = typer.Option(None, help="Saved latency-visible baseline directory.")):
     """Measure tab ownership, cached switching, and wheel/page scrolling to visible pixels."""
     native_build.build_targets("worminal", "worminald", "build/latency_echo")
     options = ["--compare", str(compare)] if compare else []
     raise typer.Exit(run([sys.executable, "tests/interaction_perf.py", "--trials", str(trials),
-                          "--samples", str(samples), *options]))
+                          "--samples", str(samples), "--pace-ms", str(pace_ms), *options]))
 
 
 @app.command("frame-perf")
