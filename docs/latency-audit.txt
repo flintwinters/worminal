@@ -398,3 +398,8 @@ inside the isolated browser integration profile: its late helper writes caused
 two directory-cleanup failures after all functional assertions had passed.
 Product rendering settings are unchanged. File/line-limit checks pass;
 clang-tidy remains unavailable.
+
+Installed 66bba0f with the existing Alacritty configuration. Launcher, frontend
+and browser modules match the verified build byte-for-byte. No live GTK owner
+or workspace daemon was restarted or migrated; existing owners retain their
+loaded frontend until they exit. The broader launch/latency audit remains open.
