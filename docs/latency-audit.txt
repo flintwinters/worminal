@@ -783,3 +783,34 @@ The verified improvement is about 89--93% lower client import CPU in this
 resize sequence and less redundant retained state. The broader launch/input,
 painting and whole-application resource audit remains active. File/line limits
 pass; clang-tidy remains unavailable.
+
+Replica-grid final interaction verification
+-------------------------------------------
+The native view regression additionally covers cropping a truncated wide cell,
+restoring a wide/dummy pair and copying its complete UTF-8 text. The copy test
+uses the actual drag lifecycle (motion before release); releasing an empty
+selection correctly clears it. The counterfactual suite now also removes the
+wide-cell crop repair and requires the new assertion to fail. Updated headless
+and all counterfactual checks pass. Product code is unchanged from 586768a.
+
+Three paired ordinary release-renderer trials match every ASCII/Unicode/clipped
+RGBA hash and geometry; sampled PSS is 55559/55647 KiB. No ordinary paint-speed
+claim is made from this short representation check. Frozen
+.checks/replica-grid-ordinary-paint.json.
+
+Five interaction pairs measured candidate / baseline first claims 6.96/5.98 ms,
+cached switches 16.73/16.90 ms, wheel 16.39/16.47 ms and page scroll 16.52/16.48 ms.
+Each side made 30 median steady interaction paints per trial and three claim
+paints; fixed wheel-burst paint medians were 14/15. Claim main-thread runtime
+was 4.61/3.77 ms, while coarse process ticks were 0/10 ms, which must not be
+interpreted as zero candidate CPU. This smoke comparison establishes no
+separate first-claim/scroll speedup. Frozen .checks/replica-grid-interactions.json.
+
+Twenty paired controlled key/pixel trials measured fresh readiness
+98.60/99.08 ms (paired -1.02 ms), additional readiness 28.22/28.86 ms (paired
+-0.05 ms), typing median/p95 3.22/4.42 versus 3.00/4.18 ms and settled frontend
+PSS 12452/12464 KiB. These establish no new end-to-end launch/input improvement;
+the verified benefit is removing redundant state and import/reflow work after
+geometry changes. Frozen .checks/replica-grid-input-launch.json. File limits
+pass; clang-tidy is unavailable. The checkpoint is ready for installation;
+whole-application resources and the broader latency objective remain open.
