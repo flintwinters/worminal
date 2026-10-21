@@ -246,3 +246,8 @@ fresh/additional readiness differences of -1.67/-0.20 ms. Typing median/p95
 were 2.91/4.41 ms versus 2.79/4.13 ms, with one candidate maximum of 9.80 ms.
 This is not an input-latency improvement claim. Frontend PSS medians were
 11950/11974 KiB. Frozen data: .checks/claim-launch-input-verified.json.
+
+Installed c7d65a7 with the existing Alacritty theme. Launcher, frontend and
+browser module byte comparisons match the verified build. Live GTK owners and
+daemon sessions were preserved; a new GTK owner loads this frontend. Remaining
+work includes native Wayland coverage and the wider latency/resource audit.
