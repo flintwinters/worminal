@@ -186,6 +186,7 @@ activate(Page *page)
 {
 	App *app = page->app;
 	app->active = page;
+	window_state_changed(app);
 	if (page->url) {
 		app->geometry_pending = FALSE;
 		claim_browser(page);
@@ -378,6 +379,7 @@ catalog(App *app, WirePacket *packet)
 		if (app->attached && !app->pending) gtk_widget_destroy(app->window);
 	}
 	app->attached = TRUE;
+	window_state_changed(app);
 	return TRUE;
 invalid:
 	app->syncing = FALSE;
@@ -562,6 +564,7 @@ disconnected(App *app)
 	app->reader = app->writer = 0;
 	if (app->fd >= 0) close(app->fd);
 	app->fd = -1;
+	window_state_changed(app);
 	wire_reader_free(&app->input); app->input = (WireReader){0};
 	wire_buffer_free(&app->output_queue); app->output_queue = (WireBuffer){0}; app->sent = 0;
 	app->pending = 0;
@@ -671,6 +674,7 @@ destroyed(GtkWidget *widget, App *app)
 {
 	(void)widget;
 	app->closing = TRUE;
+	window_state_remove(app);
 	g_signal_handlers_disconnect_by_data(app->notebook, app);
 	g_signal_handlers_disconnect_by_data(app->window, app);
 	if (app->reconnect) g_source_remove(app->reconnect);
@@ -751,6 +755,7 @@ show_app(App *app)
 	if (request) g_mutex_unlock(&request->widgets_ready);
 	else connect_async(app, FALSE);
 	gtk_widget_show_all(app->window);
+	window_state_add(app);
 	app_startuptime("map-request");
 }
 

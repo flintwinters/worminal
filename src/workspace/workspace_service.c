@@ -289,18 +289,25 @@ refresh_directory(Tab *tab)
 	char path[64], directory[PATH_MAX];
 	pid_t child = tsessionpid(tab->session);
 	ssize_t length;
-	if (child <= 0)
-		return;
 	snprintf(path, sizeof(path), "/proc/%ld/cwd", (long)child);
-	length = readlink(path, directory, sizeof(directory) - 1);
+	length = child > 0 ? readlink(path, directory, sizeof(directory) - 1) : -1;
+	/* An unreadable directory must clear the previous value, not advertise it. */
 	if (length < 0 || length >= (ssize_t)sizeof(directory) - 1)
-		return;
+		length = 0;
 	directory[length] = '\0';
 	if (strcmp(tab->directory, directory) == 0)
 		return;
 	free(tab->directory);
 	tab->directory = xstrdup(directory);
 	catalog_dirty = 1;
+}
+
+static int64_t
+monotonic_ns(void)
+{
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (int64_t)now.tv_sec * 1000000000 + now.tv_nsec;
 }
 
 static void
@@ -630,6 +637,7 @@ serve(void)
 {
 	int listener = workspace_listen();
 	struct timespec last_frame = {0};
+	int64_t next_directory_ns = 0;
 	/* -o - follows the launching client's stdout across the service boundary. */
 	tprinterhook = service_print;
 	ttyrawhook = service_input;
@@ -639,6 +647,7 @@ serve(void)
 		fd_set readers, writers;
 		int maxfd = listener;
 		int pending = 0;
+		int watch_directories = 0;
 		FD_ZERO(&readers);
 		FD_ZERO(&writers);
 		FD_SET(listener, &readers);
@@ -647,6 +656,13 @@ serve(void)
 			maxfd = MAX(maxfd, handin_listener);
 		}
 		tsessionreap();
+		int64_t directory_ns = monotonic_ns();
+		for (Tab *tab = tabs; tab; tab = tab->next) {
+			if (!tab->session) continue;
+			watch_directories = 1;
+			if (directory_ns >= next_directory_ns) refresh_directory(tab);
+		}
+		if (directory_ns >= next_directory_ns) next_directory_ns = directory_ns + 250000000;
 		for (Tab *tab = tabs, *next; tab; tab = next) {
 			next = tab->next;
 			if (tab->session && tsessionfd(tab->session) < 0)
@@ -685,8 +701,12 @@ serve(void)
 			clock_gettime(CLOCK_MONOTONIC, &before_wait);
 			flush_delay.tv_nsec = frame_delay_ns(last_frame, before_wait);
 		}
+		if (watch_directories) {
+			long delay = MAX(next_directory_ns - monotonic_ns(), 0);
+			if (!pending || delay < flush_delay.tv_nsec) flush_delay.tv_nsec = delay;
+		}
 		if (pselect(maxfd + 1, &readers, &writers, NULL,
-		            pending ? &flush_delay : NULL, NULL) < 0) {
+		            pending || watch_directories ? &flush_delay : NULL, NULL) < 0) {
 			if (errno == EINTR)
 				continue;
 			return 1;
