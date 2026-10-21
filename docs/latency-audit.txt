@@ -1025,3 +1025,8 @@ with p95 differences +15.66/+11.09 ms. Frozen .checks/frontend-gc-shell-verified
 The retained improvement is a smaller module and fewer relocations without
 extra resident processes, prewarming, new caches or changed user behavior.
 Broader latency optimization remains active.
+
+Installed a32931f atomically with the existing configuration. All six installed
+artifacts match their verified builds byte-for-byte. No live owner, daemon,
+PTY or browser state was restarted or migrated. Fresh owners load the smaller
+frontend; existing owners retain their mapped module. Latency work remains open.
