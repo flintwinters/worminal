@@ -980,3 +980,48 @@ Installed b530a68 atomically with the existing configuration. All six installed
 product artifacts match verified builds byte-for-byte. No owner, service, PTY
 or browser state was restarted or migrated; fresh owners load the new selection
 transaction. The broader latency objective remains active.
+
+Collect unused owner/parser code from the frontend module
+--------------------------------------------------------
+The release frontend previously exported all 145 defined global symbols from
+its shared source objects, retaining owner/parser/snapshot entrypoints that no
+GTK view calls. src/gtk/frontend.map now defines the module entrypoint and
+app/terminal/tab/wire callback families, plus the current-session accessor used
+by the existing release-rendering probe. Other symbols are local. Frontend-only
+function/data sections and linker collection remove unreachable code; service,
+rollback and browser builds retain their existing flags and interfaces.
+No terminal behavior, parser implementation, widget state or wire format changes.
+
+Builder.program now accepts explicit link dependencies so editing the export map
+invalidates the module without recompiling sources. A real compiler/linker test
+checks this incremental behavior. A separate isolated CLI test loads the actual
+frontend globally and browser eagerly, resolving every browser import without a
+live display, and verifies that the owner constructor is absent from the frontend
+exports. Existing delayed WebKit loading remains covered by the release broker
+GUI checks. Full headless and X11/native-Wayland local/SSH GTK suites pass.
+File/line gates pass; clang-tidy remains unavailable.
+
+Against ddf9bec, ELF file bytes 192208 -> 142000 (26.1% smaller); size text/data/bss
+142155/20696/120 -> 96022/19352/48, combined 162971 -> 115422 (29.2% smaller).
+Dynamic exports 145 -> 41. readelf relocation counts dyn309/plt353 -> 251/271:
+662 -> 522 total. These are artifact metrics, not total application memory or
+physical cold-storage latency claims. Three alternating release-rendering pairs
+per backend preserve exact RGBA images for ASCII, Unicode and clipped scenes.
+Scene PSS candidate/baseline 55464/55617 KiB on X11, 37482/37388 on Wayland:
+these noisy opposite-direction results do not prove a process-memory reduction.
+Frozen .checks/frontend-gc-render-{x11,wayland}-verified.json.
+
+Twenty raw-fixture launch pairs show no established end-to-end gain: candidate/
+baseline fresh readiness 100.22/99.71 ms, additional 28.61/27.77 ms, typing 2.71/
+2.69 ms. Paired readiness medians -0.15/-0.45 ms with positive p95 differences
+13.43/13.29 ms. Frozen .checks/frontend-gc-launch-verified.json. Warm filesystem
+caches and private Xvfb exclude physical storage/display effects; GTK and shell
+startup remain substantially larger costs than this module's removed code.
+
+Twenty additional paired interactive-zsh launches likewise show no established
+launch gain: candidate/baseline fresh readiness 143.54/143.49 ms, additional
+122.81/119.90 ms, typing 2.70/2.59 ms. Paired readiness medians +1.94/+0.08 ms
+with p95 differences +15.66/+11.09 ms. Frozen .checks/frontend-gc-shell-verified.json.
+The retained improvement is a smaller module and fewer relocations without
+extra resident processes, prewarming, new caches or changed user behavior.
+Broader latency optimization remains active.

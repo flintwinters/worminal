@@ -90,13 +90,14 @@ class Builder:
         self.cflags = compile_flags()
         self.libs = link_flags()
 
-    def program(self, output, sources, *, variant="default", flags=(), libs=None):
+    def program(self, output, sources, *, variant="default", flags=(), libs=None, link_dependencies=()):
         objects = []
         for source in sources:
             obj = f"build/obj/{variant}/{Path(source).with_suffix('.o')}"
             step(obj, [*self.cc, *self.cflags, *flags, "-c", source], [source], depfile=True)
             objects.append(obj)
-        step(output, [*self.cc, *objects, *(self.libs if libs is None else libs)], objects)
+        step(output, [*self.cc, *objects, *(self.libs if libs is None else libs)],
+             [*objects, *link_dependencies])
 
     def target(self, target):
         if target == "build/browser.so":
@@ -128,7 +129,7 @@ class Builder:
         elif target in ("worminald", "worminald-preview", "build/frontend.so", "build/preview_test"):
             flags = ["-DWORMINAL_PREVIEW_PROTOCOL"]
             if target == "build/frontend.so":
-                flags += ["-fPIC"]
+                flags += ["-fPIC", "-ffunction-sections", "-fdata-sections"]
             server = target in ("worminald", "worminald-preview")
             sources = SERVER if server else PREVIEW
             if target == "build/preview_test":
@@ -136,7 +137,7 @@ class Builder:
                 flags += ["-O1", "-g"]
             libs = ["-lm", "-lrt", "-lutil", *words("LDFLAGS")]
             if target == "build/frontend.so":
-                libs += ["-shared"]
+                libs += ["-shared", "-Wl,--gc-sections", "-Wl,--version-script=src/gtk/frontend.map"]
             old_flags = self.cflags
             # Keep GTK, WebKit and X11 out of the preview daemon's build/link flags.
             self.cflags = [*CPPFLAGS, *words("CPPFLAGS"), *words("CFLAGS", "-O3")]
@@ -149,7 +150,8 @@ class Builder:
                              ["tests/preview.c", *(f"src/{source}" for source in COMMON),
                               "src/workspace/workspace_client.c"],
                              variant="preview-service" if server else "preview-test" if not sources else "frontend",
-                             flags=flags, libs=libs)
+                             flags=flags, libs=libs,
+                             link_dependencies=["src/gtk/frontend.map"] if target == "build/frontend.so" else [])
             finally:
                 self.cflags = old_flags
         elif target == "build/render_probe":

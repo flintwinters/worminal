@@ -1,0 +1,12 @@
+/* Module entrypoints, browser callbacks and release-rendering probe API.
+ * Terminal ownership/parser internals are not a frontend module interface. */
+{
+	global:
+		worminal_frontend_v1;
+		app_*;
+		terminal_*;
+		tabs_*;
+		wire_*;
+		tsessioncurrent;
+	local: *;
+};
