@@ -262,6 +262,8 @@ python3 manage.py latency-visible --compare .checks/launch-baseline --trials 20 
 Each version gets a private display and workspace with the same growing tab workload; trial order alternates.
 The native echo fixture excludes interpreter startup and restores its ready canvas after startup resizes.
 Use `--saved-tabs 100` to seed a populated workspace before measuring launch costs.
+`--bridge-delay-ms 100` uses the local SSH fixture with a controlled startup delay. It exercises the
+production workspace bridge; actual SSH authentication, compression and network timing remain outside this probe.
 `.checks/visible-latency-comparison.json` records raw pairs, differences, CPU count, and start/end system load.
 
 `interaction-perf` observes known tab and scrollback colors after real key/wheel input on private Xvfb.

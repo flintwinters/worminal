@@ -5,4 +5,7 @@ case "$*" in
   "-T -C key-test worminald --bridge") ;;
   *) exit 64 ;;
 esac
+if [ -n "${WORMINAL_TEST_BRIDGE_DELAY:-}" ]; then
+  sleep "$WORMINAL_TEST_BRIDGE_DELAY"
+fi
 exec "$WORMINAL_TEST_DAEMON" --bridge
