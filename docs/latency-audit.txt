@@ -943,3 +943,9 @@ The retained improvement removes per-page font-description copies, metric
 lookups and size-request/queue-draw calls during a catalog transaction; final
 presentation still refreshes through its existing paths. Frozen evidence:
 .checks/catalog-refresh-launch-verified.json. Broader launch work remains open.
+
+Installed3850cd0 via atomic replacement using the existing configuration.
+All six installed product artifacts match their verified builds byte-for-byte.
+No live owner, service, PTY or browser state was restarted or migrated. Existing
+owners retain their mapped frontend; fresh owners load catalog coalescing.
+The broader launch and latency goal remains active.
