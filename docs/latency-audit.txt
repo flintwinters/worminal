@@ -510,3 +510,43 @@ little overlap to justify changing their connection timing. Frozen reports:
 are saved in .checks/first-worker-probe-control; the final source remains
 uninstalled pending the later-window presentation audit. Installed 66bba0f and
 all live owner/service sessions remain intact. The full latency goal is open.
+
+Later-window presentation follow-up
+------------------------------------
+The optional startup trace now covers forwarded additional windows as well as
+fresh owners. Both share one parser, which retains first occurrences and the
+last frame/paint before the pixel-ready observation. Existing-owner events
+older than the launcher's main timestamp are excluded. Owner frame/paint
+traces can include other visible pages; they are diagnostic, not a substitute
+for the unique target-window pixel identity check.
+
+Twenty traced interactive-shell pairs show additional connection-send paired
+-0.04 ms, first complete frame -0.01 ms, final complete frame +0.38 ms, last
+paint -0.42 ms and pixel readiness -0.79 ms. The earlier +6.94 ms readiness
+result does not recur under tracing. Logging can shift phase/timing, so this
+alone did not resolve the concern. Frozen .checks/additional-worker-shell-traced.json.
+
+A subsequent larger UNTRACED 40-pair interactive-zsh comparison measured:
+
+                           candidate / baseline median     paired difference
+  fresh map                    68.60 /  64.37 ms               +3.19 ms
+  fresh pixel readiness       144.61 / 184.86 ms              -35.75 ms
+  additional map                5.96 /   6.40 ms               -0.20 ms
+  additional readiness        123.82 / 123.69 ms               +1.08 ms
+
+Additional readiness p95 was 129.14/133.64 ms. The larger result and the traced
+stage comparison do not support a persistent seven-millisecond additional
+regression. They also do not prove an exact zero-cost change. Shell/config and
+frame-presentation timing vary, and the original discrepant run remains saved.
+The small fresh-map delay is repeatable in shell mode, consistent with shell
+initialization competing during GTK construction; usable-input readiness is
+the project's launch priority. No claim of improving every isolated milestone
+is made. Typing median/p95 was 2.68/4.30 versus 2.85/4.61 ms (400 keys per side),
+without establishing a separate steady typing optimization. Settled PSS was
+12828/12826 KiB. Frozen .checks/additional-worker-shell-untraced-40.json.
+
+The final trace-parser filtering was exercised in three paired minimal-fixture
+runs, including forwarded-window stages. The product source is unchanged from
+20c7b84, whose final X11, native Wayland and headless suites already pass. The
+installation hold on that checkpoint is lifted by this follow-up, while peak
+startup resource costs and the broader presentation/latency audit remain open.
