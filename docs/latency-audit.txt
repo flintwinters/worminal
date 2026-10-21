@@ -557,3 +557,60 @@ browser artifacts match the saved tested candidate, and installed artifacts
 match the current build byte-for-byte. No live GTK owner, workspace daemon,
 legacy session or PTY was restarted or migrated. New owners load the early
 worker; existing windows retain their mapped frontend until they exit.
+
+First-content presentation experiment (rejected)
+-------------------------------------------------
+A one-shot allowance was evaluated for newly created terminals: retain it over
+blank/unchanged frames, detect imported glyph/background/decorative content,
+and process updates only after complete mapped geometry-matching frames. This
+would reuse the existing keyboard/claim early-paint mechanism without eagerly
+painting later bulk output. It is NOT retained in the source or installed build.
+
+Ten paired minimal-fixture trials measured fresh readiness 99.56/99.80 ms,
+paired -1.04 ms, and additional readiness 27.48/26.54 ms, paired +0.58 ms.
+Five traced zsh pairs measured fresh/additional paired +1.59/+0.31 ms. The
+experimental startup-paint marker fires, but early setup content can consume
+it long before usable shell output: additional median allowance use 33.90 ms,
+last complete frame 111.13 ms, last paint 111.49 ms, readiness 115.52 ms.
+There is no demonstrated useful-launch gain to justify the content heuristic
+and extra synchronous-paint opportunity. Frozen experiments:
+.checks/first-content-minimal-experiment.json,
+.checks/first-content-shell-rejected.json and corresponding .log. Rebuilt
+frontend.so is byte-identical to .checks/first-content-baseline/build/frontend.so.
+
+First-ready frontend resource accounting
+-----------------------------------------
+latency-visible --startup-resources adds an optional snapshot after the fresh
+window's unique ready pixels appear. It records observed live frontend/helper
+per-process CPU, main-thread scheduled runtime, VmRSS and approximate VmHWM.
+Whole-process CPU uses Linux clock-tick counters; main-thread scheduled runtime
+resolves smaller differences but excludes non-main threads. Exited helpers and
+daemon-owned PTY shells are outside the sample. Separate process high-water
+marks are not simultaneous peak RSS, and no whole-application peak PSS claim
+is possible from this mode. Sampling can perturb subsequent timing; independent
+untraced/resource-free pixel measurements remain the primary latency evidence.
+
+The new regression touches and releases 32 MiB in a child, verifying the
+high-water observation survives the allocation while current RSS falls by a
+large margin, and CPU counters remain monotonic. An initial exact inequality
+between pre-release VmRSS and later VmHWM failed by 172 KiB; Linux documents
+both status counters as approximate. The test now checks the large known
+allocation rather than imposing an invalid exact ordering. See primary docs:
+https://man7.org/linux/man-pages/man5/proc_pid_status.5.html
+Headless tests and file/line limits pass; clang-tidy remains unavailable.
+
+Twenty paired real-zsh first-ready resource trials against the earlier worker
+baseline measured installed candidate / baseline: approximate frontend VmHWM
+medians 32194/32186 KiB, main-thread CPU 82.66/80.30 ms, and process CPU 90/80 ms.
+The last difference must not be read as ten milliseconds of resolved extra
+work: those counters have ten-millisecond granularity here. Fine main-thread
+counters indicate a much smaller difference, while still omitting other
+threads. These observations do not prove identical startup CPU or whole-app
+resource costs. Fresh readiness remained 143.18/182.21 ms, paired -38.95 ms;
+this diagnostic run is supplementary to the previous resource-free trials.
+Frozen .checks/first-ready-resources-shell.json. Product artifacts and installed
+rendering behavior remain unchanged; resource/presentation optimization is open.
+Three additional delayed-bridge pairs verify observed first-ready frontend and
+helper membership: every sample includes both processes. Frozen
+.checks/first-ready-resources-bridge.json. This is a fixture/accounting check,
+not a separate speedup claim or a measurement of real SSH authentication.

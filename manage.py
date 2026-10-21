@@ -268,6 +268,7 @@ def latency(forwarded: bool = typer.Option(
 def latency_visible(trials: int = typer.Option(10, min=1), keys: int = typer.Option(50, min=1),
                     trace_startup: bool = typer.Option(False, help="Include diagnostic startup milestones."),
                     shell: bool = typer.Option(False, help="Include interactive shell initialization."),
+                    startup_resources: bool = typer.Option(False, help="Sample first-ready CPU and peak RSS counters."),
                     saved_tabs: int = typer.Option(0, min=0, help="Seed service-owned tabs before measurement."),
                     bridge_delay_ms: int = typer.Option(None, min=0, help="Use a private delayed SSH bridge fixture."),
                     snapshot: Path = typer.Option(None, help="Save current binaries/modules as a comparison baseline."),
@@ -275,6 +276,8 @@ def latency_visible(trials: int = typer.Option(10, min=1), keys: int = typer.Opt
     """Measure real key events to visible echo and fresh/additional window presentation."""
     native_build.build_targets("worminal", "worminald", "build/latency_echo")
     options = (["--snapshot", str(snapshot)] if snapshot else []) + (["--compare", str(compare)] if compare else [])
+    if startup_resources:
+        options += ["--startup-resources"]
     if shell:
         options += ["--shell"]
     if trace_startup:

@@ -269,6 +269,11 @@ these include logging overhead and supplement the independent pixel measurements
 Use `--shell` to run the configured POSIX-compatible interactive shell before it execs
 the pixel fixture, including its real startup configuration. Each measured launch uses
 a unique readiness color so an older retained tab cannot satisfy the readiness check.
+`--startup-resources` samples frontend/helper CPU and approximate per-process RSS
+high-water counters after fresh readiness. It excludes daemon-owned shells;
+separate process peaks need not coincide, and sampling can perturb later timings.
+The [Linux status counters](https://man7.org/linux/man-pages/man5/proc_pid_status.5.html)
+are approximate; this mode does not measure whole-application peak PSS.
 `--bridge-delay-ms 100` uses the local SSH fixture with a controlled startup delay. It exercises the
 production workspace bridge; actual SSH authentication, compression and network timing remain outside this probe.
 `.checks/visible-latency-comparison.json` records raw pairs, differences, CPU count, and start/end system load.
