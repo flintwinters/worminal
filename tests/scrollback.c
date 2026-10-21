@@ -193,6 +193,30 @@ main(void)
 
 	/* Wrapped text must survive both narrower and wider grids, including
 	 * the cursor position used by the next character. */
+	for (int width = 1; width <= 6; width++) {
+		tsessionnew(4, 8);
+		twrite("abcd", 4, 0);
+		tcursor(CURSOR_SAVE);
+		tresize(width, 8);
+		twrite("q", 1, 0);
+		if (term.line[3 / width][3 % width].u != 'd')
+			fprintf(stderr, "pending-wrap width=%d cursor=%d,%d previous=%u\n", width,
+			    term.c.x, term.c.y, term.line[3 / width][3 % width].u);
+		assert(term.line[3 / width][3 % width].u == 'd');
+		assert(term.line[4 / width][4 % width].u == 'q');
+		int saved_y = 4 % width ? 4 / width : 4 / width - 1;
+		int saved_x = 4 % width ? 4 % width : width - 1;
+		assert(session->saved[0].x == saved_x && session->saved[0].y == saved_y);
+		tcursor(CURSOR_LOAD);
+		twrite("Z", 1, 0);
+		assert(term.line[saved_y][saved_x].u == 'Z');
+	}
+	tsessionnew(5, 3);
+	twrite("READY", 5, 0);
+	tresize(171, 32);
+	twrite("q", 1, 0);
+	assert(term.line[0][4].u == 'Y' && term.line[0][5].u == 'q');
+
 	tsessionnew(4, 3);
 	twrite("abcdefghij", 10, 0);
 	tresize(5, 3);

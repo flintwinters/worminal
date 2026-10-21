@@ -6,7 +6,6 @@
 #include "../src/gtk/windows.c"
 #include <glib/gstdio.h>
 
-static App *diagnostic_app, *diagnostic_peer;
 static void diagnostics(void);
 
 #define WAIT(condition) do { \
@@ -21,17 +20,27 @@ static void diagnostics(void);
 static void
 diagnostics(void)
 {
-	App *apps[] = {diagnostic_app, diagnostic_peer};
-	for (int i = 0; i < 2; i++) {
-		App *app = apps[i];
-		if (!app) continue;
+	int i = 0;
+	for (GList *window = apps; window; window = window->next, i++) {
+		App *app = window->data;
 		g_printerr("window %d fd=%d reader=%u writer=%u queued=%zu active=%u\n", i,
 		    app->fd, app->reader, app->writer, app->output_queue.len, app->active ? app->active->id : 0);
 		for (GList *item = app->pages; item; item = item->next) {
 			Page *page = item->data;
 			Terminal *t = page->terminal;
+			g_printerr("tab %u url=%s browser=%d\n", page->id, page->url ?: "(terminal)", page->browser != NULL);
 			if (t) g_printerr("tab %u live=%d allocated=%dx%d frame=%dx%d scroll=%d\n",
 			    page->id, page->live, t->cols, t->rows, t->frame.cols, t->frame.rows, t->frame.scroll);
+			if (t) {
+				GString *text = g_string_new(NULL);
+				for (int y = 0; y < MIN(t->frame.rows, 6); y++) {
+					Line line = tsessionviewline(t->session, y);
+					for (int x = 0; x < t->frame.cols; x++) g_string_append_unichar(text, line[x].u);
+					g_string_append_c(text, '\n');
+				}
+				g_printerr("%s", text->str);
+				g_string_free(text, TRUE);
+			}
 		}
 	}
 }
@@ -384,7 +393,6 @@ main(int argc, char **argv)
 		g_assert_cmpstr(G_OBJECT_TYPE_NAME(gdk_display_get_default()), ==, "GdkWaylandDisplay");
 	}
 	App *app = new_app();
-	diagnostic_app = app;
 	app->title = g_strdup("Preview integration");
 	const char *master = g_getenv("WORMINAL_PREVIEW_TEST_MASTER");
 	app->master = g_strdup(master);
@@ -457,7 +465,6 @@ main(int argc, char **argv)
 	WAIT(t->frame.scroll == 0 && screen_has(t, "LIVE"));
 	/* A second window takes painting ownership; reconnect recovers the same tab. */
 	App *peer = new_app();
-	diagnostic_peer = peer;
 	peer->master = g_strdup(master);
 	peer->initial_attach = TRUE;
 	show_app(peer);
