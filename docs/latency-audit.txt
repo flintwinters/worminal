@@ -454,3 +454,59 @@ Frozen experiments: .checks/worker-overlap-shell-unique-color-experiment.json
 and .checks/worker-overlap-shell-reused-color-rejected.json. These compare an
 uncommitted worker prototype against .checks/widget-worker-baseline; they are
 not final release claims.
+
+First-window connection worker
+-------------------------------
+The current source starts the existing connection worker before the first
+GtkWindow constructor, after display and option validation. This overlaps local
+shell initialization as well as remote transport setup with the expensive first
+constructor. A transient per-request mutex gates worker completion until every
+widget and signal handler exists, including if constructors iterate a nested
+main context. Reconnects do not hold the gate. Later windows retain connection
+startup after their cheap widget construction. No extra worker/process is added.
+
+This replaces the previous initial-only preopened-SSH socket path, removes its
+App tail field and descriptor handoff, and restores the single launch option
+parser/presenter. Existing App field offsets and the module/protocol entry ABI
+remain unchanged. Failure on a missing display or invalid arguments still
+starts no remote work. The regression pumps a nested main context while an
+immediate connection failure is held behind the gate, then releases it and
+verifies completion cleanup. A separate normal window checks failure/retry UI.
+Final local/SSH X11 and native Wayland suites pass with the first-window-only
+policy. File/line limits pass; clang-tidy is still unavailable.
+
+Twenty alternating pairs against .checks/widget-worker-baseline, with distinct
+per-launch canvases, measured candidate / baseline fresh readiness medians:
+
+  real interactive zsh           143.87 / 184.19 ms   paired -40.16 ms
+  minimal local fixture          100.08 /  98.55 ms   paired  +1.00 ms
+  private bridge, 100 ms delay    173.59 / 171.31 ms   paired  +1.43 ms
+
+Zsh fresh readiness p95 is 160.91/198.64 ms. This is about a 22% median launch
+improvement with this machine's real configuration, not a claim about all
+shells. Minimal startup has no demonstrated gain; the existing SSH overlap gain
+is retained, not independently improved relative to the installed optimization.
+Typing medians/p95 were 2.58/4.31 vs 2.75/4.41 ms in the shell run, 2.91/4.36
+vs 3.14/4.31 ms minimally, and 2.96/5.09 vs 2.79/4.49 ms with bridge delay.
+No separate steady typing gain is established by these startup-only changes.
+Settled frontend-plus-helper PSS medians were 12820/12778 KiB for shell mode,
+12810/12792 KiB minimally and 12926/12944 KiB with bridge delay; peak startup
+memory and shell initialization CPU remain unmeasured.
+
+There is an unresolved secondary latency concern: zsh mapping paired +2.89 ms,
+and additional readiness 123.26/118.94 ms with paired +6.94 ms. Additional mapping
+paired -0.28 ms. Minimal and delayed-bridge additional readiness paired -0.35
+and +0.04 ms. Although later windows retain the old connection timing, their
+presentation can depend on the preceding owner's launch/frame-clock phase.
+This is a hypothesis, not a verified explanation or proof of no regression.
+
+An identical-candidate 20-pair zsh control measured paired fresh/additional
+readiness -1.20/-0.91 ms. It therefore does not explain away the +6.94 ms result.
+The early-all-windows prototype is not retained: later constructors provide too
+little overlap to justify changing their connection timing. Frozen reports:
+.checks/first-worker-{shell,minimal,bridge}-final.json,
+.checks/first-worker-shell-identical-control.json, and the earlier prototype
+.checks/worker-overlap-all-windows-shell-experiment.json. Exact candidate modules
+are saved in .checks/first-worker-probe-control; the final source remains
+uninstalled pending the later-window presentation audit. Installed 66bba0f and
+all live owner/service sessions remain intact. The full latency goal is open.
