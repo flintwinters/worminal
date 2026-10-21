@@ -452,16 +452,30 @@ check_initial_dimensions(void)
 }
 
 static void
-check_failed_preconnected_transport(void)
+check_connection_gate(void)
 {
-	int sockets[2];
-	g_assert_cmpint(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), ==, 0);
 	App *app = new_app();
-	app->startup_fd = sockets[0];
-	close(sockets[1]);
+	/* Fail before any transport/daemon work. A nested main loop must not
+	 * dispatch the failure callback against an unfinished window. */
+	app->master = g_strdup("-invalid");
+	ConnectionRequest *request = connect_async(app, TRUE);
+	gint64 deadline = g_get_monotonic_time() + 100000;
+	while (g_get_monotonic_time() < deadline) {
+		while (g_main_context_iteration(NULL, FALSE)) {}
+		g_usleep(1000);
+	}
+	g_assert_cmpint(app->refs, ==, 2);
+	g_assert_cmpint(app->fd, ==, -1);
+	g_assert_cmpuint(app->reconnect, ==, 0);
+	app->closing = TRUE;
+	g_mutex_unlock(&request->widgets_ready);
+	WAIT(app->refs == 1);
+	apps = g_list_remove(apps, app);
+	app_unref(app);
+	app = new_app();
+	app->master = g_strdup("-invalid");
 	show_app(app);
 	WAIT(app->reconnect);
-	g_assert_cmpint(app->startup_fd, ==, -1);
 	g_assert_cmpint(app->fd, ==, -1);
 	gtk_widget_destroy(app->window);
 }
@@ -663,7 +677,7 @@ main(int argc, char **argv)
 	gtk_init(&argc, &argv);
 	check_initial_dimensions();
 	check_blink_damage();
-	check_failed_preconnected_transport();
+	check_connection_gate();
 	const char *backend = g_getenv("GDK_BACKEND");
 	if (backend && !strcmp(backend, "wayland")) {
 		g_assert_null(g_getenv("DISPLAY"));

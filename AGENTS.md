@@ -7,7 +7,8 @@ The app is a GTK terminal/browser built on st 0.9.3. A per-user `worminald` serv
 terminal state, and bounded main-screen scrollback; views connect locally or through `--master user@host` over SSH.
 Main-screen width changes reflow soft-wrapped text. A tab has one live painting view and can run with no windows. Each
 window maps early while its connection worker sends the initial launch request; font loading and shell startup overlap.
-A fresh remote owner starts SSH after display/argument validation and overlaps transport setup with widget construction.
+Validated launches overlap connection requests and shell startup with widget construction;
+a per-request completion gate keeps GTK callbacks behind completed widget setup.
 `manage.py build` compiles Alacritty colors, font family, size, spacing, and scrollback into a generated C header.
 `src/terminal` owns terminal state,
 `src/gtk` paints release views, `src/x11` preserves the original renderer, and `src/workspace` connects the service.
@@ -20,7 +21,8 @@ Tab claims can present their first complete response early; cached mapping and r
 `tools/build.py` owns builds and installation; `manage.py` owns
 checks and latency measurements on private displays.
 `manage.py latency-visible` measures real key events to visible echo and fresh/additional window presentation
-using private Xvfb pixels; it excludes desktop compositing and physical display latency.
+using distinct launch canvases on private Xvfb; --shell includes real interactive initialization.
+It excludes desktop compositing and physical display latency.
 `manage.py interaction-perf` measures first ownership claims, cached tab switches, and wheel/page scroll pixels.
 `manage.py render-perf` compares actual release-module painting, exact pixels, CPU and memory on private backends.
 The upstream source and license remain in the repository. Keep machine destinations in environment configuration
@@ -42,6 +44,7 @@ Private Wayland checks use a project-local Weston runtime and matching virtual-s
 
 Current jobs: prioritize remaining launch latency, while auditing input, rendering, output delivery, and view switching
 until further gains require correctness, resource, or compatibility compromises; review remaining compatibility gaps.
+Audit the current first-window worker overlap against later-window presentation before installing that checkpoint.
 `worminal`/`worminald` are GTK/v2; preview build aliases share that workspace and existing browser profiles.
 Keep `worminal-x11`/`worminald-x11` and live v1 sessions available for rollback; never migrate or stop them implicitly.
 Both daemon builds share explicit `--handin`/`--handoff` ownership transfer via sealed native snapshots and SCM_RIGHTS.
