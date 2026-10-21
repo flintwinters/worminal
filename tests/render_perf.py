@@ -22,13 +22,13 @@ from x11 import isolated_display
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def sample(module, label, frames, backend, log, resize=False):
+def sample(module, label, frames, backend, log, resize=False, tabs=0):
     context = isolated_display if backend == "x11" else wayland_display
     prefix = ROOT / f".checks/render-{label}"
     with context() as env:
         env.update(GDK_BACKEND=backend)
         process = subprocess.Popen([str(ROOT / "build/render_probe"), str(module), str(prefix), str(frames),
-                                    *(["--resize"] if resize else [])],
+                                    *(["--resize"] if resize else []), *(["--tabs", str(tabs)] if tabs else [])],
                                    env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log)
         try:
             try:
@@ -54,8 +54,11 @@ def main():
     parser.add_argument("--frames", type=int, default=60)
     parser.add_argument("--compare", type=Path)
     parser.add_argument("--resize", action="store_true")
+    parser.add_argument("--tabs", type=int, default=0)
     parser.add_argument("--backend", choices=("x11", "wayland"), default="x11")
     args = parser.parse_args()
+    if args.tabs < 0 or args.tabs > 4096 or (args.tabs and args.resize):
+        parser.error("--tabs must be 0..4096 and cannot be combined with --resize")
     if args.trials < 1 or args.frames < 1:
         parser.error("--trials and --frames must be positive")
     modules = {"candidate": ROOT / "build/frontend.so"}
@@ -72,7 +75,8 @@ def main():
         logs = {label: stack.enter_context((checks / f"render-{label}.log").open("wb")) for label in modules}
         for trial in range(args.trials):
             for label in list(modules)[::1 if trial % 2 == 0 else -1]:
-                results, usage = sample(modules[label], label, args.frames, args.backend, logs[label], args.resize)
+                results, usage = sample(modules[label], label, args.frames, args.backend, logs[label],
+                                        args.resize, args.tabs)
                 for result in results:
                     if args.resize and label == "candidate" and result["local_history_rows"]:
                         raise RuntimeError("Replica frame import accumulated local scrollback")
@@ -94,7 +98,8 @@ def main():
     summary_key = "summary_ms_per_resize_cycle" if args.resize else "summary_ms_per_frame"
     report = {"revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
               "measurement_unit": "resize cycle (two frames)" if args.resize else "paint frame",
-              "resize": args.resize, "backend": args.backend, "trials": args.trials, "frames": args.frames,
+              "tabs": args.tabs, "resize": args.resize, "backend": args.backend,
+              "trials": args.trials, "frames": args.frames,
               "measurements": measurements, summary_key: summaries, "resources": resources,
               "probe_sha256": hashlib.sha256((ROOT / "build/render_probe").read_bytes()).hexdigest(),
               "module_sha256": {label: hashlib.sha256(module.read_bytes()).hexdigest()
@@ -114,6 +119,11 @@ def main():
                            "Only packet import is timed; final painting is outside the measured interval. "
                            "The final exact image and retained storage are checked. "
                            "Cell storage excludes parser buffers, fonts, row pointers and allocator overhead.")
+    if args.tabs:
+        report["notes"] = ("Actual release tab strip with distinct directory labels and the last tab active; "
+                           "twenty warm-up frames precede timed GTK draw to Cairo images. "
+                           "Exact RGBA and pixel geometry match across variants. "
+                           "No terminal cells, service or shell are included.")
     path = checks / f"render-perf-{args.backend}.json"
     path.write_text(json.dumps(report, indent=2) + "\n")
     console = Console()

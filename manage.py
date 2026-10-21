@@ -298,11 +298,14 @@ def latency_visible(trials: int = typer.Option(10, min=1), keys: int = typer.Opt
 @app.command("render-perf")
 def render_perf(trials: int = typer.Option(10, min=1), frames: int = typer.Option(60, min=1),
                 resize: bool = typer.Option(False, help="Measure viewport imports instead of painting."),
+                tabs: int = typer.Option(0, min=0, max=4096, help="Measure a strip with N distinct tab labels."),
                 backend: str = typer.Option("x11", help="Private display backend: x11 or wayland."),
                 compare: Path = typer.Option(None, help="Snapshot with a compatible internal frontend view ABI.")):
     """Compare release-module painting, exact pixels, CPU, and memory."""
     native_build.build_targets("worminal", "build/render_probe")
     options = ["--compare", str(compare)] if compare else []
+    if tabs:
+        options += ["--tabs", str(tabs)]
     if resize:
         options += ["--resize"]
     raise typer.Exit(run([sys.executable, "tests/render_perf.py", "--trials", str(trials), "--frames", str(frames),

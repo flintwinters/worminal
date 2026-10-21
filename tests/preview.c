@@ -6,6 +6,7 @@
 #include "../src/gtk/windows.c"
 #include <glib/gstdio.h>
 #include "preview_text.c"
+#include "preview_tabs.c"
 
 static void diagnostics(void);
 
@@ -505,6 +506,10 @@ check_tabs(App *app, Page *terminal, Page *browser)
 	char *name = g_strdup(gtk_label_get_text(GTK_LABEL(terminal->label)));
 	gtk_label_set_text(GTK_LABEL(terminal->label), "a-very-long-directory-name-before-the-browser-tab");
 	g_assert_true(first_visible(strip, 20)->data == browser);
+	select_page(terminal);
+	gtk_label_set_text(GTK_LABEL(terminal->label), "a-very-long-directory-name-before-the-browser-tab");
+	g_assert_true(first_visible(strip, 20)->data == terminal);
+	select_page(browser);
 	gtk_label_set_text(GTK_LABEL(terminal->label), name);
 	g_free(name);
 }
@@ -676,6 +681,7 @@ main(int argc, char **argv)
 {
 	setlocale(LC_CTYPE, "");
 	gtk_init(&argc, &argv);
+	check_tab_ranges();
 	check_initial_dimensions();
 	check_blink_damage();
 	check_connection_gate();

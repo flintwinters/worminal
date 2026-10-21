@@ -19,15 +19,17 @@ tab_width(TabStrip *strip, Page *page)
 static GList *
 first_visible(TabStrip *strip, int right)
 {
-	GList *first = strip->app->pages;
-	int width = 2;
-	for (GList *item = first; item; item = item->next) {
-		width += tab_width(strip, item->data);
-		if (item->data == strip->app->active) break;
-	}
-	while (first && first->next && width > right) {
-		width -= tab_width(strip, first->data);
-		first = first->next;
+	GList *first = g_list_find(strip->app->pages, strip->app->active);
+	if (!first) first = g_list_last(strip->app->pages);
+	if (!first) return NULL;
+	/* Only the suffix ending at the active tab determines the left edge.
+	 * Hidden prefixes need no text shaping. An oversized active tab clips. */
+	int width = 2 + tab_width(strip, first->data);
+	while (first->prev && width <= right) {
+		int previous = tab_width(strip, first->prev->data);
+		if (previous > right - width) break;
+		width += previous;
+		first = first->prev;
 	}
 	return first;
 }

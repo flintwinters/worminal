@@ -837,3 +837,37 @@ gap in seeding itself. Earlier measured-launch colors were already distinct.
 Three identical-build control pairs with 100 distinct labels pass, reporting
 fresh/additional paired differences -1.15/+2.78 ms. This is fixture validation,
 not an application speedup. Frozen .checks/tab-label-fixture-control.json.
+
+Bound tab-strip text work to the visible suffix
+---------------------------------------------
+first_visible now finds the active node and walks backward only while preceding
+labels fit. Hidden prefix labels no longer enter Pango on every draw/click.
+The pointer lookup remains linear; this is bounded text work, not a claim of
+constant-time list traversal. There is no width cache, extra persistent state,
+ABI change, or font/zoom invalidation requirement. Draw and hit testing continue
+to share the same range calculation. An overwide active tab now remains visible
+and clipped instead of potentially advancing to a later tab.
+
+A separate prefix-sum oracle checks all active positions, varied/Unicode names,
+multiple widths, an oversized active label, empty lists and missing active state.
+It fails against the saved baseline and passes with the new traversal. Full GTK
+local/SSH checks pass on X11 and native Wayland, including actual tab clicks.
+File/line gates pass; clang-tidy remains unavailable.
+
+The routinized render-perf --tabs N case draws the actual release strip with
+unique labels and the last tab active. Ten alternating pairs, 100 labels,
+20 warm-up and 60 measured frames: median drawing CPU baseline/candidate is
+1.453/0.281 ms on X11 and 1.700/0.205 ms on native Wayland. Exact RGBA pixels
+match in every pair. This scene excludes terminal cells, daemon and shells;
+its memory readings are not whole-workspace memory claims. Frozen evidence:
+.checks/tab-range-{x11,wayland}-verified.json, saved baseline64c35c5/product586768a.
+
+Twenty actual populated-launch pairs use 100 retained distinct directory labels
+and verified catalog counts. Fresh ready baseline/candidate medians 96.04/91.39
+ms; additional-window ready 39.14/27.39 ms. Paired median differences are only
+-0.87/-2.69 ms, respectively, with positive p95 differences: launch noise remains
+substantial, so do not equate differences of medians with a reliable launch gain.
+Typing medians 2.52/2.38 ms. These are warm-filesystem private Xvfb software
+readiness measurements, not physical display or interactive-shell startup.
+Frozen .checks/tab-range-launch-verified.json. The strong repeatable result is
+less hidden-label drawing CPU; broader launch optimization remains open.
