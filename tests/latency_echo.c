@@ -2,6 +2,9 @@
 #define _DEFAULT_SOURCE
 #include <errno.h>
 #include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/select.h>
 #include <termios.h>
 #include <unistd.h>
@@ -16,10 +19,22 @@ resize(int signal)
 }
 
 int
-main(void)
+main(int argc, char **argv)
 {
 	struct termios mode;
-	const char ready[] = "\033[?25l\033[48;2;17;34;51m\033[2J\033[H";
+	unsigned long color = 0x112233;
+	int history = 0;
+	for (int i = 1; i < argc; i++) {
+		if (!strcmp(argv[i], "--history")) history = 1;
+		else if (!strcmp(argv[i], "--color") && ++i < argc) {
+			char *end;
+			color = strtoul(argv[i], &end, 16);
+			if (!*argv[i] || *end || color > 0xffffff) return 2;
+		} else return 2;
+	}
+	char ready[80];
+	int ready_length = snprintf(ready, sizeof(ready), "\033[?25l\033[48;2;%lu;%lu;%lum\033[2J\033[H",
+	    color >> 16, (color >> 8) & 255, color & 255);
 	char echo[] = "\033[12;40H ";
 	int initial = 1;
 	struct sigaction action = {.sa_handler = resize};
@@ -37,7 +52,15 @@ main(void)
 			resized = 0;
 			/* Early GTK allocations can resize the PTY after its first output.
 			 * Restore the ready canvas until the first measured key arrives. */
-			if (initial && write(1, ready, sizeof(ready) - 1) != sizeof(ready) - 1) return 1;
+			if (initial) {
+				if (history) {
+					const char background[] = "\033[48;2;68;85;102m";
+					if (write(1, background, sizeof(background) - 1) != sizeof(background) - 1) return 1;
+					for (int row = 0; row < 256; row++)
+						if (write(1, "history\r\n", 9) != 9) return 1;
+				}
+				if (write(1, ready, ready_length) != ready_length) return 1;
+			}
 		}
 		fd_set readers;
 		FD_ZERO(&readers);
