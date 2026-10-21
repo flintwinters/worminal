@@ -984,6 +984,7 @@ main(int argc, char **argv)
 			extra = item->data;
 	g_list_free(toplevels);
 	g_assert_nonnull(extra);
+	WAIT(gtk_window_is_active(GTK_WINDOW(extra)));
 	gtk_widget_destroy(extra);
 	g_assert_cmpint(windows, ==, 2);
 	gtk_widget_destroy(peer->window);
