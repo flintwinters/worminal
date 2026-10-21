@@ -312,10 +312,14 @@ draw_terminal(GtkWidget *widget, cairo_t *cr, Terminal *t)
 		Line line = tsessionviewline(t->session, y);
 		for (int x = 0; x < f.cols; x++) {
 			Glyph g = line[x];
+			if (g.mode & ATTR_WDUMMY) continue;
+			gboolean blank = g.u == ' ' && !(g.mode & (ATTR_UNDERLINE | ATTR_STRUCK));
+			/* Plain spaces have no foreground ink. Only the cursor row can
+			 * still require an outline or another non-block cursor shape. */
+			if (blank && y != f.cursor_y) continue;
 			GdkRGBA fg, bg;
 			gboolean cursor = cell_colors(t, g, x, y, &fg, &bg);
-			if (g.mode & ATTR_WDUMMY)
-				continue;
+			if (blank && !cursor) continue;
 			char utf8[8] = {0};
 			g_unichar_to_utf8(g_unichar_validate(g.u) ? g.u : 0xfffd, utf8);
 			gdk_cairo_set_source_rgba(cr, &fg);
