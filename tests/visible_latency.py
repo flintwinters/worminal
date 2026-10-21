@@ -1,4 +1,4 @@
-"""Observe X server pixels after real key events; no application timing hooks.
+"""Observe X server pixels after real key events; optional diagnostic startup traces.
 
 Private Xvfb measures software presentation, not compositor/display scanout or
 physical keyboard latency. The fixture uses a raw PTY, so every visible glyph
@@ -142,9 +142,21 @@ def typing(connection, window, count):
 
 def sample_round(env, connection, label, trial, count, log, master=None):
     title = f"Latency {label} fresh {os.getpid()} {trial}"
+    trace_offset = os.fstat(log.fileno()).st_size
     owner, window, timing = launch(env, connection, title, log, master=master)
     result = {f"fresh_{phase}": [value] for phase, value in timing.items()}
     try:
+        if env.get("WORMINAL_TRACE_TIMING"):
+            data = os.pread(log.fileno(), os.fstat(log.fileno()).st_size - trace_offset, trace_offset)
+            events = {}
+            for line in data.splitlines():
+                parts = line.split()
+                if len(parts) == 3 and parts[0] == b"worminal-timing":
+                    events.setdefault(parts[1].decode(), int(parts[2]))
+            if "main" not in events or "map-request" not in events:
+                raise RuntimeError("Fresh startup trace is missing launcher or map events")
+            result.update({f"trace_{name}_from_main": [(value - events["main"]) / 1e6]
+                           for name, value in events.items() if name != "main"})
         result["typing"] = typing(connection, window, count)
         resources = memory(descendants(owner.pid))
         title = f"Latency {label} additional {os.getpid()} {trial}"
@@ -201,6 +213,7 @@ def main():
     parser.add_argument("--trials", type=int, default=10)
     parser.add_argument("--keys", type=int, default=50)
     parser.add_argument("--saved-tabs", type=int, default=0)
+    parser.add_argument("--trace-startup", action="store_true")
     parser.add_argument("--bridge-delay-ms", type=int)
     parser.add_argument("--snapshot", type=Path)
     parser.add_argument("--compare", type=Path)
@@ -229,6 +242,9 @@ def main():
         for label, executable in variants.items():
             env = stack.enter_context(isolated_display())
             env.update(GDK_BACKEND="x11", WORMINAL_FRONTEND=str(executable))
+            env.pop("WORMINAL_TRACE_TIMING", None)
+            if args.trace_startup:
+                env["WORMINAL_TRACE_TIMING"] = "1"
             if master:
                 env.update(PATH=str(ROOT / "tests/fixtures/preview-master") + os.pathsep + env["PATH"],
                            WORMINAL_TEST_DAEMON=str(executable.parent / "worminald"),
@@ -236,7 +252,7 @@ def main():
             connection = display.Display(env["DISPLAY"])
             stack.callback(connection.close)
             log_name = "visible-latency.log" if len(variants) == 1 else f"visible-latency-{label}.log"
-            log = stack.enter_context((checks / log_name).open("wb"))
+            log = stack.enter_context((checks / log_name).open("w+b"))
             contexts[label] = env, connection, log
         for env, connection, log in contexts.values():
             seed_tabs(env, connection, args.saved_tabs, log, master=master)
@@ -255,7 +271,7 @@ def main():
               "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
               "cpu_count": os.cpu_count(), "saved_tabs": args.saved_tabs,
               "transport": "private SSH bridge fixture" if master else "local",
-              "bridge_delay_ms": args.bridge_delay_ms,
+              "bridge_delay_ms": args.bridge_delay_ms, "trace_startup": args.trace_startup,
               "frontend_memory_samples": resources,
               "load_start": load_start, "load_end": os.getloadavg(),
               "notes": "Fresh frontend with warm filesystem caches; "
@@ -279,7 +295,8 @@ def main():
                               for label, values in samples.items()}
         report["baseline_revision"] = (args.compare / "revision").read_text().strip()
         differences = {name: [a - b for a, b in zip(values, samples["baseline"][name])]
-                       for name, values in samples["candidate"].items() if name != "typing"}
+                       for name, values in samples["candidate"].items()
+                       if name != "typing" and name in samples["baseline"]}
         report["paired_difference_ms"] = differences
         report["paired_summary_ms"] = summarize(differences)
         path = checks / "visible-latency-comparison.json"
@@ -297,6 +314,9 @@ def main():
         for name, summary in report["paired_summary_ms"].items():
             console.print(f"  {name}: {summary['median']:+.2f} ms")
     console.print(report["notes"])
+    if args.trace_startup:
+        console.print("Diagnostic traces are cumulative from launcher main, include logging overhead, "
+                      "and do not replace visible-pixel observations.")
     if master:
         console.print(f"Private SSH bridge fixture, {args.bridge_delay_ms} ms requested startup delay; no remote host.")
     console.print(f"Raw measurements: {path.relative_to(ROOT)}")
