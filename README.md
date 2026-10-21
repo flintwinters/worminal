@@ -7,6 +7,7 @@
 The optional `file-explorer` submodule is a TypeScript npm workspace building a plain dark,
 offline explorer as `file-explorer/dist/index.html`. Run `npm ci` inside the submodule, then
 `python3 manage.py explorer-build` or `python3 manage.py explorer-check` from this repository.
+`python3 manage.py explorer-lint` runs its pinned Hyperlinter; setup is in the submodule README.
 It currently uses a read-only folder picker; native filesystem integration is not implemented.
 The submodule repository is local at `.checks/repos/file-explorer.git` until a publishing destination
 is supplied. Its relative URL is local-only; fresh remote clones need that repository published and
