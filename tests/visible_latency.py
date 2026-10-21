@@ -142,6 +142,28 @@ def typing(connection, window, count):
     return samples
 
 
+def startup_trace(log, offset):
+    data = os.pread(log.fileno(), os.fstat(log.fileno()).st_size - offset, offset)
+    points = []
+    for line in data.splitlines():
+        parts = line.split()
+        if len(parts) == 3 and parts[0] == b"worminal-timing":
+            points.append((parts[1].decode(), int(parts[2])))
+    origin = next((timestamp for name, timestamp in points if name == "main"), None)
+    events, last = {}, {}
+    for name, timestamp in points:
+        # An existing owner's blink/paint may finish before the launcher enters main.
+        if origin is not None and timestamp >= origin:
+            events.setdefault(name, timestamp)
+            last[name] = timestamp
+    if "main" not in events or "map-request" not in events:
+        raise RuntimeError("Startup trace is missing launcher or map events")
+    result = {name: (value - events["main"]) / 1e6 for name, value in events.items() if name != "main"}
+    result.update({f"last_{name}": (last[name] - events["main"]) / 1e6
+                   for name in ("frame", "paint") if name in last})
+    return result
+
+
 def sample_round(env, connection, label, trial, count, log, master=None):
     title = f"Latency {label} fresh {os.getpid()} {trial}"
     trace_offset = os.fstat(log.fileno()).st_size
@@ -151,22 +173,18 @@ def sample_round(env, connection, label, trial, count, log, master=None):
     result = {f"fresh_{phase}": [value] for phase, value in timing.items()}
     try:
         if env.get("WORMINAL_TRACE_TIMING"):
-            data = os.pread(log.fileno(), os.fstat(log.fileno()).st_size - trace_offset, trace_offset)
-            events = {}
-            for line in data.splitlines():
-                parts = line.split()
-                if len(parts) == 3 and parts[0] == b"worminal-timing":
-                    events.setdefault(parts[1].decode(), int(parts[2]))
-            if "main" not in events or "map-request" not in events:
-                raise RuntimeError("Fresh startup trace is missing launcher or map events")
-            result.update({f"trace_{name}_from_main": [(value - events["main"]) / 1e6]
-                           for name, value in events.items() if name != "main"})
+            result.update({f"trace_{name}_from_main": [value]
+                           for name, value in startup_trace(log, trace_offset).items()})
         result["typing"] = typing(connection, window, count)
         resources = memory(descendants(owner.pid))
         title = f"Latency {label} additional {os.getpid()} {trial}"
+        trace_offset = os.fstat(log.fileno()).st_size
         child, _, timing = launch(env, connection, title, log, color=color + 1, master=master)
         try:
             result.update({f"additional_{phase}": [value] for phase, value in timing.items()})
+            if env.get("WORMINAL_TRACE_TIMING"):
+                result.update({f"additional_trace_{name}_from_main": [value]
+                               for name, value in startup_trace(log, trace_offset).items()})
         finally:
             close_window(env, title)
             stop(child)

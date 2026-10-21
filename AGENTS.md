@@ -44,7 +44,7 @@ Private Wayland checks use a project-local Weston runtime and matching virtual-s
 
 Current jobs: prioritize remaining launch latency, while auditing input, rendering, output delivery, and view switching
 until further gains require correctness, resource, or compatibility compromises; review remaining compatibility gaps.
-Audit the current first-window worker overlap against later-window presentation before installing that checkpoint.
+Continue auditing first-frame presentation and peak startup resources after the verified first-window worker overlap.
 `worminal`/`worminald` are GTK/v2; preview build aliases share that workspace and existing browser profiles.
 Keep `worminal-x11`/`worminald-x11` and live v1 sessions available for rollback; never migrate or stop them implicitly.
 Both daemon builds share explicit `--handin`/`--handoff` ownership transfer via sealed native snapshots and SCM_RIGHTS.
