@@ -409,6 +409,7 @@ terminal_dimensions(Terminal *t, int *cols, int *rows)
 void
 terminal_copy(Terminal *t, GdkAtom selection)
 {
+	if (!t->session) return;
 	tsessionuse(t->session);
 	char *value = getsel();
 	if (value) {
@@ -650,9 +651,10 @@ wheel(GtkWidget *widget, GdkEventScroll *e, Terminal *t)
 static void
 prepare(Terminal *t)
 {
+	if (!t->session) t->session = tsessionnew(t->frame.cols, t->frame.rows);
 	if (t->layout) return;
-	/* Catalogs include every tab. Hidden views need cells, but their Pango
-	 * layouts, input methods and blink timers can wait until first use. */
+	/* Catalogs include every tab. Allocate cells only on first use or frame;
+	 * Pango layouts, input methods and blink timers wait until first use. */
 	t->layout = gtk_widget_create_pango_layout(t->page->widget, "");
 	t->im = gtk_im_multicontext_new();
 	g_signal_connect(t->im, "commit", G_CALLBACK(commit), t);
@@ -677,8 +679,7 @@ terminal_new(Page *page)
 	t->cols = page->app->cols;
 	t->rows = page->app->rows;
 	t->numlock = TRUE;
-	t->frame = (SessionFrame){.cols = 80, .rows = 24};
-	t->session = tsessionnew(80, 24);
+	t->frame = (SessionFrame){.cols = t->cols, .rows = t->rows};
 	page->widget = gtk_drawing_area_new();
 	g_object_set_data(G_OBJECT(page->widget), "terminal", t);
 	gtk_widget_set_can_focus(page->widget, TRUE);
@@ -706,6 +707,10 @@ terminal_packet(Terminal *t, WirePacket *p)
 		for (size_t i = 0; i < G_N_ELEMENTS(v); i++)
 			if (!wire_get_u32(p, &v[i])) return;
 		if (v[0] < 1 || v[0] > 400 || v[1] < 1 || v[1] > 200 || v[2] >= v[0] || v[3] >= v[1]) return;
+		if (!t->session) {
+			t->session = tsessionnew(v[0], v[1]);
+			t->full_damage = TRUE;
+		}
 		if (v[0] != (uint32_t)t->frame.cols || v[1] != (uint32_t)t->frame.rows ||
 		    v[4] != (uint32_t)t->frame.scroll || v[5] != (uint32_t)t->frame.alternate || !t->page->live)
 			t->full_damage = TRUE;
@@ -718,7 +723,7 @@ terminal_packet(Terminal *t, WirePacket *p)
 		t->page->live = TRUE;
 	} else if (p->type == WIRE_ROW) {
 		uint32_t row;
-		if (!wire_get_u32(p, &row) || row >= (uint32_t)t->frame.rows ||
+		if (!t->session || !wire_get_u32(p, &row) || row >= (uint32_t)t->frame.rows ||
 		    p->len - p->pos != (size_t)t->frame.cols * 16) return;
 		Glyph cells[400];
 		for (int x = 0; x < t->frame.cols; x++) {
@@ -760,7 +765,7 @@ terminal_free(Terminal *t)
 	g_clear_object(&t->layout);
 	if (t->font) pango_font_description_free(t->font);
 	g_free(t->preedit);
-	tsessionremove(t->session);
+	if (t->session) tsessionremove(t->session);
 	g_free(t);
 }
 

@@ -31,7 +31,7 @@ diagnostics(void)
 			g_printerr("tab %u url=%s browser=%d\n", page->id, page->url ?: "(terminal)", page->browser != NULL);
 			if (t) g_printerr("tab %u live=%d allocated=%dx%d frame=%dx%d scroll=%d\n",
 			    page->id, page->live, t->cols, t->rows, t->frame.cols, t->frame.rows, t->frame.scroll);
-			if (t) {
+			if (t && t->session) {
 				GString *text = g_string_new(NULL);
 				for (int y = 0; y < MIN(t->frame.rows, 6); y++) {
 					Line line = tsessionviewline(t->session, y);
@@ -48,6 +48,7 @@ diagnostics(void)
 static gboolean
 screen_has(Terminal *t, const char *wanted)
 {
+	if (!t->session) return FALSE;
 	GString *screen = g_string_new(NULL);
 	for (int y = 0; y < t->frame.rows; y++) {
 		Line line = tsessionviewline(t->session, y);
@@ -242,11 +243,15 @@ check_initial_dimensions(void)
 	Terminal *t = terminal_new(&page);
 	g_object_ref_sink(page.widget);
 	g_assert_null(t->layout);
+	g_assert_null(t->session);
 	g_assert_null(t->im);
 	g_assert_cmpuint(t->timer, ==, 0);
 	/* Font setup before realization must not send GTK's placeholder 1x1
 	 * allocation to a running shell as its initial terminal geometry. */
 	terminal_zoom(t);
+	g_assert_nonnull(t->session);
+	g_assert_cmpint(tsessionframe(t->session).cols, ==, app.cols);
+	g_assert_cmpint(tsessionframe(t->session).rows, ==, app.rows);
 	int cols, rows;
 	terminal_dimensions(t, &cols, &rows);
 	g_assert_cmpint(cols, ==, app.cols);
@@ -258,6 +263,26 @@ check_initial_dimensions(void)
 	/* A catalog tab may disappear before it is ever selected. */
 	t = terminal_new(&page);
 	g_object_ref_sink(page.widget);
+	terminal_free(t);
+	gtk_widget_destroy(page.widget);
+	g_object_unref(page.widget);
+	/* A complete frame may arrive for an unmapped view. Import its actual
+	 * geometry without preparing GTK fonts or accepting a row before it. */
+	t = terminal_new(&page);
+	g_object_ref_sink(page.widget);
+	WirePacket packet = {.type = WIRE_ROW};
+	terminal_packet(t, &packet);
+	g_assert_null(t->session);
+	WireBuffer frame = {0};
+	uint32_t values[] = {7, 3, 6, 2, 0, 0};
+	for (size_t i = 0; i < G_N_ELEMENTS(values); i++) wire_put_u32(&frame, values[i]);
+	packet = (WirePacket){.type = WIRE_FRAME, .data = frame.data, .len = frame.len};
+	terminal_packet(t, &packet);
+	g_assert_nonnull(t->session);
+	g_assert_null(t->layout);
+	g_assert_cmpint(tsessionframe(t->session).cols, ==, 7);
+	g_assert_cmpint(tsessionframe(t->session).rows, ==, 3);
+	wire_buffer_free(&frame);
 	terminal_free(t);
 	gtk_widget_destroy(page.widget);
 	g_object_unref(page.widget);

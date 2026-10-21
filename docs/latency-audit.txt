@@ -98,3 +98,35 @@ has not initialized its tab layout.
 An experiment painting the first complete frame synchronously showed no gain
 (fresh readiness paired +0.38 ms, additional +0.13 ms) and was discarded.
 Frozen data: .checks/launch-first-frame-experiment.json.
+
+Saved-tab launch work
+---------------------
+Unviewed terminal proxies no longer allocate st cell buffers merely because a
+catalog lists them. First use allocates the requested geometry; a first incoming
+frame allocates its validated geometry without loading fonts. Rows before any
+frame are ignored. Tests cover unprepared destruction, first-use dimensions,
+and unmapped first-frame allocation, alongside full local/SSH integration.
+
+The visible benchmark now accepts --saved-tabs and records process-tree frontend
+memory through the existing shared metrics. It seeds real PTYs in private service
+scopes and leaves live desktop sessions untouched. Its typing probe calibrates
+expected glyph images outside measured keystrokes: the earlier any-pixel-change
+test could mistake a late resize for an echo, particularly with large catalogs.
+X11 discovery also tolerates windows destroyed after its root-tree snapshot.
+
+Command: python3 manage.py latency-visible --compare .checks/launch-focus-baseline
+         --saved-tabs 100 --trials 20 --keys 10
+Candidate includes lazy strip layouts and lazy cells; baseline is f5761db.
+Fresh visible readiness median: 93.06 vs 103.91 ms, paired median -8.79 ms.
+Additional-window readiness: 28.07 vs 41.72 ms, paired median -11.15 ms.
+Frontend PSS median: 16827 vs 25192 KiB, measured after typing and before the
+additional window. Typing medians: 2.57 vs 2.55 ms; p95: 5.31 vs 4.56 ms.
+This is launch and memory evidence, not an input-latency improvement claim.
+Frozen data: .checks/launch-saved-tabs-verified.json. Private Xvfb excludes
+desktop compositing and physical scanout; filesystem caches are warm.
+
+A twenty-pair run without seeded tabs measured fresh readiness 100.30/102.03 ms,
+paired -1.20 ms; additional readiness paired +0.14 ms. The benefit is largest
+with populated workspaces. Frozen data: .checks/launch-unseeded-verified.json.
+The updated full local/SSH GTK suite passes. Lint file-size/line-length checks
+pass, but Clang analysis cannot run because clang-tidy is not installed.
