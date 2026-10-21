@@ -463,7 +463,6 @@ focus(GtkWidget *widget, GdkEventFocus *event, Terminal *t)
 	gtk_im_context_set_client_window(t->im, gtk_widget_get_window(widget));
 	if (event->in) {
 		gtk_im_context_focus_in(t->im);
-		if (!t->page->live) app_focus(t->page);
 	} else {
 		gtk_im_context_focus_out(t->im);
 	}
@@ -631,6 +630,8 @@ static void
 mouse_report(Terminal *t, int button, int x, int y, guint state, gboolean release, gboolean motion)
 {
 	uint32_t mode = t->page->mode;
+	/* Passive pointer reports must never claim a replica's PTY or resize it. */
+	if (motion && !t->page->live) return;
 	if ((mode & MODE_MOUSEX10) && (release || motion)) return;
 	if (motion && !(mode & MODE_MOUSEMANY) && !(t->button && (mode & MODE_MOUSEMOTION))) return;
 	int code = button + (motion ? 32 : 0);
@@ -655,6 +656,7 @@ mouse_report(Terminal *t, int button, int x, int y, guint state, gboolean releas
 static gboolean
 button(GtkWidget *widget, GdkEventButton *e, Terminal *t)
 {
+	if (e->type != GDK_BUTTON_RELEASE && !t->page->live) app_focus(t->page);
 	gtk_widget_grab_focus(widget);
 	int x, y;
 	mouse_position(t, e->x, e->y, &x, &y);
