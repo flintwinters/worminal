@@ -35,10 +35,10 @@ Hidden terminal views defer cell buffers until first use or frame, and font layo
 and blink timers until mapped or used. Empty tab strips defer Pango layouts until catalog refresh.
 Service output batching sleeps to its existing deadline rather than adding a fresh interval after partial bursts.
 `manage.py check-preview*` and `preview-perf` validate GTK; `build-preview` retains compatibility binary names.
+Private Wayland checks use a project-local Weston runtime and matching virtual-seat ABI, without X11 fallback.
 
 Current jobs: prioritize remaining launch latency, while auditing input, rendering, output delivery, and view switching
 until further gains require correctness, resource, or compatibility compromises; review remaining compatibility gaps.
-Restore private native Wayland coverage against the available Weston runtime.
 `worminal`/`worminald` are GTK/v2; preview build aliases share that workspace and existing browser profiles.
 Keep `worminal-x11`/`worminald-x11` and live v1 sessions available for rollback; never migrate or stop them implicitly.
 Both daemon builds share explicit `--handin`/`--handoff` ownership transfer via sealed native snapshots and SCM_RIGHTS.

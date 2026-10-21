@@ -251,3 +251,37 @@ Installed c7d65a7 with the existing Alacritty theme. Launcher, frontend and
 browser module byte comparisons match the verified build. Live GTK owners and
 daemon sessions were preserved; a new GTK owner loads this frontend. Remaining
 work includes native Wayland coverage and the wider latency/resource audit.
+
+Native Wayland coverage restored
+--------------------------------
+manage.py setup-preview-wayland now supports the audited Weston 10 and 16 seat
+ABIs. It downloads into a fresh project-local package directory, extracts each
+ABI into its own runtime tree, and publishes the selected runtime after package
+extraction. Old package archives cannot be silently mixed into a new setup.
+The test module uses matching headers and a per-ABI output, tracks header and
+runtime-selection dependencies, and rejects mixed or mismatched layouts.
+Both current /usr/libexec and legacy shell-helper locations are supported;
+the private compositor's input-method helper uses the same selected runtime.
+The explicit WORMINAL_WESTON override and legacy runtime layout remain available.
+
+The real Weston 16 compositor now runs the entire GTK/WebKit suite natively,
+locally and through the SSH fixture. DISPLAY is absent and the test asserts the
+GDK Wayland display type; there is no X11 fallback. Recent idle damage, completed
+claim-response painting, clipping, font caches, selection, IME, browser ownership
+and recovery checks all pass. The idle assertion first waits for startup paint
+activity to quiesce, then still requires zero steady/hidden-cursor blink redraws.
+This fixes the observer's startup assumption rather than weakening the invariant.
+
+manage.py check-headless passes, including four new runtime/build regressions
+for ABI selection, shell-helper paths, mixed/mismatched headers, stale package
+exclusion and failed-download preservation of the previous selection. Full local
+and SSH X11 checks also pass. Weston 10 layout compatibility is covered by those
+unit fixtures; this machine's actual native compositor run uses Weston 16.
+File-limit checks pass; Clang analysis is still unavailable without clang-tidy.
+
+An initial native run measured dense full paints at 12.12/12.09 ms and input
+callback to GTK paint at 4.38/4.31 ms (local/SSH, mean of 20 echoes for input).
+These are rendering/callback measurements, excluding physical key delivery and
+compositor presentation; they are not native key-to-visible-pixel measurements
+and do not demonstrate a new performance improvement. Dense foreground work
+and native presentation remain part of the wider latency audit.
