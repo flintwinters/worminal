@@ -877,3 +877,36 @@ All six installed product artifacts match their builds byte-for-byte, including
 rollback X11 binaries. No live GTK owner, service, PTY or browser was restarted
 or migrated. Existing owners retain their mapped frontend; fresh owners load
 the new tab traversal. Further launch and latency work remains open.
+
+Active-page packet lookup
+-------------------------
+The selected Page already has an authoritative pointer. find_page now checks its
+identity before walking the catalog, avoiding N comparisons for every active
+frame row without new storage or a maintained lookup index. Nonactive, unknown
+and catalog identities retain the existing search. Conversion/removal already
+clear the pointer before freeing; final window destruction now clears it too.
+This keeps the pointer lifetime explicit during widget teardown.
+
+Current interactive-shell startup audit (ten launches) remains dominated by
+GTK/first-window construction and shell initialization: median fresh map/ready
+76.40/147.73 ms, additional map/ready 7.18/114.88 ms; typing 2.52 ms. Diagnostic
+median cumulative milestones from launcher main: GTK 23.60 ms, launch-sent23.92,
+window69.63, widgets70.03, font79.52, initial frame83.86, final paint143.88.
+Tracing/resource sampling adds overhead; this is a localization audit, not a
+comparison or physical display measurement. .checks/launch-audit-current.json.
+Starting a shell before display/argument validation would change failure
+semantics and is not justified by this trace.
+
+Twenty alternating 100-distinct-label launch pairs compare the active lookup
+against6339f17. Candidate/baseline fresh readiness93.63/94.53 ms, additional
+28.58/40.93 ms, typing2.55/2.90 ms. Paired readiness differences -3.59/-1.04 ms
+with positive p95 differences15.41/13.23 ms. Mapping also shifts before lookup
+can execute; therefore these noisy end-to-end figures do not establish a causal
+launch speedup. The proven change is removing the active packet's linear search.
+Frozen .checks/active-lookup-launch-verified.json. Further launch work remains.
+Full final local/SSH GTK suites pass on X11 and native Wayland, covering active
+and passive views, catalog removal, terminal/browser conversion, reconnect,
+ownership and close. File/line gates pass; clang-tidy is still unavailable.
+Next candidate to measure: coalesce tab-strip metric refresh within catalog
+application, which currently refreshes once per page title despite a single
+final catalog presentation. Preserve palette-only damage and browser mirrors.
