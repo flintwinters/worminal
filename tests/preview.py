@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 import select
+import signal
 from pathlib import Path
 import shutil
 import socket
@@ -15,6 +16,7 @@ import threading
 import time
 
 from x11 import isolated_display
+from workspace_protocol import send as wire_send, wait_kind as wire_wait
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -76,6 +78,8 @@ def profile(env):
         runtime.mkdir(mode=0o700)
         yield {**env, "XDG_RUNTIME_DIR": str(runtime), "XDG_DATA_HOME": str(base / "data"),
                "XDG_CACHE_HOME": str(base / "cache"), "NO_AT_BRIDGE": "1", "SHELL": "/bin/sh",
+               # Browser GPU helpers can finish cache writes after the UI process exits.
+               "MESA_SHADER_CACHE_DISABLE": "true",
                "WEBKIT_DISABLE_DMABUF_RENDERER": "1", "G_DEBUG": "fatal-criticals"}
 
 
@@ -165,6 +169,54 @@ def qtile_display():
             finally:
                 manager.terminate()
                 manager.wait(timeout=5)
+
+
+def startup_check(env, log):
+    """Invalid displays and arguments must not start SSH or create a service tab."""
+    failed = {**env, "DISPLAY": "worminal-invalid", "WAYLAND_DISPLAY": "worminal-invalid",
+              "WORMINAL_TRACE_TIMING": "1", "WORMINAL_TEST_BRIDGE_DELAY": "30",
+              "WORMINAL_TEST_DAEMON": str(ROOT / "worminald"),
+              "PATH": str(ROOT / "tests/fixtures/preview-master") + os.pathsep + env["PATH"]}
+    for arguments, expected, started in ((["-e", "/bin/cat"], 1, False),
+                                         (["--invalid-startup-option"], 2, False)):
+        trial = dict(failed)
+        if expected == 2:
+            for key in ("DISPLAY", "WAYLAND_DISPLAY"):
+                trial.pop(key, None)
+                if key in env:
+                    trial[key] = env[key]
+        process = subprocess.Popen([str(ROOT / "worminal"), "--master", "preview-test", *arguments],
+                                   env=trial, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+        try:
+            _, errors = process.communicate(timeout=5)
+            log.write(errors)
+            log.flush()
+            if process.returncode != expected or (b"worminal-timing ssh-started " in errors) != started:
+                raise RuntimeError(f"Invalid-display/argument startup failed: status={process.returncode}, {errors!r}")
+            if expected == 1 and b"cannot open display" not in errors.lower():
+                raise RuntimeError("The initial SSH probe did not reach the expected display failure")
+            try:
+                os.killpg(process.pid, 0)
+            except ProcessLookupError:
+                pass
+            else:
+                raise RuntimeError("Failed startup left an SSH helper running")
+        finally:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait(timeout=5)
+        with socket.socket(socket.AF_UNIX) as peer:
+            peer.settimeout(3)
+            peer.connect(f"\0worminal-workspace-v2-{os.getuid()}-{env['WORMINAL_SHARED_SOCKET_SCOPE']}")
+            # Two ordered round trips also let already-readable bridge traffic
+            # be processed before accepting an empty-catalog observation.
+            for _ in range(2):
+                wire_send(peer, 19, version=2)
+                _, catalog = wire_wait(peer, 7, version=2)
+                if len(catalog) < 12 or int.from_bytes(catalog[:4], "big"):
+                    raise RuntimeError("Failed GUI startup created an orphan service tab")
 
 
 def broker_check(env, url, log):
@@ -277,6 +329,7 @@ def main():
                 trial_env["WORMINAL_TEST_DAEMON"] = str(ROOT / "worminald")
             log_path = ROOT / f".checks/preview-{backend}-{'remote' if remote else 'local'}.log"
             with service(trial_env), log_path.open("wb") as log:
+                startup_check(trial_env, log)
                 command = [str(ROOT / "build/preview_test")]
                 if os.environ.get("WORMINAL_PREVIEW_DEBUG"):
                     command = ["gdb", "-batch", "-ex", "run", "-ex", "bt", "--args", *command]

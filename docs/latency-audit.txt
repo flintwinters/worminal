@@ -354,3 +354,47 @@ its child alive and checks both the fixture premise and resource membership.
 Bridge benchmarks also require at least the frontend and bridge to be counted;
 all control samples include both. Re-evaluate older helper-inclusive memory
 figures before comparing workloads whose helpers originate in worker threads.
+
+Remote transport/widget overlap
+--------------------------------
+Fresh remote owners now start the existing SSH transport after GTK display and
+argument validation, before constructing widgets. The normal connection worker
+consumes that descriptor and sends the immutable launch request. Descriptor
+ownership moves App -> ConnectionRequest -> worker; unused descriptors close on
+cleanup. Brokered windows and reconnects retain their asynchronous opening path,
+so an existing owner's GTK thread does not perform transport setup. No extra
+worker, process, persistent cache or protocol version is introduced. The App
+field is appended to preserve existing browser-module field offsets.
+
+Twenty alternating pairs against .checks/remote-init-baseline measured median
+fresh pixel readiness in milliseconds (candidate / baseline; paired difference):
+
+  private bridge, 100 ms delay    173.59 / 212.96    -39.40
+  private bridge, zero delay     102.33 / 110.39     -7.85
+  local transport                102.14 / 100.22     +0.52
+
+The controlled-delay gain is about 18%. This does not establish a local launch
+improvement or predict actual SSH authentication/network costs. The probes use
+warm filesystem caches; earlier trials retain service tabs. Final delayed-run
+map medians were 67.00/68.38 ms; additional readiness 142.09/141.99 ms. Typing
+medians were 2.75/2.75 ms and p95 4.42/4.51 ms. Local typing medians were
+3.07/2.84 ms and p95 4.61/4.21 ms; no steady typing improvement is claimed.
+Frontend-plus-helper PSS medians were 12955/12962 KiB with delay, 12950/12950 KiB
+without delay, and 12830/12804 KiB locally. This samples settled memory after
+typing, not peak startup memory. Frozen data:
+.checks/remote-widget-overlap-{100ms,0ms,local}.json.
+
+An earlier pre-GTK transport experiment improved delayed startup by 50.23 ms
+paired, but was rejected: a missing display could still authenticate SSH or
+start an idle remote service before failure. Killing the SSH client cannot
+safely undo such external effects. Frozen rejected experiment:
+.checks/remote-before-gtk-experiment.json. The retained version performs no
+remote work on display or argument failure.
+
+Full local/SSH-fixture X11 and native Wayland integration checks pass, including
+failed-display/argument process-group and empty-catalog guards, and recovery
+from a closed preconnected socket. Mesa shader disk caching is disabled only
+inside the isolated browser integration profile: its late helper writes caused
+two directory-cleanup failures after all functional assertions had passed.
+Product rendering settings are unchanged. File/line-limit checks pass;
+clang-tidy remains unavailable.

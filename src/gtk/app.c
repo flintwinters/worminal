@@ -38,6 +38,7 @@ app_unref(App *app)
 	g_clear_pointer(&app->cached_font, pango_font_description_free);
 	g_strfreev(app->command); g_strfreev(app->environment);
 	if (app->print_fd != STDOUT_FILENO) close(app->print_fd);
+	if (app->startup_fd >= 0) close(app->startup_fd);
 	g_free(app);
 }
 
@@ -564,6 +565,7 @@ typedef struct {
 	App *app;
 	WireBuffer payload;
 	uint32_t type;
+	int fd;
 } ConnectionRequest;
 
 static void
@@ -571,6 +573,7 @@ connection_request_free(gpointer data)
 {
 	ConnectionRequest *request = data;
 	wire_buffer_free(&request->payload);
+	if (request->fd >= 0) close(request->fd);
 	g_free(request);
 }
 
@@ -580,10 +583,12 @@ connect_worker(GTask *task, gpointer source, gpointer data, GCancellable *cancel
 	(void)source; (void)cancel;
 	ConnectionRequest *request = data;
 	App *app = request->app;
-	int fd = workspace_client_open_process(app->master, &app->connecting_child);
+	int fd = request->fd;
+	request->fd = -1;
+	if (fd < 0) fd = workspace_client_open_process(app->master, &app->connecting_child);
 	if (fd >= 0) {
-		/* Launch the child while GTK maps the window. Only immutable wire data
-		 * crosses this worker; all widgets and response parsing stay on GTK. */
+		/* Launch the child while GTK maps the window. The wire request stays
+		 * immutable; widgets and response parsing stay on GTK. */
 		struct timeval timeout = {.tv_sec = 3};
 		if (request->payload.len + 16 > OUTPUT_LIMIT ||
 		    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0 ||
@@ -632,6 +637,8 @@ connect_async(App *app)
 	app->refs++;
 	ConnectionRequest *request = g_new0(ConnectionRequest, 1);
 	request->app = app;
+	request->fd = app->startup_fd;
+	app->startup_fd = -1;
 	if (app->attached || app->initial_attach) request->type = WIRE_ATTACH;
 	else {
 		app->pending++;
@@ -670,6 +677,7 @@ new_app(void)
 {
 	App *app = g_new0(App, 1);
 	app->refs = 1; app->fd = -1; app->print_fd = STDOUT_FILENO;
+	app->startup_fd = -1;
 	app->environment = g_get_environ(); app->cols = 120; app->rows = 24; app->allowalt = 1; app->geometry_pending = TRUE;
 	app->cwd = g_get_current_dir();
 	apps = g_list_append(apps, app);
@@ -749,21 +757,24 @@ usage(FILE *stream)
 	        "       worminal -v | --version    Show version\n");
 }
 
-static gboolean
-launch_window(int argc, char **argv, char **env, const char *cwd, int output)
+typedef struct {
+	gboolean fixed;
+	const char *class, *name;
+} WindowOptions;
+
+static App *
+parse_window(int argc, char **argv, char **env, const char *cwd, int output, WindowOptions *options)
 {
 	App *app = new_app();
-	g_strfreev(app->environment); app->environment = g_strdupv(env);
-	g_free(app->cwd); app->cwd = g_strdup(cwd);
+	if (env) { g_strfreev(app->environment); app->environment = g_strdupv(env); }
+	if (cwd) { g_free(app->cwd); app->cwd = g_strdup(cwd); }
 	app->print_fd = output;
-	gboolean fixed = FALSE;
-	char *class = NULL, *name = NULL;
 	for (int i = 1; i < argc; i++) {
 		const char *arg = argv[i];
 		if (!strcmp(arg, "-v")) goto invalid;
 		if (!strcmp(arg, "--attach")) { app->initial_attach = TRUE; continue; }
 		if (!strcmp(arg, "-a")) { app->allowalt = 0; continue; }
-		if (!strcmp(arg, "-i")) { fixed = TRUE; continue; }
+		if (!strcmp(arg, "-i")) { options->fixed = TRUE; continue; }
 		if (!strcmp(arg, "-e") || !strcmp(arg, "--") || *arg != '-') {
 			if (*arg == '-') i++;
 			app->command = g_strdupv(argv + i);
@@ -777,8 +788,8 @@ launch_window(int argc, char **argv, char **env, const char *cwd, int output)
 		else if (!strcmp(arg, "-f")) app->font = g_strdup(value);
 		else if (!strcmp(arg, "-o")) app->output = g_strdup(value);
 		else if (!strcmp(arg, "-l")) app->line = g_strdup(value);
-		else if (!strcmp(arg, "-c")) class = value;
-		else if (!strcmp(arg, "-n")) name = value;
+		else if (!strcmp(arg, "-c")) options->class = value;
+		else if (!strcmp(arg, "-n")) options->name = value;
 		else if (!strcmp(arg, "-g")) {
 			if (sscanf(value, "%dx%d", &app->cols, &app->rows) != 2 ||
 			    app->cols < 1 || app->cols > 400 || app->rows < 1 || app->rows > 200) goto invalid;
@@ -787,16 +798,31 @@ launch_window(int argc, char **argv, char **env, const char *cwd, int output)
 	if ((!app->output || strcmp(app->output, "-")) && output != STDOUT_FILENO) {
 		close(output); app->print_fd = STDOUT_FILENO;
 	}
-	if (class) gdk_set_program_class(class);
-	show_app(app);
-	if (fixed) gtk_window_set_resizable(GTK_WINDOW(app->window), FALSE);
-	if (name) gtk_widget_set_name(app->window, name);
-	return TRUE;
+	return app;
 invalid:
 	apps = g_list_remove(apps, app);
 	app_unref(app);
 	usage(stderr);
-	return FALSE;
+	return NULL;
+}
+
+static void
+show_window(App *app, const WindowOptions *options)
+{
+	if (options->class) gdk_set_program_class(options->class);
+	show_app(app);
+	if (options->fixed) gtk_window_set_resizable(GTK_WINDOW(app->window), FALSE);
+	if (options->name) gtk_widget_set_name(app->window, options->name);
+}
+
+static gboolean
+launch_window(int argc, char **argv, char **env, const char *cwd, int output)
+{
+	WindowOptions options = {0};
+	App *app = parse_window(argc, argv, env, cwd, output, &options);
+	if (!app) return FALSE;
+	show_window(app, &options);
+	return TRUE;
 }
 
 int
@@ -823,12 +849,18 @@ worminal_frontend_v1(int argc, char **argv, int listener)
 	g_set_prgname("worminal");
 	gtk_init(NULL, NULL);
 	app_startuptime("gtk");
+	WindowOptions options = {0};
+	App *app = parse_window(argc, argv, NULL, NULL, STDOUT_FILENO, &options);
+	if (!app) { close(listener); return 2; }
+	if (app->master) {
+		/* Overlap SSH with widget construction after validating the display.
+		 * The worker sends the launch request once the widgets are ready. */
+		app->startup_fd = workspace_client_open_process(app->master, &app->connecting_child);
+		if (app->startup_fd >= 0) app_startuptime("ssh-started");
+	}
+	show_window(app, &options);
 	guint source = windows_listen(listener, launch_window);
-	char **env = g_get_environ();
-	char *cwd = g_get_current_dir();
-	gboolean okay = launch_window(argc, argv, env, cwd, STDOUT_FILENO);
-	g_strfreev(env); g_free(cwd);
-	if (okay) gtk_main();
+	gtk_main();
 	g_source_remove(source); close(listener);
-	return okay ? 0 : 2;
+	return 0;
 }
