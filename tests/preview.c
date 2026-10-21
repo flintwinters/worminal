@@ -301,8 +301,17 @@ check_blink_damage(void)
 	gtk_widget_show_all(app.window);
 	WAIT(probe.draws);
 	g_source_remove(t->timer); t->timer = 0;
-	while (g_main_context_iteration(NULL, FALSE)) {}
-	flush_paint(t);
+	/* Wayland configures, focus and buffer releases can arrive after the
+	 * first draw. Establish an idle baseline before counting blink damage. */
+	gint64 quiet = g_get_monotonic_time(), deadline = quiet + G_TIME_SPAN_SECOND;
+	guint previous = probe.draws;
+	do {
+		while (g_main_context_iteration(NULL, FALSE)) {}
+		flush_paint(t);
+		if (probe.draws != previous) { previous = probe.draws; quiet = g_get_monotonic_time(); }
+		g_usleep(1000);
+	} while (g_get_monotonic_time() - quiet < 100000 && g_get_monotonic_time() < deadline);
+	g_assert_cmpint(g_get_monotonic_time() - quiet, >=, 100000);
 	probe.draws = 0;
 	gint64 start = g_get_monotonic_time();
 	for (int i = 0; i < 20; i++) { blink(t); flush_paint(t); }

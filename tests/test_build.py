@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from tools import build
+from tools import build, weston
 
 
 class BuildTests(unittest.TestCase):
@@ -135,3 +135,86 @@ class BuildTests(unittest.TestCase):
     def test_relative_install_prefix_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "absolute"):
             build.installation_files("relative")
+
+    def weston_runtime(self, major):
+        local = self.root / "weston"
+        runtime = local / f"libweston-{major}-0"
+        paths = ["usr/bin/weston", f"usr/include/libweston-{major}/libweston/libweston.h",
+                 "usr/lib/testarch/weston/libexec_weston.so.0",
+                 f"usr/lib/testarch/libweston-{major}/headless-backend.so",
+                 "usr/libexec/weston-desktop-shell" if major == 16 else "usr/lib/testarch/weston-desktop-shell"]
+        for name in paths:
+            path = runtime / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+        (local / "active-library").write_text(f"libweston-{major}-0\n")
+        return local, runtime
+
+    def test_weston_selects_matching_abi_and_shell_paths(self):
+        for major in (10, 16):
+            with self.subTest(major=major):
+                local, runtime = self.weston_runtime(major)
+                env = {"LD_LIBRARY_PATH": "/retained"}
+                with (patch.object(weston, "LOCAL", local), patch.object(weston, "ROOT", self.root),
+                      patch.object(build, "step") as step, patch.object(build, "pkg_flags", return_value=[])):
+                    command = weston.command(env)
+                self.assertEqual(command[0], str(runtime / "usr/bin/weston"))
+                output, compiler, dependencies = step.call_args.args
+                self.assertEqual(output.name, f"weston_seat-{major}.so")
+                self.assertIn(f"-I{runtime / f'usr/include/libweston-{major}'}", compiler)
+                self.assertIn(local / "active-library", dependencies)
+                self.assertTrue(step.call_args.kwargs["depfile"])
+                self.assertIn(str(runtime / f"usr/lib/testarch/libweston-{major}"), env["WESTON_MODULE_MAP"])
+                self.assertTrue(env["LD_LIBRARY_PATH"].endswith(":/retained"))
+                config = (local / f"weston-{major}.ini").read_text()
+                client = runtime / ("usr/libexec" if major == 16 else "usr/lib/testarch")
+                self.assertIn(f"client={client / 'weston-desktop-shell'}", config)
+                self.assertIn(f"path={client / 'weston-keyboard'}", config)
+
+    def test_weston_rejects_mixed_and_mismatched_headers(self):
+        local, runtime = self.weston_runtime(16)
+        wrong = runtime / "usr/include/libweston-10/libweston/libweston.h"
+        wrong.parent.mkdir(parents=True)
+        wrong.touch()
+        with patch.object(weston, "LOCAL", local), patch.object(build, "step") as step:
+            with self.assertRaisesRegex(ValueError, "mixed"):
+                weston.command({})
+            (runtime / "usr/include/libweston-16/libweston/libweston.h").unlink()
+            with self.assertRaisesRegex(ValueError, "mismatched"):
+                weston.command({})
+            step.assert_not_called()
+
+    def test_weston_failed_download_preserves_selection(self):
+        local, _ = self.weston_runtime(10)
+        with (patch.object(weston, "LOCAL", local),
+              patch.object(weston.subprocess, "check_output", return_value=" Depends: libweston-16-0\n"),
+              patch.object(weston.subprocess, "run", side_effect=subprocess.CalledProcessError(1, "apt-get"))):
+            with self.assertRaises(subprocess.CalledProcessError):
+                weston.setup()
+        self.assertEqual((local / "active-library").read_text(), "libweston-10-0\n")
+        self.assertFalse(list(local.glob("download-*")))
+
+    def test_weston_setup_excludes_stale_packages(self):
+        local = self.root / "weston"
+        stale = local / "packages/old-runtime.deb"
+        stale.parent.mkdir(parents=True)
+        stale.touch()
+        extracted = []
+
+        def run(command, **kwargs):
+            if command[0] == "apt-get":
+                self.assertIn("libweston-16-dev", command)
+                for name in ("weston.deb", "runtime.deb", "headers.deb"):
+                    (Path(kwargs["cwd"]) / name).touch()
+            else:
+                extracted.append(Path(command[2]).name)
+                self.assertEqual(Path(command[3]), local / "libweston-16-0")
+
+        with (patch.object(weston, "LOCAL", local),
+              patch.object(weston.subprocess, "check_output", return_value=" Depends: libweston-16-0\n"),
+              patch.object(weston.subprocess, "run", side_effect=run)):
+            weston.setup()
+        self.assertCountEqual(extracted, ("weston.deb", "runtime.deb", "headers.deb"))
+        self.assertEqual((local / "active-library").read_text(), "libweston-16-0\n")
+        self.assertFalse((local / "active-library.pending").exists())
+        self.assertTrue(stale.exists())
