@@ -54,6 +54,24 @@ check_session_view(void)
 	int fd = memfd_create("worminal-view-test", MFD_CLOEXEC);
 	assert(fd >= 0 && !tsessionexport(view, fd) && lseek(fd, 0, SEEK_CUR) == 0);
 	close(fd);
+	/* A clipped wide glyph cannot leave an orphaned half-cell behind. */
+	view->term.line[1][2] = (Glyph){.u = 0x4e2d, .mode = ATTR_WIDE, .fg = defaultfg, .bg = defaultbg};
+	view->term.line[1][3] = (Glyph){.mode = ATTR_WDUMMY, .fg = defaultfg, .bg = defaultbg};
+	frame.cols = 3; frame.cursor_x = 2;
+	tsessionimportframe(view, &frame);
+	assert(view->term.line[1][2].u == ' ' && !(view->term.line[1][2].mode & ATTR_WIDE));
+	frame.cols = 4;
+	tsessionimportframe(view, &frame);
+	Glyph pair[4];
+	for (int x = 0; x < 4; x++) pair[x] = (Glyph){.u = ' ', .fg = defaultfg, .bg = defaultbg};
+	pair[2] = (Glyph){.u = 0x4e2d, .mode = ATTR_WIDE, .fg = defaultfg, .bg = defaultbg};
+	pair[3] = (Glyph){.mode = ATTR_WDUMMY, .fg = defaultfg, .bg = defaultbg};
+	tsessionimportrow(view, 1, pair, 4);
+	selstart(2, 1, 0);
+	selextend(3, 1, SEL_REGULAR, 0); selextend(3, 1, SEL_REGULAR, 1);
+	copy = getsel();
+	assert(copy && strcmp(copy, "\xe4\xb8\xad") == 0);
+	free(copy);
 	TermSession *other = tsessionviewnew(2, 2);
 	for (int cycle = 0; cycle < 100; cycle++) {
 		frame = (SessionFrame){cycle & 1 ? 400 : 1, cycle & 1 ? 200 : 1, 0, 0, cycle, cycle & 1};

@@ -60,6 +60,16 @@ def prove():
                     libs=["-Wl,--gc-sections", "-lm"])
     cases.append(("replica does not reflow", [str(view_binary)], os.environ,
                   b"view->term.histlen == 0 && view->term.hist == NULL"))
+    crop = directory / "uncropped-view.c"
+    crop.write_text((ROOT / "src/terminal/session_view.c").read_text().replace(
+        "if (term->line[y][cols - 1].mode & ATTR_WIDE) term->line[y][cols - 1] = blank;", ""))
+    crop_binary = directory / "uncropped-view"
+    support = [str(crop) if source.endswith("session_view.c") else f"src/{source}"
+               for source in build.SESSION_SUPPORT]
+    builder.program(crop_binary, ["tests/scrollback.c", *support], variant="crop-view-proof",
+                    flags=["-Itests", "-ffunction-sections", "-fdata-sections"], libs=["-Wl,--gc-sections", "-lm"])
+    cases.append(("replica crops wide cells", [str(crop_binary)], os.environ,
+                  b"view->term.line[1][2].u == ' '"))
     current_parser = (ROOT / "src/terminal/st.c").read_text()
 
     def parser_case(name, source, expected):
