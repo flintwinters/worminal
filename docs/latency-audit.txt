@@ -47,3 +47,15 @@ mapping across width changes and pending-wrap preservation on unchanged-width
 resizes are now covered by native regressions. The existing counterfactual proof
 command verifies that restoring the old mapping fails. Local and SSH GTK checks
 pass with corrected cursor handling and the new output deadline policy.
+
+Follow-up: visible launch/input comparison is not yet conclusive
+---------------------------------------------------------------
+Ten alternating pairs with twenty keystrokes each measured candidate/baseline
+typing medians of 3.80/3.97 ms and p95 of 11.65/8.63 ms. Additional-window visible
+readiness medians were 51.78/35.60 ms, with a +25.42 ms paired median difference.
+Fresh-window paired readiness was -17.90 ms despite higher candidate marginal
+medians, demonstrating substantial variation within the run. These results do
+not establish an overall launch/input improvement or rule out a presentation
+regression. Investigate this before declaring the full objective complete.
+Frozen data: .checks/latency-goal-post-schedule.json. The installed build has not
+been replaced by this checkpoint, and live daemons have not been restarted.
