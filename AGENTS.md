@@ -49,5 +49,7 @@ Investigate remote Codex scrolling separately from tested wheel modes.
 
 `file-explorer` is an independent TypeScript npm-workspace submodule. It builds a plain dark,
 offline HTML explorer using a read-only folder picker; native filesystem integration is not implemented.
+Native builds embed that artifact in the lazy browser module as the default `worminal:///files` page.
+Browser commands resolve filepaths in the calling shell before the service replaces its terminal.
 Use `manage.py explorer-build` and `explorer-check` after `npm ci` in the submodule.
 `manage.py explorer-lint` runs its nested `tools/hyperlint` submodule; see the explorer README for setup.

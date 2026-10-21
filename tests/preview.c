@@ -741,6 +741,16 @@ main(int argc, char **argv)
 	const char *base = g_getenv("WORMINAL_PREVIEW_FIXTURE");
 	g_assert_nonnull(base);
 	char *url = g_strconcat(base, "/page", NULL);
+	/* Exercise the embedded default in real WebKit, including its initialized DOM.
+	 * Explicit about:blank remains distinct and is covered by the command checks. */
+	Page *home = open_browser(app, NULL);
+	expect_script(home->browser, "document.title", "Files — Worminal");
+	expect_script(home->browser, "document.querySelector('#picker').webkitdirectory + ':' + "
+	              "document.querySelector('#filter').disabled", "true:true");
+	g_assert_cmpstr(webkit_web_view_get_uri(home->browser->view), ==, WORKSPACE_BROWSER_HOME);
+	int home_count = g_list_length(app->pages);
+	app_close(home);
+	WAIT(g_list_length(app->pages) == home_count - 1);
 	Page *web = open_browser(app, url);
 	check_tabs(app, terminal, web);
 	press_browser_key(web, GDK_KEY_k, GDK_CONTROL_MASK);
