@@ -59,3 +59,28 @@ not establish an overall launch/input improvement or rule out a presentation
 regression. Investigate this before declaring the full objective complete.
 Frozen data: .checks/latency-goal-post-schedule.json. The installed build has not
 been replaced by this checkpoint, and live daemons have not been restarted.
+
+Follow-up control and renderer checkpoint
+-----------------------------------------
+Twenty identical-binary pairs produced additional-window readiness medians of
+9.19/24.38 ms, yet their paired median difference was only -1.65 ms. Marginal
+medians alone are therefore unreliable for this frame-clock-sensitive probe.
+Frozen data: .checks/latency-aa-control-comparison.json.
+
+A quieter twenty-pair repeat against the pre-scheduler build measured a paired
+additional-window difference of +1.78 ms, rather than the earlier +25.42 ms.
+Fresh readiness remained +9.79 ms in paired samples. The large additional-window
+regression did not reproduce; fresh presentation still needs investigation.
+Frozen data: .checks/latency-scheduler-repeat.json.
+
+GTK backgrounds now combine consecutive equal-color cells into runs on aligned
+device grids. Fractional transforms retain scalar fills to preserve antialias
+and alpha-edge behavior. Color/cursor decisions share one policy, and every
+background is still painted before any glyph ink. No pixel buffer/cache is added.
+
+Exact scalar-reference comparisons pass for mixed colors, reverse cells,
+transparency, clipping, integer scaling, and fractional transforms. Existing
+clipped-glyph, selection, IME, ownership, browser and SSH integration checks pass.
+Sixty alternating same-process measurements reported scalar/spans background
+means of 3.28/0.41 ms in one run and 12.62/1.90 ms under heavier load in another.
+This establishes lower background work, not a claimed 7x whole-frame speedup.
