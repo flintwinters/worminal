@@ -821,3 +821,19 @@ daemon, frontend/browser modules and rollback X11 binaries match their current
 builds byte-for-byte. No live owner, PTY, browser state or service was restarted,
 stopped or migrated. Fresh GTK owners use the one-grid replica implementation;
 existing owners retain their mapped frontend. The full latency goal stays open.
+
+Populated-workspace label fixture
+----------------------------------
+latency-visible --saved-tabs N --varied-labels now starts seed fixtures in
+separate project-local directories, retaining distinct directory-basename tab
+labels. Temporary directories outlive the private displays/daemons and are
+removed afterward. Both comparison variants use the same label names; normal
+same-directory seeding remains available. No live workspace is involved.
+
+Seed launches also now use distinct readiness colors, disjoint from measured
+fresh/additional launches, and an ATTACH/catalog round trip verifies exactly N
+records remain after the seed owner exits. This closes the reused-color premise
+gap in seeding itself. Earlier measured-launch colors were already distinct.
+Three identical-build control pairs with 100 distinct labels pass, reporting
+fresh/additional paired differences -1.15/+2.78 ms. This is fixture validation,
+not an application speedup. Frozen .checks/tab-label-fixture-control.json.

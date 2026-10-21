@@ -274,12 +274,15 @@ def latency_visible(trials: int = typer.Option(10, min=1), keys: int = typer.Opt
                     shell: bool = typer.Option(False, help="Include interactive shell initialization."),
                     startup_resources: bool = typer.Option(False, help="Sample first-ready CPU and peak RSS counters."),
                     saved_tabs: int = typer.Option(0, min=0, help="Seed service-owned tabs before measurement."),
+                    varied_labels: bool = typer.Option(False, help="Seed tabs in distinct project-local directories."),
                     bridge_delay_ms: int = typer.Option(None, min=0, help="Use a private delayed SSH bridge fixture."),
                     snapshot: Path = typer.Option(None, help="Save current binaries/modules as a comparison baseline."),
                     compare: Path = typer.Option(None, help="Alternate trials with a saved baseline directory.")):
     """Measure real key events to visible echo and fresh/additional window presentation."""
     native_build.build_targets("worminal", "worminald", "build/latency_echo")
     options = (["--snapshot", str(snapshot)] if snapshot else []) + (["--compare", str(compare)] if compare else [])
+    if varied_labels:
+        options += ["--varied-labels"]
     if startup_resources:
         options += ["--startup-resources"]
     if shell:

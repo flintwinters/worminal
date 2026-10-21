@@ -264,6 +264,8 @@ python3 manage.py latency-visible --compare .checks/launch-baseline --trials 20 
 Each version gets a private display and workspace with the same growing tab workload; trial order alternates.
 The native echo fixture excludes interpreter startup and restores its ready canvas after startup resizes.
 Use `--saved-tabs 100` to seed a populated workspace before measuring launch costs.
+Add `--varied-labels` to use distinct directory basenames; seeding checks each readiness identity
+and verifies the exact retained tab count before measurement.
 Add `--trace-startup` to diagnose cumulative application milestones from launcher entry;
 these include logging overhead and supplement the independent pixel measurements.
 Use `--shell` to run the configured POSIX-compatible interactive shell before it execs

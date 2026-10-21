@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 import statistics
 import shutil
+import socket
+import tempfile
 import subprocess
 import sys
 import time
@@ -23,6 +25,7 @@ from rich.table import Table
 
 from x11 import close_window, isolated_display
 from perf_metrics import descendants, memory, startup_usage
+from workspace_protocol import send, wait_kind
 
 ROOT = Path(__file__).resolve().parent.parent
 TIMEOUT = 10
@@ -71,7 +74,7 @@ def capture_failure(window):
         pass  # Preserve the original failure even if its window has disappeared.
 
 
-def launch(env, connection, title, log, color=0x112233, history=False, master=None):
+def launch(env, connection, title, log, color=0x112233, history=False, master=None, cwd=None):
     started = time.monotonic_ns()
     command = [str(ROOT / "build/latency_echo"), "--color", f"{color:06x}",
                *(["--history"] if history else [])]
@@ -79,7 +82,7 @@ def launch(env, connection, title, log, color=0x112233, history=False, master=No
         command = [env["WORMINAL_LATENCY_SHELL"], "-i", "-c", 'exec "$@"', "worminal-latency", *command]
     process = subprocess.Popen([env.get("WORMINAL_FRONTEND", str(ROOT / "worminal")), "-g", "80x24", "-T", title,
                                 *(["--master", master] if master else []), "-e", *command],
-                               env=env, stdout=log, stderr=log)
+                               env=env, cwd=cwd, stdout=log, stderr=log)
     window = None
     try:
         window = wait_for(lambda: find_window(connection, title))
@@ -207,13 +210,17 @@ def summarize(samples):
     return summaries
 
 
-def seed_tabs(env, connection, count, log, master=None):
+def seed_tabs(env, connection, count, log, master=None, labels=None):
     """Leave real service-owned tabs behind without a running GTK owner."""
     owner = None
     try:
         for index in range(count):
             title = f"Latency saved {os.getpid()} {index}"
-            process, _, _ = launch(env, connection, title, log, master=master)
+            cwd = None
+            if labels:
+                cwd = labels / f"project-{index:05d}"
+                cwd.mkdir(exist_ok=True)
+            process, _, _ = launch(env, connection, title, log, color=0x100000 + index, master=master, cwd=cwd)
             if owner is None:
                 owner = process
             else:
@@ -222,6 +229,14 @@ def seed_tabs(env, connection, count, log, master=None):
     finally:
         if owner:
             stop(owner)
+    if count:
+        with socket.socket(socket.AF_UNIX) as peer:
+            peer.settimeout(3)
+            peer.connect(f"\0worminal-workspace-v2-{os.getuid()}-{env['WORMINAL_SHARED_SOCKET_SCOPE']}")
+            send(peer, 19, version=2)
+            _, catalog = wait_kind(peer, 7, version=2)
+            if len(catalog) < 12 or int.from_bytes(catalog[:4], "big") != count:
+                raise RuntimeError("Saved-tab fixture did not retain the requested number of PTYs")
 
 
 def snapshot(directory):
@@ -240,6 +255,7 @@ def main():
     parser.add_argument("--trials", type=int, default=10)
     parser.add_argument("--keys", type=int, default=50)
     parser.add_argument("--saved-tabs", type=int, default=0)
+    parser.add_argument("--varied-labels", action="store_true")
     parser.add_argument("--trace-startup", action="store_true")
     parser.add_argument("--shell", action="store_true")
     parser.add_argument("--startup-resources", action="store_true")
@@ -249,6 +265,8 @@ def main():
     args = parser.parse_args()
     if args.trials < 1 or args.keys < 1 or args.saved_tabs < 0:
         parser.error("--trials and --keys must be positive; --saved-tabs must be nonnegative")
+    if args.saved_tabs > 0x100000:
+        parser.error("--saved-tabs exceeds the unique RGB readiness-color capacity")
     if args.trials > 0x700000:
         parser.error("--trials exceeds the unique RGB readiness-color capacity")
     if args.bridge_delay_ms is not None and args.bridge_delay_ms < 0:
@@ -269,6 +287,10 @@ def main():
     resources = {label: [] for label in variants}
     load_start = os.getloadavg()
     with ExitStack() as stack:
+        # Register before displays so their private daemons exit before directory cleanup.
+        labels = None
+        if args.varied_labels:
+            labels = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="latency-labels-", dir=checks)))
         contexts = {}
         for label, executable in variants.items():
             env = stack.enter_context(isolated_display())
@@ -292,7 +314,7 @@ def main():
             log = stack.enter_context((checks / log_name).open("w+b"))
             contexts[label] = env, connection, log
         for env, connection, log in contexts.values():
-            seed_tabs(env, connection, args.saved_tabs, log, master=master)
+            seed_tabs(env, connection, args.saved_tabs, log, master=master, labels=labels)
         for trial in range(args.trials):
             # Alternate which version runs first to reduce scheduling/cache bias.
             order = list(variants)[::1 if trial % 2 == 0 else -1]
@@ -306,8 +328,8 @@ def main():
                     samples[label].setdefault(name, []).extend(values)
     report = {"backend": "private Xvfb, 1024x768x24", "poll_interval_ms": 1,
               "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
-              "cpu_count": os.cpu_count(), "saved_tabs": args.saved_tabs,
-              "readiness": "unique RGB per trial and fresh/additional launch",
+              "cpu_count": os.cpu_count(), "saved_tabs": args.saved_tabs, "varied_labels": args.varied_labels,
+              "readiness": "distinct seed, fresh and additional launch RGB identities",
               "startup_resources": args.startup_resources,
               "startup_resource_notes": "Observed frontend/helper lifetime CPU at first pixel readiness; "
                                         "process CPU counters have clock-tick granularity. "
