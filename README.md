@@ -9,10 +9,8 @@ offline explorer as `file-explorer/dist/index.html`. Run `npm ci` inside the sub
 `python3 manage.py explorer-build` or `python3 manage.py explorer-check` from this repository.
 `python3 manage.py explorer-lint` runs its pinned Hyperlinter; setup is in the submodule README.
 It currently uses a read-only folder picker; native filesystem integration is not implemented.
-The submodule repository is local at `.checks/repos/file-explorer.git` until a publishing destination
-is supplied. Its relative URL is local-only; fresh remote clones need that repository published and
-the submodule URL updated before initialization. Existing checkouts retain its history in Git's
-submodule storage as well as the local bare repository.
+The explorer lives at [worminal-file-explorer](https://github.com/flintwinters/worminal-file-explorer).
+Use `git submodule update --init --recursive` to initialize it and its pinned Hyperlinter.
 
 **A small GTK terminal and browser. Tabs that outlive your windows.**
 
