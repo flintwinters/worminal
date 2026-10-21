@@ -683,6 +683,7 @@ main(int argc, char **argv)
 	gtk_init(&argc, &argv);
 	check_tab_ranges();
 	check_catalog_tab_refresh();
+	check_catalog_selection_claim();
 	check_initial_dimensions();
 	check_blink_damage();
 	check_connection_gate();

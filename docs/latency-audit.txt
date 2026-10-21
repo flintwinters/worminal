@@ -949,3 +949,29 @@ All six installed product artifacts match their verified builds byte-for-byte.
 No live owner, service, PTY or browser state was restarted or migrated. Existing
 owners retain their mapped frontend; fresh owners load catalog coalescing.
 The broader launch and latency goal remains active.
+
+Catalog selection stays inside its transaction
+----------------------------------------------
+A socket-level native regression confirmed that an initial catalog selecting a
+second retained terminal sent two WIRE_FOCUS claims: GtkNotebook's switch
+callback activated it, then the explicit unattached-catalog path activated it
+again. The regression failed against unchanged production code with an extra
+complete packet after the expected claim (.checks/catalog-selection-counterexample.log).
+The service already suppresses redundant snapshots when controller and geometry
+are unchanged; this is not evidence that every duplicate claim caused a frame.
+
+Keep app->syncing true through gtk_notebook_set_current_page, then clear it before
+the catalog's explicit activation/passive conversion logic. The existing switched
+callback now skips this intermediate claim. Empty and invalid catalog paths still
+clear syncing. The regression observes exactly one focus packet with the selected
+identity and 80x24 geometry. Full final local/SSH X11 and native Wayland suites
+pass, including browser ownership, passive conversion, reconnect and close.
+File/line gates pass; clang-tidy is unavailable.
+
+Twenty alternating populated launches (100 distinct retained labels) against
+6a92097: candidate/baseline fresh readiness94.55/94.35 ms, additional27.41/28.40
+ms, typing2.67/2.50 ms. Paired readiness medians -0.30/+0.77 ms with positive
+p95 differences10.58/13.17 ms. No end-to-end launch gain is established. The
+verified result is one catalog-selection activation instead of two, preserving
+explicit passive ownership handling without additional state or caches. Frozen
+.checks/catalog-selection-launch-verified.json. Launch optimization remains open.

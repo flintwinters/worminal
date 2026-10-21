@@ -80,3 +80,54 @@ check_catalog_tab_refresh(void)
 	g_free(page.url); g_free(page.title); g_free(page.directory);
 	g_clear_pointer(&app.cached_font, pango_font_description_free);
 }
+
+/* Notebook switching must not send a second claim during initial attach. */
+static void
+check_catalog_selection_claim(void)
+{
+	int sockets[2];
+	g_assert_cmpint(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets), ==, 0);
+	App app = {.fd = sockets[0], .cols = 80, .rows = 24, .syncing = TRUE, .created_id = 2};
+	app.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	app.notebook = gtk_notebook_new();
+	gtk_container_add(GTK_CONTAINER(app.window), app.notebook);
+	app.tabstrip = tabs_new(&app);
+	g_object_ref_sink(app.tabstrip);
+	g_signal_connect_after(app.notebook, "switch-page", G_CALLBACK(switched), &app);
+	Page *first = new_page(&app, 1, FALSE), *second = new_page(&app, 2, FALSE);
+	app.active = first;
+	app.syncing = FALSE;
+	WireBuffer buffer = {0};
+	wire_put_u32(&buffer, 2); wire_put_u32(&buffer, 0); wire_put_u32(&buffer, 1);
+	for (uint32_t id = 1; id <= 2; id++) {
+		wire_put_u32(&buffer, id); wire_put_u32(&buffer, 0);
+		wire_put_string(&buffer, "");
+		wire_put_u32(&buffer, 0); wire_put_u32(&buffer, 2);
+		wire_put_string(&buffer, "catalog terminal"); wire_put_string(&buffer, "catalog-directory");
+		wire_put_u32(&buffer, 0);
+	}
+	WirePacket catalog_packet = {.type = WIRE_CATALOG, .data = buffer.data, .len = buffer.len};
+	g_assert_true(catalog(&app, &catalog_packet));
+	g_assert_true(app.active == second);
+	g_assert_true(app.attached);
+	g_assert_false(app.syncing);
+	WireReader reader = {0};
+	WirePacket message;
+	g_assert_cmpint(wire_tryread(sockets[1], &reader, &message), ==, 1);
+	g_assert_cmpuint(message.type, ==, WIRE_FOCUS);
+	g_assert_cmpuint(message.tab, ==, second->id);
+	uint32_t cols, rows;
+	g_assert_true(wire_get_u32(&message, &cols) && wire_get_u32(&message, &rows));
+	g_assert_cmpuint(cols, ==, 80); g_assert_cmpuint(rows, ==, 24);
+	wire_packet_free(&message);
+	g_assert_cmpint(wire_tryread(sockets[1], &reader, &message), ==, 0);
+	wire_reader_free(&reader); wire_buffer_free(&buffer);
+	g_signal_handlers_disconnect_by_data(app.notebook, &app);
+	app.active = NULL;
+	page_free(first); page_free(second);
+	gtk_widget_destroy(app.window); g_object_unref(app.tabstrip);
+	g_list_free(app.pages);
+	wire_buffer_free(&app.output_queue);
+	g_clear_pointer(&app.cached_font, pango_font_description_free);
+	close(sockets[0]); close(sockets[1]);
+}
