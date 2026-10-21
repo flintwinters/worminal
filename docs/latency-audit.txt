@@ -335,3 +335,22 @@ frontend and browser modules match the verified build byte-for-byte. Live GTK
 owners and daemon/browser sessions were preserved. Existing owners keep their
 loaded frontend until they exit; a new owner loads the optimized renderer.
 The broader startup, presentation and resource audit remains open.
+
+Remote-startup measurement setup
+--------------------------------
+latency-visible --bridge-delay-ms N now runs the existing private SSH fixture
+with a controlled bridge-startup delay, while retaining the same XTest/pixel
+observations, optional seeded tabs and alternating snapshot comparisons. This
+uses the production --master/bridge path locally, not actual SSH authentication,
+compression or a remote host. Three identical-application control pairs with a
+100 ms fixture delay completed with fresh readiness medians 211.30/207.94 ms and
+a paired median difference of +2.93 ms. This is a probe control, not a speedup.
+Frozen data: .checks/remote-startup-control.json.
+
+Resource enumeration previously read only the main Linux thread's children.
+SSH helpers forked by a live GTask worker could be omitted. The shared sampler
+now visits every thread's child list, with a regression that holds a worker and
+its child alive and checks both the fixture premise and resource membership.
+Bridge benchmarks also require at least the frontend and bridge to be counted;
+all control samples include both. Re-evaluate older helper-inclusive memory
+figures before comparing workloads whose helpers originate in worker threads.

@@ -6,12 +6,14 @@ from pathlib import Path
 
 def descendants(pid):
     result = {pid}
-    try:
-        children = Path(f"/proc/{pid}/task/{pid}/children").read_text().split()
-    except FileNotFoundError:
-        return result
+    children = set()
+    for thread in Path(f"/proc/{pid}/task").glob("*/children"):
+        try:
+            children.update(int(child) for child in thread.read_text().split())
+        except (FileNotFoundError, ProcessLookupError):
+            continue
     for child in children:
-        result.update(descendants(int(child)))
+        result.update(descendants(child))
     return result
 
 

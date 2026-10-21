@@ -71,9 +71,10 @@ def capture_failure(window):
         pass  # Preserve the original failure even if its window has disappeared.
 
 
-def launch(env, connection, title, log, color=0x112233, history=False):
+def launch(env, connection, title, log, color=0x112233, history=False, master=None):
     started = time.monotonic_ns()
     process = subprocess.Popen([env.get("WORMINAL_FRONTEND", str(ROOT / "worminal")), "-g", "80x24", "-T", title,
+                                *(["--master", master] if master else []),
                                 "-e", str(ROOT / "build/latency_echo"), "--color", f"{color:06x}",
                                 *(["--history"] if history else [])],
                                env=env, stdout=log, stderr=log)
@@ -139,15 +140,15 @@ def typing(connection, window, count):
     return samples
 
 
-def sample_round(env, connection, label, trial, count, log):
+def sample_round(env, connection, label, trial, count, log, master=None):
     title = f"Latency {label} fresh {os.getpid()} {trial}"
-    owner, window, timing = launch(env, connection, title, log)
+    owner, window, timing = launch(env, connection, title, log, master=master)
     result = {f"fresh_{phase}": [value] for phase, value in timing.items()}
     try:
         result["typing"] = typing(connection, window, count)
         resources = memory(descendants(owner.pid))
         title = f"Latency {label} additional {os.getpid()} {trial}"
-        child, _, timing = launch(env, connection, title, log)
+        child, _, timing = launch(env, connection, title, log, master=master)
         try:
             result.update({f"additional_{phase}": [value] for phase, value in timing.items()})
         finally:
@@ -167,13 +168,13 @@ def summarize(samples):
     return summaries
 
 
-def seed_tabs(env, connection, count, log):
+def seed_tabs(env, connection, count, log, master=None):
     """Leave real service-owned tabs behind without a running GTK owner."""
     owner = None
     try:
         for index in range(count):
             title = f"Latency saved {os.getpid()} {index}"
-            process, _, _ = launch(env, connection, title, log)
+            process, _, _ = launch(env, connection, title, log, master=master)
             if owner is None:
                 owner = process
             else:
@@ -200,11 +201,15 @@ def main():
     parser.add_argument("--trials", type=int, default=10)
     parser.add_argument("--keys", type=int, default=50)
     parser.add_argument("--saved-tabs", type=int, default=0)
+    parser.add_argument("--bridge-delay-ms", type=int)
     parser.add_argument("--snapshot", type=Path)
     parser.add_argument("--compare", type=Path)
     args = parser.parse_args()
     if args.trials < 1 or args.keys < 1 or args.saved_tabs < 0:
         parser.error("--trials and --keys must be positive; --saved-tabs must be nonnegative")
+    if args.bridge_delay_ms is not None and args.bridge_delay_ms < 0:
+        parser.error("--bridge-delay-ms must be nonnegative")
+    master = "preview-test" if args.bridge_delay_ms is not None else None
     if args.snapshot:
         snapshot(args.snapshot.resolve())
         return
@@ -224,25 +229,33 @@ def main():
         for label, executable in variants.items():
             env = stack.enter_context(isolated_display())
             env.update(GDK_BACKEND="x11", WORMINAL_FRONTEND=str(executable))
+            if master:
+                env.update(PATH=str(ROOT / "tests/fixtures/preview-master") + os.pathsep + env["PATH"],
+                           WORMINAL_TEST_DAEMON=str(executable.parent / "worminald"),
+                           WORMINAL_TEST_BRIDGE_DELAY=f"{args.bridge_delay_ms / 1000:.3f}")
             connection = display.Display(env["DISPLAY"])
             stack.callback(connection.close)
             log_name = "visible-latency.log" if len(variants) == 1 else f"visible-latency-{label}.log"
             log = stack.enter_context((checks / log_name).open("wb"))
             contexts[label] = env, connection, log
         for env, connection, log in contexts.values():
-            seed_tabs(env, connection, args.saved_tabs, log)
+            seed_tabs(env, connection, args.saved_tabs, log, master=master)
         for trial in range(args.trials):
             # Alternate which version runs first to reduce scheduling/cache bias.
             order = list(variants)[::1 if trial % 2 == 0 else -1]
             for label in order:
                 env, connection, log = contexts[label]
-                result, usage = sample_round(env, connection, label, trial, args.keys, log)
+                result, usage = sample_round(env, connection, label, trial, args.keys, log, master=master)
+                if master and usage["processes"] < 2:
+                    raise RuntimeError("SSH bridge process was omitted from frontend resource accounting")
                 resources[label].append(usage)
                 for name, values in result.items():
                     samples[label].setdefault(name, []).extend(values)
     report = {"backend": "private Xvfb, 1024x768x24", "poll_interval_ms": 1,
               "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
               "cpu_count": os.cpu_count(), "saved_tabs": args.saved_tabs,
+              "transport": "private SSH bridge fixture" if master else "local",
+              "bridge_delay_ms": args.bridge_delay_ms,
               "frontend_memory_samples": resources,
               "load_start": load_start, "load_end": os.getloadavg(),
               "notes": "Fresh frontend with warm filesystem caches; "
@@ -284,6 +297,8 @@ def main():
         for name, summary in report["paired_summary_ms"].items():
             console.print(f"  {name}: {summary['median']:+.2f} ms")
     console.print(report["notes"])
+    if master:
+        console.print(f"Private SSH bridge fixture, {args.bridge_delay_ms} ms requested startup delay; no remote host.")
     console.print(f"Raw measurements: {path.relative_to(ROOT)}")
 
 

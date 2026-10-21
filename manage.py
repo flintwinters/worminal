@@ -91,8 +91,8 @@ def run_headless_checks():
     code = run_native_checks()
     if code:
         return code
-    patterns = ("test_build.py", "test_cli.py", "test_workspace.py", "test_preview_workspace.py",
-                "test_theme.py", "test_privacy.py", "test_handoff.py")
+    patterns = ("test_build.py", "test_perf_metrics.py", "test_cli.py", "test_workspace.py",
+                "test_preview_workspace.py", "test_theme.py", "test_privacy.py", "test_handoff.py")
     for pattern in patterns:
         code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                     "-p", pattern, "-q"])
@@ -267,11 +267,14 @@ def latency(forwarded: bool = typer.Option(
 @app.command("latency-visible")
 def latency_visible(trials: int = typer.Option(10, min=1), keys: int = typer.Option(50, min=1),
                     saved_tabs: int = typer.Option(0, min=0, help="Seed service-owned tabs before measurement."),
+                    bridge_delay_ms: int = typer.Option(None, min=0, help="Use a private delayed SSH bridge fixture."),
                     snapshot: Path = typer.Option(None, help="Save current binaries/modules as a comparison baseline."),
                     compare: Path = typer.Option(None, help="Alternate trials with a saved baseline directory.")):
     """Measure real key events to visible echo and fresh/additional window presentation."""
     native_build.build_targets("worminal", "worminald", "build/latency_echo")
     options = (["--snapshot", str(snapshot)] if snapshot else []) + (["--compare", str(compare)] if compare else [])
+    if bridge_delay_ms is not None:
+        options += ["--bridge-delay-ms", str(bridge_delay_ms)]
     raise typer.Exit(run([sys.executable, "tests/visible_latency.py", "--trials", str(trials),
                           "--keys", str(keys), "--saved-tabs", str(saved_tabs), *options]))
 
