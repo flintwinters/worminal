@@ -65,7 +65,7 @@ tabs_draw(GtkWidget *widget, cairo_t *cr, TabStrip *strip)
 static gboolean
 tabs_click(GtkWidget *widget, GdkEventButton *event, TabStrip *strip)
 {
-	if (event->button != 1 || event->y < 2 || event->y >= 2 + strip->ch) return FALSE;
+	if (!strip->layout || event->button != 1 || event->y < 2 || event->y >= 2 + strip->ch) return FALSE;
 	int x = 2, right = gtk_widget_get_allocated_width(widget) - 2;
 	for (GList *item = first_visible(strip, right); item && x < right; item = item->next) {
 		Page *page = item->data;
@@ -84,6 +84,7 @@ tabs_refresh(App *app)
 {
 	if (!app->tabstrip || app->closing) return;
 	TabStrip *strip = g_object_get_data(G_OBJECT(app->tabstrip), "tabs");
+	if (!strip->layout) strip->layout = gtk_widget_create_pango_layout(app->tabstrip, "");
 	PangoFontDescription *font = terminal_font(app, strip->layout,
 	    &strip->cw, &strip->ch, &strip->height, &strip->ascent);
 	pango_font_description_free(font);
@@ -95,7 +96,7 @@ static void
 tabs_free(gpointer data)
 {
 	TabStrip *strip = data;
-	g_object_unref(strip->layout);
+	g_clear_object(&strip->layout);
 	g_free(strip);
 }
 
@@ -105,7 +106,6 @@ tabs_new(App *app)
 	GtkWidget *widget = gtk_drawing_area_new();
 	TabStrip *strip = g_new0(TabStrip, 1);
 	strip->app = app;
-	strip->layout = gtk_widget_create_pango_layout(widget, "");
 	g_object_set_data_full(G_OBJECT(widget), "tabs", strip, tabs_free);
 	gtk_widget_add_events(widget, GDK_BUTTON_PRESS_MASK);
 	g_signal_connect(widget, "draw", G_CALLBACK(tabs_draw), strip);
