@@ -706,9 +706,10 @@ new_app(void)
 static gboolean
 draw_outline(GtkWidget *widget, cairo_t *cr, gpointer data)
 {
-	(void)data;
+	GtkWindow *window = data;
 	/* Match the original client-side outline, above terminal and WebKit paint. */
-	cairo_set_source_rgb(cr, 0.6, 0.6, 0.6);
+	double shade = gtk_window_is_active(window) ? 0.6 : 0.3;
+	cairo_set_source_rgb(cr, shade, shade, shade);
 	cairo_set_line_width(cr, 1);
 	cairo_rectangle(cr, 0.5, 0.5, gtk_widget_get_allocated_width(widget) - 1,
 	    gtk_widget_get_allocated_height(widget) - 1);
@@ -736,7 +737,9 @@ show_app(App *app)
 	gtk_widget_set_has_window(outline, FALSE);
 	gtk_overlay_add_overlay(GTK_OVERLAY(overlay), outline);
 	gtk_overlay_set_overlay_pass_through(GTK_OVERLAY(overlay), outline, TRUE);
-	g_signal_connect(outline, "draw", G_CALLBACK(draw_outline), NULL);
+	g_signal_connect(outline, "draw", G_CALLBACK(draw_outline), app->window);
+	g_signal_connect_object(app->window, "notify::is-active",
+	    G_CALLBACK(gtk_widget_queue_draw), outline, G_CONNECT_SWAPPED);
 	app->notebook = gtk_notebook_new();
 	gtk_notebook_set_show_tabs(GTK_NOTEBOOK(app->notebook), FALSE);
 	gtk_notebook_set_show_border(GTK_NOTEBOOK(app->notebook), FALSE);
