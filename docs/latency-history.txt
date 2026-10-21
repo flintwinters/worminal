@@ -1,0 +1,534 @@
+Historical latency evidence
+===========================
+
+Earlier verified checkpoints; see latency-audit.txt for the ongoing audit.
+
+Verified checkpoint: output scheduling
+-------------------------------------
+The service used a fresh 16 ms sleep even when its existing deadline was near.
+It now waits only the remaining interval; both the wait and emission condition
+use the same policy. The configured batching limit and input boost are unchanged.
+
+A 40-response native-protocol comparison measured 7.93/16.30 ms median/p95
+before and 1.96/2.37 ms after. All responses arrived in both runs. Delivered frames
+increased from 61 to 81 because fewer intermediate states were coalesced by the
+oversleep; the rate cap was not raised. Daemon PSS measured 253/249 KiB and
+CPU below the 10 ms accounting resolution in this workload, rather than a claim
+of literally zero processing cost. Frozen samples remain under
+.checks/frame-deadline-verified-{baseline,candidate}.json.
+
+Faster delivery exposed early-output correctness failures. Pending-wrap cursor
+mapping across width changes and pending-wrap preservation on unchanged-width
+resizes are now covered by native regressions. The existing counterfactual proof
+command verifies that restoring the old mapping fails. Local and SSH GTK checks
+pass with corrected cursor handling and the new output deadline policy.
+
+Follow-up: visible launch/input comparison is not yet conclusive
+---------------------------------------------------------------
+Ten alternating pairs with twenty keystrokes each measured candidate/baseline
+typing medians of 3.80/3.97 ms and p95 of 11.65/8.63 ms. Additional-window visible
+readiness medians were 51.78/35.60 ms, with a +25.42 ms paired median difference.
+Fresh-window paired readiness was -17.90 ms despite higher candidate marginal
+medians, demonstrating substantial variation within the run. These results do
+not establish an overall launch/input improvement or rule out a presentation
+regression. Investigate this before declaring the full objective complete.
+Frozen data: .checks/latency-goal-post-schedule.json. The installed build has not
+been replaced by this checkpoint, and live daemons have not been restarted.
+
+Follow-up control and renderer checkpoint
+-----------------------------------------
+Twenty identical-binary pairs produced additional-window readiness medians of
+9.19/24.38 ms, yet their paired median difference was only -1.65 ms. Marginal
+medians alone are therefore unreliable for this frame-clock-sensitive probe.
+Frozen data: .checks/latency-aa-control-comparison.json.
+
+A quieter twenty-pair repeat against the pre-scheduler build measured a paired
+additional-window difference of +1.78 ms, rather than the earlier +25.42 ms.
+Fresh readiness remained +9.79 ms in paired samples. The large additional-window
+regression did not reproduce; fresh presentation still needs investigation.
+Frozen data: .checks/latency-scheduler-repeat.json.
+
+GTK backgrounds now combine consecutive equal-color cells into runs on aligned
+device grids. Fractional transforms retain scalar fills to preserve antialias
+and alpha-edge behavior. Color/cursor decisions share one policy, and every
+background is still painted before any glyph ink. No pixel buffer/cache is added.
+
+Exact scalar-reference comparisons pass for mixed colors, reverse cells,
+transparency, clipping, integer scaling, and fractional transforms. Existing
+clipped-glyph, selection, IME, ownership, browser and SSH integration checks pass.
+Sixty alternating same-process measurements reported scalar/spans background
+means of 3.28/0.41 ms in one run and 12.62/1.90 ms under heavier load in another.
+This establishes lower background work, not a claimed 7x whole-frame speedup.
+
+Launch-focused follow-up
+------------------------
+Deferring the empty tab strip's Pango layout until its first catalog refresh
+removes unnecessary pre-map setup. Twenty alternating candidate/baseline pairs
+measured fresh readiness medians of 99.28/101.20 ms, paired median -2.41 ms;
+mapping paired median was -2.57 ms. Additional-window paired readiness was
+-0.10 ms. Frozen data: .checks/launch-lazy-tabs-experiment.json. Local and SSH
+integration checks pass, including an assertion that mapping an empty window
+has not initialized its tab layout.
+
+An experiment painting the first complete frame synchronously showed no gain
+(fresh readiness paired +0.38 ms, additional +0.13 ms) and was discarded.
+Frozen data: .checks/launch-first-frame-experiment.json.
+
+Saved-tab launch work
+---------------------
+Unviewed terminal proxies no longer allocate st cell buffers merely because a
+catalog lists them. First use allocates the requested geometry; a first incoming
+frame allocates its validated geometry without loading fonts. Rows before any
+frame are ignored. Tests cover unprepared destruction, first-use dimensions,
+and unmapped first-frame allocation, alongside full local/SSH integration.
+
+The visible benchmark now accepts --saved-tabs and records process-tree frontend
+memory through the existing shared metrics. It seeds real PTYs in private service
+scopes and leaves live desktop sessions untouched. Its typing probe calibrates
+expected glyph images outside measured keystrokes: the earlier any-pixel-change
+test could mistake a late resize for an echo, particularly with large catalogs.
+X11 discovery also tolerates windows destroyed after its root-tree snapshot.
+
+Command: python3 manage.py latency-visible --compare .checks/launch-focus-baseline
+         --saved-tabs 100 --trials 20 --keys 10
+Candidate includes lazy strip layouts and lazy cells; baseline is f5761db.
+Fresh visible readiness median: 93.06 vs 103.91 ms, paired median -8.79 ms.
+Additional-window readiness: 28.07 vs 41.72 ms, paired median -11.15 ms.
+Frontend PSS median: 16827 vs 25192 KiB, measured after typing and before the
+additional window. Typing medians: 2.57 vs 2.55 ms; p95: 5.31 vs 4.56 ms.
+This is launch and memory evidence, not an input-latency improvement claim.
+Frozen data: .checks/launch-saved-tabs-verified.json. Private Xvfb excludes
+desktop compositing and physical scanout; filesystem caches are warm.
+
+A twenty-pair run without seeded tabs measured fresh readiness 100.30/102.03 ms,
+paired -1.20 ms; additional readiness paired +0.14 ms. The benefit is largest
+with populated workspaces. Frozen data: .checks/launch-unseeded-verified.json.
+The updated full local/SSH GTK suite passes. Lint file-size/line-length checks
+pass, but Clang analysis cannot run because clang-tidy is not installed.
+
+Installed a7ab3cf with the configured Alacritty theme. Installed launcher,
+frontend module and daemon match the verified build. Existing GTK owners keep
+their loaded frontend until all their windows close; live daemon sessions were
+not restarted or migrated.
+
+Idle presentation work
+----------------------
+Blink ticks previously requested full-widget damage every 800 ms, even with a
+steady/hidden cursor and no blinking text. They now damage only rows containing
+blinking glyphs or a visible blinking cursor, and skip unmapped views entirely.
+The blink phase still advances while hidden; no visible blink behavior is removed.
+
+Catalog palette, reverse-video, cursor shape and cursor visibility changes now
+invalidate their own pixels. Palette changes repaint the active tab strip too.
+This is required because the old blanket timer repaint could otherwise conceal
+missing metadata-only damage. Palette comparison uses parsed RGBA values, so
+unchanged catalogs do not introduce new repaints.
+
+The real GTK damage regression disables its automatic timer, explicitly invokes
+20 ticks with a steady cursor and 20 with a hidden cursor, and observes zero
+draws. It verifies partial draws for blinking cursor/text, full draws for palette
+and reverse changes, no damage for unchanged metadata, and no hidden-view draws.
+Full local and SSH integration checks pass. This proves reduced idle paint work;
+it is not yet evidence of a reduction in end-to-end typing latency.
+
+Interaction presentation probe
+-------------------------------
+manage.py interaction-perf now measures first tab ownership claim, cached tab
+switches after warm-up, wheel scroll and Shift+PageUp/PageDown. Each trial uses
+a fresh private display/workspace with two native fixtures. Known background
+colors distinguish the expected tab and scrollback/live rows; the observed
+window is raised so obscured-window pixels cannot satisfy the probe.
+
+The existing native echo fixture accepts an explicit RGB background and an
+optional bounded history producer. Default typing/launch behavior is retained.
+The root benchmark reuses launch, polling, screenshot diagnostics, keyboard
+injection and process resource helpers. --compare alternates variant ordering.
+No desktop windows or live workspaces are used.
+
+A two-trial smoke run observed cached switch/wheel/page medians around 16.6 ms
+and first-claim median 22.46 ms. This identifies a frame-clock interval worth
+investigating, rather than establishing an optimization claim.
+
+Ten alternating identical-application control pairs confirmed the probe:
+candidate/baseline cached-tab medians 16.77/16.86 ms, wheel 16.63/16.70 ms,
+page 16.42/16.70 ms, first ownership claim 25.27/24.84 ms. Each version has
+200 samples per cached/scroll path and ten first claims. Frontend CPU counters
+for the measured interaction loops range 0.12--0.17 seconds per trial, with
+10 ms accounting resolution. Frozen data: .checks/interaction-aa-control.json.
+
+The current interaction probe is self-paced: each request waits for its visible
+result before sending another. Before accepting scheduling changes, distinguish
+isolated first-response latency from sustained streams and verify that faster
+presentation does not introduce unbounded painting or lose output batching.
+Cached views must also avoid synchronously painting partially imported frames
+or geometry belonging to a previous owner. These remain open audit requirements.
+
+Installed a3ae3c8, including the idle redraw fix and explicit metadata damage.
+The installed launcher, frontend and browser modules match the verified build;
+live owners and daemon sessions were preserved. This checkpoint does not close
+the remaining presentation, dense-paint, startup and resource audit.
+
+First ownership-claim presentation
+----------------------------------
+Explicit terminal selection now reserves one early-paint allowance when a new
+ownership/geometry response is needed after a quiet display refresh interval.
+The allowance is consumed only by a changed, complete service frame whose
+geometry matches the mapped terminal. Unchanged metadata, individual rows and
+old geometry do not trigger early presentation. Cached tab mapping schedules
+its usual GTK draw; rapid selections retain GTK batching. Only the terminal's
+window updates are processed, reusing the established keyboard-response path.
+
+The interaction benchmark now accepts --pace-ms, records actual paint callbacks,
+and exercises a 100-event wheel burst with requested 2 ms spacing. Delays are
+outside measured latency. Claim CPU accounting includes a 50 ms drain and uses
+both coarse process counters and main-thread scheduled runtime from schedstat.
+The latter resolves work below the process counter's 10 ms ticks, but does not
+measure other threads. The benchmark logs resource scope and raw observations.
+
+Ten alternating pairs with 20 samples per cached/scroll path measured candidate
+versus baseline first-claim medians of 5.94/22.99 ms and p95 of 9.20/26.70 ms.
+Each version made a median three terminal paint calls during the claim window.
+Main-thread claim runtime medians were 3.92/4.75 ms. Interaction-loop paint counts
+were 60/60, with process CPU medians 155/160 ms. The fixed-input wheel burst made
+14/14 median paints, with coarse CPU medians 65/60 ms; the 5 ms median difference
+is within the process counter's 10 ms granularity, not proof of zero difference.
+Cached switch, wheel and page medians remained about 16.6--16.9 ms in self-paced
+loops. Frozen final comparison: .checks/interaction-claim-verified.json.
+
+Rejected experiments remain informative. Eager cached-tab painting added ten
+paints to a 30-interaction paced workload without improving latency. Early
+scroll painting slightly improved self-paced scroll medians but added a median
+paint to a fixed wheel burst; isolated paced scrolling already measured around
+3.7 ms. Both changes were removed. Frozen experiments:
+.checks/interaction-first-experiment.json and
+.checks/interaction-scroll-experiment.json. Root-wide early claim painting was
+also replaced by the existing terminal-only update path; its earlier comparison
+is .checks/interaction-root-claim-experiment.json. These are experimental results,
+not evidence that the discarded behavior remains enabled.
+
+The final source passes the full local and SSH X11 integration suites, including
+explicit assertions that selection does not synchronously paint cached/partial
+cells, incomplete frames and mismatched geometry retain their allowance, and a
+complete changed response consumes it. Unchanged metadata still preserves the
+keyboard allowance. File-size/line-length checks pass; clang-tidy is unavailable.
+The native Wayland command cannot start: the project-local Weston runtime is
+absent and the harness targets Weston 10, while available packages use Weston 16.
+Native Wayland validation remains open; this is an environment/harness gap, not
+a passing compatibility result.
+
+A final 20-pair launch/input check against the same snapshot measured paired
+fresh/additional readiness differences of -1.67/-0.20 ms. Typing median/p95
+were 2.91/4.41 ms versus 2.79/4.13 ms, with one candidate maximum of 9.80 ms.
+This is not an input-latency improvement claim. Frontend PSS medians were
+11950/11974 KiB. Frozen data: .checks/claim-launch-input-verified.json.
+
+Installed c7d65a7 with the existing Alacritty theme. Launcher, frontend and
+browser module byte comparisons match the verified build. Live GTK owners and
+daemon sessions were preserved; a new GTK owner loads this frontend. Remaining
+work includes native Wayland coverage and the wider latency/resource audit.
+
+Native Wayland coverage restored
+--------------------------------
+manage.py setup-preview-wayland now supports the audited Weston 10 and 16 seat
+ABIs. It downloads into a fresh project-local package directory, extracts each
+ABI into its own runtime tree, and publishes the selected runtime after package
+extraction. Old package archives cannot be silently mixed into a new setup.
+The test module uses matching headers and a per-ABI output, tracks header and
+runtime-selection dependencies, and rejects mixed or mismatched layouts.
+Both current /usr/libexec and legacy shell-helper locations are supported;
+the private compositor's input-method helper uses the same selected runtime.
+The explicit WORMINAL_WESTON override and legacy runtime layout remain available.
+
+The real Weston 16 compositor now runs the entire GTK/WebKit suite natively,
+locally and through the SSH fixture. DISPLAY is absent and the test asserts the
+GDK Wayland display type; there is no X11 fallback. Recent idle damage, completed
+claim-response painting, clipping, font caches, selection, IME, browser ownership
+and recovery checks all pass. The idle assertion first waits for startup paint
+activity to quiesce, then still requires zero steady/hidden-cursor blink redraws.
+This fixes the observer's startup assumption rather than weakening the invariant.
+
+manage.py check-headless passes, including four new runtime/build regressions
+for ABI selection, shell-helper paths, mixed/mismatched headers, stale package
+exclusion and failed-download preservation of the previous selection. Full local
+and SSH X11 checks also pass. Weston 10 layout compatibility is covered by those
+unit fixtures; this machine's actual native compositor run uses Weston 16.
+File-limit checks pass; Clang analysis is still unavailable without clang-tidy.
+
+An initial native run measured dense full paints at 12.12/12.09 ms and input
+callback to GTK paint at 4.38/4.31 ms (local/SSH, mean of 20 echoes for input).
+These are rendering/callback measurements, excluding physical key delivery and
+compositor presentation; they are not native key-to-visible-pixel measurements
+and do not demonstrate a new performance improvement. Dense foreground work
+and native presentation remain part of the wider latency audit.
+
+Native test clients pass, but the private compositor logs a layer-finalization
+warning during teardown. Its cause and shutdown status have not been audited;
+this remains a harness validation limit, not a passing absence-of-warnings claim.
+
+Cached ASCII drawing
+---------------------
+Cached printable ASCII layouts now draw their single Pango line at that layout's
+own baseline. Bold/italic and fallback metrics are retained; other strings keep
+the full-layout path. This adds no glyph cache or persistent per-view state.
+
+The new manage.py render-perf command loads the actual release frontend module
+and imports dense ASCII, mixed Unicode, and a clipped ASCII stripe through the
+real terminal packet API. GTK draws the real widget into Cairo images. It checks
+exact RGBA hashes and geometry across variants, alternates order, excludes 20
+warm-up frames per case, and records wall time, CLOCK_PROCESS_CPUTIME_ID CPU,
+and PSS with the shaped layouts alive. Snapshots need a compatible internal
+frontend view ABI. This measures rendering, not input or display presentation.
+
+Ten alternating pairs, 60 measured frames per case, gave these median CPU costs
+in milliseconds per frame (candidate / previous full-layout implementation):
+
+  backend   dense ASCII     mixed Unicode    clipped ASCII
+  X11       6.652 / 7.432   8.447 / 9.347    0.990 / 1.153
+  Wayland   7.257 / 7.933   8.442 / 9.292    1.049 / 1.142
+
+These workloads reduce repaint CPU by about 8--14%. Every rendered image matches
+the baseline exactly. PSS medians were 46366/46427 KiB on X11 and 20175/20181 KiB
+on Wayland, providing no evidence of a memory increase in this workload.
+Frozen reports: .checks/ascii-line-release-{x11,wayland}-verified.json. Reports
+record the loaded module hashes; native runs assert Wayland with DISPLAY absent.
+
+Independent legacy Pango layouts also verify all 95 printable ASCII glyphs and
+four font styles against the production path, before and after zoom, in LTR/RTL
+contexts, with transparency, clipping, integer scaling and fractional transforms.
+Full local/SSH X11 and native Wayland integration suites pass. File-limit checks
+pass; clang-tidy remains unavailable. The initial new release probe caught a
+buffer ownership bug in its own fixture, fixed by clearing consumed buffers;
+no product state or live session was involved.
+
+The final 20-pair visible comparison measured fresh readiness 99.78/99.23 ms,
+with paired median +0.15 ms; additional readiness paired -0.79 ms. Typing median
+and p95 were 2.96/4.27 ms versus 3.06/4.35 ms. This does not establish a separate
+end-to-end typing improvement. Frozen data: .checks/ascii-line-input-launch-verified.json.
+
+Installed 9df854e with the existing Alacritty configuration; installed launcher,
+frontend and browser modules match the verified build byte-for-byte. Live GTK
+owners and daemon/browser sessions were preserved. Existing owners keep their
+loaded frontend until they exit; a new owner loads the optimized renderer.
+The broader startup, presentation and resource audit remains open.
+
+Remote-startup measurement setup
+--------------------------------
+latency-visible --bridge-delay-ms N now runs the existing private SSH fixture
+with a controlled bridge-startup delay, while retaining the same XTest/pixel
+observations, optional seeded tabs and alternating snapshot comparisons. This
+uses the production --master/bridge path locally, not actual SSH authentication,
+compression or a remote host. Three identical-application control pairs with a
+100 ms fixture delay completed with fresh readiness medians 211.30/207.94 ms and
+a paired median difference of +2.93 ms. This is a probe control, not a speedup.
+Frozen data: .checks/remote-startup-control.json.
+
+Resource enumeration previously read only the main Linux thread's children.
+SSH helpers forked by a live GTask worker could be omitted. The shared sampler
+now visits every thread's child list, with a regression that holds a worker and
+its child alive and checks both the fixture premise and resource membership.
+Bridge benchmarks also require at least the frontend and bridge to be counted;
+all control samples include both. Re-evaluate older helper-inclusive memory
+figures before comparing workloads whose helpers originate in worker threads.
+
+Remote transport/widget overlap
+--------------------------------
+Fresh remote owners now start the existing SSH transport after GTK display and
+argument validation, before constructing widgets. The normal connection worker
+consumes that descriptor and sends the immutable launch request. Descriptor
+ownership moves App -> ConnectionRequest -> worker; unused descriptors close on
+cleanup. Brokered windows and reconnects retain their asynchronous opening path,
+so an existing owner's GTK thread does not perform transport setup. No extra
+worker, process, persistent cache or protocol version is introduced. The App
+field is appended to preserve existing browser-module field offsets.
+
+Twenty alternating pairs against .checks/remote-init-baseline measured median
+fresh pixel readiness in milliseconds (candidate / baseline; paired difference):
+
+  private bridge, 100 ms delay    173.59 / 212.96    -39.40
+  private bridge, zero delay     102.33 / 110.39     -7.85
+  local transport                102.14 / 100.22     +0.52
+
+The controlled-delay gain is about 18%. This does not establish a local launch
+improvement or predict actual SSH authentication/network costs. The probes use
+warm filesystem caches; earlier trials retain service tabs. Final delayed-run
+map medians were 67.00/68.38 ms; additional readiness 142.09/141.99 ms. Typing
+medians were 2.75/2.75 ms and p95 4.42/4.51 ms. Local typing medians were
+3.07/2.84 ms and p95 4.61/4.21 ms; no steady typing improvement is claimed.
+Frontend-plus-helper PSS medians were 12955/12962 KiB with delay, 12950/12950 KiB
+without delay, and 12830/12804 KiB locally. This samples settled memory after
+typing, not peak startup memory. Frozen data:
+.checks/remote-widget-overlap-{100ms,0ms,local}.json.
+
+An earlier pre-GTK transport experiment improved delayed startup by 50.23 ms
+paired, but was rejected: a missing display could still authenticate SSH or
+start an idle remote service before failure. Killing the SSH client cannot
+safely undo such external effects. Frozen rejected experiment:
+.checks/remote-before-gtk-experiment.json. The retained version performs no
+remote work on display or argument failure.
+
+Full local/SSH-fixture X11 and native Wayland integration checks pass, including
+failed-display/argument process-group and empty-catalog guards, and recovery
+from a closed preconnected socket. Mesa shader disk caching is disabled only
+inside the isolated browser integration profile: its late helper writes caused
+two directory-cleanup failures after all functional assertions had passed.
+Product rendering settings are unchanged. File/line-limit checks pass;
+clang-tidy remains unavailable.
+
+Installed 66bba0f with the existing Alacritty configuration. Launcher, frontend
+and browser modules match the verified build byte-for-byte. No live GTK owner
+or workspace daemon was restarted or migrated; existing owners retain their
+loaded frontend until they exit. The broader launch/latency audit remains open.
+
+Local launch milestones
+-----------------------
+latency-visible --trace-startup optionally records the existing monotonic trace
+stream alongside independent pixel observations. Fresh-window milestones are
+cumulative from launcher main; repeated events retain their first observation.
+Comparison reports pair only milestones present in both variants, permitting
+older binary snapshots. Traces are diagnostic and include logging overhead;
+normal measurements explicitly clear the inherited tracing environment flag.
+Window-constructor, completed-widget, and frontend-entry milestones now locate
+startup costs without changing the application protocol or paint behavior.
+
+Ten local traced trials measured cumulative medians from main of: frontend
+entry 10.42 ms, GTK initialized 22.07 ms, first GtkWindow constructed 59.45 ms,
+widgets complete 59.79 ms, map request 61.61 ms, fonts 69.73 ms, first imported
+frame 73.61 ms, first paint 80.11 ms. Pixel readiness was 100.62 ms from process
+launch (a different origin). The dominant construction interval is the first
+GtkWindow, not the remaining widget tree. This motivates overlapping the
+existing connection worker with that constructor, while explicitly delaying
+its GTK completion callback until widgets and signal handlers are ready.
+Frozen diagnostic: .checks/local-startup-milestones.json. Three comparison
+pairs against an older snapshot verify missing newer milestone compatibility;
+.checks/startup-trace-compatibility.json. These runs do not prove a speedup.
+
+Readiness identity and interactive initialization
+-------------------------------------------------
+latency-visible --shell now initializes the configured interactive shell before
+execing the same pixel/typing fixture. It uses the existing latency-shell
+convention of POSIX shell command syntax; local measurements here use zsh.
+Shell configuration is real and machine-dependent. This adds initialization to
+launch readiness; settled typing still runs the minimal raw fixture afterward.
+
+Investigating worker overlap exposed a flaw in the old ready-color invariant:
+every retained tab could contain the same canvas. In particular an additional
+window could temporarily paint an older tab while its own shell initialized,
+producing a false early readiness sample. Measured fresh/additional launches
+now use distinct RGB values for every trial, separate from seeded tabs. The
+report records this invariant. Prior additional-readiness figures must not be
+used as proof of shell or new-tab readiness; their mapping measurements remain
+independent. Earlier fresh samples should also be remeasured with this stronger
+identity check before drawing new conclusions.
+
+Ten experimental worker-overlap pairs with real zsh and unique readiness
+colors observed additional readiness 113.23/125.62 ms, versus the invalid
+6.22/7.66 ms medians in the earlier reused-color experiment. This confirms the
+material weakness of that old measurement. Fresh readiness remained promising
+at 144.37/185.43 ms, paired -40.44 ms, but product validation is still pending.
+Frozen experiments: .checks/worker-overlap-shell-unique-color-experiment.json
+and .checks/worker-overlap-shell-reused-color-rejected.json. These compare an
+uncommitted worker prototype against .checks/widget-worker-baseline; they are
+not final release claims.
+
+First-window connection worker
+-------------------------------
+The current source starts the existing connection worker before the first
+GtkWindow constructor, after display and option validation. This overlaps local
+shell initialization as well as remote transport setup with the expensive first
+constructor. A transient per-request mutex gates worker completion until every
+widget and signal handler exists, including if constructors iterate a nested
+main context. Reconnects do not hold the gate. Later windows retain connection
+startup after their cheap widget construction. No extra worker/process is added.
+
+This replaces the previous initial-only preopened-SSH socket path, removes its
+App tail field and descriptor handoff, and restores the single launch option
+parser/presenter. Existing App field offsets and the module/protocol entry ABI
+remain unchanged. Failure on a missing display or invalid arguments still
+starts no remote work. The regression pumps a nested main context while an
+immediate connection failure is held behind the gate, then releases it and
+verifies completion cleanup. A separate normal window checks failure/retry UI.
+Final local/SSH X11 and native Wayland suites pass with the first-window-only
+policy. File/line limits pass; clang-tidy is still unavailable.
+
+Twenty alternating pairs against .checks/widget-worker-baseline, with distinct
+per-launch canvases, measured candidate / baseline fresh readiness medians:
+
+  real interactive zsh           143.87 / 184.19 ms   paired -40.16 ms
+  minimal local fixture          100.08 /  98.55 ms   paired  +1.00 ms
+  private bridge, 100 ms delay    173.59 / 171.31 ms   paired  +1.43 ms
+
+Zsh fresh readiness p95 is 160.91/198.64 ms. This is about a 22% median launch
+improvement with this machine's real configuration, not a claim about all
+shells. Minimal startup has no demonstrated gain; the existing SSH overlap gain
+is retained, not independently improved relative to the installed optimization.
+Typing medians/p95 were 2.58/4.31 vs 2.75/4.41 ms in the shell run, 2.91/4.36
+vs 3.14/4.31 ms minimally, and 2.96/5.09 vs 2.79/4.49 ms with bridge delay.
+No separate steady typing gain is established by these startup-only changes.
+Settled frontend-plus-helper PSS medians were 12820/12778 KiB for shell mode,
+12810/12792 KiB minimally and 12926/12944 KiB with bridge delay; peak startup
+memory and shell initialization CPU remain unmeasured.
+
+There is an unresolved secondary latency concern: zsh mapping paired +2.89 ms,
+and additional readiness 123.26/118.94 ms with paired +6.94 ms. Additional mapping
+paired -0.28 ms. Minimal and delayed-bridge additional readiness paired -0.35
+and +0.04 ms. Although later windows retain the old connection timing, their
+presentation can depend on the preceding owner's launch/frame-clock phase.
+This is a hypothesis, not a verified explanation or proof of no regression.
+
+An identical-candidate 20-pair zsh control measured paired fresh/additional
+readiness -1.20/-0.91 ms. It therefore does not explain away the +6.94 ms result.
+The early-all-windows prototype is not retained: later constructors provide too
+little overlap to justify changing their connection timing. Frozen reports:
+.checks/first-worker-{shell,minimal,bridge}-final.json,
+.checks/first-worker-shell-identical-control.json, and the earlier prototype
+.checks/worker-overlap-all-windows-shell-experiment.json. Exact candidate modules
+are saved in .checks/first-worker-probe-control; the final source remains
+uninstalled pending the later-window presentation audit. Installed 66bba0f and
+all live owner/service sessions remain intact. The full latency goal is open.
+
+Later-window presentation follow-up
+------------------------------------
+The optional startup trace now covers forwarded additional windows as well as
+fresh owners. Both share one parser, which retains first occurrences and the
+last frame/paint before the pixel-ready observation. Existing-owner events
+older than the launcher's main timestamp are excluded. Owner frame/paint
+traces can include other visible pages; they are diagnostic, not a substitute
+for the unique target-window pixel identity check.
+
+Twenty traced interactive-shell pairs show additional connection-send paired
+-0.04 ms, first complete frame -0.01 ms, final complete frame +0.38 ms, last
+paint -0.42 ms and pixel readiness -0.79 ms. The earlier +6.94 ms readiness
+result does not recur under tracing. Logging can shift phase/timing, so this
+alone did not resolve the concern. Frozen .checks/additional-worker-shell-traced.json.
+
+A subsequent larger UNTRACED 40-pair interactive-zsh comparison measured:
+
+                           candidate / baseline median     paired difference
+  fresh map                    68.60 /  64.37 ms               +3.19 ms
+  fresh pixel readiness       144.61 / 184.86 ms              -35.75 ms
+  additional map                5.96 /   6.40 ms               -0.20 ms
+  additional readiness        123.82 / 123.69 ms               +1.08 ms
+
+Additional readiness p95 was 129.14/133.64 ms. The larger result and the traced
+stage comparison do not support a persistent seven-millisecond additional
+regression. They also do not prove an exact zero-cost change. Shell/config and
+frame-presentation timing vary, and the original discrepant run remains saved.
+The small fresh-map delay is repeatable in shell mode, consistent with shell
+initialization competing during GTK construction; usable-input readiness is
+the project's launch priority. No claim of improving every isolated milestone
+is made. Typing median/p95 was 2.68/4.30 versus 2.85/4.61 ms (400 keys per side),
+without establishing a separate steady typing optimization. Settled PSS was
+12828/12826 KiB. Frozen .checks/additional-worker-shell-untraced-40.json.
+
+The final trace-parser filtering was exercised in three paired minimal-fixture
+runs, including forwarded-window stages. The product source is unchanged from
+20c7b84, whose final X11, native Wayland and headless suites already pass. The
+installation hold on that checkpoint is lifted by this follow-up, while peak
+startup resource costs and the broader presentation/latency audit remain open.
+
+Installed the verified 20c7b84 product through the established atomic replacement
+path, using the existing Alacritty configuration. Current launcher/frontend/
+browser artifacts match the saved tested candidate, and installed artifacts
+match the current build byte-for-byte. No live GTK owner, workspace daemon,
+legacy session or PTY was restarted or migrated. New owners load the early
+worker; existing windows retain their mapped frontend until they exit.

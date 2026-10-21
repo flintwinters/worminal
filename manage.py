@@ -295,6 +295,13 @@ def latency_visible(trials: int = typer.Option(10, min=1), keys: int = typer.Opt
                           "--keys", str(keys), "--saved-tabs", str(saved_tabs), *options]))
 
 
+@app.command("profile-startup")
+def profile_startup(shell: bool = typer.Option(False, help="Include interactive shell initialization.")):
+    """Trace private-display startup syscalls; diagnostic timings include tracing overhead."""
+    native_build.build_targets("worminal", "worminald", "build/latency_echo")
+    raise typer.Exit(run([sys.executable, "tests/startup_profile.py", *(["--shell"] if shell else [])]))
+
+
 @app.command("render-perf")
 def render_perf(trials: int = typer.Option(10, min=1), frames: int = typer.Option(60, min=1),
                 resize: bool = typer.Option(False, help="Measure viewport imports instead of painting."),
