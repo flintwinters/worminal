@@ -68,6 +68,9 @@ Use `--prefix /your/prefix` for another installation location; `DESTDIR` stages 
 The build honors `CC`, `PKG_CONFIG`, `CPPFLAGS`, `CFLAGS`, and `LDFLAGS`; `CFLAGS` defaults to `-O3`.
 `PREFIX` defaults to `~/.local`, and `MANPREFIX` defaults to `$PREFIX/share/man`.
 Install as your regular user so builds read your Alacritty configuration. Keep `~/.local/bin` on `PATH`.
+When switching from a system installation, also update your desktop's default terminal command to
+`~/.local/bin/worminal` (using its full absolute path). A hardcoded system command bypasses `PATH`
+and loads the old frontend and its compiled font settings even after restarting all windows.
 
 ## Terminal and browser
 
