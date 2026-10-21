@@ -871,3 +871,9 @@ Typing medians 2.52/2.38 ms. These are warm-filesystem private Xvfb software
 readiness measurements, not physical display or interactive-shell startup.
 Frozen .checks/tab-range-launch-verified.json. The strong repeatable result is
 less hidden-label drawing CPU; broader launch optimization remains open.
+
+Installed d7bdfd9 with the existing Alacritty configuration via atomic replacement.
+All six installed product artifacts match their builds byte-for-byte, including
+rollback X11 binaries. No live GTK owner, service, PTY or browser was restarted
+or migrated. Existing owners retain their mapped frontend; fresh owners load
+the new tab traversal. Further launch and latency work remains open.
