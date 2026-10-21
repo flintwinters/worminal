@@ -60,13 +60,14 @@ To install `worminal`, `worminald`, and the `worminal-x11`/`worminald-x11` rollb
 launcher, and icon:
 
 ```sh
-sudo .venv/bin/python manage.py install
+.venv/bin/python manage.py install
 ```
 
 Use `--prefix /your/prefix` for another installation location; `DESTDIR` stages an installation for packaging.
 `python3 manage.py uninstall` removes installed files using the same prefix and staging settings.
 The build honors `CC`, `PKG_CONFIG`, `CPPFLAGS`, `CFLAGS`, and `LDFLAGS`; `CFLAGS` defaults to `-O3`.
-`PREFIX` defaults to `/usr/local`, and `MANPREFIX` defaults to `$PREFIX/share/man`.
+`PREFIX` defaults to `~/.local`, and `MANPREFIX` defaults to `$PREFIX/share/man`.
+Install as your regular user so builds read your Alacritty configuration. Keep `~/.local/bin` on `PATH`.
 
 ## Terminal and browser
 

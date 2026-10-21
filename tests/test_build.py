@@ -198,6 +198,12 @@ class BuildTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "absolute"):
             build.installation_files("relative")
 
+    def test_default_install_uses_user_prefix(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(Path, "home", return_value=self.root):
+            files = build.installation_files()
+        self.assertEqual(files[0][1], self.root / ".local/lib/worminal/browser.so")
+        self.assertIn(self.root / ".local/bin/worminal", [destination for _, destination, _ in files])
+
     def weston_runtime(self, major):
         local = self.root / "weston"
         runtime = local / f"libweston-{major}-0"
