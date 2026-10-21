@@ -289,6 +289,8 @@ flush_paint(Terminal *t)
 	G_GNUC_END_IGNORE_DEPRECATIONS
 }
 
+#include "preview_ownership.c"
+
 static void
 check_blink_damage(void)
 {
@@ -403,6 +405,7 @@ check_blink_damage(void)
 	flush_paint(t);
 	t->cols = cols; t->rows = rows;
 	page.live = TRUE;
+	check_passive_ownership(t);
 	gtk_widget_hide(app.window);
 	probe.draws = 0;
 	for (int i = 0; i < 20; i++) { blink(t); flush_paint(t); }
