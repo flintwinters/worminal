@@ -258,6 +258,12 @@ def explorer_check():
     explorer_command("check")
 
 
+@app.command("explorer-lint")
+def explorer_lint():
+    """Run the explorer's pinned Hyperlinter architecture and style audit."""
+    explorer_command("lint")
+
+
 @app.command()
 def install(prefix: Path = typer.Option(None, help="Installation prefix (default: PREFIX or /usr/local).")):
     """Build and install binaries, manual, desktop launcher, and icon; supports DESTDIR staging."""

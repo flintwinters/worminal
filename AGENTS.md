@@ -50,3 +50,4 @@ Investigate remote Codex scrolling separately from tested wheel modes.
 `file-explorer` is an independent TypeScript npm-workspace submodule. It builds a plain dark,
 offline HTML explorer using a read-only folder picker; native filesystem integration is not implemented.
 Use `manage.py explorer-build` and `explorer-check` after `npm ci` in the submodule.
+`manage.py explorer-lint` runs its nested `tools/hyperlint` submodule; see the explorer README for setup.
