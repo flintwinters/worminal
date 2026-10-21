@@ -156,17 +156,15 @@ terminal_zoom(Terminal *t)
 	gtk_widget_queue_draw(t->page->widget);
 }
 
-void
+gboolean
 terminal_palette(Page *p, uint32_t index, const char *name)
 {
 	if (index >= G_N_ELEMENTS(p->colors))
-		return;
-	GdkRGBA color;
+		return FALSE;
+	GdkRGBA color = p->colors[index];
 	if (name && gdk_rgba_parse(&color, name)) {
-		p->colors[index] = color;
-		return;
-	}
-	if (index >= 16 && index < 256) {
+		/* The service's per-tab palette overrides the compiled defaults. */
+	} else if (index >= 16 && index < 256) {
 		unsigned int n = index - 16;
 		if (index < 232) {
 			unsigned int rgb[] = {n / 36, n / 6 % 6, n % 6};
@@ -177,10 +175,12 @@ terminal_palette(Page *p, uint32_t index, const char *name)
 			double gray = (8 + 10 * (index - 232)) / 255.0;
 			color = (GdkRGBA){gray, gray, gray, 1};
 		}
-		p->colors[index] = color;
 	} else if (index < G_N_ELEMENTS(colorname) && colorname[index]) {
-		gdk_rgba_parse(&p->colors[index], colorname[index]);
+		gdk_rgba_parse(&color, colorname[index]);
 	}
+	gboolean changed = !gdk_rgba_equal(&p->colors[index], &color);
+	p->colors[index] = color;
+	return changed;
 }
 
 static GdkRGBA
@@ -375,8 +375,33 @@ blink(gpointer data)
 {
 	Terminal *t = data;
 	t->blink = !t->blink;
-	gtk_widget_queue_draw(t->page->widget);
+	if (!t->session || !gtk_widget_get_mapped(t->page->widget)) return G_SOURCE_CONTINUE;
+	Page *p = t->page;
+	for (int row = 0; row < t->frame.rows; row++) {
+		gboolean changed = row == t->frame.cursor_y && !t->frame.scroll &&
+		    p->live && !(p->mode & MODE_HIDE) && (p->cursor & 1);
+		Line line = tsessionviewline(t->session, row);
+		for (int col = 0; col < t->frame.cols && !changed; col++)
+			changed = line[col].mode & ATTR_BLINK;
+		if (changed) damage_row(t, row);
+	}
 	return G_SOURCE_CONTINUE;
+}
+
+void
+terminal_configure(Terminal *t, uint32_t mode, uint32_t cursor, gboolean palette_changed)
+{
+	Page *p = t->page;
+	uint32_t changed_mode = p->mode ^ mode;
+	gboolean changed_cursor = p->cursor != cursor || (changed_mode & MODE_HIDE);
+	p->mode = mode; p->cursor = cursor;
+	/* Catalog-only style updates need damage of their own. Idle blink ticks
+	 * cannot be relied on to eventually repaint unrelated state changes. */
+	if (palette_changed && p->app->active == p && p->app->tabstrip)
+		gtk_widget_queue_draw(p->app->tabstrip);
+	if (!t->layout || !gtk_widget_get_mapped(p->widget)) return;
+	if (palette_changed || (changed_mode & MODE_REVERSE)) gtk_widget_queue_draw(p->widget);
+	else if (changed_cursor) damage_row(t, t->frame.cursor_y);
 }
 
 static gboolean

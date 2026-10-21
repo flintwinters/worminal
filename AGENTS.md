@@ -11,6 +11,7 @@ window maps early while its connection worker sends the initial launch request; 
 `src/terminal` owns terminal state,
 `src/gtk` paints release views, `src/x11` preserves the original renderer, and `src/workspace` connects the service.
 GTK redraws changed rows and cursor damage, including overlapping glyph ink;
+blink ticks damage only visible blinking rows, while catalog style changes invalidate their own pixels.
 compact rows paint matching background runs before glyphs, with scalar fallback on fractional device grids.
 Unchanged frames do not repaint or consume the immediate paint allowance for the first changed keyboard response.
 `tools/build.py` owns builds and installation; `manage.py` owns
