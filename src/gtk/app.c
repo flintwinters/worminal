@@ -354,7 +354,6 @@ catalog(App *app, WirePacket *packet)
 		app->pages = g_list_delete_link(app->pages, item);
 		page_free(page);
 	}
-	app->syncing = FALSE;
 	Page *chosen = find_page(app, app->created_id);
 	app->created_id = 0;
 	if (!chosen) chosen = find_page(app, selected_id);
@@ -362,7 +361,10 @@ catalog(App *app, WirePacket *packet)
 	if (!chosen && app->pages) chosen = app->pages->data;
 	if (chosen) {
 		int index = gtk_notebook_page_num(GTK_NOTEBOOK(app->notebook), chosen->widget);
+		/* Selecting is part of the transaction: switched must not claim the
+		 * page before the explicit activation below (or claim passive mirrors). */
 		gtk_notebook_set_current_page(GTK_NOTEBOOK(app->notebook), index);
+		app->syncing = FALSE;
 		/* A peer catalog update must preserve local focus, forms and navigation. */
 		if (chosen->id == passive_conversion) {
 			app->active = chosen;
@@ -370,7 +372,10 @@ catalog(App *app, WirePacket *packet)
 			tabs_refresh(app);
 		} else if (chosen != app->active || !app->attached) activate(chosen);
 		else tabs_refresh(app);
-	} else if (app->attached && !app->pending) gtk_widget_destroy(app->window);
+	} else {
+		app->syncing = FALSE;
+		if (app->attached && !app->pending) gtk_widget_destroy(app->window);
+	}
 	app->attached = TRUE;
 	return TRUE;
 invalid:
