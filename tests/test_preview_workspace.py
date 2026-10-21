@@ -11,6 +11,7 @@ import socket
 import statistics
 import struct
 import subprocess
+import tempfile
 import time
 import unittest
 import uuid
@@ -143,31 +144,53 @@ class PreviewWorkspaceTest(unittest.TestCase):
         self.assertIn(digest, output)
 
     def test_command_converts_calling_terminal_and_preserves_order(self):
-        for executable, url in product((DAEMON, ROOT / "worminal"), ("https://example.invalid/converted", None)):
+        cases = (("https://example.invalid/converted", "https://example.invalid/converted"),
+                 ("about:blank", "about:blank"), (None, "worminal:///files"))
+        for executable, (url, expected) in product((DAEMON, ROOT / "worminal"), cases):
             with self.subTest(executable=executable.name, url=url):
-                command = shlex.quote(str(executable)) + " --new-browser-tab"
-                if url: command += " " + shlex.quote(url)
-                tab = self.launch("stty raw -echo; printf READY; dd bs=1 count=1 >/dev/null 2>&1; "
-                                  + command + "; sleep 30")
-                other = self.launch("stty raw -echo; printf READY; exec cat")
-                send(self.peer, 3, tab, b"x")
-                for _ in range(512):
-                    _, payload = wait_kind(self.peer, 7)
-                    rows = records(payload)
-                    converted = next((row for row in rows if row[0] == tab and row[1] == 1), None)
-                    if converted:
-                        self.assertEqual(converted[2], url or "about:blank")
-                        identities = [row[0] for row in rows]
-                        self.assertLess(identities.index(tab), identities.index(other))
-                        self.assertEqual(next(row for row in rows if row[0] == other)[1], 0)
-                        break
-                else:
-                    self.fail("calling terminal was not converted")
-                send(self.peer, 3, other, b"still-live")
-                output = b""
-                while b"still-live" not in output:
-                    _, chunk = wait_kind(self.peer, 14, other)
-                    output += chunk
+                self.assert_browser_conversion(executable, url, expected)
+
+    def assert_browser_conversion(self, executable, target, expected, directory=ROOT):
+        command = "cd " + shlex.quote(str(directory)) + " && " + shlex.quote(str(executable)) + " --new-browser-tab"
+        if target is not None: command += " " + shlex.quote(target)
+        tab = self.launch("stty raw -echo; printf READY; dd bs=1 count=1 >/dev/null 2>&1; "
+                          + command + "; sleep 30")
+        other = self.launch("stty raw -echo; printf READY; exec cat")
+        send(self.peer, 3, tab, b"x")
+        for _ in range(512):
+            _, payload = wait_kind(self.peer, 7)
+            rows = records(payload)
+            converted = next((row for row in rows if row[0] == tab and row[1] == 1), None)
+            if converted:
+                self.assertEqual(converted[2], expected)
+                identities = [row[0] for row in rows]
+                self.assertLess(identities.index(tab), identities.index(other))
+                self.assertEqual(next(row for row in rows if row[0] == other)[1], 0)
+                break
+        else:
+            self.fail("calling terminal was not converted")
+        send(self.peer, 3, other, b"still-live")
+        output = b""
+        while b"still-live" not in output:
+            _, chunk = wait_kind(self.peer, 14, other)
+            output += chunk
+
+    def test_browser_command_encodes_paths_in_the_callers_working_directory(self):
+        checks = ROOT / ".checks"
+        checks.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="browser-path-", dir=checks) as temporary:
+            directory = Path(temporary)
+            special = directory / "page #?% ü.html"
+            special.write_text("<title>Local page</title>")
+            plain = directory / "plain.html"
+            plain.write_text("<title>Plain page</title>")
+            cases = ((str(special), special.as_uri()), (special.name, special.as_uri()),
+                     ("./" + special.name, special.as_uri()), (plain.name, plain.as_uri()),
+                     (special.as_uri(), special.as_uri()),
+                     ("missing.html", (directory / "missing.html").as_uri()))
+            for executable, (target, expected) in product((DAEMON, ROOT / "worminal"), cases):
+                with self.subTest(executable=executable.name, target=target):
+                    self.assert_browser_conversion(executable, target, expected, directory)
 
     def test_browser_command_outside_a_terminal_is_rejected(self):
         for executable in (DAEMON, ROOT / "worminal"):

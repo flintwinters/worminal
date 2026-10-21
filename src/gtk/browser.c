@@ -2,6 +2,8 @@
 #include <webkit2/webkit2.h>
 #include "preview.h"
 #include "browser_module.h"
+#include "browser_target.h"
+#include "build/file_explorer.h"
 
 struct Browser {
 	App *app;
@@ -125,7 +127,8 @@ policy(WebKitWebView *view, WebKitPolicyDecision *decision, WebKitPolicyDecision
 		const char *scheme = g_uri_peek_scheme(url);
 		if (!scheme || (g_ascii_strcasecmp(scheme, "http") && g_ascii_strcasecmp(scheme, "https") &&
 		                g_ascii_strcasecmp(scheme, "about") && g_ascii_strcasecmp(scheme, "file") &&
-		                g_ascii_strcasecmp(scheme, "data") && g_ascii_strcasecmp(scheme, "blob"))) {
+		                g_ascii_strcasecmp(scheme, "data") && g_ascii_strcasecmp(scheme, "blob") &&
+		                g_ascii_strcasecmp(scheme, WORKSPACE_BROWSER_SCHEME))) {
 			webkit_policy_decision_ignore(decision);
 			notice(b, "This URL scheme is unsupported.");
 			return TRUE;
@@ -227,6 +230,24 @@ download_started(WebKitWebContext *ctx, WebKitDownload *download, gpointer data)
 	g_signal_connect(download, "failed", G_CALLBACK(download_failed), NULL);
 }
 
+static void
+explorer_request(WebKitURISchemeRequest *request, gpointer data)
+{
+	(void)data;
+	if (strcmp(webkit_uri_scheme_request_get_uri(request), WORKSPACE_BROWSER_HOME)) {
+		GError *error = g_error_new_literal(G_IO_ERROR, G_IO_ERROR_NOT_FOUND, "Unknown Worminal page");
+		webkit_uri_scheme_request_finish_error(request, error);
+		g_error_free(error);
+		return;
+	}
+	/* Serve the built artifact locally on every viewing machine; saved links must
+	 * not depend on a build checkout or a remote machine's installation prefix. */
+	GInputStream *stream = g_memory_input_stream_new_from_data(file_explorer_html,
+	                                                        sizeof(file_explorer_html) - 1, NULL);
+	webkit_uri_scheme_request_finish(request, stream, sizeof(file_explorer_html) - 1, "text/html; charset=utf-8");
+	g_object_unref(stream);
+}
+
 static WebKitWebContext *
 browser_context(void)
 {
@@ -239,6 +260,7 @@ browser_context(void)
 	    "base-data-directory", data, "base-cache-directory", cache, NULL);
 	webkit_website_data_manager_set_tls_errors_policy(manager, WEBKIT_TLS_ERRORS_POLICY_FAIL);
 	context = webkit_web_context_new_with_website_data_manager(manager);
+	webkit_web_context_register_uri_scheme(context, WORKSPACE_BROWSER_SCHEME, explorer_request, NULL, NULL);
 	g_object_unref(manager);
 	char *cookies = g_build_filename(data, "cookies.sqlite", NULL);
 	WebKitCookieManager *cookie_manager = webkit_web_context_get_cookie_manager(context);
