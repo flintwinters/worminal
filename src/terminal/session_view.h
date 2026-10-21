@@ -9,6 +9,7 @@ typedef struct {
 	int scroll, alternate;
 } SessionFrame;
 
+TermSession *tsessionviewnew(int, int);
 SessionFrame tsessionframe(TermSession *);
 Line tsessionviewline(TermSession *, int);
 int tsessionrowdirty(TermSession *, int);

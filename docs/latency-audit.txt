@@ -727,3 +727,59 @@ module replacement. Installed launcher/frontend/browser artifacts match the
 verified build byte-for-byte. No GTK owner, browser session, PTY, workspace
 daemon or legacy session was restarted or migrated. Fresh owners load the
 single-line Unicode path; existing owners retain their mapped frontend.
+
+One-grid imported GTK replicas
+-------------------------------
+The GTK frontend formerly constructed complete parser sessions for imported
+cells. They allocated an unused alternate screen and passed incoming viewport
+width changes through owner-side reflow. A new regression with three wrapped
+rows proves this invents local history when the authoritative server has already
+reflowed the viewport. The original constructor fails the no-local-history
+assertion; the frozen counterexample is .checks/replica-parser-counterexample.log.
+
+GTK now explicitly constructs a view-only TermSession with one cell grid. It
+pads/crops imported geometry without reflow or history, preserves valid selection
+semantics, and leaves alternate-screen content as metadata over the imported
+grid. Shared session registration and grid cleanup reuse the existing lifetime
+machinery. Parser owners and the legacy X11 constructor retain ordinary
+initialization and reflow. Replicas cannot be exported as complete parser
+snapshots; normal native snapshot and wire formats are unchanged.
+
+The sanitizer-backed native regression checks top-left cell preservation,
+blank growth, dirty rows, word copy, selection across height and alternate
+geometry changes, remote scroll metadata, snapshot refusal, context restoration
+and 100 repeated one-cell/large-grid transitions. Full headless, local/SSH X11
+and native Wayland integration suites pass. The existing counterfactual proof
+command also restores the old parser-backed constructor and requires this
+invariant to fail (.checks/replica-regression-proof.log). Shared native-test
+support sources now have one authoritative build list. The parser monolith's
+line limit is preserved rather than raised.
+
+check-handoff --baseline .checks/replica-grid-baseline/worminald adds old-to-new
+and new-to-old v2 transfers to the existing four v1/v2 combinations. All pass,
+including unchanged child PIDs/PTY ownership, retained cells/input and donor
+shutdown. These are isolated test daemons; live services were not migrated.
+
+render-perf --resize loads the actual release module, prebuilds two complete
+soft-wrapped owner frames, and alternates viewport widths. Twenty warm-up
+cycles precede 60 measured cycles per trial; one cycle imports TWO frames.
+Only packet import is timed. Final painting is outside the timer and checked
+by exact RGBA hash and geometry. Results use explicit resize-cycle units and
+report retained local history, alternate rows and glyph-storage bytes, with
+probe/module hashes. Storage excludes parser buffers, fonts, pointers and
+allocator overhead. This is not end-to-end window-manager/PTY resize latency.
+
+Ten alternating pairs against .checks/replica-grid-baseline give median CPU
+milliseconds per resize cycle (candidate / baseline): X11 0.127/1.175; native
+Wayland 0.095/1.365. Final images match exactly. The candidate retains zero
+local history and alternate rows; the old implementation retains 1334 history
+rows plus an unused alternate grid after this sequence. Retained glyph storage
+is 33792/1476288 bytes. Post-sequence PSS medians are 43916/45908 KiB on X11
+and 25244/28536 KiB on Wayland. These samples include allocator behavior and do
+not measure whole-application peak PSS. Frozen data:
+.checks/replica-grid-resize-{x11,wayland}-verified.json.
+
+The verified improvement is about 89--93% lower client import CPU in this
+resize sequence and less redundant retained state. The broader launch/input,
+painting and whole-application resource audit remains active. File/line limits
+pass; clang-tidy remains unavailable.

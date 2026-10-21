@@ -47,7 +47,7 @@ int
 tsessionexport(TermSession *s, int fd)
 {
 	Term *t = &s->term;
-	if (s->strescseq.len > 1024 * 1024 ||
+	if (s->view_only || s->strescseq.len > 1024 * 1024 ||
 	    (size_t)t->col * (t->row * 2 + (size_t)t->histlen) > 16000000) return 0;
 	Snapshot h = {
 		.magic = 0x57545331, .version = 1, .bytes = sizeof(Snapshot),

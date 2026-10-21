@@ -22,12 +22,13 @@ from x11 import isolated_display
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def sample(module, label, frames, backend, log):
+def sample(module, label, frames, backend, log, resize=False):
     context = isolated_display if backend == "x11" else wayland_display
     prefix = ROOT / f".checks/render-{label}"
     with context() as env:
         env.update(GDK_BACKEND=backend)
-        process = subprocess.Popen([str(ROOT / "build/render_probe"), str(module), str(prefix), str(frames)],
+        process = subprocess.Popen([str(ROOT / "build/render_probe"), str(module), str(prefix), str(frames),
+                                    *(["--resize"] if resize else [])],
                                    env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log)
         try:
             try:
@@ -52,6 +53,7 @@ def main():
     parser.add_argument("--trials", type=int, default=10)
     parser.add_argument("--frames", type=int, default=60)
     parser.add_argument("--compare", type=Path)
+    parser.add_argument("--resize", action="store_true")
     parser.add_argument("--backend", choices=("x11", "wayland"), default="x11")
     args = parser.parse_args()
     if args.trials < 1 or args.frames < 1:
@@ -70,8 +72,10 @@ def main():
         logs = {label: stack.enter_context((checks / f"render-{label}.log").open("wb")) for label in modules}
         for trial in range(args.trials):
             for label in list(modules)[::1 if trial % 2 == 0 else -1]:
-                results, usage = sample(modules[label], label, args.frames, args.backend, logs[label])
+                results, usage = sample(modules[label], label, args.frames, args.backend, logs[label], args.resize)
                 for result in results:
+                    if args.resize and label == "candidate" and result["local_history_rows"]:
+                        raise RuntimeError("Replica frame import accumulated local scrollback")
                     identity = result["pixel_sha256"], result["image_size"], result["cols"], result["rows"]
                     if expected.setdefault(result["case"], identity) != identity:
                         raise RuntimeError(f"Rendered pixels/geometry differ: {label} {result['case']} trial {trial}")
@@ -83,12 +87,15 @@ def main():
         for results in trials:
             for result in results:
                 name = result["case"]
-                samples.setdefault(f"{name}_wall", []).append(result["wall_us"] / (1000 * result["frames"]))
-                samples.setdefault(f"{name}_cpu", []).append(result["cpu_ns"] / (1e6 * result["frames"]))
+                count = result["cycles"] if args.resize else result["frames"]
+                samples.setdefault(f"{name}_wall", []).append(result["wall_us"] / (1000 * count))
+                samples.setdefault(f"{name}_cpu", []).append(result["cpu_ns"] / (1e6 * count))
         summaries[label] = summarize(samples)
+    summary_key = "summary_ms_per_resize_cycle" if args.resize else "summary_ms_per_frame"
     report = {"revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
-              "backend": args.backend, "trials": args.trials, "frames": args.frames,
-              "measurements": measurements, "summary_ms_per_frame": summaries, "resources": resources,
+              "measurement_unit": "resize cycle (two frames)" if args.resize else "paint frame",
+              "resize": args.resize, "backend": args.backend, "trials": args.trials, "frames": args.frames,
+              "measurements": measurements, summary_key: summaries, "resources": resources,
               "probe_sha256": hashlib.sha256((ROOT / "build/render_probe").read_bytes()).hexdigest(),
               "module_sha256": {label: hashlib.sha256(module.read_bytes()).hexdigest()
                                 for label, module in modules.items()},
@@ -101,10 +108,17 @@ def main():
                        "Excludes input/service delivery and compositor/display presentation."}
     if args.compare and (args.compare / "revision").is_file():
         report["baseline_revision"] = (args.compare / "revision").read_text().strip()
+    if args.resize:
+        report["notes"] = ("Actual release frontend; each cycle imports two full, soft-wrapped owner frames "
+                           "at alternating viewport widths. Twenty warm-up cycles precede measurement. "
+                           "Only packet import is timed; final painting is outside the measured interval. "
+                           "The final exact image and retained storage are checked. "
+                           "Cell storage excludes parser buffers, fonts, row pointers and allocator overhead.")
     path = checks / f"render-perf-{args.backend}.json"
     path.write_text(json.dumps(report, indent=2) + "\n")
     console = Console()
-    table = Table(title="Release rendering (milliseconds per frame)")
+    table = Table(title="Release imports (milliseconds per resize cycle)" if args.resize else
+                        "Release rendering (milliseconds per frame)")
     for column in ("Version", "Measurement", "n", "Median", "p95"):
         table.add_column(column)
     for label, values in summaries.items():
@@ -113,6 +127,12 @@ def main():
     console.print(table)
     for label, usage in resources.items():
         console.print(f"{label} frontend PSS median: {statistics.median(item['pss_kib'] for item in usage):.0f} KiB")
+    if args.resize:
+        for label, trials in measurements.items():
+            console.print(f"{label} retained local history rows: "
+                          f"{statistics.median(trial[0]['local_history_rows'] for trial in trials):.0f}; "
+                          "glyph storage: "
+                          f"{statistics.median(trial[0]['glyph_storage_bytes'] for trial in trials):.0f} bytes")
     console.print(report["notes"])
     console.print(f"Raw measurements: {path.relative_to(ROOT)}")
 

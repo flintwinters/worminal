@@ -71,7 +71,7 @@ struct TermSession {
 	int output_fd, pty_fd;
 	pid_t child_pid;
 	int child_handle; /* Imported pidfd + 1; zero for a child, -1 after exit. */
-	int altscreen_allowed;
+	int altscreen_allowed, view_only;
 	char ttybuf[BUFSIZ];
 	int ttybuflen;
 	int remote_scroll;
@@ -79,6 +79,9 @@ struct TermSession {
 	struct TermSession *next;
 };
 
+TermSession *tsessionalloc(void);
+void tsessionfreegrid(TermSession *);
+void tsessionviewresize(TermSession *, int, int);
 Line tlineat(int, int);
 
 #endif

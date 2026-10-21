@@ -12,7 +12,8 @@ from tools.theme import generate_theme
 
 ROOT = Path(__file__).resolve().parent.parent
 VERSION = "0.9.3"
-COMMON = ("terminal/defaults.c", "terminal/st.c", "terminal/session_view.c", "terminal/session_transfer.c",
+SESSION_SUPPORT = ("terminal/session_view.c", "terminal/session_transfer.c")
+COMMON = ("terminal/defaults.c", "terminal/st.c", *SESSION_SUPPORT,
           "workspace/wire.c", "workspace/workspace_socket.c")
 CLIENT = (*COMMON, "workspace/workspace_client.c", "x11/x.c", "x11/url.c")
 SERVER = (*COMMON, "workspace/workspace_service.c", "workspace/workspace_handoff.c")
@@ -182,7 +183,7 @@ class Builder:
                          libs=["-Wl,--gc-sections", *self.libs, *pkg_flags("--libs", ("xtst",))])
         elif target in ("build/scrollback_test", "build/url_test"):
             scrollback = target == "build/scrollback_test"
-            sources = (["tests/scrollback.c", "src/terminal/session_transfer.c"] if scrollback
+            sources = (["tests/scrollback.c", *(f"src/{source}" for source in SESSION_SUPPORT)] if scrollback
                        else ["tests/url.c", "src/x11/url.c"])
             flags = ["-O1", "-g", "-fsanitize=address,undefined"]
             if scrollback:
