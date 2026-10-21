@@ -130,3 +130,8 @@ paired -1.20 ms; additional readiness paired +0.14 ms. The benefit is largest
 with populated workspaces. Frozen data: .checks/launch-unseeded-verified.json.
 The updated full local/SSH GTK suite passes. Lint file-size/line-length checks
 pass, but Clang analysis cannot run because clang-tidy is not installed.
+
+Installed a7ab3cf with the configured Alacritty theme. Installed launcher,
+frontend module and daemon match the verified build. Existing GTK owners keep
+their loaded frontend until all their windows close; live daemon sessions were
+not restarted or migrated.
