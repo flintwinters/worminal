@@ -8,12 +8,13 @@ import unittest
 from unittest.mock import patch
 
 from tools.privacy import check_privacy, findings
+from tools.git_index import tracked_files
 
 
 class PrivacyTests(unittest.TestCase):
     def test_forced_private_file_is_rejected_even_without_recognized_credentials(self):
         root = Path(__file__).resolve().parent.parent
-        with patch("tools.privacy.git", side_effect=[b".env\0", b"CUSTOM_SETTING=opaque"]):
+        with patch("tools.privacy.git", side_effect=[b"100644 abc 0\t.env\0", b"CUSTOM_SETTING=opaque"]):
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertTrue(check_privacy(root, staged=True))
 
@@ -26,11 +27,22 @@ class PrivacyTests(unittest.TestCase):
     def test_staged_scan_uses_index_even_when_worktree_is_clean(self):
         root = Path(__file__).resolve().parent.parent
         secret = b"ghp_" + b"a" * 30
-        with patch("tools.privacy.git", side_effect=[b"README.md\0", secret]) as git:
+        with patch("tools.privacy.git", side_effect=[b"100644 abc 0\tREADME.md\0", secret]) as git:
             with contextlib.redirect_stdout(io.StringIO()) as output:
                 self.assertTrue(check_privacy(root, staged=True))
             self.assertEqual(git.call_args_list[-1].args, ("show", ":README.md"))
             self.assertNotIn(secret.decode(), output.getvalue())
+
+    def test_gitlinks_are_not_read_as_parent_repository_files(self):
+        index = b"160000 abc 0\tfile-explorer\0" + b"100644 def 0\tREADME.md\0"
+        self.assertEqual(list(tracked_files(index)), ["README.md"])
+        with patch("tools.privacy.git", side_effect=[index, b"public text"]) as git:
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertFalse(check_privacy(Path.cwd(), staged=True))
+            self.assertEqual(git.call_args_list[-1].args, ("show", ":README.md"))
+
+    def test_index_paths_preserve_tabs_and_newlines(self):
+        self.assertEqual(list(tracked_files(b"100644 abc 0\ta\tb\nc\0")), ["a\tb\nc"])
 
     def test_personal_identity_override_is_rejected(self):
         identity = b"Person <person@" + b"mail.invalid> 1 +0000"
