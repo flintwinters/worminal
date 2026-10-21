@@ -814,3 +814,10 @@ the verified benefit is removing redundant state and import/reflow work after
 geometry changes. Frozen .checks/replica-grid-input-launch.json. File limits
 pass; clang-tidy is unavailable. The checkpoint is ready for installation;
 whole-application resources and the broader latency objective remain open.
+
+Installed the verified 586768a product after a1171b9 validation, using the
+existing Alacritty configuration and atomic replacement. Installed GTK launcher,
+daemon, frontend/browser modules and rollback X11 binaries match their current
+builds byte-for-byte. No live owner, PTY, browser state or service was restarted,
+stopped or migrated. Fresh GTK owners use the one-grid replica implementation;
+existing owners retain their mapped frontend. The full latency goal stays open.
