@@ -770,6 +770,9 @@ show_app(App *app)
 	if (request) g_mutex_unlock(&request->widgets_ready);
 	else connect_async(app, FALSE);
 	gtk_widget_show_all(app->window);
+	/* A launch is an explicit activation request, including forwarded launches
+	 * handled by an owner whose previous window already has desktop focus. */
+	gtk_window_present_with_time(GTK_WINDOW(app->window), GDK_CURRENT_TIME);
 	window_state_add(app);
 	app_startuptime("map-request");
 }
