@@ -18,6 +18,7 @@ Unchanged frames do not repaint or consume the immediate paint allowance for the
 checks and latency measurements on private displays.
 `manage.py latency-visible` measures real key events to visible echo and fresh/additional window presentation
 using private Xvfb pixels; it excludes desktop compositing and physical display latency.
+`manage.py interaction-perf` measures first ownership claims, cached tab switches, and wheel/page scroll pixels.
 The upstream source and license remain in the repository. Keep machine destinations in environment configuration
 and use anonymous commit identities. Run `manage.py privacy-setup` in fresh clones; privacy hooks and CI guard
 staged content and history.

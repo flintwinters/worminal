@@ -54,10 +54,10 @@ def pixels(window):
                             size.width // 2, size.height // 2, X.ZPixmap, 0xffffffff).data
 
 
-def ready(window):
+def ready(window, color=0x112233):
     size = window.get_geometry()
     data = window.get_image(size.width // 2, size.height // 2, 1, 1, X.ZPixmap, 0xffffffff).data
-    return int.from_bytes(data, sys.byteorder) & 0xffffff == 0x112233
+    return int.from_bytes(data, sys.byteorder) & 0xffffff == color
 
 
 def capture_failure(window):
@@ -71,16 +71,17 @@ def capture_failure(window):
         pass  # Preserve the original failure even if its window has disappeared.
 
 
-def launch(env, connection, title, log):
+def launch(env, connection, title, log, color=0x112233, history=False):
     started = time.monotonic_ns()
     process = subprocess.Popen([env.get("WORMINAL_FRONTEND", str(ROOT / "worminal")), "-g", "80x24", "-T", title,
-                                "-e", str(ROOT / "build/latency_echo")],
+                                "-e", str(ROOT / "build/latency_echo"), "--color", f"{color:06x}",
+                                *(["--history"] if history else [])],
                                env=env, stdout=log, stderr=log)
     window = None
     try:
         window = wait_for(lambda: find_window(connection, title))
         mapped = time.monotonic_ns()
-        wait_for(lambda: ready(window))
+        wait_for(lambda: ready(window, color))
         visible = time.monotonic_ns()
         return process, window, {"map": (mapped - started) / 1e6, "ready": (visible - started) / 1e6}
     except BaseException as error:

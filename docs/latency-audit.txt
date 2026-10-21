@@ -155,3 +155,21 @@ draws. It verifies partial draws for blinking cursor/text, full draws for palett
 and reverse changes, no damage for unchanged metadata, and no hidden-view draws.
 Full local and SSH integration checks pass. This proves reduced idle paint work;
 it is not yet evidence of a reduction in end-to-end typing latency.
+
+Interaction presentation probe
+-------------------------------
+manage.py interaction-perf now measures first tab ownership claim, cached tab
+switches after warm-up, wheel scroll and Shift+PageUp/PageDown. Each trial uses
+a fresh private display/workspace with two native fixtures. Known background
+colors distinguish the expected tab and scrollback/live rows; the observed
+window is raised so obscured-window pixels cannot satisfy the probe.
+
+The existing native echo fixture accepts an explicit RGB background and an
+optional bounded history producer. Default typing/launch behavior is retained.
+The root benchmark reuses launch, polling, screenshot diagnostics, keyboard
+injection and process resource helpers. --compare alternates variant ordering.
+No desktop windows or live workspaces are used.
+
+A two-trial smoke run observed cached switch/wheel/page medians around 16.6 ms
+and first-claim median 22.46 ms. This identifies a frame-clock interval worth
+investigating, rather than establishing an optimization claim.
