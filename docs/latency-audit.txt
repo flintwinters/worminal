@@ -84,3 +84,17 @@ clipped-glyph, selection, IME, ownership, browser and SSH integration checks pas
 Sixty alternating same-process measurements reported scalar/spans background
 means of 3.28/0.41 ms in one run and 12.62/1.90 ms under heavier load in another.
 This establishes lower background work, not a claimed 7x whole-frame speedup.
+
+Launch-focused follow-up
+------------------------
+Deferring the empty tab strip's Pango layout until its first catalog refresh
+removes unnecessary pre-map setup. Twenty alternating candidate/baseline pairs
+measured fresh readiness medians of 99.28/101.20 ms, paired median -2.41 ms;
+mapping paired median was -2.57 ms. Additional-window paired readiness was
+-0.10 ms. Frozen data: .checks/launch-lazy-tabs-experiment.json. Local and SSH
+integration checks pass, including an assertion that mapping an empty window
+has not initialized its tab layout.
+
+An experiment painting the first complete frame synchronously showed no gain
+(fresh readiness paired +0.38 ms, additional +0.13 ms) and was discarded.
+Frozen data: .checks/launch-first-frame-experiment.json.

@@ -471,6 +471,7 @@ main(int argc, char **argv)
 	char *command[] = {"/bin/sh", "-c", "stty raw -echo; printf READY; exec cat", NULL};
 	app->command = g_strdupv(command);
 	show_app(app);
+	g_assert_null(((TabStrip *)g_object_get_data(G_OBJECT(app->tabstrip), "tabs"))->layout);
 	GdkEvent *early = gdk_event_new(GDK_KEY_PRESS);
 	early->key.window = g_object_ref(gtk_widget_get_window(app->window));
 	early->key.keyval = GDK_KEY_q;
