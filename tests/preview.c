@@ -211,10 +211,38 @@ input_paint_latency(Terminal *t)
 	for (size_t i = 0; i < G_N_ELEMENTS(metadata); i++) wire_put_u32(&unchanged, metadata[i]);
 	WirePacket packet = {.type = WIRE_FRAME, .data = unchanged.data, .len = unchanged.len};
 	t->input_pending = TRUE;
+	t->selection_pending = TRUE;
 	terminal_packet(t, &packet);
 	packet.type = WIRE_FRAME_FINISH;
 	terminal_packet(t, &packet);
 	g_assert_true(t->input_pending);
+	g_assert_true(t->selection_pending);
+	/* Selection responses must wait for frame completion and current geometry,
+	 * independently of the existing keyboard-response allowance. */
+	WireBuffer row = {0};
+	wire_put_u32(&row, 1);
+	Line cells = tsessionviewline(t->session, 1);
+	for (int x = 0; x < t->frame.cols; x++) {
+		wire_put_u32(&row, cells[x].u); wire_put_u32(&row, cells[x].mode);
+		wire_put_u32(&row, cells[x].fg); wire_put_u32(&row, cells[x].bg);
+	}
+	int cols = t->cols;
+	t->input_pending = FALSE;
+	probe.wanted = wanted->str;
+	probe.painted = FALSE;
+	for (int pass = 0; pass < 2; pass++) {
+		t->cols = cols + !pass;
+		packet = (WirePacket){.type = WIRE_FRAME, .data = unchanged.data, .len = unchanged.len};
+		terminal_packet(t, &packet);
+		packet = (WirePacket){.type = WIRE_ROW, .data = row.data, .len = row.len};
+		terminal_packet(t, &packet);
+		g_assert_false(probe.painted);
+		packet.type = WIRE_FRAME_FINISH;
+		terminal_packet(t, &packet);
+		g_assert_cmpint(probe.painted, ==, pass != 0);
+		g_assert_cmpint(t->selection_pending, ==, pass == 0);
+	}
+	wire_buffer_free(&row);
 	wire_buffer_free(&unchanged);
 	gint64 elapsed = 0;
 	for (int i = 0; i < 20; i++) {
@@ -225,6 +253,7 @@ input_paint_latency(Terminal *t)
 		input(t, wanted->str + wanted->len - 1, 1);
 		WAIT(probe.painted);
 		g_assert_false(t->input_pending);
+		g_assert_false(t->selection_pending);
 		elapsed += g_get_monotonic_time() - start;
 	}
 	g_print("Input to GTK paint: %.2f ms mean (20 echoes)\n", elapsed / 20000.0);
@@ -319,6 +348,34 @@ check_blink_damage(void)
 	flush_paint(t);
 	g_assert_cmpuint(probe.draws, ==, 1);
 	g_assert_false(probe.partial);
+	/* Selection only reserves an allowance for an eventual service response.
+	 * It must not flush cached or partially imported cells during mapping. */
+	int cols = t->cols, rows = t->rows;
+	t->cols = t->frame.cols; t->rows = t->frame.rows;
+	for (int guard = 0; guard < 3; guard++) {
+		probe.draws = 0;
+		t->cols = t->frame.cols + (guard == 1);
+		page.live = guard != 2;
+		app.last_selection = 0;
+		gtk_widget_queue_draw(page.widget);
+		terminal_select(t);
+		g_assert_cmpuint(probe.draws, ==, 0);
+		g_assert_cmpint(t->selection_pending, ==, guard != 0);
+		flush_paint(t);
+		g_assert_cmpuint(probe.draws, ==, 1);
+		t->selection_pending = FALSE;
+	}
+	/* Keep a queued rapid-repeat selection on GTK's normal frame clock.
+	 * A future timestamp makes this check independent of test preemption. */
+	probe.draws = 0;
+	app.last_selection = g_get_monotonic_time() + 10 * G_TIME_SPAN_SECOND;
+	gtk_widget_queue_draw(page.widget);
+	terminal_select(t);
+	g_assert_false(t->selection_pending);
+	g_assert_cmpuint(probe.draws, ==, 0);
+	flush_paint(t);
+	t->cols = cols; t->rows = rows;
+	page.live = TRUE;
 	gtk_widget_hide(app.window);
 	probe.draws = 0;
 	for (int i = 0; i < 20; i++) { blink(t); flush_paint(t); }
@@ -375,6 +432,8 @@ check_initial_dimensions(void)
 	g_assert_null(t->layout);
 	g_assert_cmpint(tsessionframe(t->session).cols, ==, 7);
 	g_assert_cmpint(tsessionframe(t->session).rows, ==, 3);
+	packet.type = WIRE_FRAME_FINISH;
+	terminal_packet(t, &packet);
 	wire_buffer_free(&frame);
 	terminal_free(t);
 	gtk_widget_destroy(page.widget);

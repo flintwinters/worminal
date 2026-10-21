@@ -21,13 +21,39 @@ struct Terminal {
 	int cw, ch, height, ascent, cols, rows;
 	int button, last_x, last_y;
 	gboolean selecting, blink, numlock;
-	gboolean full_damage, input_pending;
+	gboolean full_damage, input_pending, selection_pending;
 	guint8 damaged_rows[200];
 	guint timer;
 };
 
 static void damage_row(Terminal *, int);
 static void prepare(Terminal *);
+
+void
+terminal_select(Terminal *t)
+{
+	App *app = t->page->app;
+	gint64 now = g_get_monotonic_time(), interval = 16667, presentation;
+	GdkFrameClock *clock = gtk_widget_get_frame_clock(t->page->widget);
+	if (clock) gdk_frame_clock_get_refresh_info(clock, now, &interval, &presentation);
+	/* Cached tab mapping already schedules a draw. Only a new service frame
+	 * for ownership or geometry needs a separate response allowance. Rapid
+	 * selections retain GTK's batching after the first response in a burst. */
+	if (t->page->live && t->frame.cols == t->cols && t->frame.rows == t->rows)
+		t->selection_pending = FALSE;
+	else if (!app->last_selection || now - app->last_selection >= interval)
+		t->selection_pending = TRUE;
+	app->last_selection = now;
+}
+
+static void
+scroll_view(Terminal *t, gboolean up, int steps)
+{
+	WireBuffer b = {0};
+	wire_put_u32(&b, up); wire_put_u32(&b, steps);
+	app_send(t->page->app, WIRE_SCROLL, t->page->id, b.data, b.len);
+	wire_buffer_free(&b);
+}
 
 static void
 input(Terminal *t, const char *bytes, size_t length)
@@ -524,11 +550,7 @@ terminal_key(Terminal *t, GdkEventKey *e)
 		return TRUE;
 	}
 	if ((e->state & GDK_SHIFT_MASK) && (e->keyval == GDK_KEY_Page_Up || e->keyval == GDK_KEY_Page_Down)) {
-		WireBuffer b = {0};
-		wire_put_u32(&b, e->keyval == GDK_KEY_Page_Up);
-		wire_put_u32(&b, MAX(1, t->frame.rows - 1));
-		app_send(t->page->app, WIRE_SCROLL, t->page->id, b.data, b.len);
-		wire_buffer_free(&b);
+		scroll_view(t, e->keyval == GDK_KEY_Page_Up, MAX(1, t->frame.rows - 1));
 		return TRUE;
 	}
 	const char *mapped = keymap(t, e);
@@ -665,10 +687,7 @@ wheel(GtkWidget *widget, GdkEventScroll *e, Terminal *t)
 		input(t, t->page->mode & MODE_APPCURSOR ? (up ? "\033OA" : "\033OB") :
 		      (up ? "\033[A" : "\033[B"), 3);
 	} else {
-		WireBuffer b = {0};
-		wire_put_u32(&b, up); wire_put_u32(&b, theme_scroll_multiplier);
-		app_send(t->page->app, WIRE_SCROLL, t->page->id, b.data, b.len);
-		wire_buffer_free(&b);
+		scroll_view(t, up, theme_scroll_multiplier);
 	}
 	return TRUE;
 }
@@ -768,10 +787,12 @@ terminal_packet(Terminal *t, WirePacket *p)
 			if (t->damaged_rows[row]) { damage_row(t, row); changed = TRUE; }
 		t->full_damage = FALSE;
 		memset(t->damaged_rows, 0, sizeof(t->damaged_rows));
-		if (changed && t->input_pending && gtk_widget_get_mapped(t->page->widget)) {
-			/* The first complete response to keyboard input should not wait
-			 * another refresh interval. Bulk output keeps GTK's frame clock. */
+		gboolean selection_ready = t->selection_pending && t->frame.cols == t->cols && t->frame.rows == t->rows;
+		if (changed && (t->input_pending || selection_ready) && gtk_widget_get_mapped(t->page->widget)) {
+			/* Complete interactive responses need not wait another refresh.
+			 * Bulk output and rapid selections retain GTK's frame clock. */
 			t->input_pending = FALSE;
+			if (selection_ready) t->selection_pending = FALSE;
 			G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 			gdk_window_process_updates(gtk_widget_get_window(t->page->widget), TRUE);
 			G_GNUC_END_IGNORE_DEPRECATIONS

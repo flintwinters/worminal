@@ -35,3 +35,8 @@ def memory(pids):
 def cpu_time(pid):
     fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
     return (int(fields[11]) + int(fields[12])) / os.sysconf("SC_CLK_TCK")
+
+
+def main_cpu_time(pid):
+    """Main-thread scheduled runtime in seconds, from Linux's nanosecond counter."""
+    return int(Path(f"/proc/{pid}/schedstat").read_text().split()[0]) / 1e9

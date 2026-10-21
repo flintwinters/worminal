@@ -211,6 +211,7 @@ app_select(Page *page)
 	gtk_notebook_set_current_page(notebook, index);
 	/* Selecting an already selected mirror must still move its live browser. */
 	if (same) activate(page);
+	if (page->terminal) terminal_select(page->terminal);
 }
 
 static void
