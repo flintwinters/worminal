@@ -320,7 +320,6 @@ catalog(App *app, WirePacket *packet)
 		}
 		if (!page) page = new_page(app, id, kind);
 		page->seen = TRUE;
-		page->mode = mode; page->cursor = cursor;
 		g_free(page->directory); page->directory = directory;
 		g_free(page->url); page->url = kind ? url : NULL;
 		if (!kind) free(url);
@@ -329,12 +328,15 @@ catalog(App *app, WirePacket *packet)
 			app_page_title(page, owner && owner->title ? owner->title : title);
 		}
 		free(title);
+		gboolean palette_changed = FALSE;
 		for (uint32_t c = 0; c < colors; c++) {
 			char *name = wire_get_string(packet);
 			if (!name) goto invalid;
-			terminal_palette(page, c, name);
+			palette_changed |= terminal_palette(page, c, name);
 			free(name);
 		}
+		if (page->terminal) terminal_configure(page->terminal, mode, cursor, palette_changed);
+		else { page->mode = mode; page->cursor = cursor; }
 		/* Ordered identities come from the service; local notebook order follows it. */
 		gtk_notebook_reorder_child(GTK_NOTEBOOK(app->notebook), page->widget, index);
 	}

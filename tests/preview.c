@@ -235,6 +235,99 @@ input_paint_latency(Terminal *t)
 
 static void select_page(Page *);
 
+typedef struct { guint draws; gboolean partial; } DamageProbe;
+
+static gboolean
+damage_probe(GtkWidget *widget, cairo_t *cr, DamageProbe *probe)
+{
+	double x1, y1, x2, y2;
+	cairo_clip_extents(cr, &x1, &y1, &x2, &y2);
+	probe->draws++;
+	probe->partial = y2 - y1 < gtk_widget_get_allocated_height(widget);
+	return FALSE;
+}
+
+static void
+flush_paint(Terminal *t)
+{
+	G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+	gdk_window_process_updates(gtk_widget_get_window(t->page->widget), TRUE);
+	G_GNUC_END_IGNORE_DEPRECATIONS
+}
+
+static void
+check_blink_damage(void)
+{
+	App app = {.fd = -1, .cols = 80, .rows = 24};
+	Page page = {.app = &app, .live = TRUE, .cursor = 2};
+	app.active = &page;
+	for (size_t i = 0; i < G_N_ELEMENTS(page.colors); i++) terminal_palette(&page, i, NULL);
+	Terminal *t = terminal_new(&page);
+	page.terminal = t;
+	app.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	gtk_window_set_default_size(GTK_WINDOW(app.window), 804, 474);
+	gtk_container_add(GTK_CONTAINER(app.window), page.widget);
+	DamageProbe probe = {0};
+	g_signal_connect_after(page.widget, "draw", G_CALLBACK(damage_probe), &probe);
+	gtk_widget_show_all(app.window);
+	WAIT(probe.draws);
+	g_source_remove(t->timer); t->timer = 0;
+	while (g_main_context_iteration(NULL, FALSE)) {}
+	flush_paint(t);
+	probe.draws = 0;
+	gint64 start = g_get_monotonic_time();
+	for (int i = 0; i < 20; i++) { blink(t); flush_paint(t); }
+	g_assert_cmpuint(probe.draws, ==, 0);
+	g_print("Steady idle blink: %u redraws in 20 ticks (%.2f ms total)\n",
+	    probe.draws, (g_get_monotonic_time() - start) / 1000.0);
+	/* Metadata alone must paint immediately without waiting for blink or
+	 * inventing a row update. Unchanged metadata must not damage anything. */
+	terminal_configure(t, page.mode, page.cursor, FALSE);
+	flush_paint(t);
+	g_assert_cmpuint(probe.draws, ==, 0);
+	terminal_configure(t, MODE_HIDE, page.cursor, FALSE);
+	flush_paint(t);
+	g_assert_cmpuint(probe.draws, ==, 1);
+	g_assert_true(probe.partial);
+	probe.draws = 0;
+	for (int i = 0; i < 20; i++) { blink(t); flush_paint(t); }
+	g_assert_cmpuint(probe.draws, ==, 0);
+	terminal_configure(t, 0, 1, FALSE);
+	flush_paint(t);
+	probe.draws = 0;
+	blink(t); flush_paint(t);
+	g_assert_cmpuint(probe.draws, ==, 1);
+	g_assert_true(probe.partial);
+	terminal_configure(t, MODE_HIDE, 2, FALSE);
+	flush_paint(t);
+	Line line = tsessionviewline(t->session, 2);
+	line[2].u = 'A'; line[2].mode = ATTR_BLINK;
+	probe.draws = 0;
+	blink(t); flush_paint(t);
+	g_assert_cmpuint(probe.draws, ==, 1);
+	g_assert_true(probe.partial);
+	gboolean changed = terminal_palette(&page, defaultbg, "#123456");
+	g_assert_true(changed);
+	g_assert_false(terminal_palette(&page, defaultbg, "#123456"));
+	probe.draws = 0;
+	terminal_configure(t, page.mode, page.cursor, changed);
+	flush_paint(t);
+	g_assert_cmpuint(probe.draws, ==, 1);
+	g_assert_false(probe.partial);
+	probe.draws = 0;
+	terminal_configure(t, page.mode | MODE_REVERSE, page.cursor, FALSE);
+	flush_paint(t);
+	g_assert_cmpuint(probe.draws, ==, 1);
+	g_assert_false(probe.partial);
+	gtk_widget_hide(app.window);
+	probe.draws = 0;
+	for (int i = 0; i < 20; i++) { blink(t); flush_paint(t); }
+	g_assert_cmpuint(probe.draws, ==, 0);
+	terminal_free(t);
+	g_clear_pointer(&app.cached_font, pango_font_description_free);
+	gtk_widget_destroy(app.window);
+}
+
 static void
 check_initial_dimensions(void)
 {
@@ -484,6 +577,7 @@ main(int argc, char **argv)
 	setlocale(LC_CTYPE, "");
 	gtk_init(&argc, &argv);
 	check_initial_dimensions();
+	check_blink_damage();
 	const char *backend = g_getenv("GDK_BACKEND");
 	if (backend && !strcmp(backend, "wayland")) {
 		g_assert_null(g_getenv("DISPLAY"));

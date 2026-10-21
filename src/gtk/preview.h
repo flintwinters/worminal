@@ -72,7 +72,8 @@ void terminal_zoom(Terminal *);
 void terminal_copy(Terminal *, GdkAtom);
 void terminal_paste(Terminal *, GdkAtom);
 gboolean terminal_key(Terminal *, GdkEventKey *);
-void terminal_palette(Page *, uint32_t, const char *);
+gboolean terminal_palette(Page *, uint32_t, const char *);
+void terminal_configure(Terminal *, uint32_t, uint32_t, gboolean);
 void terminal_dimensions(Terminal *, int *, int *);
 
 G_GNUC_INTERNAL Browser *browser_new(App *);

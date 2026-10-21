@@ -135,3 +135,23 @@ Installed a7ab3cf with the configured Alacritty theme. Installed launcher,
 frontend module and daemon match the verified build. Existing GTK owners keep
 their loaded frontend until all their windows close; live daemon sessions were
 not restarted or migrated.
+
+Idle presentation work
+----------------------
+Blink ticks previously requested full-widget damage every 800 ms, even with a
+steady/hidden cursor and no blinking text. They now damage only rows containing
+blinking glyphs or a visible blinking cursor, and skip unmapped views entirely.
+The blink phase still advances while hidden; no visible blink behavior is removed.
+
+Catalog palette, reverse-video, cursor shape and cursor visibility changes now
+invalidate their own pixels. Palette changes repaint the active tab strip too.
+This is required because the old blanket timer repaint could otherwise conceal
+missing metadata-only damage. Palette comparison uses parsed RGBA values, so
+unchanged catalogs do not introduce new repaints.
+
+The real GTK damage regression disables its automatic timer, explicitly invokes
+20 ticks with a steady cursor and 20 with a hidden cursor, and observes zero
+draws. It verifies partial draws for blinking cursor/text, full draws for palette
+and reverse changes, no damage for unchanged metadata, and no hidden-view draws.
+Full local and SSH integration checks pass. This proves reduced idle paint work;
+it is not yet evidence of a reduction in end-to-end typing latency.
