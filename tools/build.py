@@ -163,6 +163,8 @@ class Builder:
             packages = PROBES[name]
             step(target, [*self.cc, "-O2", *pkg_flags("--cflags", packages), f"tests/{name}.c",
                           *pkg_flags("--libs", packages)], [f"tests/{name}.c"])
+        elif target == "build/frame_schedule_test":
+            self.program(target, ["tests/frame_schedule.c"], variant="frame-schedule", libs=[])
         elif target == "build/view_state_test":
             # view_state.c includes x.c to exercise internal state; compile that translation unit once.
             sources = ["tests/view_state.c", "src/terminal/defaults.c", "src/x11/url.c", "src/workspace/wire.c",

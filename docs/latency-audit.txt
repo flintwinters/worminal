@@ -1,0 +1,49 @@
+Latency optimization audit
+==========================
+
+Objective: reduce all measured latency paths until further gains require a
+correctness, resource, behavior, or compatibility compromise. This audit is
+ongoing; the completed work below does not establish that the objective is met.
+
+Preserve cell rendering, Unicode fallback, selection and IME behavior; live
+session ownership and explicit legacy rollback; desktop integration; calling
+shell configuration; and bounded CPU, memory, queues, and output batching.
+Do not remove these costs merely to improve a benchmark number.
+
+Measurement entry points
+------------------------
+manage.py latency-visible: fresh/additional window mapping and visible readiness,
+plus real XTest key events through a PTY to observed pixels. Snapshot/compare
+alternates matched workloads. Private Xvfb excludes desktop compositor, physical
+keyboard, and monitor scanout; observation adds a polling/readback allowance.
+
+manage.py frame-perf: ordinary paced PTY output to a complete service frame,
+without keyboard-response boosting. Report latency, delivered frame count,
+daemon CPU counter resolution, and RSS/PSS; compare a frozen daemon snapshot.
+
+manage.py preview-perf: fresh launch/interactive-shell/input timings and
+helper-inclusive memory. check-preview also times dense full/row painting.
+
+Remaining audit scope includes GTK presentation after service delivery, dense
+painting, view/tab switching, scrolling, and fresh GTK/shell startup. Compare
+CPU/memory and validate visual/input/session invariants before accepting changes.
+
+Verified checkpoint: output scheduling
+-------------------------------------
+The service used a fresh 16 ms sleep even when its existing deadline was near.
+It now waits only the remaining interval; both the wait and emission condition
+use the same policy. The configured batching limit and input boost are unchanged.
+
+A 40-response native-protocol comparison measured 7.93/16.30 ms median/p95
+before and 1.96/2.37 ms after. All responses arrived in both runs. Delivered frames
+increased from 61 to 81 because fewer intermediate states were coalesced by the
+oversleep; the rate cap was not raised. Daemon PSS measured 253/249 KiB and
+CPU below the 10 ms accounting resolution in this workload, rather than a claim
+of literally zero processing cost. Frozen samples remain under
+.checks/frame-deadline-verified-{baseline,candidate}.json.
+
+Faster delivery exposed early-output correctness failures. Pending-wrap cursor
+mapping across width changes and pending-wrap preservation on unchanged-width
+resizes are now covered by native regressions. The existing counterfactual proof
+command verifies that restoring the old mapping fails. Local and SSH GTK checks
+pass with corrected cursor handling and the new output deadline policy.

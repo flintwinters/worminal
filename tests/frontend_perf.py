@@ -10,39 +10,12 @@ import subprocess
 import time
 
 from latency import measure_one
+from perf_metrics import descendants, memory
 from preview import fixture, profile
 from x11 import isolated_display
 from workspace_protocol import send, string, wait_kind
 
 ROOT = Path(__file__).resolve().parent.parent
-
-
-def descendants(pid):
-    result = {pid}
-    try:
-        children = Path(f"/proc/{pid}/task/{pid}/children").read_text().split()
-    except FileNotFoundError:
-        return result
-    for child in children:
-        result.update(descendants(int(child)))
-    return result
-
-
-def memory(pids):
-    values = {"rss_kib": 0, "pss_kib": 0, "processes": 0}
-    for pid in sorted(pids):
-        try:
-            lines = Path(f"/proc/{pid}/smaps_rollup").read_text().splitlines()
-        except (FileNotFoundError, ProcessLookupError):
-            continue
-        values["processes"] += 1
-        for line in lines:
-            key, *parts = line.split()
-            if key == "Rss:":
-                values["rss_kib"] += int(parts[0])
-            elif key == "Pss:":
-                values["pss_kib"] += int(parts[0])
-    return values
 
 
 def read_until(stream, marker, timeout=10):
