@@ -81,6 +81,28 @@ class BuildTests(unittest.TestCase):
             build.step("output.o", [*command, "-O2"], ["source.c"], depfile=True)
             self.assertEqual(invoked.call_count, 3)
 
+    def test_link_dependencies_relink_without_recompiling(self):
+        (self.root / "module.c").write_text("int entry(void) { return 1; }\n")
+        exports = self.root / "exports.map"
+        exports.write_text("{ global: entry; local: *; };\n")
+        with patch.object(build, "pkg_flags", return_value=[]):
+            builder = build.Builder()
+        with patch.object(build, "invoke", wraps=build.invoke) as invoked:
+            def link():
+                builder.program("module.so", ["module.c"], flags=["-fPIC"],
+                                libs=["-shared", "-Wl,--version-script=exports.map"],
+                                link_dependencies=["exports.map"])
+            link()
+            self.assertEqual(invoked.call_count, 2)
+            link()
+            self.assertEqual(invoked.call_count, 2)
+            exports.write_text("{ global: entry; };\n")
+            modified = (self.root / "module.so").stat().st_mtime_ns + 1
+            os.utime(exports, ns=(modified, modified))
+            link()
+            self.assertEqual(invoked.call_count, 3)
+            self.assertNotIn("-c", invoked.call_args.args[0])
+
     def test_staged_install_uninstall_and_modes(self):
         for source in ("worminal", "worminald", "worminal-x11", "worminald-x11",
                        "build/browser.so", "build/frontend.so",

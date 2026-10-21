@@ -39,6 +39,7 @@ remote machines share saved URLs only. `worminald` uses the v2 endpoint; browser
 Its shell command converts the calling PTY's ordered tab into a browser. GTK and WebKit never enter the service.
 Launchers link GLib only and forward to an existing owner before loading the GTK/Pango frontend module;
 the WebKit module loads when a browser view is first claimed.
+The frontend exports its module/callback interface explicitly; linker collection removes unused owner/parser code.
 Hidden terminal views defer cell buffers until first use or frame, and font layouts, input methods,
 and blink timers until mapped or used. Empty tab strips defer Pango layouts until catalog refresh.
 Service output batching sleeps to its existing deadline rather than adding a fresh interval after partial bursts.

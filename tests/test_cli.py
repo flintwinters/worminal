@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 import subprocess
+import sys
 import unittest
 
 from tools.build import VERSION
@@ -16,6 +17,23 @@ class CommandLineTest(unittest.TestCase):
         dependencies = subprocess.check_output(["ldd", str(ROOT / "worminal")], text=True)
         for name in ("libgtk", "libgdk", "libpango", "libwebkit"):
             self.assertNotIn(name, dependencies)
+
+    def test_browser_resolves_against_frontend_module_boundary(self):
+        script = """
+import ctypes, os, sys
+frontend = ctypes.CDLL(sys.argv[1], mode=os.RTLD_NOW | os.RTLD_GLOBAL)
+browser = ctypes.CDLL(sys.argv[2], mode=os.RTLD_NOW)
+assert frontend.worminal_frontend_v1 and browser.worminal_browser_module
+try:
+    frontend.tsessionnew
+except AttributeError:
+    pass
+else:
+    raise AssertionError('frontend exports the owner/parser constructor')
+"""
+        result = subprocess.run([sys.executable, "-c", script, str(ROOT / "build/frontend.so"),
+                                 str(ROOT / "build/browser.so")], capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def invoke(self, option):
         env = {key: value for key, value in os.environ.items()
