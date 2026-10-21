@@ -4,6 +4,7 @@
 #include "../src/gtk/browser.c"
 #include "../src/gtk/tabs.c"
 #include "../src/gtk/windows.c"
+#include "../src/gtk/window_state.c"
 #include <glib/gstdio.h>
 #include "preview_text.c"
 #include "preview_tabs.c"

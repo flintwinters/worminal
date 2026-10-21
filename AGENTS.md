@@ -39,6 +39,9 @@ remote machines share saved URLs only. `worminald` uses the v2 endpoint; browser
 Its shell command converts the calling PTY's ordered tab into a browser. GTK and WebKit never enter the service.
 Launchers link GLib only and forward to an existing owner before loading the GTK/Pango frontend module;
 the WebKit module loads when a browser view is first claimed.
+GTK publishes selected terminal directories and window focus through a read-only session D-Bus interface;
+`docs/window-state.md` defines the public contract and `manage.py check-window-state` checks it privately.
+The daemon refreshes shell directories after output and every 250 ms, including silent directory changes.
 The frontend exports its module/callback interface explicitly; linker collection removes unused owner/parser code.
 Hidden terminal views defer cell buffers until first use or frame, and font layouts, input methods,
 and blink timers until mapped or used. Empty tab strips defer Pango layouts until catalog refresh.

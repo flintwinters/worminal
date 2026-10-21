@@ -224,6 +224,14 @@ def check_headless():
     raise typer.Exit(run_headless_checks())
 
 
+@app.command("check-window-state")
+def check_window_state():
+    """Check the public session-bus directory interface on a private bus and display."""
+    native_build.build_targets()
+    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                         "-p", "test_window_state.py", "-v"]))
+
+
 @app.command()
 def lint():
     """Check file limits and run Clang static analysis (requires clang-tidy)."""

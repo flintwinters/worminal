@@ -18,7 +18,7 @@ COMMON = ("terminal/defaults.c", "terminal/st.c", *SESSION_SUPPORT,
 CLIENT = (*COMMON, "workspace/workspace_client.c", "x11/x.c", "x11/url.c")
 SERVER = (*COMMON, "workspace/workspace_service.c", "workspace/workspace_handoff.c", "workspace/browser_target.c")
 PREVIEW = (*COMMON, "workspace/workspace_client.c", "gtk/app.c", "gtk/terminal.c",
-           "gtk/browser_loader.c", "gtk/tabs.c", "gtk/windows.c")
+           "gtk/browser_loader.c", "gtk/tabs.c", "gtk/windows.c", "gtk/window_state.c")
 PREVIEW_PACKAGES = ("gtk+-3.0", "pangocairo", "fontconfig", "freetype2", "webkit2gtk-4.1")
 TERMINAL_PACKAGES = ("gtk+-3.0", "pangocairo", "fontconfig", "freetype2", "gmodule-2.0")
 SOURCES = tuple(dict.fromkeys((*CLIENT, *SERVER)))
@@ -236,7 +236,8 @@ def analyze():
     flags = [*CPPFLAGS, "-DWORMINAL_PREVIEW_PROTOCOL", *words("CPPFLAGS")]
     invoke([*tidy, "src/workspace/workspace_service.c", "--", *flags])
     invoke([*tidy, "src/gtk/app.c", "src/gtk/terminal.c", "src/gtk/browser.c", "src/gtk/browser_loader.c",
-            "src/gtk/tabs.c", "src/gtk/windows.c", "src/gtk/windows_forward.c", "src/gtk/launcher.c", "--",
+            "src/gtk/tabs.c", "src/gtk/windows.c", "src/gtk/window_state.c",
+            "src/gtk/windows_forward.c", "src/gtk/launcher.c", "--",
             *flags, *pkg_flags("--cflags", PREVIEW_PACKAGES)])
 
 

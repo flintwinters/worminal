@@ -47,9 +47,13 @@ struct App {
 	double cached_font_zoom;
 	int font_cw, font_ch, font_height, font_ascent;
 	gint64 last_selection;
+	guint state_id;
 };
 
 void tabs_refresh(App *);
+void window_state_add(App *);
+void window_state_changed(App *);
+void window_state_remove(App *);
 GtkWidget *tabs_new(App *);
 PangoFontDescription *terminal_font(App *, PangoLayout *, int *, int *, int *, int *);
 

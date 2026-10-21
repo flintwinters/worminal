@@ -104,6 +104,9 @@ virtual-seat headers, without installing system packages.
 `preview-perf` compares the original and preview, including WebKit helper memory.
 See [preview validation and limitations](docs/browser-integration.txt) for measured costs and compatibility constraints.
 
+External applications can read the selected terminal's full working directory and watch changes through the
+[session D-Bus window-state interface](docs/window-state.md), independently of window titles on Wayland and X11.
+
 ## Keep your workspace running
 
 Each launch opens a new window and tab. The local `worminald` service starts on demand and owns the shells,
