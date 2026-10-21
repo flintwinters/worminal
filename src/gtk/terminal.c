@@ -192,7 +192,7 @@ color(Page *p, uint32_t value)
 	return p->colors[value < G_N_ELEMENTS(p->colors) ? value : defaultfg];
 }
 
-static void
+static gboolean
 cell_colors(Terminal *t, Glyph g, int x, int y, GdkRGBA *fg, GdkRGBA *bg)
 {
 	Page *p = t->page;
@@ -213,6 +213,14 @@ cell_colors(Terminal *t, Glyph g, int x, int y, GdkRGBA *fg, GdkRGBA *bg)
 	}
 	if ((g.mode & ATTR_INVISIBLE) || ((g.mode & ATTR_BLINK) && t->blink))
 		*fg = *bg;
+	SessionFrame f = t->frame;
+	gboolean cursor_cell = x == f.cursor_x || (x == f.cursor_x + 1 &&
+	    (tsessionviewline(t->session, y)[f.cursor_x].mode & ATTR_WIDE));
+	gboolean cursor = !f.scroll && cursor_cell && y == f.cursor_y &&
+	    !(p->mode & MODE_HIDE) && (!t->blink || !(p->cursor & 1)) && p->live;
+	gboolean block = cursor && p->cursor <= 2 && gtk_widget_has_focus(p->widget);
+	if (block) { *bg = color(p, defaultcs); *fg = color(p, defaultbg); }
+	return cursor && !block;
 }
 
 static void
@@ -245,6 +253,42 @@ glyph_overlap(Terminal *t)
 	return t->height + abs(theme_glyph_offset_y);
 }
 
+static void
+background_run(Terminal *t, cairo_t *cr, const GdkRGBA *bg, int first, int end, int row)
+{
+	gdk_cairo_set_source_rgba(cr, bg);
+	cairo_rectangle(cr, 2 + first * t->cw, 2 + row * t->ch, (end - first) * t->cw, t->ch);
+	cairo_fill(cr);
+}
+
+static void
+draw_backgrounds(Terminal *t, cairo_t *cr, int first, int end)
+{
+	cairo_matrix_t matrix;
+	cairo_get_matrix(cr, &matrix);
+	/* Joining cells is pixel-identical only on an aligned device grid. Keep
+	 * scalar painting for fractional transforms, including alpha edge blends. */
+	double origin_x = 2 * matrix.xx + matrix.x0, origin_y = 2 * matrix.yy + matrix.y0;
+	double step_x = t->cw * matrix.xx, step_y = t->ch * matrix.yy;
+	gboolean aligned = !matrix.xy && !matrix.yx &&
+	    origin_x == floor(origin_x) && origin_y == floor(origin_y) &&
+	    step_x == floor(step_x) && step_y == floor(step_y);
+	for (int y = first; y < end; y++) {
+		Line line = tsessionviewline(t->session, y);
+		GdkRGBA fg, bg, run;
+		cell_colors(t, line[0], 0, y, &fg, &run);
+		int start = 0;
+		for (int x = 1; x < t->frame.cols; x++) {
+			cell_colors(t, line[x], x, y, &fg, &bg);
+			if (aligned && gdk_rgba_equal(&bg, &run)) continue;
+			background_run(t, cr, &run, start, x, y);
+			start = x;
+			run = bg;
+		}
+		background_run(t, cr, &run, start, t->frame.cols, y);
+	}
+}
+
 static gboolean
 draw_terminal(GtkWidget *widget, cairo_t *cr, Terminal *t)
 {
@@ -263,57 +307,45 @@ draw_terminal(GtkWidget *widget, cairo_t *cr, Terminal *t)
 	int overlap = glyph_overlap(t) + t->ch;
 	int first = MAX(0, (int)floor((clip_y1 - 2 - overlap) / t->ch));
 	int end = MIN(f.rows, (int)ceil((clip_y2 - 2 + overlap) / t->ch));
-	for (int pass = 0; pass < 2; pass++)
-		for (int y = first; y < end; y++) {
-			Line line = tsessionviewline(t->session, y);
-			for (int x = 0; x < f.cols; x++) {
-				Glyph g = line[x];
-				GdkRGBA fg, bg;
-				cell_colors(t, g, x, y, &fg, &bg);
-				gboolean cursor_cell = x == f.cursor_x || (x == f.cursor_x + 1 &&
-				    (line[f.cursor_x].mode & ATTR_WIDE));
-				gboolean cursor = !f.scroll && cursor_cell && y == f.cursor_y &&
-				                  !(p->mode & MODE_HIDE) && (!t->blink || !(p->cursor & 1)) && p->live;
-				gboolean block = cursor && p->cursor <= 2 && gtk_widget_has_focus(widget);
-				if (block) { bg = color(p, defaultcs); fg = color(p, defaultbg); }
-				if (!pass) {
-					gdk_cairo_set_source_rgba(cr, &bg);
-					cairo_rectangle(cr, 2 + x * t->cw, 2 + y * t->ch, t->cw, t->ch);
-					cairo_fill(cr);
-					continue;
-				}
-				if (g.mode & ATTR_WDUMMY)
-					continue;
-				char utf8[8] = {0};
-				g_unichar_to_utf8(g_unichar_validate(g.u) ? g.u : 0xfffd, utf8);
-				gdk_cairo_set_source_rgba(cr, &fg);
-				if (g.u != ' ') text(t, cr, utf8, x, y, g.mode);
-				int width = t->cw * ((g.mode & ATTR_WIDE) ? 2 : 1);
-				if (g.mode & ATTR_UNDERLINE) {
-					cairo_rectangle(cr, 2 + x * t->cw, 2 + (y + 1) * t->ch - 1, width, 1);
-					cairo_fill(cr);
-				}
-				if (g.mode & ATTR_STRUCK) {
-					cairo_rectangle(cr, 2 + x * t->cw, 2 + y * t->ch + t->ch / 2, width, 1);
-					cairo_fill(cr);
-				}
-				if (cursor && !block) {
-					GdkRGBA cs = color(p, defaultcs);
-					gdk_cairo_set_source_rgba(cr, &cs);
-					if (p->cursor <= 2) {
-						cairo_set_line_width(cr, 1);
-						cairo_rectangle(cr, 2.5 + x * t->cw, 2.5 + y * t->ch, width - 1, t->ch - 1);
-						cairo_stroke(cr);
-					} else if (p->cursor == 7) {
-						text(t, cr, "☃", x, y, 0);
-					} else if (p->cursor == 5 || p->cursor == 6)
-						cairo_rectangle(cr, 2 + x * t->cw, 2 + y * t->ch, 2, t->ch);
-					else
-						cairo_rectangle(cr, 2 + x * t->cw, (y + 1) * t->ch, t->cw, 2);
-					cairo_fill(cr);
-				}
+	draw_backgrounds(t, cr, first, end);
+	for (int y = first; y < end; y++) {
+		Line line = tsessionviewline(t->session, y);
+		for (int x = 0; x < f.cols; x++) {
+			Glyph g = line[x];
+			GdkRGBA fg, bg;
+			gboolean cursor = cell_colors(t, g, x, y, &fg, &bg);
+			if (g.mode & ATTR_WDUMMY)
+				continue;
+			char utf8[8] = {0};
+			g_unichar_to_utf8(g_unichar_validate(g.u) ? g.u : 0xfffd, utf8);
+			gdk_cairo_set_source_rgba(cr, &fg);
+			if (g.u != ' ') text(t, cr, utf8, x, y, g.mode);
+			int width = t->cw * ((g.mode & ATTR_WIDE) ? 2 : 1);
+			if (g.mode & ATTR_UNDERLINE) {
+				cairo_rectangle(cr, 2 + x * t->cw, 2 + (y + 1) * t->ch - 1, width, 1);
+				cairo_fill(cr);
+			}
+			if (g.mode & ATTR_STRUCK) {
+				cairo_rectangle(cr, 2 + x * t->cw, 2 + y * t->ch + t->ch / 2, width, 1);
+				cairo_fill(cr);
+			}
+			if (cursor) {
+				GdkRGBA cs = color(p, defaultcs);
+				gdk_cairo_set_source_rgba(cr, &cs);
+				if (p->cursor <= 2) {
+					cairo_set_line_width(cr, 1);
+					cairo_rectangle(cr, 2.5 + x * t->cw, 2.5 + y * t->ch, width - 1, t->ch - 1);
+					cairo_stroke(cr);
+				} else if (p->cursor == 7) {
+					text(t, cr, "☃", x, y, 0);
+				} else if (p->cursor == 5 || p->cursor == 6)
+					cairo_rectangle(cr, 2 + x * t->cw, 2 + y * t->ch, 2, t->ch);
+				else
+					cairo_rectangle(cr, 2 + x * t->cw, (y + 1) * t->ch, t->cw, 2);
+				cairo_fill(cr);
 			}
 		}
+	}
 	if (t->preedit && *t->preedit) {
 		GdkRGBA fg = color(p, defaultfg);
 		gdk_cairo_set_source_rgba(cr, &fg);

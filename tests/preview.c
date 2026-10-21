@@ -74,8 +74,80 @@ paint_probe(GtkWidget *widget, cairo_t *cr, PaintProbe *probe)
 }
 
 static void
+reference_backgrounds(Terminal *t, cairo_t *cr, int first, int end)
+{
+	for (int y = first; y < end; y++) {
+		Line line = tsessionviewline(t->session, y);
+		for (int x = 0; x < t->frame.cols; x++) {
+			GdkRGBA fg, bg;
+			cell_colors(t, line[x], x, y, &fg, &bg);
+			gdk_cairo_set_source_rgba(cr, &bg);
+			cairo_rectangle(cr, 2 + x * t->cw, 2 + y * t->ch, t->cw, t->ch);
+			cairo_fill(cr);
+		}
+	}
+}
+
+static void
+check_background_spans(Terminal *t)
+{
+	tsessionuse(t->session);
+	int width = gtk_widget_get_allocated_width(t->page->widget);
+	int height = gtk_widget_get_allocated_height(t->page->widget);
+	Glyph saved[400];
+	Line line = tsessionviewline(t->session, 0);
+	memcpy(saved, line, t->frame.cols * sizeof(*line));
+	GdkRGBA saved_color = t->page->colors[1];
+	t->page->colors[1].alpha = .5;
+	for (int x = 0; x < t->frame.cols; x++) {
+		line[x].bg = x / 5 % 16;
+		if (x % 7 == 0) line[x].mode ^= ATTR_REVERSE;
+	}
+	const double scales[] = {1, 2, 1.25, 1};
+	for (size_t index = 0; index < G_N_ELEMENTS(scales); index++) {
+		int factor = 2;
+		cairo_surface_t *surfaces[2];
+		for (int reference = 0; reference < 2; reference++) {
+			surfaces[reference] = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width * factor, height * factor);
+			cairo_t *cr = cairo_create(surfaces[reference]);
+			cairo_scale(cr, scales[index], scales[index]);
+			if (index >= 2) cairo_translate(cr, .25, .5);
+			cairo_rectangle(cr, 3.5, 4.25, width - 7, height - 8);
+			cairo_clip(cr);
+			if (reference) reference_backgrounds(t, cr, 0, t->frame.rows);
+			else draw_backgrounds(t, cr, 0, t->frame.rows);
+			cairo_destroy(cr);
+			cairo_surface_flush(surfaces[reference]);
+		}
+		int bytes = cairo_image_surface_get_stride(surfaces[0]) * height * factor;
+		g_assert_cmpmem(cairo_image_surface_get_data(surfaces[0]), bytes,
+		    cairo_image_surface_get_data(surfaces[1]), bytes);
+		for (int i = 0; i < 2; i++) cairo_surface_destroy(surfaces[i]);
+	}
+	memcpy(line, saved, t->frame.cols * sizeof(*line));
+	t->page->colors[1] = saved_color;
+	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+	cairo_t *cr = cairo_create(surface);
+	gint64 elapsed[2] = {0};
+	for (int i = 0; i < 60; i++) {
+		for (int order = 0; order < 2; order++) {
+			int reference = (i + order) % 2;
+			gint64 start = g_get_monotonic_time();
+			if (reference) reference_backgrounds(t, cr, 0, t->frame.rows);
+			else draw_backgrounds(t, cr, 0, t->frame.rows);
+			elapsed[reference] += g_get_monotonic_time() - start;
+		}
+	}
+	g_print("Background paint: scalar %.2f ms, spans %.2f ms mean (60 alternating trials)\n",
+	    elapsed[1] / 60000.0, elapsed[0] / 60000.0);
+	cairo_destroy(cr);
+	cairo_surface_destroy(surface);
+}
+
+static void
 check_clipped_paint(Terminal *t)
 {
+	check_background_spans(t);
 	int width = gtk_widget_get_allocated_width(t->page->widget);
 	int height = gtk_widget_get_allocated_height(t->page->widget);
 	cairo_surface_t *full = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
