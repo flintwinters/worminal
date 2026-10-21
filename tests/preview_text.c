@@ -34,32 +34,58 @@ check_ascii_line_rendering(Terminal *t)
 		}
 		pango_font_description_free(font);
 	}
+	guint eligible = 0;
+	for (int style = 0; style < 4; style++)
+		for (int col = 0; col < 95; col++)
+			eligible += plain_ascii_run(pango_layout_get_line_readonly(t->ascii[style][col], 0)) != NULL;
+	g_print("Direct ASCII runs: %u/380\n", eligible);
 	cairo_destroy(cr); cairo_surface_destroy(seed);
 	int width = 2 * (95 * t->cw + 4), height = 2 * (4 * t->ch + t->height + 4);
 	PangoContext *context = pango_layout_get_context(t->layout);
 	PangoDirection direction = pango_context_get_base_dir(context);
-	for (int rtl = 0; rtl < 2; rtl++) {
-		pango_context_set_base_dir(context, rtl ? PANGO_DIRECTION_RTL : PANGO_DIRECTION_LTR);
-		for (int transform = 0; transform < 3; transform++) {
-			for (int clipped = 0; clipped < 2; clipped++) {
-				cairo_surface_t *images[2];
-				for (int lines = 0; lines < 2; lines++) {
-					images[lines] = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
-					cr = cairo_create(images[lines]);
-					if (transform == 1) cairo_scale(cr, 2, 2);
-					if (transform == 2) { cairo_translate(cr, .25, .5); cairo_scale(cr, 1.25, 1.25); }
-					if (clipped) { cairo_rectangle(cr, 13, 7, width / 3, height / 3); cairo_clip(cr); }
-					cairo_set_source_rgba(cr, .3, .7, .9, .5);
-					ascii_grid(t, cr, lines, legacy);
-					cairo_destroy(cr);
-					cairo_surface_flush(images[lines]);
+	for (int attributed = 0; attributed < 2; attributed++) {
+		PangoAttrList *attrs = NULL;
+		if (attributed) {
+			attrs = pango_attr_list_new();
+			pango_attr_list_insert(attrs, pango_attr_rise_new(3 * PANGO_SCALE));
+			pango_attr_list_insert(attrs, pango_attr_underline_new(PANGO_UNDERLINE_SINGLE));
+		}
+		for (int style = 0; style < 4; style++)
+			for (int col = 0; col < 95; col++) {
+				pango_layout_set_attributes(legacy[style][col], attrs);
+				pango_layout_set_attributes(t->ascii[style][col], attrs);
+				if (attributed)
+					g_assert_null(plain_ascii_run(pango_layout_get_line_readonly(t->ascii[style][col], 0)));
+			}
+		for (int rtl = 0; rtl < 2; rtl++) {
+			pango_context_set_base_dir(context, rtl ? PANGO_DIRECTION_RTL : PANGO_DIRECTION_LTR);
+			for (int transform = 0; transform < 3; transform++) {
+				for (int clipped = 0; clipped < 2; clipped++) {
+					cairo_surface_t *images[2];
+					for (int lines = 0; lines < 2; lines++) {
+						images[lines] = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+						cr = cairo_create(images[lines]);
+						if (transform == 1) cairo_scale(cr, 2, 2);
+						if (transform == 2) { cairo_translate(cr, .25, .5); cairo_scale(cr, 1.25, 1.25); }
+						if (clipped) { cairo_rectangle(cr, 13, 7, width / 3, height / 3); cairo_clip(cr); }
+						cairo_set_source_rgba(cr, .3, .7, .9, .5);
+						ascii_grid(t, cr, lines, legacy);
+						cairo_destroy(cr);
+						cairo_surface_flush(images[lines]);
+					}
+					g_assert_cmpmem(cairo_image_surface_get_data(images[0]), cairo_image_surface_get_stride(images[0]) * height,
+					    cairo_image_surface_get_data(images[1]), cairo_image_surface_get_stride(images[1]) * height);
+					cairo_surface_destroy(images[0]); cairo_surface_destroy(images[1]);
 				}
-				g_assert_cmpmem(cairo_image_surface_get_data(images[0]), cairo_image_surface_get_stride(images[0]) * height,
-				    cairo_image_surface_get_data(images[1]), cairo_image_surface_get_stride(images[1]) * height);
-				cairo_surface_destroy(images[0]); cairo_surface_destroy(images[1]);
 			}
 		}
+		if (attrs) pango_attr_list_unref(attrs);
 	}
+	for (int style = 0; style < 4; style++)
+		for (int col = 0; col < 95; col++) {
+			pango_layout_set_attributes(legacy[style][col], NULL);
+			pango_layout_set_attributes(t->ascii[style][col], NULL);
+		}
 	pango_context_set_base_dir(context, direction);
 	cairo_surface_t *image = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
 	cr = cairo_create(image);
