@@ -682,6 +682,7 @@ main(int argc, char **argv)
 	setlocale(LC_CTYPE, "");
 	gtk_init(&argc, &argv);
 	check_tab_ranges();
+	check_catalog_tab_refresh();
 	check_initial_dimensions();
 	check_blink_damage();
 	check_connection_gate();
