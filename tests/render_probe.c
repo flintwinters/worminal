@@ -27,8 +27,10 @@ process_ns(void)
 
 static void
 paint_case(Terminal *terminal, GtkWidget *widget, int cols, int rows,
-           gboolean unicode, gboolean clipped, const char *prefix, int frames)
+           int content, gboolean clipped, const char *prefix, int frames)
 {
+	const gunichar runes[] = {0x03bb, 0x00e9, 0x0416, 0x05d0, 0x0639, 0x253c, 0x4e2d, 0x1f642};
+	uint32_t coverage = 0;
 	WireBuffer frame = {0};
 	uint32_t values[] = {cols, rows, 0, 0, 0, 0};
 	for (size_t i = 0; i < G_N_ELEMENTS(values); i++) wire_put_u32(&frame, values[i]);
@@ -36,18 +38,38 @@ paint_case(Terminal *terminal, GtkWidget *widget, int cols, int rows,
 	for (int row = 0; row < rows; row++) {
 		WireBuffer cells = {0};
 		wire_put_u32(&cells, row);
+		gboolean dummy = FALSE;
+		int glyph = row;
+		uint32_t dummy_mode = 0, dummy_fg = 0;
 		for (int col = 0; col < cols; col++) {
+			gboolean is_dummy = dummy;
+			uint32_t fg = 1 + col % 15;
 			uint32_t rune = '!' + col % 94;
-			if (unicode && col % 17 == 0) rune = 0x03bb;
+			if (content == 1 && col % 17 == 0) rune = 0x03bb;
 			uint32_t mode = (row & 1 ? ATTR_BOLD : 0) | (row & 2 ? ATTR_ITALIC : 0);
+			if (content == 2) {
+				if (dummy) { rune = 0; mode |= ATTR_WDUMMY; dummy = FALSE; }
+				else {
+					unsigned int index = glyph++ % G_N_ELEMENTS(runes);
+					rune = runes[index];
+					if (g_unichar_iswide(rune)) {
+						if (col + 1 < cols) { mode |= ATTR_WIDE; dummy = TRUE; }
+						else rune = 0x03bb;
+					}
+					if (rune == runes[index]) coverage |= 1u << index;
+				}
+			}
 			if (col % 7 == 0) mode |= ATTR_UNDERLINE;
 			if (col % 13 == 0) mode |= ATTR_STRUCK;
 			if (col % 11 == 0) mode |= ATTR_REVERSE;
+			if (is_dummy) { mode = dummy_mode | ATTR_WDUMMY; fg = dummy_fg; }
+			else if (mode & ATTR_WIDE) { dummy_mode = mode & ~ATTR_WIDE; dummy_fg = fg; }
 			wire_put_u32(&cells, rune); wire_put_u32(&cells, mode);
-			wire_put_u32(&cells, 1 + col % 15); wire_put_u32(&cells, 0);
+			wire_put_u32(&cells, fg); wire_put_u32(&cells, 0);
 		}
 		deliver(terminal, WIRE_ROW, &cells);
 	}
+	if (content == 2) g_assert_cmpuint(coverage, ==, (1u << G_N_ELEMENTS(runes)) - 1);
 	deliver(terminal, WIRE_FRAME_FINISH, &frame);
 	cairo_surface_t *image = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
 	    gtk_widget_get_allocated_width(widget), gtk_widget_get_allocated_height(widget));
@@ -61,7 +83,8 @@ paint_case(Terminal *terminal, GtkWidget *widget, int cols, int rows,
 	gint64 started_cpu = process_ns(), started = g_get_monotonic_time();
 	for (int i = 0; i < frames; i++) gtk_widget_draw(widget, cr);
 	gint64 elapsed = g_get_monotonic_time() - started, cpu = process_ns() - started_cpu;
-	const char *name = clipped ? "clipped_ascii" : unicode ? "mixed_unicode" : "dense_ascii";
+	const char *name = clipped ? "clipped_ascii" :
+	    content == 2 ? "dense_unicode" : content == 1 ? "mixed_unicode" : "dense_ascii";
 	char *path = g_strdup_printf("%s-%s.png", prefix, name);
 	g_assert_cmpint(cairo_surface_write_to_png(image, path), ==, CAIRO_STATUS_SUCCESS);
 	g_print("{\"case\":\"%s\",\"frames\":%d,\"cols\":%d,\"rows\":%d,\"wall_us\":%" G_GINT64_FORMAT
@@ -111,6 +134,8 @@ main(int argc, char **argv)
 	paint_case(page.terminal, page.widget, cols, rows, FALSE, FALSE, argv[2], frames);
 	g_print(",");
 	paint_case(page.terminal, page.widget, cols, rows, TRUE, FALSE, argv[2], frames);
+	g_print(",");
+	paint_case(page.terminal, page.widget, cols, rows, 2, FALSE, argv[2], frames);
 	g_print(",");
 	paint_case(page.terminal, page.widget, cols, rows, FALSE, TRUE, argv[2], frames);
 	g_print("]\n");

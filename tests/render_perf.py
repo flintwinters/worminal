@@ -89,10 +89,13 @@ def main():
     report = {"revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
               "backend": args.backend, "trials": args.trials, "frames": args.frames,
               "measurements": measurements, "summary_ms_per_frame": summaries, "resources": resources,
+              "probe_sha256": hashlib.sha256((ROOT / "build/render_probe").read_bytes()).hexdigest(),
               "module_sha256": {label: hashlib.sha256(module.read_bytes()).hexdigest()
                                 for label, module in modules.items()},
               "notes": "Actual release frontend module, GTK draw to Cairo images; 20 warm-up frames per case. "
                        "Clipped case uses a 16-pixel stripe through dense ASCII. "
+                       "Dense Unicode cycles Greek, Latin, Cyrillic, Hebrew, Arabic, box drawing, CJK and emoji; "
+                       "wide cells have matching dummy columns. "
                        "Alternating variant order, matched geometry and exact RGBA pixel hashes. "
                        "Process CPU uses CLOCK_PROCESS_CPUTIME_ID; PSS sampled with shaped layouts alive. "
                        "Excludes input/service delivery and compositor/display presentation."}

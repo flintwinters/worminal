@@ -671,3 +671,53 @@ replacement path. Installed launcher, frontend and browser modules match the
 verified build byte-for-byte. Live owners, browser sessions, PTYs and daemons
 were not restarted or migrated; existing owners retain their mapped renderer.
 The glyph-string optimization applies when a new owner loads the module.
+
+Single-line Unicode presentation
+----------------------------------
+Uncached single-line Unicode/preedit now uses the same baseline-preserving
+line/run drawing path as cached ASCII. Pango still shapes every Unicode string
+and chooses fallback fonts. Eligible plain runs draw shaped glyph strings;
+other runs use the complete line renderer. Multiline strings retain full-layout
+drawing. No Unicode cache, per-view state or ownership/ABI change is introduced.
+The helper is renamed to reflect its shared single-line eligibility invariant.
+
+An independent full-layout oracle now covers Greek, accents, CJK, emoji, a ZWJ
+sequence, combining marks, Hebrew, Arabic, mixed-font strings, tabs, empty text
+and multiline preedit. It checks all four styles, LTR/RTL contexts, alpha,
+clipping and integer/fractional transforms, before and after zoom. Full local
+and SSH-fixture X11 and native Wayland integration checks pass, including the
+existing attributed ASCII fallback oracle. File/line limits pass; clang-tidy
+remains unavailable. The Pango <1.50 direct-run guard remains unchanged.
+
+The release probe adds a genuinely dense-Unicode scene cycling Greek, accented
+Latin, Cyrillic, Hebrew, Arabic, box drawing, CJK and emoji. Logical glyphs cycle
+independently of occupied columns; wide glyphs have matching dummy columns and
+attributes. A coverage assertion verifies every declared scalar is emitted.
+Reports now also hash the probe binary so workload identity is explicit.
+Ten alternating pairs, 60 measured frames after 20 warm-ups, give median CPU
+milliseconds per frame (candidate / saved ASCII-only direct-run baseline):
+
+  backend   dense ASCII    sparse lambda/ASCII   dense Unicode    clipped ASCII
+  X11       6.330/6.393    8.082/8.280           19.855/21.211    0.919/0.942
+  Wayland   6.838/6.878    8.258/8.155           19.818/20.658    0.961/0.947
+
+Every RGBA pixel hash and geometry matches. The dense-Unicode paint CPU gain is
+about 6% on X11 and 4% on Wayland. Small differences elsewhere do not establish
+another ASCII gain; that path is unchanged. PSS medians are 56136/56130 KiB on
+X11 and 37904/37836 KiB on Wayland. These include the denser scene's fallback
+font population and must not be compared to older sparse-only probe memory as
+if it were an application memory change. Frozen reports:
+.checks/unicode-single-line-{x11,wayland}-verified.json. Baseline modules:
+.checks/unicode-line-baseline.
+
+Twenty paired real-zsh trials measured fresh readiness 141.77/142.95 ms (paired
+-2.25 ms), additional readiness 124.04/118.06 ms (paired +3.08 ms), typing
+median/p95 2.69/5.17 versus 2.53/4.25 ms, and settled PSS 12833/12807 KiB.
+A separate 20-pair controlled raw-fixture run measured fresh readiness
+99.62/98.71 ms (paired +1.18 ms), additional 29.39/28.04 ms (paired +0.64 ms),
+typing median/p95 2.65/4.13 versus 3.19/4.42 ms, and PSS 12817/12816 KiB.
+These establish no separate end-to-end input/launch gain or consistent typing
+regression; raw-fixture ASCII input does not exercise the new uncached path.
+The verified optimization is dense-Unicode drawing CPU. Frozen reports:
+.checks/unicode-single-line-{shell,raw}-input.json. The full latency audit stays
+open, including whole-application resources and remaining presentation costs.
