@@ -173,3 +173,22 @@ No desktop windows or live workspaces are used.
 A two-trial smoke run observed cached switch/wheel/page medians around 16.6 ms
 and first-claim median 22.46 ms. This identifies a frame-clock interval worth
 investigating, rather than establishing an optimization claim.
+
+Ten alternating identical-application control pairs confirmed the probe:
+candidate/baseline cached-tab medians 16.77/16.86 ms, wheel 16.63/16.70 ms,
+page 16.42/16.70 ms, first ownership claim 25.27/24.84 ms. Each version has
+200 samples per cached/scroll path and ten first claims. Frontend CPU counters
+for the measured interaction loops range 0.12--0.17 seconds per trial, with
+10 ms accounting resolution. Frozen data: .checks/interaction-aa-control.json.
+
+The current interaction probe is self-paced: each request waits for its visible
+result before sending another. Before accepting scheduling changes, distinguish
+isolated first-response latency from sustained streams and verify that faster
+presentation does not introduce unbounded painting or lose output batching.
+Cached views must also avoid synchronously painting partially imported frames
+or geometry belonging to a previous owner. These remain open audit requirements.
+
+Installed a3ae3c8, including the idle redraw fix and explicit metadata damage.
+The installed launcher, frontend and browser modules match the verified build;
+live owners and daemon sessions were preserved. This checkpoint does not close
+the remaining presentation, dense-paint, startup and resource audit.
