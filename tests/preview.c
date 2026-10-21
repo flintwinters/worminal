@@ -205,6 +205,7 @@ input_paint_latency(Terminal *t)
 	WAIT(screen_has(t, wanted->str));
 	check_clipped_paint(t);
 	check_ascii_line_rendering(t);
+	check_unicode_layout_rendering(t);
 	/* Input acknowledgements may carry unchanged frame metadata before the
 	 * PTY echoes anything. They must not consume the prompt-paint allowance. */
 	WireBuffer unchanged = {0};
@@ -741,6 +742,7 @@ main(int argc, char **argv)
 			g_assert_null(t->ascii[style][c]);
 	WAIT(t->frame.cols != oldcols && t->frame.cols == t->cols);
 	check_ascii_line_rendering(t);
+	check_unicode_layout_rendering(t);
 	paint(t, ".checks/preview-terminal.png");
 	GString *flood = g_string_new(NULL);
 	for (int i = 0; i < 2000; i++) g_string_append_printf(flood, "\r\noutput-%04d", i);

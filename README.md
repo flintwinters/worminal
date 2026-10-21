@@ -283,10 +283,11 @@ Use `--pace-ms 40` for isolated gestures; the default sends each request after i
 It also records repaint counts and a fixed 100-event wheel burst independent of response speed.
 
 `render-perf --compare .checks/launch-baseline` loads the actual release frontend module and draws dense ASCII,
-mixed Unicode and a clipped stripe through the real GTK terminal widget. Baselines must have a compatible
+dense Unicode with wide cells, mixed Unicode and a clipped stripe through the real GTK terminal widget.
+Baselines must have a compatible
 internal frontend view ABI. It checks exact RGBA pixels and geometry, alternates variant order, and measures
 wall time, process CPU and PSS after untimed warm-up frames. `--backend wayland` uses the private native
-compositor; the default uses Xvfb. Results and module hashes are saved in `.checks/render-perf-*.json`.
+compositor; the default uses Xvfb. Results and probe/module hashes are saved in `.checks/render-perf-*.json`.
 These measurements isolate rendering; they exclude input/service delivery and compositor/display presentation.
 
 `python3 manage.py frame-perf --compare .checks/launch-baseline` measures ordinary PTY output to a complete

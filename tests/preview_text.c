@@ -37,7 +37,7 @@ check_ascii_line_rendering(Terminal *t)
 	guint eligible = 0;
 	for (int style = 0; style < 4; style++)
 		for (int col = 0; col < 95; col++)
-			eligible += plain_ascii_run(pango_layout_get_line_readonly(t->ascii[style][col], 0)) != NULL;
+			eligible += plain_glyph_run(pango_layout_get_line_readonly(t->ascii[style][col], 0)) != NULL;
 	g_print("Direct ASCII runs: %u/380\n", eligible);
 	cairo_destroy(cr); cairo_surface_destroy(seed);
 	int width = 2 * (95 * t->cw + 4), height = 2 * (4 * t->ch + t->height + 4);
@@ -55,7 +55,7 @@ check_ascii_line_rendering(Terminal *t)
 				pango_layout_set_attributes(legacy[style][col], attrs);
 				pango_layout_set_attributes(t->ascii[style][col], attrs);
 				if (attributed)
-					g_assert_null(plain_ascii_run(pango_layout_get_line_readonly(t->ascii[style][col], 0)));
+					g_assert_null(plain_glyph_run(pango_layout_get_line_readonly(t->ascii[style][col], 0)));
 			}
 		for (int rtl = 0; rtl < 2; rtl++) {
 			pango_context_set_base_dir(context, rtl ? PANGO_DIRECTION_RTL : PANGO_DIRECTION_LTR);
@@ -105,4 +105,56 @@ check_ascii_line_rendering(Terminal *t)
 	cairo_destroy(cr); cairo_surface_destroy(image);
 	for (int style = 0; style < 4; style++)
 		for (int col = 0; col < 95; col++) g_object_unref(legacy[style][col]);
+}
+
+
+/* The oracle shapes independently and always draws full layouts. */
+static void
+check_unicode_layout_rendering(Terminal *t)
+{
+	const char *samples[] = {"λ", "é", "中", "🙂", "👩‍💻", "é", "אב", "العربية",
+	                        "A中🙂", "A\nλ", "\tλ", "", "\n"};
+	PangoContext *context = pango_layout_get_context(t->layout);
+	PangoDirection direction = pango_context_get_base_dir(context);
+	for (int rtl = 0; rtl < 2; rtl++) {
+		pango_context_set_base_dir(context, rtl ? PANGO_DIRECTION_RTL : PANGO_DIRECTION_LTR);
+		for (int style = 0; style < 4; style++) {
+			PangoFontDescription *font = pango_font_description_copy(t->font);
+			pango_font_description_set_weight(font, style & 1 ? PANGO_WEIGHT_BOLD : PANGO_WEIGHT_NORMAL);
+			pango_font_description_set_style(font, style & 2 ? PANGO_STYLE_ITALIC : PANGO_STYLE_NORMAL);
+			for (size_t sample = 0; sample < G_N_ELEMENTS(samples); sample++) {
+				PangoLayout *legacy = gtk_widget_create_pango_layout(t->page->widget, samples[sample]);
+				pango_layout_set_font_description(legacy, font);
+				for (int transform = 0; transform < 3; transform++) {
+					for (int clipped = 0; clipped < 2; clipped++) {
+						int width = 640, height = 8 * t->ch + 4 * t->height + 32;
+						cairo_surface_t *images[2];
+						for (int actual = 0; actual < 2; actual++) {
+							images[actual] = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+							cairo_t *cr = cairo_create(images[actual]);
+							if (transform == 1) cairo_scale(cr, 2, 2);
+							if (transform == 2) { cairo_translate(cr, .25, .5); cairo_scale(cr, 1.25, 1.25); }
+							if (clipped) { cairo_rectangle(cr, 7, 4, width / 3, height / 3); cairo_clip(cr); }
+							cairo_set_source_rgba(cr, .3, .7, .9, .5);
+							if (actual) text(t, cr, samples[sample], 1, 1,
+							    (style & 1 ? ATTR_BOLD : 0) | (style & 2 ? ATTR_ITALIC : 0));
+							else {
+								cairo_move_to(cr, 2 + t->cw, 2 + 2 * t->ch - t->height - theme_glyph_offset_y);
+								pango_cairo_show_layout(cr, legacy);
+							}
+							cairo_destroy(cr);
+							cairo_surface_flush(images[actual]);
+						}
+						g_assert_cmpmem(cairo_image_surface_get_data(images[0]),
+						    cairo_image_surface_get_stride(images[0]) * height,
+						    cairo_image_surface_get_data(images[1]), cairo_image_surface_get_stride(images[1]) * height);
+						cairo_surface_destroy(images[0]); cairo_surface_destroy(images[1]);
+					}
+				}
+				g_object_unref(legacy);
+			}
+			pango_font_description_free(font);
+		}
+	}
+	pango_context_set_base_dir(context, direction);
 }

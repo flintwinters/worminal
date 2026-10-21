@@ -250,7 +250,7 @@ cell_colors(Terminal *t, Glyph g, int x, int y, GdkRGBA *fg, GdkRGBA *bg)
 }
 
 static PangoGlyphItem *
-plain_ascii_run(PangoLayoutLine *line)
+plain_glyph_run(PangoLayoutLine *line)
 {
 #if PANGO_VERSION_CHECK(1, 50, 0)
 	/* Run offsets became public in 1.50. Older libraries keep line drawing. */
@@ -285,12 +285,12 @@ text(Terminal *t, cairo_t *cr, const char *value, int x, int y, ushort mode)
 	/* Anchor glyphs to cell bottoms, including compact spacing and glyph offset.
 	 * Draw every background first: tall glyphs may overlap adjacent compact rows. */
 	double top = 2 + (y + 1) * t->ch - t->height - theme_glyph_offset_y;
-	if (cached) {
+	if (cached || pango_layout_get_line_count(layout) == 1) {
 		/* Keep the shaped line baseline and font; plain horizontal runs can
 		 * bypass layout rendering. Attributed/offset runs keep line drawing. */
 		cairo_move_to(cr, 2 + x * t->cw, top + pango_layout_get_baseline(layout) / (double)PANGO_SCALE);
 		PangoLayoutLine *line = pango_layout_get_line_readonly(layout, 0);
-		PangoGlyphItem *run = plain_ascii_run(line);
+		PangoGlyphItem *run = plain_glyph_run(line);
 		if (run) pango_cairo_show_glyph_string(cr, run->item->analysis.font, run->glyphs);
 		else pango_cairo_show_layout_line(cr, line);
 	} else {
