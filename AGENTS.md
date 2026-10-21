@@ -15,7 +15,8 @@ a per-request completion gate keeps GTK callbacks behind completed widget setup.
 GTK redraws changed rows and cursor damage, including overlapping glyph ink;
 blink ticks damage only visible blinking rows, while catalog style changes invalidate their own pixels.
 compact rows paint matching background runs before glyphs, with scalar fallback on fractional device grids.
-Cached ASCII glyphs use Pango line drawing; other strings keep full layout drawing and fallback.
+Cached ASCII draws eligible Pango-shaped horizontal glyph runs directly; attributed/offset runs keep line drawing.
+Other strings retain full layouts and font fallback.
 Unchanged frames do not repaint or consume the immediate paint allowance for the first changed keyboard response.
 Tab claims can present their first complete response early; cached mapping and rapid selections keep GTK's frame clock.
 `tools/build.py` owns builds and installation; `manage.py` owns

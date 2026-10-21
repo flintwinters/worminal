@@ -614,3 +614,54 @@ Three additional delayed-bridge pairs verify observed first-ready frontend and
 helper membership: every sample includes both processes. Frozen
 .checks/first-ready-resources-bridge.json. This is a fixture/accounting check,
 not a separate speedup claim or a measurement of real SSH authentication.
+
+Direct cached ASCII glyph strings
+---------------------------------
+Eligible cached ASCII now draws its already-shaped PangoGlyphString with the
+font selected by Pango, retaining the layout's baseline. Eligibility requires
+one horizontal, unattributed run with a real font, no centered baseline and no
+run offsets. Other cached runs retain line drawing; Unicode/preedit retains
+full-layout rendering. Layout ownership and cache invalidation are unchanged;
+there is no additional per-view cache, allocation or persistent state.
+
+Pango's public run-offset fields were verified in the authoritative 1.50.0
+header and absent in 1.48.10. The implementation compiles this optimization only
+with Pango >=1.50; older builds retain their existing line path. Historical
+headers were inspected, not full older-runtime integration tests. Sources:
+https://download.gnome.org/sources/pango/1.48/pango-1.48.10.tar.xz
+https://download.gnome.org/sources/pango/1.50/pango-1.50.0.tar.xz
+https://docs.gtk.org/PangoCairo/func.show_glyph_string.html
+
+The initial overly broad check rejected all analysis flags and exercised zero
+of 380 cached runs; an apparent three-pair gain from that build was noise, not
+proof of a working optimization (.checks/glyph-string-ineligible-control.json).
+The corrected guard checks the relevant centered-baseline flag instead of
+rejecting shaping metadata. Integration diagnostics verify 380/380 plain runs
+are eligible before and after zoom with the configured font. Raised/underlined
+layouts explicitly take the fallback, independently matching the legacy full
+layout oracle. Existing exact tests cover all 95 ASCII characters, four styles,
+LTR/RTL, alpha, clipping and integer/fractional transforms. Full local/SSH X11
+and native Wayland integration suites pass. File/line limits pass; clang-tidy
+is unavailable.
+
+Ten alternating release-module pairs, 60 measured frames per case after 20
+warm-ups, measured median CPU milliseconds per frame (candidate / baseline):
+
+  backend    dense ASCII     mixed lambda/ASCII    clipped ASCII
+  X11        6.442 / 6.742    8.228 / 8.711         0.930 / 1.031
+  Wayland    6.818 / 7.235    7.990 / 8.548         0.972 / 1.001
+
+All release RGBA hashes and geometry match exactly. This is about 3--10% lower
+CPU in these workloads. The mixed case inserts lambda every seventeenth cell;
+it is not a broad Unicode-performance benchmark and the Unicode drawing path
+is unchanged. PSS medians are 46190/46222 KiB on X11 and 28542/28483 KiB on
+Wayland, without evidence of a material cache-memory increase. Frozen reports:
+.checks/ascii-glyph-string-{x11,wayland}-verified.json. Baseline modules are in
+.checks/glyph-string-baseline.
+
+Twenty paired real-shell/input trials measured fresh readiness 144.49/145.08 ms
+(paired +1.62 ms), additional readiness 123.55/117.04 ms (paired +1.95 ms), and
+typing median/p95 2.63/4.22 vs 2.66/4.11 ms. This establishes no new end-to-end
+launch or typing improvement; the verified gain is paint CPU. Settled frontend
+PSS was 12771/12796 KiB. Frozen .checks/ascii-glyph-string-shell-input.json.
+The broader launch, resource, and presentation audit remains open.
