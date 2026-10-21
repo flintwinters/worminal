@@ -702,6 +702,7 @@ show_app(App *app)
 {
 	windows++;
 	app->window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	app_startuptime("window");
 	gtk_window_set_title(GTK_WINDOW(app->window), app->title ? app->title : "Worminal preview");
 	gtk_window_set_default_size(GTK_WINDOW(app->window), app->cols * 10 + 4, app->rows * 18 + 42);
 	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -728,6 +729,7 @@ show_app(App *app)
 	/* GtkNotebook maps the new child in its default switch handler. Focus it
 	 * afterwards so a hidden WebKit child cannot retain keyboard ownership. */
 	g_signal_connect_after(app->notebook, "switch-page", G_CALLBACK(switched), app);
+	app_startuptime("widgets");
 	connect_async(app);
 	gtk_widget_show_all(app->window);
 	app_startuptime("map-request");
@@ -828,6 +830,7 @@ launch_window(int argc, char **argv, char **env, const char *cwd, int output)
 int
 worminal_frontend_v1(int argc, char **argv, int listener)
 {
+	app_startuptime("frontend");
 	setlocale(LC_CTYPE, "");
 	if (argc >= 2 && !strcmp(argv[1], "--new-browser-tab")) {
 		if (argc > 3) { usage(stderr); return 2; }
