@@ -122,7 +122,8 @@ page_title(Page *page, const char *title)
 	g_free(label);
 	if (page->app->active == page)
 		gtk_window_set_title(GTK_WINDOW(page->app->window), page->title);
-	tabs_refresh(page->app);
+	/* Catalog titles are applied together; refresh metrics after selection. */
+	if (!page->app->syncing) tabs_refresh(page->app);
 }
 
 void
@@ -368,6 +369,7 @@ catalog(App *app, WirePacket *packet)
 			gtk_window_set_title(GTK_WINDOW(app->window), chosen->title);
 			tabs_refresh(app);
 		} else if (chosen != app->active || !app->attached) activate(chosen);
+		else tabs_refresh(app);
 	} else if (app->attached && !app->pending) gtk_widget_destroy(app->window);
 	app->attached = TRUE;
 	return TRUE;

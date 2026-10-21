@@ -38,3 +38,45 @@ check_tab_ranges(void)
 	g_object_unref(strip.layout); g_object_unref(widget);
 	g_clear_pointer(&app.cached_font, pango_font_description_free);
 }
+
+/* A catalog must refresh even when its selected page does not change. */
+static void
+check_catalog_tab_refresh(void)
+{
+	App app = {.fd = -1, .attached = TRUE};
+	app.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	app.notebook = gtk_notebook_new();
+	gtk_container_add(GTK_CONTAINER(app.window), app.notebook);
+	app.tabstrip = tabs_new(&app);
+	g_object_ref_sink(app.tabstrip);
+	Page page = {.app = &app, .id = 7, .url = g_strdup("about:blank"),
+	    .widget = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0), .label = gtk_label_new("old")};
+	gtk_notebook_append_page(GTK_NOTEBOOK(app.notebook), page.widget, page.label);
+	app.pages = g_list_append(NULL, &page);
+	app.active = &page;
+	TabStrip *strip = g_object_get_data(G_OBJECT(app.tabstrip), "tabs");
+	app.syncing = TRUE;
+	page_title(&page, "pending catalog title");
+	g_assert_null(strip->layout);
+	app.syncing = FALSE;
+	WireBuffer buffer = {0};
+	wire_put_u32(&buffer, 1); wire_put_u32(&buffer, 0); wire_put_u32(&buffer, page.id);
+	wire_put_u32(&buffer, page.id); wire_put_u32(&buffer, 1);
+	wire_put_string(&buffer, "about:blank");
+	wire_put_u32(&buffer, 0); wire_put_u32(&buffer, 2);
+	wire_put_string(&buffer, "final catalog title"); wire_put_string(&buffer, "catalog-directory");
+	wire_put_u32(&buffer, 0);
+	WirePacket packet = {.type = WIRE_CATALOG, .data = buffer.data, .len = buffer.len};
+	g_assert_true(catalog(&app, &packet));
+	g_assert_false(app.syncing);
+	g_assert_true(app.active == &page);
+	g_assert_nonnull(strip->layout);
+	g_assert_cmpint(strip->ch, >, 0);
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(page.label)), ==, "final catalog title");
+	g_assert_cmpstr(gtk_window_get_title(GTK_WINDOW(app.window)), ==, "final catalog title");
+	wire_buffer_free(&buffer);
+	gtk_widget_destroy(app.window); g_object_unref(app.tabstrip);
+	g_list_free(app.pages);
+	g_free(page.url); g_free(page.title); g_free(page.directory);
+	g_clear_pointer(&app.cached_font, pango_font_description_free);
+}

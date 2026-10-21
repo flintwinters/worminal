@@ -914,3 +914,32 @@ final catalog presentation. Preserve palette-only damage and browser mirrors.
 Installed945bc21 atomically with the existing configuration. All six installed
 artifacts match their verified builds byte-for-byte. No live owner, daemon,
 PTY or browser was restarted or migrated; fresh owners load the new frontend.
+
+Coalesce catalog title-driven tab-strip refresh
+----------------------------------------------
+page_title still applies each title, directory-basename label and selected
+window title immediately. During app->syncing it now leaves tab-strip metrics
+to the completed catalog's selection path. Activations and passive conversions
+already refresh; the unchanged-selection branch now explicitly refreshes too.
+Browser title propagation to other nonsyncing windows retains immediate refresh.
+No new queue, dirty flag, cache, wire format or resource allocation is introduced.
+Palette-only damage remains in terminal_configure, independently of this path.
+
+A native regression keeps the selected browser record unchanged, applies a
+catalog, and verifies the final strip layout/metrics, label and window title.
+It also verifies that intermediate syncing titles do not initialize a strip
+layout. Final full local/SSH suites pass on X11 and native Wayland. File/line
+gates pass; clang-tidy is unavailable.
+
+Twenty alternating 100-distinct-label launches against25217bb do not establish
+a latency improvement: candidate/baseline fresh ready92.96/93.84 ms, additional
+ready34.26/26.86 ms, typing2.80/2.60 ms. Paired readiness differences+0.62/+0.92
+ms are below the noisy tails; p95 differences+17.32/+21.84 ms. Median observed
+first-ready main-thread lifetime CPU83.56/85.03 ms, total CPU90/90 ms (coarse
+clock ticks), approximate process RSS peak32850/32820 KiB. Resource sampling
+occurs after fresh readiness and can perturb additional-window timing. These
+figures are context, not proof of an end-to-end gain or memory reduction.
+The retained improvement removes per-page font-description copies, metric
+lookups and size-request/queue-draw calls during a catalog transaction; final
+presentation still refreshes through its existing paths. Frozen evidence:
+.checks/catalog-refresh-launch-verified.json. Broader launch work remains open.
