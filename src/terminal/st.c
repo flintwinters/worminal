@@ -2850,7 +2850,7 @@ tresizeplain(int col, int row)
 	int i;
 	int minrow = MIN(row, term.row);
 	int mincol = MIN(col, term.col);
-	int scr;
+	int scr, wrapnext = col == term.col ? term.c.state & CURSOR_WRAPNEXT : 0;
 	int *bp;
 	TCursor c;
 
@@ -2923,6 +2923,7 @@ tresizeplain(int col, int row)
 	tsetscroll(0, row-1);
 	/* make use of the LIMIT in tmoveto */
 	tmoveto(term.c.x, term.c.y);
+	term.c.state |= wrapnext;
 	/* Clearing both screens (it makes dirty all lines) */
 	c = term.c;
 	scr = term.scr;
@@ -2983,6 +2984,9 @@ treflow(int col, int row)
 
 	if (col <= 0 || row <= 0)
 		die("invalid reflow dimensions\n");
+	/* Pending wraps denote insertion after the last glyph, not on that glyph. */
+	if (cursor.state & CURSOR_WRAPNEXT) cursor.x = oldcol;
+	if (saved.state & CURSOR_WRAPNEXT) saved.x = oldcol;
 	/* Empty rows below the cursor are space for future output, not history. */
 	while (last > cursor.y) {
 		for (x = 0; x < oldcol && term.line[last][x].u == ' '; x++)
@@ -3129,15 +3133,11 @@ treflow(int col, int row)
 	term.c = cursor;
 	term.c.x = cursorx;
 	term.c.y = MIN((size_t)(row - 1), cursorrow - start);
-	MODBIT(term.c.state, cursorend ||
-	       (cursor.state & CURSOR_WRAPNEXT && term.c.x == col - 1),
-	       CURSOR_WRAPNEXT);
+	MODBIT(term.c.state, cursorend, CURSOR_WRAPNEXT);
 	session->saved[0] = saved;
 	session->saved[0].x = savedx;
 	session->saved[0].y = MIN((size_t)(row - 1), savedrow - start);
-	MODBIT(session->saved[0].state, savedend ||
-	       (saved.state & CURSOR_WRAPNEXT && savedx == col - 1),
-	       CURSOR_WRAPNEXT);
+	MODBIT(session->saved[0].state, savedend, CURSOR_WRAPNEXT);
 	term.scr = oldscr ? MIN(term.histlen, start > anchorrow ? start - anchorrow : 0) : 0;
 	term.ocx = term.c.x;
 	term.ocy = term.c.y;
