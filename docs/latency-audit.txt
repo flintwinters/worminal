@@ -910,3 +910,7 @@ ownership and close. File/line gates pass; clang-tidy is still unavailable.
 Next candidate to measure: coalesce tab-strip metric refresh within catalog
 application, which currently refreshes once per page title despite a single
 final catalog presentation. Preserve palette-only damage and browser mirrors.
+
+Installed945bc21 atomically with the existing configuration. All six installed
+artifacts match their verified builds byte-for-byte. No live owner, daemon,
+PTY or browser was restarted or migrated; fresh owners load the new frontend.
