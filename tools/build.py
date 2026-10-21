@@ -16,7 +16,7 @@ SESSION_SUPPORT = ("terminal/session_view.c", "terminal/session_transfer.c")
 COMMON = ("terminal/defaults.c", "terminal/st.c", *SESSION_SUPPORT,
           "workspace/wire.c", "workspace/workspace_socket.c")
 CLIENT = (*COMMON, "workspace/workspace_client.c", "x11/x.c", "x11/url.c")
-SERVER = (*COMMON, "workspace/workspace_service.c", "workspace/workspace_handoff.c")
+SERVER = (*COMMON, "workspace/workspace_service.c", "workspace/workspace_handoff.c", "workspace/browser_target.c")
 PREVIEW = (*COMMON, "workspace/workspace_client.c", "gtk/app.c", "gtk/terminal.c",
            "gtk/browser_loader.c", "gtk/tabs.c", "gtk/windows.c")
 PREVIEW_PACKAGES = ("gtk+-3.0", "pangocairo", "fontconfig", "freetype2", "webkit2gtk-4.1")
@@ -84,6 +84,29 @@ def step(output, command, dependencies, *, depfile=False):
         pending_dep.unlink(missing_ok=True)
 
 
+def generate_explorer():
+    """Embed the standalone artifact in the lazy browser module, including installed/remote views."""
+    explorer = ROOT / "file-explorer"
+    if not (explorer / "package.json").exists():
+        raise ValueError("Initialize file-explorer before building: git submodule update --init")
+    inputs = [explorer / name for name in ("package.json", "package-lock.json", "tsconfig.json", "vite.config.ts")]
+    inputs += [path for directory in ("apps", "packages") for path in (explorer / directory).rglob("*")
+               if path.is_file() and "node_modules" not in path.parts]
+    artifact = explorer / "dist/index.html"
+    if not artifact.exists() or any(path.stat().st_mtime_ns > artifact.stat().st_mtime_ns for path in inputs):
+        invoke(["python3", str(explorer / "manage.py"), "build"])
+    data = artifact.read_bytes()
+    # Fixed-width octal bytes preserve UTF-8 and cannot merge with adjacent C escapes.
+    chunks = ['"' + "".join(f"\\{byte:03o}" for byte in data[start:start + 24]) + '"'
+              for start in range(0, len(data), 24)]
+    content = "/* Generated from file-explorer/dist/index.html. */\nstatic const char file_explorer_html[] =\n"
+    content += "\n".join(chunks) + ";\n"
+    header = ROOT / "build/file_explorer.h"
+    header.parent.mkdir(parents=True, exist_ok=True)
+    if not header.exists() or header.read_text() != content:
+        header.write_text(content)
+
+
 class Builder:
     def __init__(self):
         self.cc = words("CC", "cc")
@@ -101,6 +124,7 @@ class Builder:
 
     def target(self, target):
         if target == "build/browser.so":
+            generate_explorer()
             old_flags = self.cflags
             self.cflags = [*CPPFLAGS, *words("CPPFLAGS"), *words("CFLAGS", "-O3"),
                            *pkg_flags("--cflags", PREVIEW_PACKAGES)]
@@ -127,6 +151,8 @@ class Builder:
             finally:
                 self.cflags = old_flags
         elif target in ("worminald", "worminald-preview", "build/frontend.so", "build/preview_test"):
+            if target == "build/preview_test":
+                generate_explorer()
             flags = ["-DWORMINAL_PREVIEW_PROTOCOL"]
             if target == "build/frontend.so":
                 flags += ["-fPIC", "-ffunction-sections", "-fdata-sections"]

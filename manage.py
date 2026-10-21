@@ -14,6 +14,7 @@ except ModuleNotFoundError as error:
 from tools import build as native_build
 from tools.icon import generate_icon
 from tools.privacy import check_privacy
+from tools.git_index import tracked_files
 
 
 ROOT = Path(__file__).resolve().parent
@@ -38,12 +39,10 @@ def run(args, *, env=None):
 
 
 def check_file_limits():
-    paths = subprocess.check_output(["git", "ls-files", "-z"], cwd=ROOT).split(b"\0")
+    index = subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=ROOT)
     problems = []
-    for raw in paths:
-        if not raw:
-            continue
-        path = ROOT / os.fsdecode(raw)
+    for name in tracked_files(index):
+        path = ROOT / name
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
         except UnicodeDecodeError:
@@ -236,6 +235,37 @@ def lint():
 def clean():
     """Remove generated binaries and headers."""
     native_build.clean()
+
+
+def explorer_command(command):
+    script = ROOT / "file-explorer/manage.py"
+    if not script.exists():
+        typer.echo("Initialize the file-explorer submodule first: git submodule update --init", err=True)
+        raise typer.Exit(1)
+    raise typer.Exit(run([sys.executable, str(script), command]))
+
+
+@app.command("explorer-build")
+def explorer_build():
+    """Build file-explorer/dist/index.html (run npm ci in the submodule first)."""
+    explorer_command("build")
+
+
+@app.command("explorer-check")
+def explorer_check():
+    """Check explorer types, directory behavior, DOM interactions, and standalone output."""
+    code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                "-p", "test_privacy.py", "-q"])
+    if code:
+        raise typer.Exit(code)
+    check_file_limits()
+    explorer_command("check")
+
+
+@app.command("explorer-lint")
+def explorer_lint():
+    """Run the explorer's pinned Hyperlinter architecture and style audit."""
+    explorer_command("lint")
 
 
 @app.command()

@@ -4,6 +4,7 @@ import re
 import subprocess
 
 from rich.console import Console
+from tools.git_index import tracked_files
 
 
 PATTERNS = {
@@ -43,10 +44,8 @@ def check_privacy(root, history=False, staged=False, identities=False, message_f
             console.print(f"{location}:{line}: {category}", markup=False)
             count += 1
 
-    for raw in git("ls-files", "-z").split(b"\0"):
-        if not raw:
-            continue
-        path = root / raw.decode("utf-8", errors="surrogateescape")
+    for name in tracked_files(git("ls-files", "--stage", "-z")):
+        path = root / name
         # Upstream license attribution must remain intact.
         if path.name == "LICENSE":
             continue

@@ -4,6 +4,14 @@
 
 # Worminal
 
+The `file-explorer` submodule is a TypeScript npm workspace building a plain dark,
+offline explorer as `file-explorer/dist/index.html`. Run `npm ci` inside the submodule, then
+`python3 manage.py explorer-build` or `python3 manage.py explorer-check` from this repository.
+`python3 manage.py explorer-lint` runs its pinned Hyperlinter; setup is in the submodule README.
+It currently uses a read-only folder picker; native filesystem integration is not implemented.
+The explorer lives at [worminal-file-explorer](https://github.com/flintwinters/worminal-file-explorer).
+Use `git submodule update --init --recursive` to initialize it and its pinned Hyperlinter.
+
 **A small GTK terminal and browser. Tabs that outlive your windows.**
 
 Worminal keeps your shells in a per-user service, so you can close every window and return to your tabs later.
@@ -76,12 +84,16 @@ install builds that rollback frontend and `worminald-x11`. Installation never mi
 For a remote workspace, install the current release remotely and use `--master user@host`.
 The old preview executable names remain build aliases and share the v2 workspace.
 `--attach` opens existing tabs without creating another shell. Closing a window preserves its service tabs.
-Inside a Worminal terminal, `worminal --new-browser-tab [URL]` replaces that terminal with a browser,
-ending its shell. Omitting the URL opens a blank page; Ctrl+K reveals the address entry.
+Inside a Worminal terminal, `worminal --new-browser-tab [URL|FILE]` replaces that terminal with a browser,
+ending its shell. Omitting the target opens the built-in file explorer; Ctrl+K reveals the address entry.
+Absolute and relative filepaths open as encoded `file://` URLs, relative to the calling shell's directory.
+Explicit URLs, including `about:blank`, are preserved. Native builds embed the generated explorer HTML
+in the lazy browser module, so installed builds and remote viewing machines use their own local copy.
+Initialize the explorer submodule and run `npm ci` there before the first native build.
 
-Ctrl+Shift+T opens a terminal, Ctrl+Shift+B asks for a browser URL, Ctrl+Shift+N opens another window,
+Ctrl+Shift+T opens a terminal, Ctrl+Shift+N opens another window,
 and Ctrl+Shift+W closes the active tab. Ctrl+Tab/Shift+Ctrl+Tab and Alt+1 through Alt+9 switch tabs.
-Browser tabs provide Back, Forward, Reload/Stop and a location entry (Ctrl+L). User popup links open as independent
+Browser tabs provide Back, Forward, Reload/Stop and a location entry (Ctrl+K). User popup links open as independent
 tabs; scripts cannot retain `window.opener`. Cookies and local storage stay in the local XDG `worminal-preview`
 profile. A peer's navigation updates the saved link without replacing an already open local page.
 

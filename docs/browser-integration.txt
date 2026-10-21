@@ -53,14 +53,20 @@ Ctrl+R or F5 reloads and Escape stops loading. Ctrl+K reveals and selects the
 normally hidden address entry; Enter navigates and hides it, and Escape dismisses
 it. Tab activation and moving a browser between windows cannot reveal the entry.
 Ctrl+T always creates a terminal. Ctrl+Shift+B has no browser action.
-Inside a Worminal terminal, worminal --new-browser-tab [URL] replaces
+Inside a Worminal terminal, worminal --new-browser-tab [URL|FILE] replaces
 that terminal with a browser under the same ordered identity. This ends its shell
-and PTY; it does not allocate a hidden terminal. With no URL, about:blank opens;
+and PTY; it does not allocate a hidden terminal. With no target, the embedded file explorer opens;
 Ctrl+K reveals the address entry. For example:
 
   alias s='worminal --new-browser-tab'
   s
   s https://example.com
+  s ./report.html
+
+Filepaths become percent-encoded file URLs in the calling shell's directory before the
+service receives the command. Explicit URLs (including about:blank) stay unchanged.
+The default worminal:///files page serves the generated explorer HTML from the lazy
+browser module, so installed and remote views do not depend on checkout paths.
 
 The service uses kernel peer credentials and the caller's process session to
 identify the terminal, independent of which window is focused. Calls outside a

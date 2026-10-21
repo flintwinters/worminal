@@ -19,6 +19,7 @@
 #include "session_transfer.h"
 #include "wire.h"
 #include "workspace_socket.h"
+#include "browser_target.h"
 #include WORMINAL_THEME_HEADER
 
 #include "service_state.h"
@@ -461,7 +462,7 @@ client_message(Client *client, WirePacket *packet)
 			wire_put_string(&error, !tab
 			    ? "This shell is not in this workspace. Open worminal and run the command there; "
 			      "keep WORMINAL_SHARED_SOCKET_SCOPE unchanged."
-			    : "Invalid browser URL: omit it for a blank page, or supply one nonempty URL up to 65536 bytes.");
+			    : "Invalid browser URL: omit it for the file explorer, or supply one nonempty URL up to 65536 bytes.");
 			client_send(client, WIRE_ERROR, 0, &error);
 			wire_buffer_free(&error); free(url);
 			return;
@@ -813,15 +814,18 @@ out:
 static int
 browser_command(const char *url)
 {
+	char *target = workspace_browser_target(url);
+	if (!target) { perror("Cannot resolve browser target"); return 1; }
 	int fd = workspace_connect();
-	if (fd < 0) { fputs("No preview workspace service is running.\n", stderr); return 1; }
+	if (fd < 0) { free(target); fputs("No preview workspace service is running.\n", stderr); return 1; }
 	/* Converting this PTY hangs up its shell. Let the short-lived command receive
 	 * its result and exit normally even if it is in the foreground process group. */
 	signal(SIGHUP, SIG_IGN);
 	struct timeval timeout = {.tv_sec = 3};
 	setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 	WireBuffer buffer = {0};
-	wire_put_string(&buffer, url);
+	wire_put_string(&buffer, target);
+	free(target);
 	int okay = wire_write(fd, WIRE_BROWSER_REPLACE, 0, buffer.data, buffer.len);
 	wire_buffer_free(&buffer);
 	WirePacket packet;
@@ -849,7 +853,7 @@ main(int argc, char **argv)
 		return handoff_command(argv[2], !strcmp(argv[1], "--handin"));
 #ifdef WORMINAL_PREVIEW_PROTOCOL
 	if ((argc == 2 || argc == 3) && strcmp(argv[1], "--new-browser-tab") == 0)
-		return browser_command(argc == 3 ? argv[2] : "about:blank");
+		return browser_command(argc == 3 ? argv[2] : NULL);
 #endif
 	if (argc == 2 && strcmp(argv[1], "--serve") == 0)
 		return serve();
@@ -865,7 +869,7 @@ main(int argc, char **argv)
 	}
 	fprintf(stderr, "usage: worminald --serve|--bridge|--stop\n       worminald --handin NAME | --handoff NAME\n");
 #ifdef WORMINAL_PREVIEW_PROTOCOL
-	fputs("       worminald --new-browser-tab [URL]\n", stderr);
+	fputs("       worminald --new-browser-tab [URL|FILE]\n", stderr);
 #endif
 	return 2;
 }
