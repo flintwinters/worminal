@@ -150,7 +150,7 @@ class PreviewWorkspaceTest(unittest.TestCase):
 
     def test_command_converts_calling_terminal_and_preserves_order(self):
         cases = (("https://example.invalid/converted", "https://example.invalid/converted"),
-                 ("about:blank", "about:blank"), (None, ROOT.as_uri()))
+                 ("about:blank", "about:blank"), (None, "worminal://" + ROOT.as_uri()[7:]))
         for executable, (url, expected) in product((DAEMON, ROOT / "worminal"), cases):
             with self.subTest(executable=executable.name, url=url):
                 self.assert_browser_conversion(executable, url, expected)
@@ -189,7 +189,7 @@ class PreviewWorkspaceTest(unittest.TestCase):
             special.write_text("<title>Local page</title>")
             plain = directory / "plain.html"
             plain.write_text("<title>Plain page</title>")
-            cases = ((None, directory.as_uri()),
+            cases = ((None, "worminal://" + directory.as_uri()[7:]),
                      (str(special), special.as_uri()), (special.name, special.as_uri()),
                      ("./" + special.name, special.as_uri()), (plain.name, plain.as_uri()),
                      (special.as_uri(), special.as_uri()),

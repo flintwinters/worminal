@@ -155,7 +155,8 @@ policy(WebKitWebView *view, WebKitPolicyDecision *decision, WebKitPolicyDecision
 		const char *scheme = g_uri_peek_scheme(url);
 		if (!scheme || (g_ascii_strcasecmp(scheme, "http") && g_ascii_strcasecmp(scheme, "https") &&
 		                g_ascii_strcasecmp(scheme, "about") && g_ascii_strcasecmp(scheme, "file") &&
-		                g_ascii_strcasecmp(scheme, "data") && g_ascii_strcasecmp(scheme, "blob"))) {
+		                g_ascii_strcasecmp(scheme, "data") && g_ascii_strcasecmp(scheme, "blob") &&
+		                g_ascii_strcasecmp(scheme, WORKSPACE_BROWSER_SCHEME))) {
 			webkit_policy_decision_ignore(decision);
 			notice(b, "This URL scheme is unsupported.");
 			return TRUE;
@@ -257,6 +258,72 @@ download_started(WebKitWebContext *ctx, WebKitDownload *download, gpointer data)
 	g_signal_connect(download, "failed", G_CALLBACK(download_failed), NULL);
 }
 
+/* A directory is a plain document: no JavaScript, picker, or filesystem bridge. */
+static void
+directory_link(GString *html, const char *path, const char *name, gboolean directory)
+{
+	char *encoded = g_uri_escape_string(path, "/", FALSE);
+	char *url = g_strconcat("worminal://", encoded, NULL);
+	char *href = g_markup_escape_text(url, -1);
+	char *label = g_markup_escape_text(name, -1);
+	g_string_append_printf(html, "<li><a href=\"%s\">%s%s</a></li>\n",
+	                       href, label, directory ? "/" : "");
+	g_free(label); g_free(href); g_free(url); g_free(encoded);
+}
+
+static void
+directory_request(WebKitURISchemeRequest *request, gpointer data)
+{
+	(void)data;
+	GError *error = NULL;
+	GUri *uri = g_uri_parse(webkit_uri_scheme_request_get_uri(request), G_URI_FLAGS_NONE, &error);
+	if (!uri) goto fail;
+	const char *path = g_uri_get_path(uri);
+	if (g_file_test(path, G_FILE_TEST_IS_REGULAR)) {
+		GFile *file = g_file_new_for_path(path);
+		GFileInputStream *stream = g_file_read(file, NULL, &error);
+		g_object_unref(file);
+		if (!stream) { g_uri_unref(uri); goto fail; }
+		char *type = g_content_type_guess(path, NULL, 0, NULL);
+		char *mime = g_content_type_get_mime_type(type);
+		webkit_uri_scheme_request_finish(request, G_INPUT_STREAM(stream), -1, mime);
+		g_free(mime); g_free(type); g_object_unref(stream); g_uri_unref(uri);
+		return;
+	}
+	GDir *directory = g_dir_open(path, 0, &error);
+	if (!directory) { g_uri_unref(uri); goto fail; }
+	char *label = g_markup_escape_text(path, -1);
+	GString *html = g_string_new("<!doctype html><meta charset=\"utf-8\">\n");
+	g_string_append_printf(html, "<title>%s</title><h1>%s</h1>\n<ul>\n", label, label);
+	g_free(label);
+	if (strcmp(path, "/")) {
+		char *parent = g_path_get_dirname(path);
+		directory_link(html, parent, "..", TRUE);
+		g_free(parent);
+	}
+	GList *names = NULL;
+	const char *name;
+	while ((name = g_dir_read_name(directory))) names = g_list_prepend(names, g_strdup(name));
+	g_dir_close(directory);
+	names = g_list_sort(names, (GCompareFunc)g_strcmp0);
+	for (GList *item = names; item; item = item->next) {
+		char *child = g_build_filename(path, item->data, NULL);
+		directory_link(html, child, item->data, g_file_test(child, G_FILE_TEST_IS_DIR));
+		g_free(child);
+	}
+	g_list_free_full(names, g_free);
+	g_string_append(html, "</ul>\n");
+	g_uri_unref(uri);
+	gsize length = html->len;
+	GInputStream *stream = g_memory_input_stream_new_from_data(g_string_free(html, FALSE), length, g_free);
+	webkit_uri_scheme_request_finish(request, stream, length, "text/html; charset=utf-8");
+	g_object_unref(stream);
+	return;
+ fail:
+	webkit_uri_scheme_request_finish_error(request, error);
+	g_error_free(error);
+}
+
 static WebKitWebContext *
 browser_context(void)
 {
@@ -270,6 +337,9 @@ browser_context(void)
 	    "base-data-directory", data, "base-cache-directory", cache, NULL);
 	webkit_website_data_manager_set_tls_errors_policy(manager, WEBKIT_TLS_ERRORS_POLICY_FAIL);
 	context = webkit_web_context_new_with_website_data_manager(manager);
+	webkit_web_context_register_uri_scheme(context, WORKSPACE_BROWSER_SCHEME, directory_request, NULL, NULL);
+	webkit_security_manager_register_uri_scheme_as_local(webkit_web_context_get_security_manager(context),
+	                                                     WORKSPACE_BROWSER_SCHEME);
 	g_object_unref(manager);
 	char *cookies = g_build_filename(data, "cookies.sqlite", NULL);
 	WebKitCookieManager *cookie_manager = webkit_web_context_get_cookie_manager(context);

@@ -146,7 +146,7 @@ def main():
               "notes": "Private Xvfb; real Return execs the browser replacement command in its calling PTY. "
                        "First and additional browser views use fresh profiles per target and trial. "
                        "Visible waits for expected page pixels; HTTP also verifies real-key JavaScript response. "
-                       "Explorer uses WebKit's built-in directory listing. Warm filesystem caches. "
+                       "Explorer uses Worminal plain HTML directory links. Warm filesystem caches. "
                        "Memory includes frontend descendants, excludes service/shells. "
                        "Excludes desktop compositing and physical display latency."}
     if args.compare:

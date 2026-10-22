@@ -69,7 +69,7 @@ The receiver stages and validates state before commit; the donor then closes PTY
 Running daemons that predate the protocol cannot gain it through installation; preserve their live sessions.
 Investigate remote Codex scrolling separately from tested wheel modes.
 
-The default browser target is the calling shell directory as a file URL. WebKit supplies its own plain HTML
-directory listing and file navigation; there is no custom explorer UI, script bridge, or filesystem API.
+The default browser target is the calling shell directory under worminal:///. The browser module generates
+a plain HTML heading and list of parent, folder, and file links. No scripts, picker, or filesystem API are used.
 `file-explorer` remains an independent TypeScript npm-workspace submodule, unused by native builds.
 Use `manage.py explorer-build`, `explorer-check`, and `explorer-lint` for that standalone artifact.

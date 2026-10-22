@@ -39,7 +39,7 @@ script_equals(Browser *b, const char *script, const char *expected)
 	return equal;
 }
 
-/* Use WebKit's own directory listing and ordinary file navigation. */
+/* Our plain directory HTML uses ordinary links and browser navigation. */
 static void
 check_explorer(Browser *browser)
 {
@@ -50,11 +50,12 @@ check_explorer(Browser *browser)
 	char *file = g_build_filename(directory, "literal <name>.txt", NULL);
 	g_assert_cmpint(g_mkdir(empty, 0700), ==, 0);
 	g_assert_true(g_file_set_contents(file, "literal <text>", -1, NULL));
-	char *url = g_filename_to_uri(directory, NULL, NULL);
+	char *encoded = g_uri_escape_string(directory, "/", FALSE);
+	char *url = g_strconcat("worminal://", encoded, NULL);
 	webkit_web_view_load_uri(browser->view, url);
 	WAIT(!webkit_web_view_is_loading(browser->view));
 	WAIT(script_equals(browser, "String(document.body.textContent.includes('literal <name>.txt'))", "true"));
-	expect_script(browser, "String(document.querySelectorAll('input,button').length)", "0");
+	expect_script(browser, "String(document.querySelectorAll('input,button,script').length)", "0");
 	expect_script(browser, "Array.from(document.links).find(a => a.textContent.includes('literal <name>.txt')).click(); 'ok'",
 	              "ok");
 	WAIT(!webkit_web_view_is_loading(browser->view));
@@ -64,8 +65,8 @@ check_explorer(Browser *browser)
 	WAIT(script_equals(browser, "String(document.body.textContent.includes('empty'))", "true"));
 	expect_script(browser, "Array.from(document.links).find(a => a.textContent.includes('empty')).click(); 'ok'", "ok");
 	WAIT(!webkit_web_view_is_loading(browser->view));
-	char *empty_url = g_filename_to_uri(empty, NULL, NULL);
+	char *empty_url = g_strconcat(url, "/empty", NULL);
 	WAIT(g_str_has_prefix(webkit_web_view_get_uri(browser->view), empty_url));
 	g_unlink(file); g_rmdir(empty); g_rmdir(directory);
-	g_free(empty_url); g_free(url); g_free(file); g_free(empty); g_free(directory); g_free(cwd);
+	g_free(encoded); g_free(empty_url); g_free(url); g_free(file); g_free(empty); g_free(directory); g_free(cwd);
 }
