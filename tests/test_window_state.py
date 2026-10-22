@@ -112,7 +112,8 @@ class WindowStateTest(unittest.TestCase):
                     key("key", "ctrl+1")
                     self.wait_for(lambda: directory(second), "terminal availability restored")
                     original_id = snapshot()[0][0]
-                    key("key", "ctrl+n")
+                    subprocess.run([str(ROOT / "worminal"), "-e", "/bin/cat"],
+                                   env=env, check=True, timeout=5)
                     self.wait_for(lambda: len(snapshot()) == 2, "second window registration")
                     windows = subprocess.check_output(["xdotool", "search", "--onlyvisible", "--pid",
                                                        str(app.pid)], env=env, text=True).splitlines()
