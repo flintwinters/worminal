@@ -4,6 +4,8 @@
 #include "browser_module.h"
 #include "browser_target.h"
 
+#define BROWSER_BACKGROUND "#141414"
+
 struct Browser {
 	App *app;
 	Page *page;
@@ -290,7 +292,7 @@ directory_request(WebKitURISchemeRequest *request, gpointer data)
 	GDir *directory = g_dir_open(path, 0, &error);
 	if (!directory) { g_uri_unref(uri); goto fail; }
 	GString *html = g_string_new("<!doctype html><meta charset=\"utf-8\">"
-	    "<style>html{background:#141414;color:#ddd}a{color:#b7d5ff}</style>\n");
+	    "<style>html{background:" BROWSER_BACKGROUND ";color:#ddd}a{color:#b7d5ff}</style>\n");
 	const char *name;
 	while ((name = g_dir_read_name(directory))) {
 		char *child = g_build_filename(path, name, NULL);
@@ -358,6 +360,9 @@ browser_new(App *app, const char *url)
 	WebKitWebView *related = related_view(url);
 	b->view = WEBKIT_WEB_VIEW(related ? webkit_web_view_new_with_related_view(related) :
 	    webkit_web_view_new_with_context(browser_context()));
+	GdkRGBA background;
+	gdk_rgba_parse(&background, BROWSER_BACKGROUND);
+	webkit_web_view_set_background_color(b->view, &background);
 	browsers = g_list_prepend(browsers, b);
 	app_startuptime("browser-view-ready");
 	/* Adapt surf's conservative defaults; keep WebKit's normal UA/site support.
