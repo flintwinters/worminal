@@ -4,7 +4,7 @@
 #include <gmodule.h>
 
 static inline char *
-module_path(const char *name)
+module_path(const char *name, const char *build_name)
 {
 	char *executable = g_file_read_link("/proc/self/exe", NULL);
 	if (!executable) return NULL;
@@ -13,7 +13,7 @@ module_path(const char *name)
 	char *path = g_build_filename(directory, "..", "lib", "worminal", name, NULL);
 	if (!g_file_test(path, G_FILE_TEST_EXISTS)) {
 		g_free(path);
-		path = g_build_filename(directory, "build", name, NULL);
+		path = g_build_filename(directory, "build", build_name ? build_name : name, NULL);
 	}
 	g_free(directory);
 	return path;

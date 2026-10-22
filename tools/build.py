@@ -12,6 +12,9 @@ from tools.theme import generate_theme
 
 ROOT = Path(__file__).resolve().parent.parent
 VERSION = "0.9.3"
+BROWSER_ABI = next(line.split()[2] for line in (ROOT / "src/gtk/browser_module.h").read_text().splitlines()
+                   if line.startswith("#define WORMINAL_BROWSER_ABI "))
+BROWSER_MODULE = f"browser-v{BROWSER_ABI}.so"
 SESSION_SUPPORT = ("terminal/session_view.c", "terminal/session_transfer.c")
 COMMON = ("terminal/defaults.c", "terminal/st.c", *SESSION_SUPPORT,
           "workspace/wire.c", "workspace/workspace_socket.c")
@@ -234,7 +237,7 @@ def installation_files(prefix=None):
         raise ValueError("PREFIX and MANPREFIX must be absolute paths")
     staging = Path(os.environ.get("DESTDIR", "/"))
     # Publish modules before a launcher that may immediately need them.
-    files = [("build/browser.so", prefix / "lib/worminal/browser.so", 0o755),
+    files = [("build/browser.so", prefix / "lib/worminal" / BROWSER_MODULE, 0o755),
              ("build/frontend.so", prefix / "lib/worminal/frontend.so", 0o755)]
     files += [(name, prefix / "bin" / name, 0o755)
               for name in ("worminal", "worminald", "worminal-x11", "worminald-x11")]

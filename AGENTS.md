@@ -50,7 +50,8 @@ remote machines share saved URLs only. `worminald` uses the v2 endpoint; browser
 Its shell command converts the calling PTY's ordered tab into a browser. GTK and WebKit never enter the service.
 Launchers link GLib only and forward to an existing owner before loading the GTK/Pango frontend module;
 the WebKit module loads when a browser view is first claimed. Both modules use local linker scope;
-explicit host callbacks carry browser actions across the module boundary.
+explicit host callbacks carry browser actions across the module boundary. Installed browser modules are
+ABI-named so live owners retain compatible lazy loading across upgrades.
 New browser views reuse a live renderer for matching HTTP origins or the same local file path;
 tabs retain independent navigation and session storage, and the first browser launch stays lazy.
 GTK publishes selected terminal directories and window focus through a read-only session D-Bus interface;

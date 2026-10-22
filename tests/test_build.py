@@ -118,14 +118,17 @@ class BuildTests(unittest.TestCase):
         previous = stage / "previous-client"
         previous.write_text("previous client")
         (installed / "bin/worminal").symlink_to(previous)
-        module = installed / "lib/worminal/browser.so"
+        module = installed / "lib/worminal" / build.BROWSER_MODULE
         module.parent.mkdir(parents=True)
         module.write_text("running module")
+        legacy = installed / "lib/worminal/browser.so"
+        legacy.write_text("legacy browser module")
         with patch.dict(os.environ, {"DESTDIR": str(stage), "MANPREFIX": "/manuals"}), \
                 patch.object(build, "build_targets") as compile_build:
             with module.open() as running_module:
                 build.install("/opt/worminal")
                 self.assertEqual(running_module.read(), "running module")
+            self.assertEqual(legacy.read_text(), "legacy browser module")
             self.assertFalse((installed / "bin/worminal").is_symlink())
             self.assertEqual(previous.read_text(), "previous client")
             compile_build.assert_called_once_with("worminal-x11", "worminald-x11")
@@ -140,6 +143,7 @@ class BuildTests(unittest.TestCase):
             keep.touch()
             build.uninstall("/opt/worminal")
             self.assertTrue(keep.exists())
+            self.assertEqual(legacy.read_text(), "legacy browser module")
             self.assertTrue(all(not destination.exists() for _, destination, _ in files))
 
     def test_clean_preserves_diagnostics(self):
@@ -162,7 +166,7 @@ class BuildTests(unittest.TestCase):
     def test_default_install_uses_user_prefix(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(Path, "home", return_value=self.root):
             files = build.installation_files()
-        self.assertEqual(files[0][1], self.root / ".local/lib/worminal/browser.so")
+        self.assertEqual(files[0][1], self.root / ".local/lib/worminal" / build.BROWSER_MODULE)
         self.assertIn(self.root / ".local/bin/worminal", [destination for _, destination, _ in files])
 
     def weston_runtime(self, major):
