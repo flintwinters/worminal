@@ -43,6 +43,16 @@ script_equals(Browser *b, const char *script, const char *expected)
 static void
 check_explorer(Browser *browser)
 {
+	Browser *fresh = browser_new(browser->app, "about:blank");
+	GdkRGBA background, expected;
+	gdk_rgba_parse(&expected, "#141414");
+	webkit_web_view_get_background_color(fresh->view, &background);
+	g_assert_cmpfloat_with_epsilon(background.red, expected.red, 0.000001);
+	g_assert_cmpfloat_with_epsilon(background.green, expected.green, 0.000001);
+	g_assert_cmpfloat_with_epsilon(background.blue, expected.blue, 0.000001);
+	g_assert_cmpfloat(background.alpha, ==, 1);
+	g_assert_null(webkit_web_view_get_uri(fresh->view));
+	browser_free(fresh);
 	char *cwd = g_get_current_dir();
 	char *directory = g_build_filename(cwd, ".checks", "explorer- #?% ü-XXXXXX", NULL);
 	g_assert_nonnull(g_mkdtemp(directory));
