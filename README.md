@@ -97,6 +97,7 @@ Initialize the explorer submodule and run `npm ci` there before the first native
 
 Ctrl+Shift+T opens a terminal, Ctrl+Shift+N opens another window,
 and Ctrl+Shift+W closes the active tab. Ctrl+Tab/Shift+Ctrl+Tab and Alt+1 through Alt+9 switch tabs.
+Plain Ctrl+N passes through to the terminal application.
 Browser tabs provide Back, Forward, Reload/Stop and a location entry (Ctrl+K). User popup links open as independent
 tabs; scripts cannot retain `window.opener`. Cookies and local storage stay in the local XDG `worminal-preview`
 profile. A peer's navigation updates the saved link without replacing an already open local page.

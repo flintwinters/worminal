@@ -54,12 +54,22 @@ class WindowActivationTests(unittest.TestCase):
                     # Give the owner a real input timestamp before forwarding a launch.
                     time.sleep(.1)
                     subprocess.run([str(ROOT / "worminal"), "-T", "Activation second",
-                                    "-e", "/bin/cat"], env=env, check=True, timeout=10)
+                                    "-o", "-", "-e", "/bin/sh", "-c",
+                                    "stty raw -echo; printf ACTIVATION_READY; exec cat"],
+                                   env=env, stdout=log, stderr=log, check=True, timeout=10)
                     wait_for(lambda: window("Activation second"), "Second window did not map")
                     second = window("Activation second")
                     wait_for(lambda: output("xdotool", "getwindowfocus") == second,
                              "Forwarded launch did not focus its new window")
-                    subprocess.run(["xdotool", "key", "ctrl+n"], env=env, check=True)
+                    log_path = ROOT / ".checks/window-activation.log"
+                    wait_for(lambda: b"ACTIVATION_READY" in log_path.read_bytes(), "Raw terminal readiness")
+                    before = output("xdotool", "search", "--onlyvisible", "--pid", str(owner.pid))
+                    subprocess.run(["xdotool", "key", "ctrl+n", "type", "PASSTHROUGH"], env=env, check=True)
+                    wait_for(lambda: b"\x0ePASSTHROUGH" in log_path.read_bytes(),
+                             "Ctrl+N did not reach the terminal as byte 0x0e")
+                    self.assertEqual(output("xdotool", "search", "--onlyvisible", "--pid", str(owner.pid)),
+                                     before, "Ctrl+N opened a window")
+                    subprocess.run(["xdotool", "key", "ctrl+shift+n"], env=env, check=True)
                     wait_for(lambda: output("xdotool", "getwindowfocus") not in (first, second, ""),
                              "New-window shortcut did not focus its window")
                     focused = output("xdotool", "getwindowfocus")

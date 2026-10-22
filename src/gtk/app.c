@@ -508,9 +508,9 @@ shortcut(GtkWidget *window, GdkEventKey *event, App *app)
 	guint mods = event->state & (GDK_CONTROL_MASK | GDK_SHIFT_MASK | GDK_MOD1_MASK);
 	Page *page = app->active;
 	if (page->url && browser_shortcut(page, key, mods)) return TRUE;
-	if (mods == GDK_CONTROL_MASK && (key == GDK_KEY_t || key == GDK_KEY_n || key == GDK_KEY_w)) {
+	/* Plain Ctrl+N belongs to terminal applications; window creation uses Shift. */
+	if (mods == GDK_CONTROL_MASK && (key == GDK_KEY_t || key == GDK_KEY_w)) {
 		if (key == GDK_KEY_t) app_terminal(app, FALSE);
-		else if (key == GDK_KEY_n) app_new_window(app);
 		else app_close(page);
 		return TRUE;
 	}
