@@ -15,6 +15,9 @@
 #include "browser_target.h"
 #include "tab_label.h"
 #include "windows.h"
+#ifdef GDK_WINDOWING_X11
+#include <gdk/gdkx.h>
+#endif
 
 static int windows;
 static GList *apps;
@@ -769,10 +772,21 @@ show_app(App *app)
 	app_startuptime("widgets");
 	if (request) g_mutex_unlock(&request->widgets_ready);
 	else connect_async(app, FALSE);
+	guint32 activation_time = GDK_CURRENT_TIME;
+#ifdef GDK_WINDOWING_X11
+	if (GDK_IS_X11_DISPLAY(gtk_widget_get_display(app->window))) {
+		/* Existing owners retain old input times. Muffin rejects timestamp-zero
+		 * activation, so stamp both the initial map and presentation freshly. */
+		gtk_widget_realize(app->window);
+		GdkWindow *window = gtk_widget_get_window(app->window);
+		activation_time = gdk_x11_get_server_time(window);
+		gdk_x11_window_set_user_time(window, activation_time);
+	}
+#endif
 	gtk_widget_show_all(app->window);
 	/* A launch is an explicit activation request, including forwarded launches
 	 * handled by an owner whose previous window already has desktop focus. */
-	gtk_window_present_with_time(GTK_WINDOW(app->window), GDK_CURRENT_TIME);
+	gtk_window_present_with_time(GTK_WINDOW(app->window), activation_time);
 	window_state_add(app);
 	app_startuptime("map-request");
 }

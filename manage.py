@@ -232,6 +232,14 @@ def check_window_state():
                          "-p", "test_window_state.py", "-v"]))
 
 
+@app.command("check-window-activation")
+def check_window_activation():
+    """Check new-window focus under Cinnamon's Muffin on a private display."""
+    native_build.build_targets()
+    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                         "-p", "test_window_activation.py", "-v"]))
+
+
 @app.command()
 def lint():
     """Check file limits and run Clang static analysis (requires clang-tidy)."""
