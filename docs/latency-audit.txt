@@ -577,3 +577,16 @@ are warm, and desktop compositing/physical display are excluded. Results are
 frozen under .checks/browser-cold-{final,all-targets,cpu-samples}.json. Main
 checkout headless checks also pass with the unrelated launcher changes retained.
 The installed running application is not replaced or restarted by this checkpoint.
+
+Browser conversion launcher
+---------------------------
+The existing pending launcher shortcut avoids loading frontend.so and its GTK
+libraries in the command process before execing worminald --new-browser-tab.
+Its matching app entrypoint removal, socket helper build dependency and CLI
+regression test form one change. Eleven alternating initialized-profile HTTP
+conversion pairs against staged cec59de measured first-browser 809/859 ms and
+additional-browser 68/80 ms medians. This is the PTY command path, distinct from
+direct --surf launches. The baseline also validates the ABI-named staged module
+layout. Routine headless checks pass, including real PTY conversions, caller
+path encoding, command rejection outside a terminal and missing-frontend CLI.
+The raw measurements are frozen in .checks/browser-launcher-exec.json.

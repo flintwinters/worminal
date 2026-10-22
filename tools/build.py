@@ -127,7 +127,8 @@ class Builder:
             self.cflags = [*CPPFLAGS, *words("CPPFLAGS"), *words("CFLAGS", "-O3"),
                            *pkg_flags("--cflags", packages)]
             try:
-                self.program(target, ["src/gtk/launcher.c", "src/gtk/windows_forward.c", "src/workspace/wire.c"],
+                self.program(target, ["src/gtk/launcher.c", "src/gtk/windows_forward.c", "src/workspace/wire.c",
+                                      "src/workspace/workspace_socket.c"],
                              variant="launcher", flags=["-DWORMINAL_PREVIEW_PROTOCOL"],
                              libs=[*pkg_flags("--libs", packages), *words("LDFLAGS")])
             finally:
