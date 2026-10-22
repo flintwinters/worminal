@@ -13,7 +13,7 @@ from Xlib import X, XK, display
 from rich.console import Console
 from rich.table import Table
 
-from perf_metrics import descendants, memory
+from perf_metrics import descendants, memory, startup_usage
 from preview import profile
 from visible_latency import capture_failure, find_window, ready, snapshot, stop, summarize, wait_for
 from window_perf import keypress, window_for_pid
@@ -76,10 +76,13 @@ def content_visible(window, target):
     return len(data) // 4 - data.count(color.to_bytes(3, "little")) > 32
 
 
-def sample(executable, target, log, cold_open=False):
+def sample(executable, target, log, cold_open=False, trace_startup=False):
     with isolated_display() as private, profile(private) as env:
-        env.update(GDK_BACKEND="x11", GIO_USE_VFS="local", GSETTINGS_BACKEND="memory",
-                   WORMINAL_TRACE_TIMING="1")
+        env.update(GDK_BACKEND="x11", GIO_USE_VFS="local", GSETTINGS_BACKEND="memory")
+        if trace_startup:
+            env["WORMINAL_TRACE_TIMING"] = "1"
+        else:
+            env.pop("WORMINAL_TRACE_TIMING", None)
         env.pop("DBUS_SESSION_BUS_ADDRESS", None)
         connection = display.Display(env["DISPLAY"])
         owner = None
@@ -118,6 +121,13 @@ def sample(executable, target, log, cold_open=False):
                     capture_failure(window)
                     raise
                 values[phase + "_visible"] = (time.monotonic_ns() - started) / 1e6
+                startup = startup_usage(owner.pid) if cold_open else None
+                if startup:
+                    for item in startup["processes"]:
+                        try:
+                            item["name"] = Path(f"/proc/{item['pid']}/comm").read_text().strip()
+                        except (FileNotFoundError, ProcessLookupError):
+                            item["name"] = "exited"
                 if target:
                     started = time.monotonic_ns()
                     keypress(connection, XK.XK_a)
@@ -129,6 +139,8 @@ def sample(executable, target, log, cold_open=False):
                         return title and str(ROOT) in bytes(title.value).decode("utf-8")
                     wait_for(explorer_title)
                 resources[phase] = memory(descendants(owner.pid))
+                if startup:
+                    resources[phase]["startup"] = startup
             return values, resources
         finally:
             if owner:
@@ -152,6 +164,7 @@ def main():
     parser.add_argument("--snapshot", type=Path)
     parser.add_argument("--compare", type=Path)
     parser.add_argument("--cold-open", action="store_true")
+    parser.add_argument("--trace-startup", action="store_true")
     parser.add_argument("--kind", choices=("all", "http", "file", "explorer"), default="all")
     args = parser.parse_args()
     if args.trials < 1:
@@ -172,7 +185,7 @@ def main():
                     for kind, target in (("http", url), ("file", file_url), ("explorer", None)):
                         if args.kind != "all" and kind != args.kind:
                             continue
-                        values, usage = sample(variants[name], target, log, args.cold_open)
+                        values, usage = sample(variants[name], target, log, args.cold_open, args.trace_startup)
                         resources[name].append({"kind": kind, **usage})
                         for phase, value in values.items():
                             samples[name].setdefault(kind + "_" + phase, []).append(value)
@@ -180,6 +193,7 @@ def main():
     report = {"revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
               "trials": args.trials, "resources": resources,
               "cold_open": args.cold_open,
+              "trace_startup": args.trace_startup,
               "variants": {name: {"samples_ms": values,
                                   "summary_ms": summarize(values)}
                            for name, values in samples.items()},
