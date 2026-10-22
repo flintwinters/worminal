@@ -558,7 +558,9 @@ open_browser(App *app, const char *url)
 	app_browser(app, url);
 	WAIT(g_list_length(app->pages) == before + 1 && app->active && app->active->browser);
 	Page *page = app->active;
-	WAIT(!webkit_web_view_is_loading(page->browser->view) && webkit_web_view_get_title(page->browser->view));
+	WAIT(!webkit_web_view_is_loading(page->browser->view) &&
+	     !g_strcmp0(webkit_web_view_get_uri(page->browser->view), page->url) &&
+	     script_equals(page->browser, "document.readyState", "complete"));
 	g_assert_false(gtk_widget_get_visible(page->browser->entry));
 	gtk_widget_show_all(browser_widget(page->browser));
 	g_assert_false(gtk_widget_get_visible(page->browser->entry));

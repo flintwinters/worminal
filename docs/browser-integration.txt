@@ -67,7 +67,7 @@ File targets become percent-encoded file URLs; directory targets open the custom
 Both resolve in the calling shell directory before the service receives the command.
 Explicit URLs (including about:blank) stay unchanged.
 The default target uses worminal:/// followed by the encoded calling shell directory. The browser
-module generates plain HTML: a directory heading and ordinary parent, folder, and file links.
+module enumerates entries and emits only file/folder links on a dark background.
 Folder links show another listing; file links stream the file with its normal content type.
 Browser back/forward and the address entry work normally. The viewer has no scripts, folder picker, or filesystem API.
 Native builds do not require the standalone file-explorer submodule or Node dependencies.

@@ -269,18 +269,6 @@ download_started(WebKitWebContext *ctx, WebKitDownload *download, gpointer data)
 
 /* A directory is a plain document: no JavaScript, picker, or filesystem bridge. */
 static void
-directory_link(GString *html, const char *path, const char *name, gboolean directory)
-{
-	char *encoded = g_uri_escape_string(path, "/", FALSE);
-	char *url = g_strconcat("worminal://", encoded, NULL);
-	char *href = g_markup_escape_text(url, -1);
-	char *label = g_markup_escape_text(name, -1);
-	g_string_append_printf(html, "<li><a href=\"%s\">%s%s</a></li>\n",
-	                       href, label, directory ? "/" : "");
-	g_free(label); g_free(href); g_free(url); g_free(encoded);
-}
-
-static void
 directory_request(WebKitURISchemeRequest *request, gpointer data)
 {
 	(void)data;
@@ -301,27 +289,17 @@ directory_request(WebKitURISchemeRequest *request, gpointer data)
 	}
 	GDir *directory = g_dir_open(path, 0, &error);
 	if (!directory) { g_uri_unref(uri); goto fail; }
-	char *label = g_markup_escape_text(path, -1);
-	GString *html = g_string_new("<!doctype html><meta charset=\"utf-8\">\n");
-	g_string_append_printf(html, "<title>%s</title><h1>%s</h1>\n<ul>\n", label, label);
-	g_free(label);
-	if (strcmp(path, "/")) {
-		char *parent = g_path_get_dirname(path);
-		directory_link(html, parent, "..", TRUE);
-		g_free(parent);
-	}
-	GList *names = NULL;
+	GString *html = g_string_new("<!doctype html><meta charset=\"utf-8\">"
+	    "<style>html{background:#141414;color:#ddd}a{color:#b7d5ff}</style>\n");
 	const char *name;
-	while ((name = g_dir_read_name(directory))) names = g_list_prepend(names, g_strdup(name));
-	g_dir_close(directory);
-	names = g_list_sort(names, (GCompareFunc)g_strcmp0);
-	for (GList *item = names; item; item = item->next) {
-		char *child = g_build_filename(path, item->data, NULL);
-		directory_link(html, child, item->data, g_file_test(child, G_FILE_TEST_IS_DIR));
-		g_free(child);
+	while ((name = g_dir_read_name(directory))) {
+		char *child = g_build_filename(path, name, NULL);
+		char *href = g_uri_escape_string(child, "/", FALSE);
+		char *label = g_markup_escape_text(name, -1);
+		g_string_append_printf(html, "<a href=\"worminal://%s\">%s</a><br>\n", href, label);
+		g_free(label); g_free(href); g_free(child);
 	}
-	g_list_free_full(names, g_free);
-	g_string_append(html, "</ul>\n");
+	g_dir_close(directory);
 	g_uri_unref(uri);
 	gsize length = html->len;
 	GInputStream *stream = g_memory_input_stream_new_from_data(g_string_free(html, FALSE), length, g_free);

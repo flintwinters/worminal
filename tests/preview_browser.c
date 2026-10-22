@@ -55,7 +55,9 @@ check_explorer(Browser *browser)
 	webkit_web_view_load_uri(browser->view, url);
 	WAIT(!webkit_web_view_is_loading(browser->view));
 	WAIT(script_equals(browser, "String(document.body.textContent.includes('literal <name>.txt'))", "true"));
-	expect_script(browser, "String(document.querySelectorAll('input,button,script').length)", "0");
+	expect_script(browser, "String(document.querySelectorAll('input,button,script,h1,ul,li').length)", "0");
+	expect_script(browser, "getComputedStyle(document.documentElement).backgroundColor", "rgb(20, 20, 20)");
+	expect_script(browser, "String(document.links.length)", "2");
 	expect_script(browser, "Array.from(document.links).find(a => a.textContent.includes('literal <name>.txt')).click(); 'ok'",
 	              "ok");
 	WAIT(!webkit_web_view_is_loading(browser->view));
