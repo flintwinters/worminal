@@ -19,7 +19,6 @@
 #include "session_transfer.h"
 #include "wire.h"
 #include "workspace_socket.h"
-#include "workspace_client.h"
 #include "browser_target.h"
 #include WORMINAL_THEME_HEADER
 
@@ -831,6 +830,41 @@ out:
 	return 0;
 }
 
+#ifdef WORMINAL_PREVIEW_PROTOCOL
+static int
+browser_command(const char *url)
+{
+	char *target = workspace_browser_target(url);
+	if (!target) { perror("Cannot resolve browser target"); return 1; }
+	int fd = workspace_connect();
+	if (fd < 0) { free(target); fputs("No preview workspace service is running.\n", stderr); return 1; }
+	/* Converting this PTY hangs up its shell. Let the short-lived command receive
+	 * its result and exit normally even if it is in the foreground process group. */
+	signal(SIGHUP, SIG_IGN);
+	struct timeval timeout = {.tv_sec = 3};
+	setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+	WireBuffer buffer = {0};
+	wire_put_string(&buffer, target);
+	free(target);
+	int okay = wire_write(fd, WIRE_BROWSER_REPLACE, 0, buffer.data, buffer.len);
+	wire_buffer_free(&buffer);
+	WirePacket packet;
+	if (okay && wire_read(fd, &packet) > 0) {
+		okay = packet.type == WIRE_COMMAND_DONE;
+		if (!okay) {
+			char *error = packet.type == WIRE_ERROR ? wire_get_string(&packet) : NULL;
+			fprintf(stderr, "%s\n", error ? error : "Preview service rejected the browser command.");
+			free(error);
+		}
+		wire_packet_free(&packet);
+	} else {
+		fputs("Preview service did not reply; an older service may need restarting after its sessions end.\n", stderr);
+		okay = 0;
+	}
+	close(fd);
+	return okay ? 0 : 1;
+}
+#endif
 
 int
 main(int argc, char **argv)
@@ -839,7 +873,7 @@ main(int argc, char **argv)
 		return handoff_command(argv[2], !strcmp(argv[1], "--handin"));
 #ifdef WORMINAL_PREVIEW_PROTOCOL
 	if ((argc == 2 || argc == 3) && strcmp(argv[1], "--new-browser-tab") == 0)
-		return workspace_browser_command(argc == 3 ? argv[2] : NULL);
+		return browser_command(argc == 3 ? argv[2] : NULL);
 #endif
 	if (argc == 2 && strcmp(argv[1], "--serve") == 0)
 		return serve();
