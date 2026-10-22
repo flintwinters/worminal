@@ -79,6 +79,12 @@ check_explorer(Browser *browser)
 	WAIT(!webkit_web_view_is_loading(browser->view));
 	char *empty_url = g_strconcat(url, "/empty", NULL);
 	WAIT(g_str_has_prefix(webkit_web_view_get_uri(browser->view), empty_url));
+	char *missing = g_strconcat(url, "/missing%20%3Cname%3E", NULL);
+	webkit_web_view_load_uri(browser->view, missing);
+	WAIT(script_equals(browser, "String(document.body.textContent.includes('missing <name>'))", "true"));
+	expect_script(browser, "getComputedStyle(document.documentElement).backgroundColor", "rgb(20, 20, 20)");
+	expect_script(browser, "String(document.querySelectorAll('name,script').length)", "0");
+	g_free(missing);
 	g_unlink(file); g_rmdir(empty); g_rmdir(directory);
 	g_free(encoded); g_free(empty_url); g_free(url); g_free(file); g_free(empty); g_free(directory); g_free(cwd);
 }

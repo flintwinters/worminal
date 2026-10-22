@@ -922,8 +922,8 @@ main(int argc, char **argv)
 	app_browser(app, tls);
 	WAIT(g_list_length(app->pages) == before_tls + 1 && app->active && app->active->browser);
 	Page *failed = app->active;
-	WAIT(gtk_widget_get_visible(failed->browser->notice));
-	g_assert_nonnull(strstr(gtk_label_get_text(GTK_LABEL(failed->browser->notice)), "Certificate"));
+	WAIT(script_equals(failed->browser, "String(document.body.textContent.includes('Certificate'))", "true"));
+	expect_script(failed->browser, "getComputedStyle(document.documentElement).backgroundColor", "rgb(20, 20, 20)");
 	g_assert_null(webkit_web_view_get_title(failed->browser->view));
 	app_close(failed);
 	WAIT(g_list_length(app->pages) == before_tls);

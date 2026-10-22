@@ -5,6 +5,8 @@
 #include "browser_target.h"
 
 #define BROWSER_BACKGROUND "#141414"
+#define BROWSER_DOCUMENT "<!doctype html><meta charset=\"utf-8\"><meta name=\"color-scheme\" content=\"dark\">" \
+    "<style>html{background:" BROWSER_BACKGROUND ";color:#ddd}a{color:#b7d5ff}</style>\n"
 
 struct Browser {
 	App *app;
@@ -99,12 +101,21 @@ load_changed(WebKitWebView *view, WebKitLoadEvent event, Browser *b)
 	changed(view, NULL, b);
 }
 
+static void
+error_page(WebKitWebView *view, const char *url, const char *message)
+{
+	char *escaped = g_markup_escape_text(message, -1);
+	char *html = g_strconcat(BROWSER_DOCUMENT, escaped, NULL);
+	webkit_web_view_load_alternate_html(view, html, url, NULL);
+	g_free(html); g_free(escaped);
+}
+
 static gboolean
 load_failed(WebKitWebView *view, WebKitLoadEvent event, const char *url, GError *error, Browser *b)
 {
-	(void)view; (void)event; (void)url;
+	(void)event; (void)b;
 	if (!g_error_matches(error, WEBKIT_NETWORK_ERROR, WEBKIT_NETWORK_ERROR_CANCELLED))
-		notice(b, error->message);
+		error_page(view, url, error->message);
 	return TRUE;
 }
 
@@ -112,9 +123,9 @@ static gboolean
 tls_failed(WebKitWebView *view, const char *url, GTlsCertificate *certificate,
            GTlsCertificateFlags errors, Browser *b)
 {
-	(void)view; (void)certificate;
+	(void)certificate; (void)b;
 	char *message = g_strdup_printf("Certificate validation failed (%u) for %s. Connection blocked.", errors, url);
-	notice(b, message);
+	error_page(view, url, message);
 	g_free(message);
 	return TRUE;
 }
@@ -291,8 +302,7 @@ directory_request(WebKitURISchemeRequest *request, gpointer data)
 	}
 	GDir *directory = g_dir_open(path, 0, &error);
 	if (!directory) { g_uri_unref(uri); goto fail; }
-	GString *html = g_string_new("<!doctype html><meta charset=\"utf-8\">"
-	    "<style>html{background:" BROWSER_BACKGROUND ";color:#ddd}a{color:#b7d5ff}</style>\n");
+	GString *html = g_string_new(BROWSER_DOCUMENT);
 	const char *name;
 	while ((name = g_dir_read_name(directory))) {
 		char *child = g_build_filename(path, name, NULL);
