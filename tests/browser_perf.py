@@ -14,6 +14,7 @@ from rich.console import Console
 from rich.table import Table
 
 from perf_metrics import descendants, memory, startup_usage
+from browser_profile import collect as collect_cpu
 from preview import profile
 from visible_latency import capture_failure, find_window, ready, snapshot, stop, summarize, wait_for
 from window_perf import keypress, window_for_pid
@@ -76,7 +77,7 @@ def content_visible(window, target):
     return len(data) // 4 - data.count(color.to_bytes(3, "little")) > 32
 
 
-def sample(executable, target, log, cold_open=False, trace_startup=False, stored_profile=None):
+def sample(executable, target, log, cold_open=False, trace_startup=False, stored_profile=None, profile_cpu=False):
     with isolated_display() as private, profile(private) as env:
         if stored_profile:
             for key in ("XDG_DATA_HOME", "XDG_CACHE_HOME"):
@@ -87,6 +88,12 @@ def sample(executable, target, log, cold_open=False, trace_startup=False, stored
         else:
             env.pop("WORMINAL_TRACE_TIMING", None)
         env.pop("DBUS_SESSION_BUS_ADDRESS", None)
+        if profile_cpu:
+            cpu_directory = Path(log.name).with_suffix(".cpu")
+            cpu_directory.mkdir(exist_ok=True)
+            env["WORMINAL_BROWSER_CPU_DIR"] = str(cpu_directory)
+            preload = str(ROOT / "build/browser_cpu.so")
+            env["LD_PRELOAD"] = preload + (":" + env["LD_PRELOAD"] if env.get("LD_PRELOAD") else "")
         connection = display.Display(env["DISPLAY"])
         owner = None
         values, resources = {}, {}
@@ -123,7 +130,8 @@ def sample(executable, target, log, cold_open=False, trace_startup=False, stored
                 except TimeoutError:
                     capture_failure(window)
                     raise
-                values[phase + "_visible"] = (time.monotonic_ns() - started) / 1e6
+                visible = time.monotonic_ns()
+                values[phase + "_visible"] = (visible - started) / 1e6
                 startup = startup_usage(owner.pid) if cold_open else None
                 if startup:
                     for item in startup["processes"]:
@@ -144,6 +152,8 @@ def sample(executable, target, log, cold_open=False, trace_startup=False, stored
                 resources[phase] = memory(descendants(owner.pid))
                 if startup:
                     resources[phase]["startup"] = startup
+                if profile_cpu:
+                    resources[phase]["cpu_profile"] = collect_cpu(descendants(owner.pid), cpu_directory, visible)
             return values, resources
         finally:
             if owner:
@@ -169,10 +179,13 @@ def main():
     parser.add_argument("--cold-open", action="store_true")
     parser.add_argument("--established-profile", action="store_true")
     parser.add_argument("--trace-startup", action="store_true")
+    parser.add_argument("--profile-cpu", action="store_true")
     parser.add_argument("--kind", choices=("all", "http", "file", "explorer"), default="all")
     args = parser.parse_args()
     if args.trials < 1:
         parser.error("--trials must be positive")
+    if args.profile_cpu and not args.cold_open:
+        parser.error("--profile-cpu requires --cold-open")
     if args.snapshot:
         snapshot(args.snapshot)
     variants = {"candidate": ROOT / "worminal"}
@@ -200,7 +213,7 @@ def main():
                 with (checks / f"browser-perf-{name}-{trial}.log").open("wb") as log:
                     for kind, target in targets:
                         values, usage = sample(variants[name], target, log, args.cold_open, args.trace_startup,
-                                               stored_profiles.get((name, kind)))
+                                               stored_profiles.get((name, kind)), args.profile_cpu)
                         resources[name].append({"kind": kind, **usage})
                         for phase, value in values.items():
                             samples[name].setdefault(kind + "_" + phase, []).append(value)
@@ -210,6 +223,7 @@ def main():
               "cold_open": args.cold_open,
               "trace_startup": args.trace_startup,
               "established_profile": args.established_profile,
+              "profile_cpu": args.profile_cpu,
               "variants": {name: {"samples_ms": values,
                                   "summary_ms": summarize(values)}
                            for name, values in samples.items()},
@@ -224,6 +238,8 @@ def main():
                        "Excludes desktop compositing and physical display latency."}
     if args.compare:
         report["baseline_revision"] = (args.compare / "revision").read_text().strip()
+    if args.profile_cpu:
+        report["notes"] += " CPU sampling is diagnostic; sampler setup adds overhead to elapsed timings."
     path = checks / "browser-perf.json"
     path.write_text(json.dumps(report, indent=2) + "\n")
     table = Table(title="Browser tab latency (ms)")

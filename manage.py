@@ -354,6 +354,7 @@ def browser_perf(trials: int = typer.Option(5, min=1),
                  cold_open: bool = typer.Option(False, help="Measure fresh process launch directly into a browser."),
                  established_profile: bool = typer.Option(False, help="Initialize profile storage before measured launches."),
                  trace_startup: bool = typer.Option(False, help="Log startup milestones; timings include log I/O."),
+                 profile_cpu: bool = typer.Option(False, help="Diagnostically sample startup CPU without perf privileges."),
                  kind: str = typer.Option("all", help="Target: all, http, file, or explorer.")):
     """Measure browser presentation, including direct cold launches, on private Xvfb."""
     native_build.build_targets("worminal", "worminald", "build/latency_echo")
@@ -363,6 +364,9 @@ def browser_perf(trials: int = typer.Option(5, min=1),
         options += ["--trace-startup"]
     if established_profile:
         options += ["--established-profile"]
+    if profile_cpu:
+        native_build.build_targets("build/browser_cpu.so")
+        options += ["--profile-cpu"]
     raise typer.Exit(run([sys.executable, "tests/browser_perf.py", "--trials", str(trials), *options]))
 
 
