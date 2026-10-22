@@ -5,6 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import subprocess
+import tempfile
 import threading
 import time
 
@@ -19,13 +20,14 @@ from window_perf import keypress
 from x11 import isolated_display
 
 ROOT = Path(__file__).resolve().parent.parent
+CANVAS_HTML = ("<!doctype html><title>Browser canvas</title>"
+               "<style>html{background:#345678}</style>"
+               "<script>onkeydown=()=>document.documentElement.style.background='#789abc'</script>")
 
 
 class Canvas(BaseHTTPRequestHandler):
     def do_GET(self):
-        body = ("<!doctype html><title>Browser canvas</title>"
-                "<style>html{background:#345678}</style>"
-                "<script>onkeydown=()=>document.documentElement.style.background='#789abc'</script>").encode()
+        body = CANVAS_HTML.encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.send_header("Content-Length", str(len(body)))
@@ -47,6 +49,14 @@ def canvas():
         server.shutdown()
         server.server_close()
         worker.join()
+
+
+@contextmanager
+def file_canvas(checks):
+    with tempfile.TemporaryDirectory(prefix="browser-canvas-", dir=checks) as directory:
+        path = Path(directory) / "canvas.html"
+        path.write_text(CANVAS_HTML)
+        yield path.as_uri()
 
 
 def sample(executable, target, log):
@@ -128,11 +138,11 @@ def main():
     resources = {name: [] for name in variants}
     checks = ROOT / ".checks"
     checks.mkdir(exist_ok=True)
-    with canvas() as url:
+    with canvas() as url, file_canvas(checks) as file_url:
         for trial in range(args.trials):
             for name in list(variants)[::1 if trial % 2 == 0 else -1]:
                 with (checks / f"browser-perf-{name}-{trial}.log").open("wb") as log:
-                    for kind, target in (("http", url), ("explorer", None)):
+                    for kind, target in (("http", url), ("file", file_url), ("explorer", None)):
                         values, usage = sample(variants[name], target, log)
                         resources[name].append({"kind": kind, **usage})
                         for phase, value in values.items():
@@ -145,7 +155,7 @@ def main():
                            for name, values in samples.items()},
               "notes": "Private Xvfb; real Return execs the browser replacement command in its calling PTY. "
                        "First and additional browser views use fresh profiles per target and trial. "
-                       "Visible waits for expected page pixels; HTTP also verifies real-key JavaScript response. "
+                       "Visible waits for expected page pixels; HTTP and file URLs verify real-key JavaScript response. "
                        "Explorer uses Worminal plain HTML directory links. Warm filesystem caches. "
                        "Memory includes frontend descendants, excludes service/shells. "
                        "Excludes desktop compositing and physical display latency."}

@@ -779,9 +779,12 @@ main(int argc, char **argv)
 	const char *base = g_getenv("WORMINAL_PREVIEW_FIXTURE");
 	g_assert_nonnull(base);
 	char *url = g_strconcat(base, "/page", NULL);
-	/* Exercise the native directory listing in real WebKit.
-	 * Explicit about:blank remains distinct and is covered by the command checks. */
-	Page *home = open_browser(app, NULL);
+	/* File views retain their own tab storage while reusing the same resource's
+	 * renderer. Closing the original view must leave its sibling usable. */
+	char *file_cwd = g_get_current_dir();
+	char *file_url = g_filename_to_uri(file_cwd, NULL, NULL);
+	Page *home = open_browser(app, file_url);
+	g_free(file_url); g_free(file_cwd);
 	char *home_url = g_strdup(webkit_web_view_get_uri(home->browser->view));
 	g_assert_true(related_view(home_url) == home->browser->view);
 	g_assert_null(related_view("file:///etc/hosts"));
@@ -794,8 +797,15 @@ main(int argc, char **argv)
 	WAIT(g_list_length(app->pages) == original_home_count - 1);
 	home = second_home;
 	g_free(home_url);
-	check_explorer(home->browser);
+	expect_script(home->browser, "sessionStorage.setItem('surviving-tab', 'yes'); "
+	              "sessionStorage.getItem('surviving-tab')", "yes");
 	int home_count = g_list_length(app->pages);
+	app_close(home);
+	WAIT(g_list_length(app->pages) == home_count - 1);
+	/* Also exercise the current default directory page, independently of its scheme. */
+	home = open_browser(app, NULL);
+	check_explorer(home->browser);
+	home_count = g_list_length(app->pages);
 	app_close(home);
 	WAIT(g_list_length(app->pages) == home_count - 1);
 	Page *web = open_browser(app, url);
