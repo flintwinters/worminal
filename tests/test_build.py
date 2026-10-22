@@ -23,7 +23,7 @@ class BuildTests(unittest.TestCase):
         self.addCleanup(self.root_patch.stop)
 
     def test_release_and_rollback_own_matching_protocols(self):
-        with patch.object(build, "pkg_flags", return_value=[]), patch.object(build, "generate_explorer"):
+        with patch.object(build, "pkg_flags", return_value=[]):
             builder = build.Builder()
             with patch.object(builder, "program") as program:
                 for name in ("worminal", "worminald", "worminal-preview", "worminald-preview"):
@@ -41,45 +41,6 @@ class BuildTests(unittest.TestCase):
                     args, kwargs = program.call_args
                     self.assertNotIn("-DWORMINAL_PREVIEW_PROTOCOL", kwargs["flags"])
                     self.assertIn('-DWORKSPACE_DAEMON="worminald-x11"', kwargs["flags"])
-
-    def test_explorer_embedding_rebuilds_when_sources_change_and_preserves_utf8(self):
-        explorer = self.root / "file-explorer"
-        explorer.mkdir()
-        for name in ("package.json", "package-lock.json", "tsconfig.json", "vite.config.ts"):
-            (explorer / name).write_text("{}")
-        source = explorer / "apps/explorer/src/main.ts"
-        source.parent.mkdir(parents=True)
-        source.write_text("first")
-        artifact = explorer / "dist/index.html"
-
-        def bundle(_command):
-            artifact.parent.mkdir(exist_ok=True)
-            artifact.write_text('<title>Files — Worminal</title>"\\' + source.read_text())
-
-        with patch.object(build, "invoke", side_effect=bundle) as invoked:
-            build.generate_explorer()
-            header = self.root / "build/file_explorer.h"
-            content = header.read_text()
-            encoded = bytes(int(value, 8) for value in re.findall(r"\\([0-7]{3})", content))
-            self.assertEqual(encoded, artifact.read_bytes())
-            timestamp = header.stat().st_mtime_ns
-            build.generate_explorer()
-            self.assertEqual(invoked.call_count, 1)
-            self.assertEqual(header.stat().st_mtime_ns, timestamp)
-            source.write_text("changed")
-            later = artifact.stat().st_mtime_ns + 1_000_000
-            os.utime(source, ns=(later, later))
-            build.generate_explorer()
-            self.assertEqual(invoked.call_count, 2)
-            self.assertNotEqual(header.read_text(), content)
-
-    def test_browser_and_preview_proof_both_generate_the_embedded_explorer(self):
-        with patch.object(build, "pkg_flags", return_value=[]), patch.object(build, "generate_explorer") as generate:
-            builder = build.Builder()
-            with patch.object(builder, "program"):
-                builder.target("build/browser.so")
-                builder.target("build/preview_test")
-            self.assertEqual(generate.call_count, 2)
 
     def test_defaults_and_environment_flags(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(build, "pkg_flags", return_value=[]):
