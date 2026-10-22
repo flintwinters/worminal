@@ -19,13 +19,21 @@ related_view(const char *url)
 	WebKitSecurityOrigin *origin = webkit_security_origin_new_for_uri(url);
 	const char *scheme = webkit_security_origin_get_protocol(origin);
 	WebKitWebView *result = NULL;
-	/* Only share renderers for explicit network origins. Local and opaque
-	 * documents retain independent processes and their normal access rules. */
-	if (!g_strcmp0(scheme, "http") || !g_strcmp0(scheme, "https")) {
+	/* A file tab may reuse only the same local path, never another file's
+	 * renderer. Network tabs share only matching WebKit security origins. */
+	GFile *file = !g_strcmp0(scheme, "file") ? g_file_new_for_uri(url) : NULL;
+	if (file || !g_strcmp0(scheme, "http") || !g_strcmp0(scheme, "https")) {
 		for (GList *item = browsers; item; item = item->next) {
 			Browser *b = item->data;
 			const char *current = webkit_web_view_get_uri(b->view);
 			if (!current) continue;
+			if (file) {
+				GFile *other = g_file_new_for_uri(current);
+				gboolean same = g_file_equal(file, other);
+				g_object_unref(other);
+				if (same) { result = b->view; break; }
+				continue;
+			}
 			WebKitSecurityOrigin *other = webkit_security_origin_new_for_uri(current);
 			gboolean same = !g_strcmp0(scheme, webkit_security_origin_get_protocol(other)) &&
 			    !g_strcmp0(webkit_security_origin_get_host(origin), webkit_security_origin_get_host(other)) &&
@@ -34,6 +42,7 @@ related_view(const char *url)
 			if (same) { result = b->view; break; }
 		}
 	}
+	g_clear_object(&file);
 	webkit_security_origin_unref(origin);
 	return result;
 }

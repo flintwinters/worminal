@@ -782,6 +782,18 @@ main(int argc, char **argv)
 	/* Exercise the native directory listing in real WebKit.
 	 * Explicit about:blank remains distinct and is covered by the command checks. */
 	Page *home = open_browser(app, NULL);
+	char *home_url = g_strdup(webkit_web_view_get_uri(home->browser->view));
+	g_assert_true(related_view(home_url) == home->browser->view);
+	g_assert_null(related_view("file:///etc/hosts"));
+	expect_script(home->browser, "sessionStorage.setItem('file-tab', 'first'); 'ok'", "ok");
+	Page *second_home = open_browser(app, home_url);
+	expect_script(second_home->browser, "String(window.opener)", "null");
+	expect_script(second_home->browser, "String(sessionStorage.getItem('file-tab'))", "null");
+	int original_home_count = g_list_length(app->pages);
+	app_close(home);
+	WAIT(g_list_length(app->pages) == original_home_count - 1);
+	home = second_home;
+	g_free(home_url);
 	check_explorer(home->browser);
 	int home_count = g_list_length(app->pages);
 	app_close(home);
