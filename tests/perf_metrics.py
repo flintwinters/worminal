@@ -39,9 +39,15 @@ def cpu_time(pid):
     return (int(fields[11]) + int(fields[12])) / os.sysconf("SC_CLK_TCK")
 
 
+def main_thread_times(pid):
+    """Main-thread runtime and runnable-queue wait in seconds (Linux schedstat)."""
+    fields = Path(f"/proc/{pid}/schedstat").read_text().split()
+    return int(fields[0]) / 1e9, int(fields[1]) / 1e9
+
+
 def main_cpu_time(pid):
     """Main-thread scheduled runtime in seconds, from Linux's nanosecond counter."""
-    return int(Path(f"/proc/{pid}/schedstat").read_text().split()[0]) / 1e9
+    return main_thread_times(pid)[0]
 
 
 def startup_usage(pid):
@@ -57,10 +63,12 @@ def startup_usage(pid):
             status = dict(line.split(":", 1) for line in Path(f"/proc/{child}/status").read_text().splitlines())
             if "VmHWM" not in status:
                 continue  # An exited/reaped helper has no resident address space to sample.
+            main_cpu, main_runqueue = main_thread_times(child)
             processes.append({"pid": child, "approx_rss_peak_kib": int(status["VmHWM"].split()[0]),
                               "rss_kib": int(status["VmRSS"].split()[0]),
                               "cpu_ms": cpu_time(child) * 1000,
-                              "main_thread_cpu_ms": main_cpu_time(child) * 1000})
+                              "main_thread_cpu_ms": main_cpu * 1000,
+                              "main_thread_runqueue_ms": main_runqueue * 1000})
         except (FileNotFoundError, ProcessLookupError):
             continue
     return {"processes": processes, "cpu_ms": sum(item["cpu_ms"] for item in processes),
