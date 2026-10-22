@@ -65,7 +65,11 @@ Ctrl+K reveals the address entry. For example:
 
 Filepaths become percent-encoded file URLs in the calling shell's directory before the
 service receives the command. Explicit URLs (including about:blank) stay unchanged.
-The default worminal:///files page serves the generated explorer HTML from the lazy
+The default worminal:///files?path=... page starts in the calling shell directory.
+The embedded explorer lists local folders and previews bounded file contents through read-only
+host endpoints. Open folder accepts a path inside the page, without a system folder chooser.
+Saved remote URLs refer to paths on the viewing machine.
+The worminal:///files page serves the generated explorer HTML from the lazy
 browser module, so installed and remote views do not depend on checkout paths.
 
 The service uses kernel peer credentials and the caller's process session to

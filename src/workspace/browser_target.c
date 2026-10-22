@@ -15,7 +15,14 @@ alpha(unsigned char c)
 char *
 workspace_browser_target(const char *text)
 {
-	if (!text) return strdup(WORKSPACE_BROWSER_HOME);
+	if (!text) {
+		char *cwd = workspace_browser_target(".");
+		if (!cwd) return NULL;
+		char *home = NULL;
+		if (asprintf(&home, "%s?path=%s", WORKSPACE_BROWSER_HOME, cwd + 7) < 0) home = NULL;
+		free(cwd);
+		return home;
+	}
 	if (!*text) return strdup(text);
 	const unsigned char *scheme = (const unsigned char *)text;
 	if (alpha(*scheme)) {
