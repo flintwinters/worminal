@@ -562,4 +562,18 @@ a portable speedup promise. Earlier isolated deep-binding diagnostics were not
 retained in production. Applying settings at WebView construction regressed and
 was discarded. Full local/SSH preview behavior and headless checks pass, including
 loading both modules with local scope and rejecting leaked frontend callbacks.
-An all-target alternating repeat is recorded separately after completion.
+Nine all-target pairs gave HTTP 1004/927 ms, file 914/1127 ms and directory
+829/945 ms (candidate/baseline). Frontend main-thread CPU fell on every target:
+205/236, 215/231 and 218/233 ms. Those wall times remain noisy, with mixed HTTP
+results. Three diagnostic CPU-sampled pairs reduced median frontend loader
+samples from 74 to 59 and total main-thread samples from 200 to 183.
+
+After behavioral checks finished, eleven uninstrumented HTTP pairs gave 601.07/
+638.54 ms median and 650.47/729.77 ms maximum: about 37 ms (5.9%) faster median.
+The baseline predates both the lazy location entry and local module callbacks;
+these numbers measure their combined effect. Profile storage is initialized,
+all application/helpers/service processes stop between trials, filesystem caches
+are warm, and desktop compositing/physical display are excluded. Results are
+frozen under .checks/browser-cold-{final,all-targets,cpu-samples}.json. Main
+checkout headless checks also pass with the unrelated launcher changes retained.
+The installed running application is not replaced or restarted by this checkpoint.
