@@ -8,6 +8,7 @@ static gboolean
 load_browser(App *app)
 {
 	if (browser) return TRUE;
+	app_startuptime("browser-module-start");
 	char *path = module_path("browser.so");
 	if (!path) { app_status(app, "Cannot locate the browser module."); return FALSE; }
 	GModule *library = g_module_open(path, G_MODULE_BIND_LAZY | G_MODULE_BIND_LOCAL);
@@ -23,6 +24,7 @@ load_browser(App *app)
 		return FALSE;
 	}
 	g_module_make_resident(library);
+	app_startuptime("browser-module-ready");
 	return TRUE;
 }
 

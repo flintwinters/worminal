@@ -24,8 +24,10 @@ main(int argc, char **argv)
 	struct termios mode;
 	unsigned long color = 0x112233;
 	int history = 0;
+	char **command = NULL;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--history")) history = 1;
+		else if (!strcmp(argv[i], "--exec") && i + 1 < argc) { command = argv + i + 1; break; }
 		else if (!strcmp(argv[i], "--color") && ++i < argc) {
 			char *end;
 			color = strtoul(argv[i], &end, 16);
@@ -72,6 +74,7 @@ main(int argc, char **argv)
 		ssize_t count = read(0, echo + sizeof(echo) - 2, 1);
 		if (count < 0 && errno == EINTR) continue;
 		if (count != 1) return count < 0;
+		if (command) { execvp(command[0], command); perror(command[0]); return 1; }
 		initial = 0;
 		if (write(1, echo, sizeof(echo) - 1) < 0) return 1;
 	}

@@ -252,6 +252,7 @@ python3 manage.py latency         # Launch to first echoed input, using /bin/cat
 python3 manage.py latency --forwarded  # Another window in an existing GTK owner
 python3 manage.py latency-shell   # Launch to input received by your interactive shell
 python3 manage.py latency-visible # Keypress to visible echo; fresh and additional windows
+python3 manage.py browser-perf    # First/additional browser conversions to visible page pixels
 python3 manage.py interaction-perf # Tab ownership, cached switching, and wheel/page pixels
 python3 manage.py render-perf      # Release-module painting, exact pixels, CPU, and memory
 ```

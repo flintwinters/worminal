@@ -56,6 +56,9 @@ changed(WebKitWebView *view, GParamSpec *property, Browser *b)
 static void
 load_changed(WebKitWebView *view, WebKitLoadEvent event, Browser *b)
 {
+	if (event == WEBKIT_LOAD_STARTED) app_startuptime("browser-load-start");
+	if (event == WEBKIT_LOAD_COMMITTED) app_startuptime("browser-load-commit");
+	if (event == WEBKIT_LOAD_FINISHED) app_startuptime("browser-load-finish");
 	if (event == WEBKIT_LOAD_STARTED) notice(b, NULL);
 	changed(view, NULL, b);
 }
@@ -252,6 +255,7 @@ static WebKitWebContext *
 browser_context(void)
 {
 	if (context) return context;
+	app_startuptime("browser-context-start");
 	char *data = g_build_filename(g_get_user_data_dir(), "worminal-preview", NULL);
 	char *cache = g_build_filename(g_get_user_cache_dir(), "worminal-preview", NULL);
 	g_mkdir_with_parents(data, 0700);
@@ -269,6 +273,7 @@ browser_context(void)
 	webkit_web_context_set_spell_checking_enabled(context, FALSE);
 	g_signal_connect(context, "download-started", G_CALLBACK(download_started), NULL);
 	g_free(data); g_free(cache); g_free(cookies);
+	app_startuptime("browser-context-ready");
 	return context;
 }
 
@@ -289,6 +294,7 @@ browser_new(App *app)
 	gtk_widget_set_no_show_all(b->notice, TRUE);
 	gtk_box_pack_start(GTK_BOX(b->box), b->notice, FALSE, FALSE, 4);
 	b->view = WEBKIT_WEB_VIEW(webkit_web_view_new_with_context(browser_context()));
+	app_startuptime("browser-view-ready");
 	/* Adapt surf's conservative defaults; keep WebKit's normal UA/site support.
 	 * No standalone surf configuration, scripts, or X-property command transport. */
 	WebKitSettings *settings = webkit_settings_new_with_settings(
