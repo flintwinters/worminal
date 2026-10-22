@@ -13,12 +13,13 @@ from Xlib.ext import xtest
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def window_for_pid(root, atom, pid):
+def window_for_pid(root, atom, pid, *, mapped=False):
     for window in root.query_tree().children:
         value = window.get_full_property(atom, X.AnyPropertyType)
-        if value and len(value.value) == 1 and value.value[0] == pid:
+        if (value and len(value.value) == 1 and value.value[0] == pid and
+                (not mapped or window.get_attributes().map_state == X.IsViewable)):
             return window
-        found = window_for_pid(window, atom, pid)
+        found = window_for_pid(window, atom, pid, mapped=mapped)
         if found:
             return found
     return None

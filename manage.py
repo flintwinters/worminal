@@ -350,10 +350,13 @@ def profile_startup(shell: bool = typer.Option(False, help="Include interactive 
 
 @app.command("browser-perf")
 def browser_perf(trials: int = typer.Option(5, min=1),
-                 snapshot: Path = typer.Option(None), compare: Path = typer.Option(None)):
+                 snapshot: Path = typer.Option(None), compare: Path = typer.Option(None),
+                 cold_open: bool = typer.Option(False, help="Measure fresh process launch directly into a browser."),
+                 kind: str = typer.Option("all", help="Target: all, http, file, or explorer.")):
     """Measure shell browser conversion to visible content on private Xvfb."""
     native_build.build_targets("worminal", "worminald", "build/latency_echo")
     options = (["--snapshot", str(snapshot)] if snapshot else []) + (["--compare", str(compare)] if compare else [])
+    options += ["--kind", kind, *(["--cold-open"] if cold_open else [])]
     raise typer.Exit(run([sys.executable, "tests/browser_perf.py", "--trials", str(trials), *options]))
 
 
