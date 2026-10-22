@@ -5,6 +5,9 @@
 #include "preview.h"
 
 #define WORMINAL_BROWSER_ABI 3
+#define WORMINAL_STRINGIFY_(value) #value
+#define WORMINAL_STRINGIFY(value) WORMINAL_STRINGIFY_(value)
+#define WORMINAL_BROWSER_MODULE "browser-v" WORMINAL_STRINGIFY(WORMINAL_BROWSER_ABI) ".so"
 
 /* The engine never resolves frontend symbols through the global linker scope. */
 typedef struct {

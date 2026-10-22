@@ -12,7 +12,7 @@ load_browser(App *app)
 {
 	if (browser) return TRUE;
 	app_startuptime("browser-module-start");
-	char *path = module_path("browser.so");
+	char *path = module_path(WORMINAL_BROWSER_MODULE, "browser.so");
 	if (!path) { app_status(app, "Cannot locate the browser module."); return FALSE; }
 	GModule *library = g_module_open(path, G_MODULE_BIND_LAZY | G_MODULE_BIND_LOCAL);
 	g_free(path);

@@ -28,7 +28,7 @@ main(int argc, char **argv)
 			return forwarded > 0 ? 0 : 1;
 		}
 	}
-	char *path = module_path("frontend.so");
+	char *path = module_path("frontend.so", NULL);
 	/* Explicit module callbacks keep GTK out of the global symbol search scope. */
 	GModule *module = path ? g_module_open(path, G_MODULE_BIND_LAZY | G_MODULE_BIND_LOCAL) : NULL;
 	g_free(path);
