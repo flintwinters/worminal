@@ -1,6 +1,6 @@
 """Measure real PTY browser conversion through release modules to X server pixels."""
 import argparse
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
@@ -76,8 +76,11 @@ def content_visible(window, target):
     return len(data) // 4 - data.count(color.to_bytes(3, "little")) > 32
 
 
-def sample(executable, target, log, cold_open=False, trace_startup=False):
+def sample(executable, target, log, cold_open=False, trace_startup=False, stored_profile=None):
     with isolated_display() as private, profile(private) as env:
+        if stored_profile:
+            for key in ("XDG_DATA_HOME", "XDG_CACHE_HOME"):
+                env[key] = stored_profile[key]
         env.update(GDK_BACKEND="x11", GIO_USE_VFS="local", GSETTINGS_BACKEND="memory")
         if trace_startup:
             env["WORMINAL_TRACE_TIMING"] = "1"
@@ -164,6 +167,7 @@ def main():
     parser.add_argument("--snapshot", type=Path)
     parser.add_argument("--compare", type=Path)
     parser.add_argument("--cold-open", action="store_true")
+    parser.add_argument("--established-profile", action="store_true")
     parser.add_argument("--trace-startup", action="store_true")
     parser.add_argument("--kind", choices=("all", "http", "file", "explorer"), default="all")
     args = parser.parse_args()
@@ -178,14 +182,25 @@ def main():
     resources = {name: [] for name in variants}
     checks = ROOT / ".checks"
     checks.mkdir(exist_ok=True)
-    with canvas() as url, file_canvas(checks) as file_url:
+    with canvas() as url, file_canvas(checks) as file_url, ExitStack() as profiles:
+        targets = [(kind, target) for kind, target in (("http", url), ("file", file_url), ("explorer", None))
+                   if args.kind == "all" or args.kind == kind]
+        stored_profiles = {}
+        if args.established_profile:
+            for name, executable in variants.items():
+                for kind, target in targets:
+                    stored = profiles.enter_context(profile({}))
+                    with (checks / f"browser-perf-seed-{name}-{kind}.log").open("wb") as log:
+                        sample(executable, target, log, True, args.trace_startup, stored)
+                    stored_profiles[name, kind] = stored
+                    # sample exits its private display, waits for WebKit helpers,
+                    # and stops the workspace service before any measured launch.
         for trial in range(args.trials):
             for name in list(variants)[::1 if trial % 2 == 0 else -1]:
                 with (checks / f"browser-perf-{name}-{trial}.log").open("wb") as log:
-                    for kind, target in (("http", url), ("file", file_url), ("explorer", None)):
-                        if args.kind != "all" and kind != args.kind:
-                            continue
-                        values, usage = sample(variants[name], target, log, args.cold_open, args.trace_startup)
+                    for kind, target in targets:
+                        values, usage = sample(variants[name], target, log, args.cold_open, args.trace_startup,
+                                               stored_profiles.get((name, kind)))
                         resources[name].append({"kind": kind, **usage})
                         for phase, value in values.items():
                             samples[name].setdefault(kind + "_" + phase, []).append(value)
@@ -194,12 +209,15 @@ def main():
               "trials": args.trials, "resources": resources,
               "cold_open": args.cold_open,
               "trace_startup": args.trace_startup,
+              "established_profile": args.established_profile,
               "variants": {name: {"samples_ms": values,
                                   "summary_ms": summarize(values)}
                            for name, values in samples.items()},
               "notes": ("Private Xvfb; fresh process launch directly into the browser. " if args.cold_open else
                         "Private Xvfb; real Return execs the browser replacement command in its calling PTY. ") +
-                       "Each target and trial uses a fresh profile. "
+                       ("Profile storage is initialized by an unmeasured launch; application, helper and service "
+                        "processes stop before measured trials. " if args.established_profile else
+                        "Each target and trial uses a fresh profile. ") +
                        "Visible waits for expected page pixels; HTTP and file URLs verify real-key JavaScript response. "
                        "Explorer uses Worminal plain HTML directory links. Warm filesystem caches. "
                        "Memory includes frontend descendants, excludes service/shells. "
