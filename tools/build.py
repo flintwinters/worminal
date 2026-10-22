@@ -100,7 +100,10 @@ class Builder:
              [*objects, *link_dependencies])
 
     def target(self, target):
-        if target == "build/browser.so":
+        if target == "build/browser_cpu.so":
+            self.program(target, ["tests/browser_cpu.c"], variant="browser-cpu", flags=["-fPIC"],
+                         libs=["-shared", "-lrt"])
+        elif target == "build/browser.so":
             old_flags = self.cflags
             self.cflags = [*CPPFLAGS, *words("CPPFLAGS"), *words("CFLAGS", "-O3"),
                            *pkg_flags("--cflags", PREVIEW_PACKAGES)]

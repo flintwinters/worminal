@@ -37,6 +37,7 @@ GTK, service connection and WebKit startup; `--kind` isolates HTTP, file or dire
 Use `--established-profile` to distinguish normal cold processes from first-use profile setup;
 all private application, helper and service processes stop between trials. Startup reports include CPU and
 scheduler queue waits, and milestone logging is opt-in because diagnostic I/O can affect elapsed time.
+`--profile-cpu` attributes startup CPU samples without kernel profiling privileges; its timings are diagnostic.
 `manage.py render-perf` compares actual release-module painting, exact pixels, CPU and memory on private backends.
 The upstream source and license remain in the repository. Keep machine destinations in environment configuration
 and use anonymous commit identities. Run `manage.py privacy-setup` in fresh clones; privacy hooks and CI guard
