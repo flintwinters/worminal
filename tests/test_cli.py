@@ -15,13 +15,12 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class CommandLineTest(unittest.TestCase):
-    def test_browser_command_does_not_require_a_frontend_module(self):
+    def test_browser_command_does_not_require_graphics_or_a_daemon_executable(self):
         checks = ROOT / ".checks"
         checks.mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="browser-command-", dir=checks) as directory:
             path = Path(directory)
-            for name in ("worminal", "worminald"):
-                shutil.copy2(ROOT / name, path / name)
+            shutil.copy2(ROOT / "worminal", path / "worminal")
             env = {**os.environ, "WORMINAL_SHARED_SOCKET_SCOPE": path.name,
                    "DISPLAY": "invalid", "WAYLAND_DISPLAY": "invalid"}
             result = subprocess.run([str(path / "worminal"), "--new-browser-tab"],

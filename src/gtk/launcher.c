@@ -1,10 +1,9 @@
 /* Most additional launches only need GLib and the existing owner's socket. */
 #include <string.h>
-#include <stdio.h>
 #include <unistd.h>
 #include "modules.h"
 #include "windows.h"
-#include "workspace_socket.h"
+#include "workspace_client.h"
 
 static void
 timing(const char *phase)
@@ -19,12 +18,7 @@ main(int argc, char **argv)
 	timing("main");
 	if (argc >= 2 && !strcmp(argv[1], "--new-browser-tab")) {
 		if (argc > 3) { g_printerr("usage: worminal --new-browser-tab [URL|FILE]\n"); return 2; }
-		char daemon[4096];
-		/* Preserve the calling PTY without loading GTK just to exec its service. */
-		if (workspace_daemon_path(daemon, sizeof(daemon)))
-			execl(daemon, daemon, "--new-browser-tab", argc == 3 ? argv[2] : NULL, (char *)NULL);
-		perror("Could not run the workspace browser command");
-		return 1;
+		return workspace_browser_command(argc == 3 ? argv[2] : NULL);
 	}
 	/* These commands must run locally even when a GTK owner already exists. */
 	gboolean local = argc == 2 && (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help") ||
