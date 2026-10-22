@@ -44,6 +44,8 @@ remote machines share saved URLs only. `worminald` uses the v2 endpoint; browser
 Its shell command converts the calling PTY's ordered tab into a browser. GTK and WebKit never enter the service.
 Launchers link GLib only and forward to an existing owner before loading the GTK/Pango frontend module;
 the WebKit module loads when a browser view is first claimed.
+New browser views reuse a live renderer only for matching HTTP origins;
+tabs retain independent navigation and session storage, and the first browser launch stays lazy.
 GTK publishes selected terminal directories and window focus through a read-only session D-Bus interface;
 `docs/window-state.md` defines the public contract and `manage.py check-window-state` checks it privately.
 Explicit X11 window launches use fresh server timestamps for desktop activation;
