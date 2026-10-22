@@ -16,7 +16,7 @@ from rich.table import Table
 from perf_metrics import descendants, memory
 from preview import profile
 from visible_latency import capture_failure, find_window, ready, snapshot, stop, summarize, wait_for
-from window_perf import keypress
+from window_perf import keypress, window_for_pid
 from x11 import isolated_display
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -59,7 +59,7 @@ def file_canvas(checks):
         yield path.as_uri()
 
 
-def sample(executable, target, log):
+def sample(executable, target, log, cold_open=False):
     with isolated_display() as private, profile(private) as env:
         env.update(GDK_BACKEND="x11", GIO_USE_VFS="local", GSETTINGS_BACKEND="memory",
                    WORMINAL_TRACE_TIMING="1")
@@ -68,25 +68,33 @@ def sample(executable, target, log):
         owner = None
         values, resources = {}, {}
         try:
-            for index, phase in enumerate(("first", "additional")):
+            for index, phase in enumerate(("cold",) if cold_open else ("first", "additional")):
                 title = f"Browser perf terminal {index}"
                 command = [str(ROOT / "build/latency_echo"), "--exec", str(executable), "--new-browser-tab",
                            *([target] if target else [])]
-                process = subprocess.Popen([str(executable), "-T", title, "-e", *command],
+                launch = ([str(executable), "-T", title, "--surf",
+                           target or "worminal://" + ROOT.as_uri()[7:]] if cold_open else
+                          [str(executable), "-T", title, "-e", *command])
+                started = time.monotonic_ns()
+                process = subprocess.Popen(launch,
                                            env=env, stdout=log, stderr=log)
                 if owner is None:
                     owner = process
                 else:
                     process.wait(timeout=10)
-                window = wait_for(lambda: find_window(connection, title))
-                wait_for(lambda: ready(window))
+                window = wait_for(lambda: window_for_pid(connection.screen().root,
+                    connection.intern_atom("_NET_WM_PID"), process.pid, mapped=True)) if cold_open else wait_for(
+                    lambda: find_window(connection, title))
+                if not cold_open:
+                    wait_for(lambda: ready(window))
                 window.set_input_focus(X.RevertToParent, X.CurrentTime)
                 connection.sync()
                 # Terminal-only owners must continue to defer WebKit entirely.
-                if index == 0 and "libwebkit" in Path(f"/proc/{owner.pid}/maps").read_text():
+                if not cold_open and index == 0 and "libwebkit" in Path(f"/proc/{owner.pid}/maps").read_text():
                     raise AssertionError("Terminal-only launch loaded WebKit")
-                started = time.monotonic_ns()
-                keypress(connection, XK.XK_Return)
+                if not cold_open:
+                    started = time.monotonic_ns()
+                    keypress(connection, XK.XK_Return)
                 try:
                     wait_for(lambda: ready(window, 0x345678 if target else 0x141414))
                 except TimeoutError:
@@ -126,6 +134,8 @@ def main():
     parser.add_argument("--trials", type=int, default=5)
     parser.add_argument("--snapshot", type=Path)
     parser.add_argument("--compare", type=Path)
+    parser.add_argument("--cold-open", action="store_true")
+    parser.add_argument("--kind", choices=("all", "http", "file", "explorer"), default="all")
     args = parser.parse_args()
     if args.trials < 1:
         parser.error("--trials must be positive")
@@ -143,17 +153,21 @@ def main():
             for name in list(variants)[::1 if trial % 2 == 0 else -1]:
                 with (checks / f"browser-perf-{name}-{trial}.log").open("wb") as log:
                     for kind, target in (("http", url), ("file", file_url), ("explorer", None)):
-                        values, usage = sample(variants[name], target, log)
+                        if args.kind != "all" and kind != args.kind:
+                            continue
+                        values, usage = sample(variants[name], target, log, args.cold_open)
                         resources[name].append({"kind": kind, **usage})
                         for phase, value in values.items():
                             samples[name].setdefault(kind + "_" + phase, []).append(value)
                 Console().print(f"Finished {name} trial {trial + 1}/{args.trials}")
     report = {"revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
               "trials": args.trials, "resources": resources,
+              "cold_open": args.cold_open,
               "variants": {name: {"samples_ms": values,
                                   "summary_ms": summarize(values)}
                            for name, values in samples.items()},
-              "notes": "Private Xvfb; real Return execs the browser replacement command in its calling PTY. "
+              "notes": ("Private Xvfb; fresh process launch directly into the browser. " if args.cold_open else
+                        "Private Xvfb; real Return execs the browser replacement command in its calling PTY. ") +
                        "First and additional browser views use fresh profiles per target and trial. "
                        "Visible waits for expected page pixels; HTTP and file URLs verify real-key JavaScript response. "
                        "Explorer uses Worminal plain HTML directory links. Warm filesystem caches. "
