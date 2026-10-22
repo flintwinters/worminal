@@ -21,9 +21,16 @@ class CommandLineTest(unittest.TestCase):
     def test_browser_resolves_against_frontend_module_boundary(self):
         script = """
 import ctypes, os, sys
-frontend = ctypes.CDLL(sys.argv[1], mode=os.RTLD_NOW | os.RTLD_GLOBAL)
+frontend = ctypes.CDLL(sys.argv[1], mode=os.RTLD_NOW | os.RTLD_LOCAL)
 browser = ctypes.CDLL(sys.argv[2], mode=os.RTLD_NOW)
 assert frontend.worminal_frontend_v1 and browser.worminal_browser_module
+for name in ('app_send', 'wire_put_string'):
+    try:
+        getattr(frontend, name)
+    except AttributeError:
+        pass
+    else:
+        raise AssertionError('frontend leaks browser callbacks: ' + name)
 try:
     frontend.tsessionnew
 except AttributeError:

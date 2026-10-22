@@ -131,6 +131,18 @@ page_title(Page *page, const char *title)
 }
 
 void
+app_page_url(Page *page, const char *url)
+{
+	if (!url || !g_strcmp0(url, page->url)) return;
+	g_free(page->url);
+	page->url = g_strdup(url);
+	WireBuffer buffer = {0};
+	wire_put_string(&buffer, url);
+	app_send(page->app, WIRE_BROWSER_NAVIGATE, page->id, buffer.data, buffer.len);
+	wire_buffer_free(&buffer);
+}
+
+void
 app_page_title(Page *page, const char *title)
 {
 	/* One local WebKit page supplies the title for every mirror of its identity. */

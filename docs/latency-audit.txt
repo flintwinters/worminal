@@ -537,3 +537,29 @@ file-limit gate caught the accumulated audit exceeding 1000 lines; older evidenc
 was moved intact into linked latency-history.txt. Both files are below the cap.
 File/line gates now pass; clang-tidy is still unavailable. Product code and
 installed artifacts remain at the previously verified a32931f checkpoint.
+
+Cold browser module linking
+---------------------------
+The optional main-thread CPU sampler attributes much of first browser startup
+CPU to ld.so symbol lookup and relocations, followed by graphics/font startup.
+WebKit eagerly binds its own imports. Changing g_module_open's lazy flag cannot
+remove that work. The frontend previously made its entire GTK dependency group
+global solely so browser actions could resolve app_* and wire_* functions.
+
+Browser ABI 3 now carries explicit host callbacks. Navigation state and wire
+serialization belong to the frontend; the browser reports URI changes through
+that boundary. Both modules load in local scope, avoiding the global GTK search
+prefix while loading WebKit. Frontend exports retain only the entrypoint and
+release-renderer probe API. Ctrl+K still creates its URL entry on demand.
+No background engine, prewarmed process, discarded profile, disabled sandbox or
+weakened relocation protections are introduced.
+
+Seven alternating initialized-profile cold HTTP launches on private Xvfb gave
+candidate/baseline medians 1052/1234 ms. Frontend main-thread CPU medians were
+213/226 ms; total frontend CPU 230/250 ms. Machine scheduling and network-mounted
+fixture storage add substantial variance; the 181 ms wall-time difference is not
+a portable speedup promise. Earlier isolated deep-binding diagnostics were not
+retained in production. Applying settings at WebView construction regressed and
+was discarded. Full local/SSH preview behavior and headless checks pass, including
+loading both modules with local scope and rejecting leaked frontend callbacks.
+An all-target alternating repeat is recorded separately after completion.

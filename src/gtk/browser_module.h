@@ -4,7 +4,17 @@
 #include <gmodule.h>
 #include "preview.h"
 
-#define WORMINAL_BROWSER_ABI 2
+#define WORMINAL_BROWSER_ABI 3
+
+/* The engine never resolves frontend symbols through the global linker scope. */
+typedef struct {
+	void (*title)(Page *, const char *);
+	void (*navigate)(Page *, const char *);
+	void (*timing)(const char *);
+	void (*open)(App *, const char *);
+	void (*close)(Page *);
+	void (*select)(Page *);
+} BrowserHost;
 
 typedef struct {
 	Browser *(*create)(App *, const char *);
@@ -14,6 +24,7 @@ typedef struct {
 	gboolean (*shortcut)(Page *, guint, guint);
 	void (*zoom)(Browser *, double);
 	void (*destroy)(Browser *);
+	void (*initialize)(const BrowserHost *);
 } BrowserModule;
 
 #endif

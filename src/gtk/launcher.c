@@ -29,8 +29,8 @@ main(int argc, char **argv)
 		}
 	}
 	char *path = module_path("frontend.so");
-	/* Browser modules resolve callbacks from this frontend once loaded. */
-	GModule *module = path ? g_module_open(path, G_MODULE_BIND_LAZY) : NULL;
+	/* Explicit module callbacks keep GTK out of the global symbol search scope. */
+	GModule *module = path ? g_module_open(path, G_MODULE_BIND_LAZY | G_MODULE_BIND_LOCAL) : NULL;
 	g_free(path);
 	int (*entry)(int, char **, int) = NULL;
 	if (!module || !g_module_symbol(module, "worminal_frontend_v1", (gpointer *)&entry)) {
