@@ -78,7 +78,7 @@ def sample(executable, target, log):
                 started = time.monotonic_ns()
                 keypress(connection, XK.XK_Return)
                 try:
-                    wait_for(lambda: ready(window, 0x345678 if target else 0x141414))
+                    wait_for(lambda: ready(window, 0x345678 if target else 0xffffff))
                 except TimeoutError:
                     capture_failure(window)
                     raise
@@ -91,7 +91,7 @@ def sample(executable, target, log):
                 else:
                     def explorer_title():
                         title = window.get_full_property(connection.intern_atom("_NET_WM_NAME"), X.AnyPropertyType)
-                        return title and bytes(title.value).decode("utf-8").startswith("Files")
+                        return title and str(ROOT) in bytes(title.value).decode("utf-8")
                     wait_for(explorer_title)
                 resources[phase] = memory(descendants(owner.pid))
             return values, resources
@@ -146,7 +146,7 @@ def main():
               "notes": "Private Xvfb; real Return execs the browser replacement command in its calling PTY. "
                        "First and additional browser views use fresh profiles per target and trial. "
                        "Visible waits for expected page pixels; HTTP also verifies real-key JavaScript response. "
-                       "Explorer serves the embedded production artifact. Warm filesystem caches. "
+                       "Explorer uses WebKit's built-in directory listing. Warm filesystem caches. "
                        "Memory includes frontend descendants, excludes service/shells. "
                        "Excludes desktop compositing and physical display latency."}
     if args.compare:

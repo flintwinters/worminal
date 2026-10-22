@@ -779,10 +779,9 @@ main(int argc, char **argv)
 	const char *base = g_getenv("WORMINAL_PREVIEW_FIXTURE");
 	g_assert_nonnull(base);
 	char *url = g_strconcat(base, "/page", NULL);
-	/* Exercise the embedded default in real WebKit, including its initialized DOM.
+	/* Exercise the native directory listing in real WebKit.
 	 * Explicit about:blank remains distinct and is covered by the command checks. */
 	Page *home = open_browser(app, NULL);
-	expect_script(home->browser, "document.title", "Files — Worminal");
 	check_explorer(home->browser);
 	int home_count = g_list_length(app->pages);
 	app_close(home);
@@ -814,9 +813,7 @@ main(int argc, char **argv)
 	WAIT(!webkit_web_view_is_loading(web->browser->view));
 	check_outline(app);
 	expect_script(web->browser, "document.title", "Fixture");
-	expect_script(web->browser, "window.localRead = 'pending'; fetch('worminal:///list?path=%2F')"
-	              ".then(() => window.localRead = 'allowed', () => window.localRead = 'denied'); 'ok'", "ok");
-	WAIT(script_equals(web->browser, "window.localRead", "denied"));
+
 	expect_script(web->browser, "document.querySelector('input').value='local form'; localStorage.setItem('saved','yes');"
 	              "document.cookie='session=local;path=/'; document.querySelector('input').value", "local form");
 	WAIT(g_list_length(peer->pages) == 2);

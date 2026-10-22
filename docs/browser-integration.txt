@@ -55,7 +55,7 @@ it. Tab activation and moving a browser between windows cannot reveal the entry.
 Ctrl+T always creates a terminal. Ctrl+Shift+B has no browser action.
 Inside a Worminal terminal, worminal --new-browser-tab [URL|FILE] replaces
 that terminal with a browser under the same ordered identity. This ends its shell
-and PTY; it does not allocate a hidden terminal. With no target, the embedded file explorer opens;
+and PTY; it does not allocate a hidden terminal. With no target, WebKit opens its built-in directory listing at the calling shell directory;
 Ctrl+K reveals the address entry. For example:
 
   alias s='worminal --new-browser-tab'
@@ -65,12 +65,11 @@ Ctrl+K reveals the address entry. For example:
 
 Filepaths become percent-encoded file URLs in the calling shell's directory before the
 service receives the command. Explicit URLs (including about:blank) stay unchanged.
-The default worminal:///files?path=... page starts in the calling shell directory.
-The embedded explorer lists local folders and previews bounded file contents through read-only
-host endpoints. Open folder accepts a path inside the page, without a system folder chooser.
-Saved remote URLs refer to paths on the viewing machine.
-The worminal:///files page serves the generated explorer HTML from the lazy
-browser module, so installed and remote views do not depend on checkout paths.
+The default target is a file URL for the calling shell directory. WebKit renders its own plain HTML
+directory listing with ordinary parent, folder, and file links. Browser back/forward and the address
+entry work normally. There is no custom explorer application or folder picker.
+Native builds do not require the standalone file-explorer submodule or Node dependencies.
+Saved file URLs refer to paths on the viewing machine.
 
 The service uses kernel peer credentials and the caller's process session to
 identify the terminal, independent of which window is focused. Calls outside a
