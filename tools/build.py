@@ -128,7 +128,8 @@ class Builder:
                            *pkg_flags("--cflags", packages)]
             try:
                 self.program(target, ["src/gtk/launcher.c", "src/gtk/windows_forward.c", "src/workspace/wire.c",
-                                      "src/workspace/workspace_socket.c"],
+                                      "src/workspace/workspace_socket.c", "src/workspace/browser_target.c",
+                                      "src/workspace/browser_command.c"],
                              variant="launcher", flags=["-DWORMINAL_PREVIEW_PROTOCOL"],
                              libs=[*pkg_flags("--libs", packages), *words("LDFLAGS")])
             finally:
@@ -138,7 +139,7 @@ class Builder:
             if target == "build/frontend.so":
                 flags += ["-fPIC", "-ffunction-sections", "-fdata-sections"]
             server = target in ("worminald", "worminald-preview")
-            sources = SERVER if server else PREVIEW
+            sources = (*SERVER, "workspace/browser_command.c") if server else PREVIEW
             if target == "build/preview_test":
                 sources = ()
                 flags += ["-O1", "-g"]
