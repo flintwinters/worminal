@@ -76,7 +76,7 @@ changed(WebKitWebView *view, GParamSpec *property, Browser *b)
 	(void)property;
 	const char *url = webkit_web_view_get_uri(view);
 	const char *title = webkit_web_view_get_title(view);
-	if (url && !gtk_widget_has_focus(b->entry))
+	if (b->entry && url && !gtk_widget_has_focus(b->entry))
 		gtk_entry_set_text(GTK_ENTRY(b->entry), url);
 	if (b->page) {
 		app_page_title(b->page, title && *title ? title : url ? url : "Browser");
@@ -358,11 +358,6 @@ browser_new(App *app, const char *url)
 	b->app = app;
 	b->box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	g_object_ref_sink(b->box);
-	b->entry = gtk_entry_new();
-	gtk_entry_set_placeholder_text(GTK_ENTRY(b->entry), "URL");
-	/* Tab activation/reparenting uses show_all. Only Ctrl+K reveals this entry. */
-	gtk_widget_set_no_show_all(b->entry, TRUE);
-	gtk_box_pack_start(GTK_BOX(b->box), b->entry, FALSE, FALSE, 0);
 	b->notice = gtk_label_new("");
 	gtk_label_set_line_wrap(GTK_LABEL(b->notice), TRUE);
 	gtk_widget_set_no_show_all(b->notice, TRUE);
@@ -385,7 +380,6 @@ browser_new(App *app, const char *url)
 	webkit_web_view_set_settings(b->view, settings);
 	g_object_unref(settings);
 	gtk_box_pack_start(GTK_BOX(b->box), GTK_WIDGET(b->view), TRUE, TRUE, 0);
-	g_signal_connect(b->entry, "activate", G_CALLBACK(location), b);
 	g_signal_connect(b->view, "notify::title", G_CALLBACK(changed), b);
 	g_signal_connect(b->view, "notify::uri", G_CALLBACK(changed), b);
 	g_signal_connect(b->view, "notify::is-loading", G_CALLBACK(changed), b);
@@ -405,11 +399,26 @@ GtkWidget *browser_widget(Browser *b) { return b->box; }
 GtkWidget *browser_view(Browser *b) { return GTK_WIDGET(b->view); }
 static void browser_location(Browser *b)
 {
+	if (!b->entry) {
+		b->entry = gtk_entry_new();
+		gtk_entry_set_placeholder_text(GTK_ENTRY(b->entry), "URL");
+		/* Reparenting uses show_all; only Ctrl+K reveals the entry. */
+		gtk_widget_set_no_show_all(b->entry, TRUE);
+		gtk_box_pack_start(GTK_BOX(b->box), b->entry, FALSE, FALSE, 0);
+		gtk_box_reorder_child(GTK_BOX(b->box), b->entry, 0);
+		g_signal_connect(b->entry, "activate", G_CALLBACK(location), b);
+	}
 	const char *url = webkit_web_view_get_uri(b->view);
 	gtk_entry_set_text(GTK_ENTRY(b->entry), url && strcmp(url, "about:blank") ? url : "");
 	gtk_widget_show(b->entry);
 	gtk_widget_grab_focus(b->entry);
 	gtk_editable_select_region(GTK_EDITABLE(b->entry), 0, -1);
+}
+
+static gboolean
+location_visible(Browser *b)
+{
+	return b->entry && gtk_widget_get_visible(b->entry);
 }
 gboolean
 browser_shortcut(Page *page, guint key, guint mods)
@@ -418,7 +427,7 @@ browser_shortcut(Page *page, guint key, guint mods)
 	gboolean history_key = mods == GDK_MOD1_MASK && (key == GDK_KEY_Left || key == GDK_KEY_Right);
 	gboolean reload_key = (mods == GDK_CONTROL_MASK && key == GDK_KEY_r) || (!mods && key == GDK_KEY_F5);
 	gboolean escape = !mods && key == GDK_KEY_Escape && page->browser &&
-	    (gtk_widget_get_visible(page->browser->entry) || webkit_web_view_is_loading(page->browser->view));
+	    (location_visible(page->browser) || webkit_web_view_is_loading(page->browser->view));
 	if (!location_key && !history_key && !reload_key && !escape) return FALSE;
 	app_select(page);
 	Browser *b = page->browser;
@@ -430,7 +439,7 @@ browser_shortcut(Page *page, guint key, guint mods)
 		notice(b, NULL);
 		webkit_web_view_reload(b->view);
 	} else {
-		if (gtk_widget_get_visible(b->entry)) gtk_widget_hide(b->entry);
+		if (location_visible(b)) gtk_widget_hide(b->entry);
 		else webkit_web_view_stop_loading(b->view);
 		gtk_widget_grab_focus(GTK_WIDGET(b->view));
 	}

@@ -561,9 +561,9 @@ open_browser(App *app, const char *url)
 	WAIT(!webkit_web_view_is_loading(page->browser->view) &&
 	     !g_strcmp0(webkit_web_view_get_uri(page->browser->view), page->url) &&
 	     script_equals(page->browser, "document.readyState", "complete"));
-	g_assert_false(gtk_widget_get_visible(page->browser->entry));
+	g_assert_null(page->browser->entry);
 	gtk_widget_show_all(browser_widget(page->browser));
-	g_assert_false(gtk_widget_get_visible(page->browser->entry));
+	g_assert_null(page->browser->entry);
 	return page;
 }
 
@@ -959,7 +959,7 @@ main(int argc, char **argv)
 	Browser *converted_browser = converter->active->browser;
 	WAIT(peer->active && peer->active->id == converted_id && peer->active->url);
 	g_assert_null(peer->active->browser);
-	g_assert_false(gtk_widget_get_visible(converted_browser->entry));
+	g_assert_null(converted_browser->entry);
 	WAIT(gtk_window_get_focus(GTK_WINDOW(converter->window)) == browser_view(converted_browser));
 	GdkEventKey control_t = {.type = GDK_KEY_PRESS, .keyval = GDK_KEY_t, .state = GDK_CONTROL_MASK};
 	g_assert_true(shortcut(converter->window, &control_t, converter));
