@@ -14,6 +14,7 @@ struct Browser {
 	GtkWidget *box, *entry, *notice;
 	WebKitWebView *view;
 };
+static const BrowserHost *host;
 static WebKitWebContext *context;
 static GList *browsers;
 
@@ -73,30 +74,22 @@ location(GtkEntry *entry, Browser *b)
 static void
 changed(WebKitWebView *view, GParamSpec *property, Browser *b)
 {
-	(void)property;
 	const char *url = webkit_web_view_get_uri(view);
 	const char *title = webkit_web_view_get_title(view);
 	if (b->entry && url && !gtk_widget_has_focus(b->entry))
 		gtk_entry_set_text(GTK_ENTRY(b->entry), url);
 	if (b->page) {
-		app_page_title(b->page, title && *title ? title : url ? url : "Browser");
-		if (url && property && !strcmp(property->name, "uri") && g_strcmp0(url, b->page->url)) {
-			g_free(b->page->url);
-			b->page->url = g_strdup(url);
-			WireBuffer buffer = {0};
-			wire_put_string(&buffer, url);
-			app_send(b->app, WIRE_BROWSER_NAVIGATE, b->page->id, buffer.data, buffer.len);
-			wire_buffer_free(&buffer);
-		}
+		host->title(b->page, title && *title ? title : url ? url : "Browser");
+		if (property && !strcmp(property->name, "uri")) host->navigate(b->page, url);
 	}
 }
 
 static void
 load_changed(WebKitWebView *view, WebKitLoadEvent event, Browser *b)
 {
-	if (event == WEBKIT_LOAD_STARTED) app_startuptime("browser-load-start");
-	if (event == WEBKIT_LOAD_COMMITTED) app_startuptime("browser-load-commit");
-	if (event == WEBKIT_LOAD_FINISHED) app_startuptime("browser-load-finish");
+	if (event == WEBKIT_LOAD_STARTED) host->timing("browser-load-start");
+	if (event == WEBKIT_LOAD_COMMITTED) host->timing("browser-load-commit");
+	if (event == WEBKIT_LOAD_FINISHED) host->timing("browser-load-finish");
 	if (event == WEBKIT_LOAD_STARTED) notice(b, NULL);
 	changed(view, NULL, b);
 }
@@ -142,7 +135,7 @@ popup(WebKitWebView *view, WebKitNavigationAction *action, Browser *b)
 {
 	(void)view;
 	if (webkit_navigation_action_is_user_gesture(action))
-		app_browser(b->app, webkit_uri_request_get_uri(webkit_navigation_action_get_request(action)));
+		host->open(b->app, webkit_uri_request_get_uri(webkit_navigation_action_get_request(action)));
 	return NULL;
 }
 
@@ -150,7 +143,7 @@ static void
 close_requested(WebKitWebView *view, Browser *b)
 {
 	(void)view;
-	if (b->page) app_close(b->page);
+	if (b->page) host->close(b->page);
 }
 
 static gboolean
@@ -170,7 +163,7 @@ policy(WebKitWebView *view, WebKitPolicyDecision *decision, WebKitPolicyDecision
 		if (type == WEBKIT_POLICY_DECISION_TYPE_NEW_WINDOW_ACTION) {
 			/* A shared popup is a saved link with an independent local page, just
 			 * like any other browser tab. No cross-tab window.opener relationship. */
-			if (webkit_navigation_action_is_user_gesture(action)) app_browser(b->app, url);
+			if (webkit_navigation_action_is_user_gesture(action)) host->open(b->app, url);
 			webkit_policy_decision_ignore(decision);
 			return TRUE;
 		}
@@ -327,7 +320,7 @@ static WebKitWebContext *
 browser_context(void)
 {
 	if (context) return context;
-	app_startuptime("browser-context-start");
+	host->timing("browser-context-start");
 	char *data = g_build_filename(g_get_user_data_dir(), "worminal-preview", NULL);
 	char *cache = g_build_filename(g_get_user_cache_dir(), "worminal-preview", NULL);
 	g_mkdir_with_parents(data, 0700);
@@ -347,7 +340,7 @@ browser_context(void)
 	webkit_web_context_set_spell_checking_enabled(context, FALSE);
 	g_signal_connect(context, "download-started", G_CALLBACK(download_started), NULL);
 	g_free(data); g_free(cache); g_free(cookies);
-	app_startuptime("browser-context-ready");
+	host->timing("browser-context-ready");
 	return context;
 }
 
@@ -369,7 +362,7 @@ browser_new(App *app, const char *url)
 	gdk_rgba_parse(&background, BROWSER_BACKGROUND);
 	webkit_web_view_set_background_color(b->view, &background);
 	browsers = g_list_prepend(browsers, b);
-	app_startuptime("browser-view-ready");
+	host->timing("browser-view-ready");
 	/* Adapt surf's conservative defaults; keep WebKit's normal UA/site support.
 	 * No standalone surf configuration, scripts, or X-property command transport. */
 	WebKitSettings *settings = webkit_settings_new_with_settings(
@@ -429,7 +422,7 @@ browser_shortcut(Page *page, guint key, guint mods)
 	gboolean escape = !mods && key == GDK_KEY_Escape && page->browser &&
 	    (location_visible(page->browser) || webkit_web_view_is_loading(page->browser->view));
 	if (!location_key && !history_key && !reload_key && !escape) return FALSE;
-	app_select(page);
+	host->select(page);
 	Browser *b = page->browser;
 	if (location_key) browser_location(b);
 	else if (history_key) {
@@ -464,12 +457,14 @@ void browser_free(Browser *b)
 	g_free(b);
 }
 
+static void browser_initialize(const BrowserHost *callbacks) { host = callbacks; }
+
 G_MODULE_EXPORT const BrowserModule *
 worminal_browser_module(unsigned int abi)
 {
 	static const BrowserModule module = {
 		browser_new, browser_widget, browser_view, browser_bind,
-		browser_shortcut, browser_zoom, browser_free
+		browser_shortcut, browser_zoom, browser_free, browser_initialize
 	};
 	return abi == WORMINAL_BROWSER_ABI ? &module : NULL;
 }

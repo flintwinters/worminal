@@ -67,6 +67,7 @@ void app_select(Page *);
 void app_status(App *, const char *);
 void app_startuptime(const char *);
 void app_page_title(Page *, const char *);
+void app_page_url(Page *, const char *);
 void app_new_window(App *);
 void page_free(Page *);
 

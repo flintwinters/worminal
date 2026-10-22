@@ -678,6 +678,10 @@ main(int argc, char **argv)
 {
 	setlocale(LC_CTYPE, "");
 	gtk_init(&argc, &argv);
+	static const BrowserHost callbacks = {
+		app_page_title, app_page_url, app_startuptime, app_browser, app_close, app_select
+	};
+	browser_initialize(&callbacks);
 	check_tab_ranges();
 	check_catalog_tab_refresh();
 	check_catalog_selection_claim();

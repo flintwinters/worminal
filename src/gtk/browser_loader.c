@@ -3,6 +3,9 @@
 #include "modules.h"
 
 static const BrowserModule *browser;
+static const BrowserHost callbacks = {
+	app_page_title, app_page_url, app_startuptime, app_browser, app_close, app_select
+};
 
 static gboolean
 load_browser(App *app)
@@ -23,6 +26,7 @@ load_browser(App *app)
 		if (library) g_module_close(library);
 		return FALSE;
 	}
+	browser->initialize(&callbacks);
 	g_module_make_resident(library);
 	app_startuptime("browser-module-ready");
 	return TRUE;
