@@ -531,45 +531,7 @@ check_tabs(App *app, Page *terminal, Page *browser)
 	g_free(name);
 }
 
-static char *script_result;
-static gboolean script_done;
-static void
-script_finished(GObject *source, GAsyncResult *result, gpointer data)
-{
-	(void)data;
-	GError *error = NULL;
-	JSCValue *value = webkit_web_view_evaluate_javascript_finish(WEBKIT_WEB_VIEW(source), result, &error);
-	if (error) g_error("JavaScript: %s", error->message);
-	script_result = jsc_value_to_string(value);
-	g_object_unref(value);
-	script_done = TRUE;
-}
-
-static char *
-evaluate(Browser *b, const char *script)
-{
-	script_done = FALSE;
-	webkit_web_view_evaluate_javascript(b->view, script, -1, NULL, NULL, NULL, script_finished, NULL);
-	WAIT(script_done);
-	return script_result;
-}
-
-static void
-expect_script(Browser *b, const char *script, const char *expected)
-{
-	char *value = evaluate(b, script);
-	if (strcmp(value, expected)) g_error("Expected %s; got %s", expected, value);
-	g_free(value);
-}
-
-static gboolean
-script_equals(Browser *b, const char *script, const char *expected)
-{
-	char *value = evaluate(b, script);
-	gboolean equal = !strcmp(value, expected);
-	g_free(value);
-	return equal;
-}
+#include "preview_browser.c"
 
 static void
 select_page(Page *page)
@@ -821,9 +783,7 @@ main(int argc, char **argv)
 	 * Explicit about:blank remains distinct and is covered by the command checks. */
 	Page *home = open_browser(app, NULL);
 	expect_script(home->browser, "document.title", "Files — Worminal");
-	expect_script(home->browser, "document.querySelector('#picker').webkitdirectory + ':' + "
-	              "document.querySelector('#filter').disabled", "true:true");
-	g_assert_cmpstr(webkit_web_view_get_uri(home->browser->view), ==, WORKSPACE_BROWSER_HOME);
+	check_explorer(home->browser);
 	int home_count = g_list_length(app->pages);
 	app_close(home);
 	WAIT(g_list_length(app->pages) == home_count - 1);
@@ -854,6 +814,9 @@ main(int argc, char **argv)
 	WAIT(!webkit_web_view_is_loading(web->browser->view));
 	check_outline(app);
 	expect_script(web->browser, "document.title", "Fixture");
+	expect_script(web->browser, "window.localRead = 'pending'; fetch('worminal:///list?path=%2F')"
+	              ".then(() => window.localRead = 'allowed', () => window.localRead = 'denied'); 'ok'", "ok");
+	WAIT(script_equals(web->browser, "window.localRead", "denied"));
 	expect_script(web->browser, "document.querySelector('input').value='local form'; localStorage.setItem('saved','yes');"
 	              "document.cookie='session=local;path=/'; document.querySelector('input').value", "local form");
 	WAIT(g_list_length(peer->pages) == 2);

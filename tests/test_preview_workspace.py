@@ -150,7 +150,7 @@ class PreviewWorkspaceTest(unittest.TestCase):
 
     def test_command_converts_calling_terminal_and_preserves_order(self):
         cases = (("https://example.invalid/converted", "https://example.invalid/converted"),
-                 ("about:blank", "about:blank"), (None, "worminal:///files"))
+                 ("about:blank", "about:blank"), (None, "worminal:///files?path=" + str(ROOT)))
         for executable, (url, expected) in product((DAEMON, ROOT / "worminal"), cases):
             with self.subTest(executable=executable.name, url=url):
                 self.assert_browser_conversion(executable, url, expected)
@@ -183,13 +183,14 @@ class PreviewWorkspaceTest(unittest.TestCase):
     def test_browser_command_encodes_paths_in_the_callers_working_directory(self):
         checks = ROOT / ".checks"
         checks.mkdir(exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix="browser-path-", dir=checks) as temporary:
+        with tempfile.TemporaryDirectory(prefix="browser-path- #?% ü", dir=checks) as temporary:
             directory = Path(temporary)
             special = directory / "page #?% ü.html"
             special.write_text("<title>Local page</title>")
             plain = directory / "plain.html"
             plain.write_text("<title>Plain page</title>")
-            cases = ((str(special), special.as_uri()), (special.name, special.as_uri()),
+            cases = ((None, "worminal:///files?path=" + directory.as_uri()[7:]),
+                     (str(special), special.as_uri()), (special.name, special.as_uri()),
                      ("./" + special.name, special.as_uri()), (plain.name, plain.as_uri()),
                      (special.as_uri(), special.as_uri()),
                      ("missing.html", (directory / "missing.html").as_uri()))
