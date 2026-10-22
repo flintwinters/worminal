@@ -1,9 +1,11 @@
 """Help and version must identify the build without launching a graphical session."""
 
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import unittest
 
 from tools.build import VERSION
@@ -13,6 +15,24 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class CommandLineTest(unittest.TestCase):
+    def test_browser_command_does_not_require_a_frontend_module(self):
+        checks = ROOT / ".checks"
+        checks.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="browser-command-", dir=checks) as directory:
+            path = Path(directory)
+            for name in ("worminal", "worminald"):
+                shutil.copy2(ROOT / name, path / name)
+            env = {**os.environ, "WORMINAL_SHARED_SOCKET_SCOPE": path.name,
+                   "DISPLAY": "invalid", "WAYLAND_DISPLAY": "invalid"}
+            result = subprocess.run([str(path / "worminal"), "--new-browser-tab"],
+                                    env=env, capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("No preview workspace service is running", result.stderr)
+            invalid = subprocess.run([str(path / "worminal"), "--new-browser-tab", "one", "two"],
+                                     env=env, capture_output=True, text=True, timeout=5)
+            self.assertEqual(invalid.returncode, 2)
+            self.assertIn("usage:", invalid.stderr)
+
     def test_launcher_does_not_link_graphics_libraries(self):
         dependencies = subprocess.check_output(["ldd", str(ROOT / "worminal")], text=True)
         for name in ("libgtk", "libgdk", "libpango", "libwebkit"):

@@ -882,15 +882,6 @@ worminal_frontend_v1(int argc, char **argv, int listener)
 {
 	app_startuptime("frontend");
 	setlocale(LC_CTYPE, "");
-	if (argc >= 2 && !strcmp(argv[1], "--new-browser-tab")) {
-		if (argc > 3) { usage(stderr); return 2; }
-		char daemon[4096];
-		/* Exec preserves the calling PTY session and the daemon's command handling. */
-		if (workspace_daemon_path(daemon, sizeof(daemon)))
-			execl(daemon, daemon, "--new-browser-tab", argc == 3 ? argv[2] : NULL, (char *)NULL);
-		perror("Could not run the workspace browser command");
-		return 1;
-	}
 	if (argc == 2 && (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help"))) {
 		usage(stdout);
 		return 0;
