@@ -352,9 +352,11 @@ def profile_startup(shell: bool = typer.Option(False, help="Include interactive 
 def browser_perf(trials: int = typer.Option(5, min=1),
                  snapshot: Path = typer.Option(None), compare: Path = typer.Option(None),
                  cold_open: bool = typer.Option(False, help="Measure fresh process launch directly into a browser."),
-                 established_profile: bool = typer.Option(False, help="Initialize profile storage before measured launches."),
+                 established_profile: bool = typer.Option(
+                     False, help="Initialize profile storage before measured launches."),
                  trace_startup: bool = typer.Option(False, help="Log startup milestones; timings include log I/O."),
-                 profile_cpu: bool = typer.Option(False, help="Diagnostically sample startup CPU without perf privileges."),
+                 profile_cpu: bool = typer.Option(
+                     False, help="Diagnostically sample startup CPU without perf privileges."),
                  kind: str = typer.Option("all", help="Target: all, http, file, or explorer.")):
     """Measure browser presentation, including direct cold launches, on private Xvfb."""
     native_build.build_targets("worminal", "worminald", "build/latency_echo")

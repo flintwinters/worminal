@@ -232,7 +232,8 @@ def main():
                        ("Profile storage is initialized by an unmeasured launch; application, helper and service "
                         "processes stop before measured trials. " if args.established_profile else
                         "Each target and trial uses a fresh profile. ") +
-                       "Visible waits for expected page pixels; HTTP and file URLs verify real-key JavaScript response. "
+                       "Visible waits for expected page pixels; HTTP and file URLs verify "
+                       "real-key JavaScript response. "
                        "Explorer uses Worminal plain HTML directory links. Warm filesystem caches. "
                        "Memory includes frontend descendants, excludes service/shells. "
                        "Excludes desktop compositing and physical display latency."}

@@ -55,7 +55,8 @@ it. Tab activation and moving a browser between windows cannot reveal the entry.
 Ctrl+T always creates a terminal. Ctrl+Shift+B has no browser action.
 Inside a Worminal terminal, worminal --new-browser-tab [URL|FILE] replaces
 that terminal with a browser under the same ordered identity. This ends its shell
-and PTY; it does not allocate a hidden terminal. With no target, Worminal opens a plain directory listing at the calling shell directory;
+and PTY; it does not allocate a hidden terminal. With no target, Worminal opens
+a plain directory listing at the calling shell directory;
 Ctrl+K reveals the address entry. For example:
 
   alias s='worminal --new-browser-tab'
