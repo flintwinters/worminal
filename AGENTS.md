@@ -34,6 +34,9 @@ It excludes desktop compositing and physical display latency.
 checks HTTP/file keyboard response, and records helper-inclusive memory; snapshots support alternating comparisons.
 Browser latency work prioritizes genuine cold opens: `browser-perf --cold-open` includes fresh-process launch,
 GTK, service connection and WebKit startup; `--kind` isolates HTTP, file or directory targets.
+Use `--established-profile` to distinguish normal cold processes from first-use profile setup;
+all private application, helper and service processes stop between trials. Startup reports include CPU and
+scheduler queue waits, and milestone logging is opt-in because diagnostic I/O can affect elapsed time.
 `manage.py render-perf` compares actual release-module painting, exact pixels, CPU and memory on private backends.
 The upstream source and license remain in the repository. Keep machine destinations in environment configuration
 and use anonymous commit identities. Run `manage.py privacy-setup` in fresh clones; privacy hooks and CI guard

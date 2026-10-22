@@ -352,6 +352,7 @@ def profile_startup(shell: bool = typer.Option(False, help="Include interactive 
 def browser_perf(trials: int = typer.Option(5, min=1),
                  snapshot: Path = typer.Option(None), compare: Path = typer.Option(None),
                  cold_open: bool = typer.Option(False, help="Measure fresh process launch directly into a browser."),
+                 established_profile: bool = typer.Option(False, help="Initialize profile storage before measured launches."),
                  trace_startup: bool = typer.Option(False, help="Log startup milestones; timings include log I/O."),
                  kind: str = typer.Option("all", help="Target: all, http, file, or explorer.")):
     """Measure browser presentation, including direct cold launches, on private Xvfb."""
@@ -360,6 +361,8 @@ def browser_perf(trials: int = typer.Option(5, min=1),
     options += ["--kind", kind, *(["--cold-open"] if cold_open else [])]
     if trace_startup:
         options += ["--trace-startup"]
+    if established_profile:
+        options += ["--established-profile"]
     raise typer.Exit(run([sys.executable, "tests/browser_perf.py", "--trials", str(trials), *options]))
 
 
