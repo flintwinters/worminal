@@ -55,7 +55,7 @@ it. Tab activation and moving a browser between windows cannot reveal the entry.
 Ctrl+T always creates a terminal. Ctrl+Shift+B has no browser action.
 Inside a Worminal terminal, worminal --new-browser-tab [URL|FILE] replaces
 that terminal with a browser under the same ordered identity. This ends its shell
-and PTY; it does not allocate a hidden terminal. With no target, WebKit opens its built-in directory listing at the calling shell directory;
+and PTY; it does not allocate a hidden terminal. With no target, Worminal opens a plain directory listing at the calling shell directory;
 Ctrl+K reveals the address entry. For example:
 
   alias s='worminal --new-browser-tab'
@@ -63,11 +63,13 @@ Ctrl+K reveals the address entry. For example:
   s https://example.com
   s ./report.html
 
-Filepaths become percent-encoded file URLs in the calling shell's directory before the
-service receives the command. Explicit URLs (including about:blank) stay unchanged.
-The default target is a file URL for the calling shell directory. WebKit renders its own plain HTML
-directory listing with ordinary parent, folder, and file links. Browser back/forward and the address
-entry work normally. There is no custom explorer application or folder picker.
+File targets become percent-encoded file URLs; directory targets open the custom listing.
+Both resolve in the calling shell directory before the service receives the command.
+Explicit URLs (including about:blank) stay unchanged.
+The default target uses worminal:/// followed by the encoded calling shell directory. The browser
+module generates plain HTML: a directory heading and ordinary parent, folder, and file links.
+Folder links show another listing; file links stream the file with its normal content type.
+Browser back/forward and the address entry work normally. The viewer has no scripts, folder picker, or filesystem API.
 Native builds do not require the standalone file-explorer submodule or Node dependencies.
 Saved file URLs refer to paths on the viewing machine.
 
