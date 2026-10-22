@@ -73,6 +73,7 @@ Investigate remote Codex scrolling separately from tested wheel modes.
 
 The default browser target is the calling shell directory under worminal:///. The browser module generates
 only file/folder links in enumeration order on a dark background; new WebViews use it before loading.
+Generated directory and error documents share the same dark page style.
 No scripts, picker, or filesystem API are used.
 `file-explorer` remains an independent TypeScript npm-workspace submodule, unused by native builds.
 Use `manage.py explorer-build`, `explorer-check`, and `explorer-lint` for that standalone artifact.
