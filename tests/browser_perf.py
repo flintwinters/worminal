@@ -88,7 +88,7 @@ def sample(executable, target, log):
                 started = time.monotonic_ns()
                 keypress(connection, XK.XK_Return)
                 try:
-                    wait_for(lambda: ready(window, 0x345678 if target else 0xffffff))
+                    wait_for(lambda: ready(window, 0x345678 if target else 0x141414))
                 except TimeoutError:
                     capture_failure(window)
                     raise
