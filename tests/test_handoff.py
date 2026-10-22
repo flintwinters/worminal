@@ -148,7 +148,13 @@ class HandoffTest(unittest.TestCase):
                 self.assertNotEqual(records[0][0], imported)
                 # Ownership has moved: the donor retains no PTY master descriptors.
                 donor_fds = Path(f"/proc/{donor_process.pid}/fdinfo")
-                self.assertFalse(any("tty-index:" in p.read_text() for p in donor_fds.iterdir()))
+                for descriptor in donor_fds.iterdir():
+                    try:
+                        info = descriptor.read_text()
+                    except FileNotFoundError:
+                        # Transient client sockets may close during enumeration.
+                        continue
+                    self.assertNotIn("tty-index:", info)
                 # The same child and PTY survive, including when the original parent exits.
                 self.assertTrue(Path(f"/proc/{pid}").exists())
                 self.assertTrue(Path(f"/proc/{existing_pid}").exists())
