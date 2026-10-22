@@ -32,6 +32,8 @@ It excludes desktop compositing and physical display latency.
 `manage.py interaction-perf` measures first ownership claims, cached tab switches, and wheel/page scroll pixels.
 `manage.py browser-perf` measures first/additional PTY-to-browser conversions to visible HTTP/file/explorer pixels,
 checks HTTP/file keyboard response, and records helper-inclusive memory; snapshots support alternating comparisons.
+Browser latency work prioritizes genuine cold opens: `browser-perf --cold-open` includes fresh-process launch,
+GTK, service connection and WebKit startup; `--kind` isolates HTTP, file or directory targets.
 `manage.py render-perf` compares actual release-module painting, exact pixels, CPU and memory on private backends.
 The upstream source and license remain in the repository. Keep machine destinations in environment configuration
 and use anonymous commit identities. Run `manage.py privacy-setup` in fresh clones; privacy hooks and CI guard
