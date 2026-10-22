@@ -104,7 +104,7 @@ def sample(executable, target, log):
                         try:
                             if Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0] != "Z":
                                 return False
-                        except FileNotFoundError:
+                        except (FileNotFoundError, ProcessLookupError):
                             pass
                     return True
                 wait_for(helpers_exited)
