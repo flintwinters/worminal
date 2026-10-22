@@ -165,7 +165,7 @@ browser_peer(Page *page, gboolean live_only)
 static void
 move_browser(Page *from, Page *to)
 {
-	to->browser = from ? from->browser : browser_new(to->app);
+	to->browser = from ? from->browser : browser_new(to->app, to->url);
 	if (!to->browser) return;
 	if (from) {
 		from->browser = NULL;

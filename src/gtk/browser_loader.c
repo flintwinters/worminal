@@ -28,7 +28,7 @@ load_browser(App *app)
 	return TRUE;
 }
 
-Browser *browser_new(App *app) { return load_browser(app) ? browser->create(app) : NULL; }
+Browser *browser_new(App *app, const char *url) { return load_browser(app) ? browser->create(app, url) : NULL; }
 GtkWidget *browser_widget(Browser *b) { return browser->widget(b); }
 GtkWidget *browser_view(Browser *b) { return browser->view(b); }
 void browser_bind(Browser *b, Page *p, const char *url) { browser->bind(b, p, url); }

@@ -82,7 +82,7 @@ void terminal_configure(Terminal *, uint32_t, uint32_t, gboolean);
 void terminal_select(Terminal *);
 void terminal_dimensions(Terminal *, int *, int *);
 
-G_GNUC_INTERNAL Browser *browser_new(App *);
+G_GNUC_INTERNAL Browser *browser_new(App *, const char *);
 G_GNUC_INTERNAL GtkWidget *browser_widget(Browser *);
 G_GNUC_INTERNAL GtkWidget *browser_view(Browser *);
 G_GNUC_INTERNAL void browser_bind(Browser *, Page *, const char *);

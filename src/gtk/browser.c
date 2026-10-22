@@ -12,6 +12,32 @@ struct Browser {
 	WebKitWebView *view;
 };
 static WebKitWebContext *context;
+static GList *browsers;
+
+static WebKitWebView *
+related_view(const char *url)
+{
+	WebKitSecurityOrigin *origin = webkit_security_origin_new_for_uri(url);
+	const char *scheme = webkit_security_origin_get_protocol(origin);
+	WebKitWebView *result = NULL;
+	/* Only share renderers for explicit network origins. Local and opaque
+	 * documents retain independent processes and their normal access rules. */
+	if (!g_strcmp0(scheme, "http") || !g_strcmp0(scheme, "https")) {
+		for (GList *item = browsers; item; item = item->next) {
+			Browser *b = item->data;
+			const char *current = webkit_web_view_get_uri(b->view);
+			if (!current) continue;
+			WebKitSecurityOrigin *other = webkit_security_origin_new_for_uri(current);
+			gboolean same = !g_strcmp0(scheme, webkit_security_origin_get_protocol(other)) &&
+			    !g_strcmp0(webkit_security_origin_get_host(origin), webkit_security_origin_get_host(other)) &&
+			    webkit_security_origin_get_port(origin) == webkit_security_origin_get_port(other);
+			webkit_security_origin_unref(other);
+			if (same) { result = b->view; break; }
+		}
+	}
+	webkit_security_origin_unref(origin);
+	return result;
+}
 
 static void
 notice(Browser *b, const char *message)
@@ -278,7 +304,7 @@ browser_context(void)
 }
 
 Browser *
-browser_new(App *app)
+browser_new(App *app, const char *url)
 {
 	Browser *b = g_new0(Browser, 1);
 	b->app = app;
@@ -293,7 +319,10 @@ browser_new(App *app)
 	gtk_label_set_line_wrap(GTK_LABEL(b->notice), TRUE);
 	gtk_widget_set_no_show_all(b->notice, TRUE);
 	gtk_box_pack_start(GTK_BOX(b->box), b->notice, FALSE, FALSE, 4);
-	b->view = WEBKIT_WEB_VIEW(webkit_web_view_new_with_context(browser_context()));
+	WebKitWebView *related = related_view(url);
+	b->view = WEBKIT_WEB_VIEW(related ? webkit_web_view_new_with_related_view(related) :
+	    webkit_web_view_new_with_context(browser_context()));
+	browsers = g_list_prepend(browsers, b);
 	app_startuptime("browser-view-ready");
 	/* Adapt surf's conservative defaults; keep WebKit's normal UA/site support.
 	 * No standalone surf configuration, scripts, or X-property command transport. */
@@ -368,6 +397,7 @@ void browser_bind(Browser *b, Page *page, const char *url)
 }
 void browser_free(Browser *b)
 {
+	browsers = g_list_remove(browsers, b);
 	g_signal_handlers_disconnect_by_data(b->view, b);
 	if (!b->app->closing) gtk_widget_destroy(b->box);
 	g_object_unref(b->box);
