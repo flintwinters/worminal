@@ -42,6 +42,8 @@ Launchers link GLib only and forward to an existing owner before loading the GTK
 the WebKit module loads when a browser view is first claimed.
 GTK publishes selected terminal directories and window focus through a read-only session D-Bus interface;
 `docs/window-state.md` defines the public contract and `manage.py check-window-state` checks it privately.
+Explicit X11 window launches use fresh server timestamps for desktop activation;
+`manage.py check-window-activation` verifies forwarded and shortcut launches under private Muffin.
 The daemon refreshes shell directories after output and every 250 ms, including silent directory changes.
 The frontend exports its module/callback interface explicitly; linker collection removes unused owner/parser code.
 Hidden terminal views defer cell buffers until first use or frame, and font layouts, input methods,
