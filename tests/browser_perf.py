@@ -59,6 +59,23 @@ def file_canvas(checks):
         yield path.as_uri()
 
 
+def content_visible(window, target):
+    color = 0x345678 if target else 0x141414
+    if not ready(window, color):
+        return False
+    if target:
+        return True
+    # WebKit can paint its configured background before the directory document.
+    # Require document ink below the tab strip rather than timing a blank view.
+    size = window.get_geometry()
+    height = min(160, size.height - 60)
+    if height <= 0:
+        return False
+    data = window.get_image(16, 60, min(512, size.width - 32), height,
+                            X.ZPixmap, 0xffffffff).data
+    return len(data) // 4 - data.count(color.to_bytes(3, "little")) > 32
+
+
 def sample(executable, target, log, cold_open=False):
     with isolated_display() as private, profile(private) as env:
         env.update(GDK_BACKEND="x11", GIO_USE_VFS="local", GSETTINGS_BACKEND="memory",
@@ -96,7 +113,7 @@ def sample(executable, target, log, cold_open=False):
                     started = time.monotonic_ns()
                     keypress(connection, XK.XK_Return)
                 try:
-                    wait_for(lambda: ready(window, 0x345678 if target else 0x141414))
+                    wait_for(lambda: content_visible(window, target))
                 except TimeoutError:
                     capture_failure(window)
                     raise
@@ -168,7 +185,7 @@ def main():
                            for name, values in samples.items()},
               "notes": ("Private Xvfb; fresh process launch directly into the browser. " if args.cold_open else
                         "Private Xvfb; real Return execs the browser replacement command in its calling PTY. ") +
-                       "First and additional browser views use fresh profiles per target and trial. "
+                       "Each target and trial uses a fresh profile. "
                        "Visible waits for expected page pixels; HTTP and file URLs verify real-key JavaScript response. "
                        "Explorer uses Worminal plain HTML directory links. Warm filesystem caches. "
                        "Memory includes frontend descendants, excludes service/shells. "
