@@ -590,3 +590,53 @@ direct --surf launches. The baseline also validates the ABI-named staged module
 layout. Routine headless checks pass, including real PTY conversions, caller
 path encoding, command rejection outside a terminal and missing-frontend CLI.
 The raw measurements are frozen in .checks/browser-launcher-exec.json.
+
+Cold browser stopping boundary and installation
+-----------------------------------------------
+An additional on-demand acceleration experiment supplied final settings during
+WebView construction. Seven HTTP pairs gave 587/609 ms; nine all-target pairs
+gave HTTP 573/592, file 550/544 and directory 526/565 ms. CPU and memory were
+essentially unchanged. With construction order identical, eleven policy-only
+pairs gave always/on-demand 616/606 ms, insufficient evidence to change the
+existing rendering policy. Restore the original construction/settings path.
+Frozen evidence: .checks/browser-graphics-policy-{first,all,control}.json.
+
+Extracting the daemon command into a direct launcher wire client removed an
+exec but did not improve the requested cold path (810/793 ms over eleven pairs).
+Revert that experiment; retain the measured pre-GTK daemon dispatch. Its earlier
+809/859 ms conversion comparison and the separate 601/639 ms direct-window
+comparison measure different paths and must not be added together.
+
+Existing optional milestone traces locate most first-conversion delay after the
+view exists and before WebKit emits load-started. Input-to-browser-module is
+roughly 38 ms in that traced observation; there is no fixed service sleep or
+synchronous child-reap wait on conversion. Traced logs perturb timing and are
+localization evidence only. Direct/conversion traces are frozen under
+.checks/browser-{direct,conversion}-milestones.log. CPU sampling already places
+substantial work in eager library relocation and graphics/font initialization.
+
+The retained implementation preserves lazy engine loading, persistent cookies
+and profile storage, sandboxing, renderer capabilities, tab order, calling-PTY
+identity and existing terminal/window shortcuts. Prewarming would spend idle
+resources and violate terminal-only lazy loading. Removing persistence, graphics
+capabilities or relocation/sandbox protections would change required behavior or
+security; rebuilding/replacing the system engine adds compatibility and update
+ownership costs. These are explicit tradeoffs beyond this optimization pass.
+No remaining measured application-side shortcut justifies those changes.
+
+Final headless and local/SSH GTK preview checks pass after reverting the direct
+wire experiment. File/line gates pass; clang-tidy is unavailable. Install bb23704
+into the regular user's ~/.local using manage.py install. The browser is published
+as browser-v3.so, leaving legacy browser.so available to live ABI 2 owners.
+Installer tests verify legacy contents survive installation and uninstall.
+No live owner, daemon, PTY or browser was restarted or migrated. Rollback files
+are located by .checks/browser-cold-install-backup.txt.
+
+A private-display validation then exercised the actual installed executable via
+a project-local symlink using the existing manage.py browser-perf comparison
+fixture. HTTP, file and directory conversions, subsequent views and real-key
+HTTP/file response all pass; terminal-only owners still defer WebKit. Frozen
+.checks/browser-installed-smoke.json is a functional installation check, not an
+installed-versus-build speed claim. Machine load and NFS profile fixtures vary
+substantially; earlier alternating quiet-process measurements remain scoped to
+warm filesystem caches and exclude desktop compositing and physical displays.
