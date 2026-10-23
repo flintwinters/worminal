@@ -24,6 +24,7 @@
 
 #include "service_state.h"
 #include "frame_schedule.h"
+#include "service_diagnostics.h"
 #include "workspace_handoff.h"
 typedef struct {
 	uint32_t cols, rows, allowalt, argc, envc;
@@ -642,7 +643,7 @@ serve(void)
 	tprinterhook = service_print;
 	ttyrawhook = service_input;
 	if (listener < 0)
-		return 1;
+		return service_failure("workspace listen");
 	for (; running;) {
 		fd_set readers, writers;
 		int maxfd = listener;
@@ -709,7 +710,7 @@ serve(void)
 		            pending || watch_directories ? &flush_delay : NULL, NULL) < 0) {
 			if (errno == EINTR)
 				continue;
-			return 1;
+			return service_failure("workspace pselect");
 		}
 		for (Tab *tab = tabs; tab; tab = tab->next) {
 			int fd = tab->session ? tsessionfd(tab->session) : -1;
@@ -876,7 +877,7 @@ main(int argc, char **argv)
 		return browser_command(argc == 3 ? argv[2] : NULL);
 #endif
 	if (argc == 2 && strcmp(argv[1], "--serve") == 0)
-		return serve();
+		return service_diagnostics(serve);
 	if (argc == 2 && strcmp(argv[1], "--bridge") == 0)
 		return bridge();
 	if (argc == 2 && strcmp(argv[1], "--stop") == 0) {

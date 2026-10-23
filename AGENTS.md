@@ -68,6 +68,8 @@ Private Wayland checks use a project-local Weston runtime and matching virtual-s
 
 Current jobs: prioritize remaining launch latency, while auditing input, rendering, output delivery, and view switching
 until further gains require correctness, resource, or compatibility compromises; review remaining compatibility gaps.
+Investigate intermittent local workspace loss after idle time; no root cause is confirmed.
+Daemon lifecycle, event-loop failures and fatal terminal errors go to syslog for journal diagnosis.
 Continue auditing first-frame presentation and peak startup resources after the verified first-window worker overlap.
 Browser cold startup is dominated by engine initialization; preserve lazy startup, persistent profiles and
 rendering compatibility when revisiting that cost.

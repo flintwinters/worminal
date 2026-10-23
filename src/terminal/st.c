@@ -11,6 +11,7 @@
 #include <signal.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>
+#include <syslog.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <termios.h>
@@ -761,7 +762,12 @@ void
 die(const char *errstr, ...)
 {
 	va_list ap;
+	char message[1024];
 
+	va_start(ap, errstr);
+	vsnprintf(message, sizeof(message), errstr, ap);
+	va_end(ap);
+	syslog(LOG_ERR, "%s", message);
 	va_start(ap, errstr);
 	vfprintf(stderr, errstr, ap);
 	va_end(ap);
