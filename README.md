@@ -17,6 +17,11 @@ Use `git submodule update --init --recursive` to initialize it and its pinned Hy
 Worminal keeps your shells in a per-user service, so you can close every window and return to your tabs later.
 Open another window on the same machine, or connect to a remote master over SSH: your tabs travel with the service.
 
+If windows become unresponsive or tabs disappear, inspect `journalctl -t worminald --since today`.
+New daemon processes report startup, normal exits, event-loop failures and fatal terminal errors through syslog.
+Signal deaths and OOM kills require the system crash/kernel logs. This reporting does not recover lost shells;
+an already running daemon keeps its existing behavior until an explicit ownership transfer or its next start.
+
 Built on [st 0.9.3](https://git.suckless.org/st/), with GTK 3/Pango-Cairo rendering, WebKitGTK browser tabs, and a C
 core.
 The priorities are fast launch to usable input, low memory use, and a small interface.

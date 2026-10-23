@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shlex
+import signal
 from pathlib import Path
 import socket
 import statistics
@@ -56,6 +57,37 @@ def records(data):
 
 @unittest.skipUnless(DAEMON.exists(), "run manage.py build-preview first")
 class PreviewWorkspaceTest(unittest.TestCase):
+    def test_pause_resume_and_disconnected_view_preserve_shell(self):
+        tab = self.launch("stty raw -echo; printf READY; exec cat")
+        self.daemon.send_signal(signal.SIGSTOP)
+        try:
+            send(self.peer, 3, tab, b"after-resume")
+        finally:
+            self.daemon.send_signal(signal.SIGCONT)
+        output = b""
+        while b"after-resume" not in output:
+            _, chunk = wait_kind(self.peer, 14, tab)
+            output += chunk
+        self.peer.close()
+        with self.connect() as peer:
+            send(peer, 19)
+            _, catalog = wait_kind(peer, 7)
+            self.assertEqual([(row[0], row[1]) for row in records(catalog)], [(tab, 0)])
+            send(peer, 4, tab, number(40) + number(4))
+            wait_kind(peer, 10, tab)
+            send(peer, 3, tab, b"still-alive")
+            # Reattaching must preserve the original shell and accept new input.
+            for _ in range(512):
+                kind, ident, payload = wire_packet(peer, version=2)
+                if kind == 9 and ident == tab:
+                    text = ''.join(chr(struct.unpack_from('!I', payload, offset)[0])
+                                   for offset in range(4, len(payload), 16))
+                    if "still-alive" in text:
+                        break
+            else:
+                self.fail("reattached shell did not echo input")
+        self.assertIsNone(self.daemon.poll())
+
     def setUp(self):
         self.scope = f"preview-{os.getpid()}-{uuid.uuid4().hex}"
         self.env = {**os.environ, "WORMINAL_SHARED_SOCKET_SCOPE": self.scope, "WORMINAL_INHERIT_TEST": "inherited"}
@@ -372,3 +404,57 @@ class PreviewWorkspaceTest(unittest.TestCase):
             _, chunk = wait_kind(self.peer, 14, tab)
             output += chunk
         self.assertIsNone(self.daemon.poll())
+
+
+class ServiceDiagnosticsTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        checks = ROOT / ".checks"
+        checks.mkdir(exist_ok=True)
+        cls.directory = tempfile.TemporaryDirectory(prefix="service-fault-", dir=checks)
+        cls.addClassCleanup(cls.directory.cleanup)
+        cls.library = Path(cls.directory.name) / "fault.so"
+        subprocess.run(["cc", "-shared", "-fPIC", "-Wall", "-Wextra", "-o", str(cls.library),
+                        str(ROOT / "tests/service_fault.c"), "-ldl"], check=True)
+
+    def environment(self):
+        return {**os.environ, "LD_PRELOAD": str(self.library),
+                "WORMINAL_SHARED_SOCKET_SCOPE": f"diagnostics-{uuid.uuid4().hex}"}
+
+    def test_event_loop_failure_records_operation_and_errno(self):
+        result = subprocess.run([str(DAEMON), "--serve"],
+                                env={**self.environment(), "WORMINAL_TEST_PSELECT_FAILURE": "1"},
+                                capture_output=True, text=True, timeout=3)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("JOURNAL[5] Workspace service started (protocol 2)", result.stderr)
+        self.assertIn("JOURNAL[3] workspace pselect failed:", result.stderr)
+        self.assertIn("(errno 9)", result.stderr)
+        self.assertIn("JOURNAL[3] Workspace service exited with status 1", result.stderr)
+
+    def test_fatal_pty_failure_is_reported_to_journal_and_stderr(self):
+        env = self.environment()
+        service = subprocess.Popen([str(DAEMON), "--serve"], env=env,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        try:
+            deadline = time.monotonic() + 3
+            with socket.socket(socket.AF_UNIX) as peer:
+                while True:
+                    try:
+                        peer.connect(f"\0worminal-workspace-v2-{os.getuid()}-"
+                                     + env['WORMINAL_SHARED_SOCKET_SCOPE'])
+                        break
+                    except ConnectionRefusedError:
+                        if time.monotonic() >= deadline:
+                            self.fail("diagnostic daemon did not start")
+                        time.sleep(.01)
+                launch = b"".join((number(40), number(4), number(1), number(0), number(0),
+                                   string("test"), string(str(ROOT)), string(""), string(""), string("")))
+                send(peer, 1, payload=launch)
+                _, errors = service.communicate(timeout=3)
+            self.assertEqual(service.returncode, 1)
+            self.assertIn(b"JOURNAL[3] openpty failed: Too many open files", errors)
+            self.assertEqual(errors.count(b"openpty failed: Too many open files"), 2)
+        finally:
+            if service.poll() is None:
+                service.terminate()
+            service.communicate(timeout=3)
