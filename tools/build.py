@@ -135,7 +135,8 @@ class Builder:
             self.cflags = [*CPPFLAGS, *words("CPPFLAGS"), *words("CFLAGS", "-O3"),
                            *pkg_flags("--cflags", PREVIEW_PACKAGES)]
             try:
-                self.program(target, ["src/gtk/browser.c"], variant="browser", flags=["-fPIC"],
+                self.program(target, ["src/gtk/browser.c", "src/workspace/browser_target.c"],
+                             variant="browser", flags=["-fPIC"],
                              libs=["-shared", *pkg_flags("--libs", PREVIEW_PACKAGES), *words("LDFLAGS")])
             finally:
                 self.cflags = old_flags
@@ -181,7 +182,7 @@ class Builder:
             try:
                 self.program(target, [f"src/{source}" for source in sources] or
                              ["tests/preview.c", *(f"src/{source}" for source in COMMON),
-                              "src/workspace/workspace_client.c"],
+                              "src/workspace/workspace_client.c", "src/workspace/browser_target.c"],
                              variant="preview-service" if server else "preview-test" if not sources else "frontend",
                              flags=flags, libs=libs,
                              link_dependencies=["src/gtk/frontend.map"] if target == "build/frontend.so" else [])

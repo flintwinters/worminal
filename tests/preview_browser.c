@@ -4,10 +4,9 @@ static gboolean script_done;
 static void
 script_finished(GObject *source, GAsyncResult *result, gpointer data)
 {
-	(void)data;
 	GError *error = NULL;
 	JSCValue *value = webkit_web_view_evaluate_javascript_finish(WEBKIT_WEB_VIEW(source), result, &error);
-	if (error) g_error("JavaScript: %s", error->message);
+	if (error) g_error("JavaScript %s: %s", (const char *)data, error->message);
 	script_result = jsc_value_to_string(value);
 	g_object_unref(value);
 	script_done = TRUE;
@@ -17,7 +16,7 @@ static char *
 evaluate(Browser *b, const char *script)
 {
 	script_done = FALSE;
-	webkit_web_view_evaluate_javascript(b->view, script, -1, NULL, NULL, NULL, script_finished, NULL);
+	webkit_web_view_evaluate_javascript(b->view, script, -1, NULL, NULL, NULL, script_finished, (gpointer)script);
 	WAIT(script_done);
 	return script_result;
 }
@@ -52,9 +51,16 @@ check_explorer(Browser *browser)
 	g_assert_true(g_file_set_contents(file, "literal <text>", -1, NULL));
 	char *escaped = g_uri_escape_string(directory, NULL, FALSE);
 	char *url = g_strconcat(WORKSPACE_BROWSER_HOME "files?path=", escaped, NULL);
-	webkit_web_view_load_uri(browser->view, url);
-	WAIT(!webkit_web_view_is_loading(browser->view));
-	WAIT(script_equals(browser, "String(document.querySelectorAll('#entries tr').length)", "2"));
+	char *saved = g_filename_to_uri(directory, NULL, NULL);
+	char *trailing = g_strconcat(saved, "/", NULL);
+	const char *targets[] = {saved, trailing, url};
+	for (size_t i = 0; i < G_N_ELEMENTS(targets); i++) {
+		webkit_web_view_load_uri(browser->view, targets[i]);
+		WAIT(!webkit_web_view_is_loading(browser->view));
+		WAIT(g_str_has_prefix(webkit_web_view_get_uri(browser->view), "worminal:"));
+		WAIT(script_equals(browser, "String(document.querySelectorAll('#entries tr').length)", "2"));
+	}
+	g_free(saved); g_free(trailing);
 	expect_script(browser, "document.querySelector('#entries button').textContent", "empty/");
 	expect_script(browser, "document.querySelectorAll('#entries button')[1].click(); 'ok'", "ok");
 	WAIT(script_equals(browser, "document.querySelector('#preview-text').textContent", "literal <text>"));
@@ -78,6 +84,11 @@ check_explorer(Browser *browser)
 	webkit_web_view_load_uri(browser->view, file_url);
 	WAIT(script_equals(browser, "document.body.textContent.trim()", "literal <text>"));
 	g_free(file_path); g_free(file_url);
+	file_url = g_filename_to_uri(file, NULL, NULL);
+	webkit_web_view_load_uri(browser->view, file_url);
+	WAIT(script_equals(browser, "document.body.textContent.trim()", "literal <text>"));
+	g_assert_cmpstr(webkit_web_view_get_uri(browser->view), ==, file_url);
+	g_free(file_url);
 	g_unlink(file);
 	g_rmdir(empty);
 	g_rmdir(directory);

@@ -74,7 +74,8 @@ calling directory automatically and accept absolute paths through Open folder.
 The native scheme handler supplies directory metadata and at most 1 MiB per text preview. Only the
 exact embedded document served to that WebView can use these read-only endpoints; navigating to
 another document revokes access. File content is displayed as text, never executable HTML.
-Saved file URLs refer to paths on the viewing machine.
+Saved file URLs refer to paths on the viewing machine. Main-frame file URLs naming local directories
+are redirected through the same target resolver into the explorer; ordinary files retain file URL behavior.
 
 The service uses kernel peer credentials and the caller's process session to
 identify the terminal, independent of which window is focused. Calls outside a
