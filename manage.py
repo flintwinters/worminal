@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build, check, measure, and prove Worminal: run `python3 manage.py --help`."""
 
+from contextlib import chdir
 import os
 from pathlib import Path
 import subprocess
@@ -179,9 +180,13 @@ def check():
 def privacy(history: bool = typer.Option(False, "--history", help="Also scan reachable Git history."),
             staged: bool = typer.Option(False, "--staged", help="Scan index content instead of working files."),
             identities: bool = typer.Option(False, "--identities", help="Require anonymous commit identities."),
-            message_file: Path = typer.Option(None, "--message-file", help="Also scan a commit message.")):
+            message_file: Path = typer.Option(None, "--message-file", help="Also scan a commit message."),
+            repository: Path = typer.Option(ROOT, "--repository", help="Repository or initialized submodule to scan.")):
     """Scan tracked content for common private data; redact matched values."""
-    raise typer.Exit(int(check_privacy(ROOT, history, staged, identities, message_file)))
+    repository = repository.resolve()
+    message_file = message_file.resolve() if message_file else None
+    with chdir(repository):
+        raise typer.Exit(int(check_privacy(repository, history, staged, identities, message_file)))
 
 
 @app.command("privacy-setup")
