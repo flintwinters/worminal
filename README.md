@@ -8,7 +8,8 @@ The `file-explorer` submodule is a TypeScript npm workspace building a plain dar
 offline explorer as `file-explorer/dist/index.html`. Run `npm ci` inside the submodule, then
 `python3 manage.py explorer-build` or `python3 manage.py explorer-check` from this repository.
 `python3 manage.py explorer-lint` runs its pinned Hyperlinter; setup is in the submodule README.
-It currently uses a read-only folder picker; native filesystem integration is not implemented.
+Standalone pages use a read-only folder picker; Worminal opens the calling directory automatically
+through native read-only directory and bounded text-preview endpoints.
 The explorer lives at [worminal-file-explorer](https://github.com/flintwinters/worminal-file-explorer).
 Use `git submodule update --init --recursive` to initialize it and its pinned Hyperlinter.
 
@@ -95,7 +96,8 @@ The old preview executable names remain build aliases and share the v2 workspace
 `--attach` opens existing tabs without creating another shell. Closing a window preserves its service tabs.
 Inside a Worminal terminal, `worminal --new-browser-tab [URL|FILE]` replaces that terminal with a browser,
 ending its shell. Omitting the target opens the built-in file explorer; Ctrl+K reveals the address entry.
-Absolute and relative filepaths open as encoded `file://` URLs, relative to the calling shell's directory.
+Absolute and relative paths resolve in the calling shell directory. Files open as encoded `file://`
+URLs; directories open in the embedded explorer.
 Explicit URLs, including `about:blank`, are preserved. Native builds embed the generated explorer HTML
 in the lazy browser module, so installed builds and remote viewing machines use their own local copy.
 Initialize the explorer submodule and run `npm ci` there before the first native build.

@@ -1,4 +1,4 @@
-/* Shared real-WebKit script assertions and native directory navigation regressions. */
+/* Shared real-WebKit script assertions and embedded filesystem regressions. */
 static char *script_result;
 static gboolean script_done;
 static void
@@ -39,20 +39,10 @@ script_equals(Browser *b, const char *script, const char *expected)
 	return equal;
 }
 
-/* Our plain directory HTML uses ordinary links and browser navigation. */
+/* Embedded directory browsing runs through the real WebKit scheme handler. */
 static void
 check_explorer(Browser *browser)
 {
-	Browser *fresh = browser_new(browser->app, "about:blank");
-	GdkRGBA background, expected;
-	gdk_rgba_parse(&expected, "#141414");
-	webkit_web_view_get_background_color(fresh->view, &background);
-	g_assert_cmpfloat_with_epsilon(background.red, expected.red, 0.000001);
-	g_assert_cmpfloat_with_epsilon(background.green, expected.green, 0.000001);
-	g_assert_cmpfloat_with_epsilon(background.blue, expected.blue, 0.000001);
-	g_assert_cmpfloat(background.alpha, ==, 1);
-	g_assert_null(webkit_web_view_get_uri(fresh->view));
-	browser_free(fresh);
 	char *cwd = g_get_current_dir();
 	char *directory = g_build_filename(cwd, ".checks", "explorer- #?% ü-XXXXXX", NULL);
 	g_assert_nonnull(g_mkdtemp(directory));
@@ -60,32 +50,36 @@ check_explorer(Browser *browser)
 	char *file = g_build_filename(directory, "literal <name>.txt", NULL);
 	g_assert_cmpint(g_mkdir(empty, 0700), ==, 0);
 	g_assert_true(g_file_set_contents(file, "literal <text>", -1, NULL));
-	char *encoded = g_uri_escape_string(directory, "/", FALSE);
-	char *url = g_strconcat("worminal://", encoded, NULL);
+	char *escaped = g_uri_escape_string(directory, NULL, FALSE);
+	char *url = g_strconcat(WORKSPACE_BROWSER_HOME "files?path=", escaped, NULL);
 	webkit_web_view_load_uri(browser->view, url);
 	WAIT(!webkit_web_view_is_loading(browser->view));
-	WAIT(script_equals(browser, "String(document.body.textContent.includes('literal <name>.txt'))", "true"));
-	expect_script(browser, "String(document.querySelectorAll('input,button,script,h1,ul,li').length)", "0");
-	expect_script(browser, "getComputedStyle(document.documentElement).backgroundColor", "rgb(20, 20, 20)");
-	expect_script(browser, "String(document.links.length)", "2");
-	expect_script(browser, "Array.from(document.links).find(a => "
-	              "a.textContent.includes('literal <name>.txt')).click(); 'ok'",
+	WAIT(script_equals(browser, "String(document.querySelectorAll('#entries tr').length)", "2"));
+	expect_script(browser, "document.querySelector('#entries button').textContent", "empty/");
+	expect_script(browser, "document.querySelectorAll('#entries button')[1].click(); 'ok'", "ok");
+	WAIT(script_equals(browser, "document.querySelector('#preview-text').textContent", "literal <text>"));
+	expect_script(browser, "document.querySelector('#preview').close(); document.querySelector('#open').click(); "
+	              "String(document.querySelector('input[aria-label=\"Folder path\"]').hidden)", "false");
+	expect_script(browser, "(() => { const p = document.querySelector('input[aria-label=\"Folder path\"]'); "
+	              "p.value += '/empty'; p.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter'})); return 'ok'; })()",
 	              "ok");
+	WAIT(script_equals(browser, "String(document.querySelectorAll('#entries tr').length)", "0"));
+	expect_script(browser, "document.querySelector('#notice').textContent", "No matching files.");
+	/* A different document in the same view must not retain filesystem privileges. */
+	webkit_web_view_load_html(browser->view, "<!doctype html><title>Untrusted</title>", "https://example.org/");
 	WAIT(!webkit_web_view_is_loading(browser->view));
+	char *probe = g_strdup("window.denied = false; fetch('worminal:///list?path=%2F')"
+	                             ".then(r => { window.denied = !r.ok; }).catch(() => { window.denied = true; }); 'ok'");
+	expect_script(browser, probe, "ok");
+	g_free(probe);
+	WAIT(script_equals(browser, "String(window.denied)", "true"));
+	char *file_path = g_uri_escape_string(file, "/", FALSE);
+	char *file_url = g_strconcat("worminal://", file_path, NULL);
+	webkit_web_view_load_uri(browser->view, file_url);
 	WAIT(script_equals(browser, "document.body.textContent.trim()", "literal <text>"));
-	webkit_web_view_go_back(browser->view);
-	WAIT(!webkit_web_view_is_loading(browser->view));
-	WAIT(script_equals(browser, "String(document.body.textContent.includes('empty'))", "true"));
-	expect_script(browser, "Array.from(document.links).find(a => a.textContent.includes('empty')).click(); 'ok'", "ok");
-	WAIT(!webkit_web_view_is_loading(browser->view));
-	char *empty_url = g_strconcat(url, "/empty", NULL);
-	WAIT(g_str_has_prefix(webkit_web_view_get_uri(browser->view), empty_url));
-	char *missing = g_strconcat(url, "/missing%20%3Cname%3E", NULL);
-	webkit_web_view_load_uri(browser->view, missing);
-	WAIT(script_equals(browser, "String(document.body.textContent.includes('missing <name>'))", "true"));
-	expect_script(browser, "getComputedStyle(document.documentElement).backgroundColor", "rgb(20, 20, 20)");
-	expect_script(browser, "String(document.querySelectorAll('name,script').length)", "0");
-	g_free(missing);
-	g_unlink(file); g_rmdir(empty); g_rmdir(directory);
-	g_free(encoded); g_free(empty_url); g_free(url); g_free(file); g_free(empty); g_free(directory); g_free(cwd);
+	g_free(file_path); g_free(file_url);
+	g_unlink(file);
+	g_rmdir(empty);
+	g_rmdir(directory);
+	g_free(url); g_free(escaped); g_free(file); g_free(empty); g_free(directory); g_free(cwd);
 }
