@@ -3,6 +3,7 @@
 #include "preview.h"
 #include "browser_module.h"
 #include "browser_target.h"
+#include "build/file_explorer.h"
 
 #define BROWSER_BACKGROUND "#141414"
 #define BROWSER_DOCUMENT "<!doctype html><meta charset=\"utf-8\"><meta name=\"color-scheme\" content=\"dark\">" \
@@ -273,44 +274,111 @@ download_started(WebKitWebContext *ctx, WebKitDownload *download, gpointer data)
 	g_signal_connect(download, "failed", G_CALLBACK(download_failed), NULL);
 }
 
-/* A directory is a plain document: no JavaScript, picker, or filesystem bridge. */
+/* Only our embedded top-level page may read the local filesystem. */
 static void
-directory_request(WebKitURISchemeRequest *request, gpointer data)
+explorer_request(WebKitURISchemeRequest *request, gpointer data)
 {
 	(void)data;
 	GError *error = NULL;
-	GUri *uri = g_uri_parse(webkit_uri_scheme_request_get_uri(request), G_URI_FLAGS_NONE, &error);
+	GUri *uri = g_uri_parse(webkit_uri_scheme_request_get_uri(request), G_URI_FLAGS_ENCODED_QUERY, &error);
 	if (!uri) goto fail;
-	const char *path = g_uri_get_path(uri);
-	if (g_file_test(path, G_FILE_TEST_IS_REGULAR)) {
-		GFile *file = g_file_new_for_path(path);
-		GFileInputStream *stream = g_file_read(file, NULL, &error);
+	const char *route = g_uri_get_path(uri);
+	char *contents = NULL;
+	gsize length = 0;
+	const char *mime = "text/html; charset=utf-8";
+	if ((!g_uri_get_host(uri) || !*g_uri_get_host(uri)) &&
+	    (!strcmp(route, "/files") || (!g_uri_get_query(uri) && g_file_test(route, G_FILE_TEST_IS_DIR)))) {
+		WebKitWebView *view = webkit_uri_scheme_request_get_web_view(request);
+		/* Bind filesystem access to the exact document served by this operation.
+		 * Arbitrary file/HTTP pages must never inherit the read-only bridge. */
+		g_object_set_data_full(G_OBJECT(view), "worminal-files-uri",
+		    g_strdup(webkit_uri_scheme_request_get_uri(request)), g_free);
+		contents = g_strdup(file_explorer_html);
+		length = sizeof(file_explorer_html) - 1;
+	} else if (!g_uri_get_query(uri) && g_file_test(route, G_FILE_TEST_IS_REGULAR)) {
+		WebKitWebView *view = webkit_uri_scheme_request_get_web_view(request);
+		const char *top = view ? webkit_web_view_get_uri(view) : NULL;
+		/* Preserve direct saved file navigation without exposing file subresources to other pages. */
+		if (!top || strcmp(top, webkit_uri_scheme_request_get_uri(request))) goto denied;
+		GFile *file = g_file_new_for_path(route);
+		GFileInputStream *input = g_file_read(file, NULL, &error);
 		g_object_unref(file);
-		if (!stream) { g_uri_unref(uri); goto fail; }
-		char *type = g_content_type_guess(path, NULL, 0, NULL);
-		char *mime = g_content_type_get_mime_type(type);
-		webkit_uri_scheme_request_finish(request, G_INPUT_STREAM(stream), -1, mime);
-		g_free(mime); g_free(type); g_object_unref(stream); g_uri_unref(uri);
+		if (!input) { g_uri_unref(uri); goto fail; }
+		char *type = g_content_type_guess(route, NULL, 0, NULL);
+		char *content_type = g_content_type_get_mime_type(type);
+		webkit_uri_scheme_request_finish(request, G_INPUT_STREAM(input), -1, content_type);
+		g_free(content_type); g_free(type); g_object_unref(input); g_uri_unref(uri);
 		return;
+	} else {
+		WebKitWebView *view = webkit_uri_scheme_request_get_web_view(request);
+		const char *top = view ? webkit_web_view_get_uri(view) : NULL;
+		const char *trusted = view ? g_object_get_data(G_OBJECT(view), "worminal-files-uri") : NULL;
+		if (!top || !trusted || strcmp(top, trusted)) goto denied;
+		GHashTable *params = g_uri_parse_params(g_uri_get_query(uri) ? g_uri_get_query(uri) : "",
+		                                      -1, "&", G_URI_PARAMS_NONE, &error);
+		if (!params) goto done;
+		const char *path = g_hash_table_lookup(params, "path");
+		if (!path || !g_path_is_absolute(path)) {
+			g_hash_table_unref(params);
+			goto denied;
+		}
+		GFile *file = g_file_new_for_path(path);
+		if (!strcmp(route, "/list")) {
+			GFileEnumerator *items = g_file_enumerate_children(file,
+			    "standard::name,standard::type,standard::size,time::modified",
+			    G_FILE_QUERY_INFO_NONE, NULL, &error);
+			if (items) {
+				GString *json = g_string_new("[");
+				GFileInfo *info;
+				while ((info = g_file_enumerator_next_file(items, NULL, &error))) {
+					const char *name = g_file_info_get_name(info);
+					char *encoded = g_base64_encode((const guchar *)name, strlen(name));
+					g_string_append_printf(json, "%s[\"%s\",%s,%" G_GOFFSET_FORMAT ",%" G_GUINT64_FORMAT "]",
+					    json->len > 1 ? "," : "", encoded,
+					    g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY ? "true" : "false",
+					    g_file_info_get_size(info),
+					    g_file_info_get_attribute_uint64(info, G_FILE_ATTRIBUTE_TIME_MODIFIED) * 1000);
+					g_free(encoded);
+					g_object_unref(info);
+				}
+				g_object_unref(items);
+				g_string_append_c(json, ']');
+				length = json->len;
+				contents = g_string_free(json, FALSE);
+				mime = "application/json";
+			}
+		} else if (!strcmp(route, "/read")) {
+			GFileInfo *info = g_file_query_info(file, "standard::type", G_FILE_QUERY_INFO_NONE, NULL, &error);
+			GFileInputStream *input = NULL;
+			if (info) {
+				if (g_file_info_get_file_type(info) == G_FILE_TYPE_REGULAR)
+					input = g_file_read(file, NULL, &error);
+				else error = g_error_new_literal(G_IO_ERROR, G_IO_ERROR_NOT_REGULAR_FILE, "Not a regular file");
+				g_object_unref(info);
+			}
+			if (input) {
+				contents = g_malloc(1048576);
+				g_input_stream_read_all(G_INPUT_STREAM(input), contents, 1048576, &length, NULL, &error);
+				g_object_unref(input);
+				mime = "application/octet-stream";
+			}
+		} else {
+			error = g_error_new_literal(G_IO_ERROR, G_IO_ERROR_NOT_FOUND, "Unknown Worminal page");
+		}
+		g_object_unref(file);
+		g_hash_table_unref(params);
 	}
-	GDir *directory = g_dir_open(path, 0, &error);
-	if (!directory) { g_uri_unref(uri); goto fail; }
-	GString *html = g_string_new(BROWSER_DOCUMENT);
-	const char *name;
-	while ((name = g_dir_read_name(directory))) {
-		char *child = g_build_filename(path, name, NULL);
-		char *href = g_uri_escape_string(child, "/", FALSE);
-		char *label = g_markup_escape_text(name, -1);
-		g_string_append_printf(html, "<a href=\"worminal://%s\">%s</a><br>\n", href, label);
-		g_free(label); g_free(href); g_free(child);
-	}
-	g_dir_close(directory);
+ done:
 	g_uri_unref(uri);
-	gsize length = html->len;
-	GInputStream *stream = g_memory_input_stream_new_from_data(g_string_free(html, FALSE), length, g_free);
-	webkit_uri_scheme_request_finish(request, stream, length, "text/html; charset=utf-8");
+	if (error) { g_free(contents); goto fail; }
+	GInputStream *stream = g_memory_input_stream_new_from_data(contents, length, g_free);
+	webkit_uri_scheme_request_finish(request, stream, length, mime);
 	g_object_unref(stream);
 	return;
+ denied:
+	g_uri_unref(uri);
+	error = g_error_new_literal(G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+	                            "Local directory access requires the Files page");
  fail:
 	webkit_uri_scheme_request_finish_error(request, error);
 	g_error_free(error);
@@ -329,8 +397,8 @@ browser_context(void)
 	    "base-data-directory", data, "base-cache-directory", cache, NULL);
 	webkit_website_data_manager_set_tls_errors_policy(manager, WEBKIT_TLS_ERRORS_POLICY_FAIL);
 	context = webkit_web_context_new_with_website_data_manager(manager);
-	webkit_web_context_register_uri_scheme(context, WORKSPACE_BROWSER_SCHEME, directory_request, NULL, NULL);
-	webkit_security_manager_register_uri_scheme_as_local(webkit_web_context_get_security_manager(context),
+	webkit_web_context_register_uri_scheme(context, WORKSPACE_BROWSER_SCHEME, explorer_request, NULL, NULL);
+	webkit_security_manager_register_uri_scheme_as_cors_enabled(webkit_web_context_get_security_manager(context),
 	                                                     WORKSPACE_BROWSER_SCHEME);
 	g_object_unref(manager);
 	char *cookies = g_build_filename(data, "cookies.sqlite", NULL);

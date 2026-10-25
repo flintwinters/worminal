@@ -81,9 +81,8 @@ The receiver stages and validates state before commit; the donor then closes PTY
 Running daemons that predate the protocol cannot gain it through installation; preserve their live sessions.
 Investigate remote Codex scrolling separately from tested wheel modes.
 
-The default browser target is the calling shell directory under worminal:///. The browser module generates
-only file/folder links in enumeration order on a dark background; new WebViews use it before loading.
-Generated directory and error documents share the same dark page style.
-No scripts, picker, or filesystem API are used.
-`file-explorer` remains an independent TypeScript npm-workspace submodule, unused by native builds.
-Use `manage.py explorer-build`, `explorer-check`, and `explorer-lint` for that standalone artifact.
+The default browser target is the calling shell directory under worminal:///. Native builds embed the
+`file-explorer` submodule's offline HTML in the lazy browser module. The host supplies directory metadata
+and bounded read-only text previews only to the embedded page; other pages cannot use these endpoints.
+The independent TypeScript workspace retains a folder picker outside Worminal.
+Use `manage.py explorer-build`, `explorer-check`, and `explorer-lint` after `npm ci` in the submodule.
