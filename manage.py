@@ -152,7 +152,7 @@ def preview_perf():
 
 @app.command("check-preview-keys")
 def check_preview_keys():
-    """Run existing keyboard and mouse regressions through the GTK frontend."""
+    """Check keyboard, mouse, clipboard, and real editor input through GTK."""
     native_build.build_targets("worminal-preview", "worminald-preview")
     raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                           "-p", "test_keys.py", "-q"], env={**os.environ, "WORMINAL_FRONTEND": "worminal-preview"}))
@@ -201,11 +201,12 @@ def privacy_setup():
 
 
 @app.command("check-keys")
-def check_keys():
-    """Check navigation and mouse input on private Xvfb displays."""
-    native_build.build_targets()
+def check_keys(legacy: bool = typer.Option(False, "--legacy", help="Check the rollback X11 frontend.")):
+    """Check keys, mouse input, and clipboard bytes on private Xvfb displays."""
+    native_build.build_targets(*(("worminal-x11", "worminald-x11") if legacy else ()))
     raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
-                          "-p", "test_keys.py", "-q"], env={**os.environ, "WORMINAL_FRONTEND": "worminal"}))
+                          "-p", "test_keys.py", "-q"],
+                          env={**os.environ, "WORMINAL_FRONTEND": "worminal-x11" if legacy else "worminal"}))
 
 
 @app.command("check-handoff")

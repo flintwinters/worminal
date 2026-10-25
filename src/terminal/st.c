@@ -731,15 +731,9 @@ getsel(void)
 			ptr += utf8encode(gp->u, ptr);
 		}
 
-		/*
-		 * Copy and pasting of line endings is inconsistent
-		 * in the inconsistent terminal and GUI world.
-		 * The best solution seems like to produce '\n' when
-		 * something is copied from st and convert '\n' to
-		 * '\r', when something to be pasted is received by
-		 * st.
-		 * FIXME: Fix the computer world.
-		 */
+		/* Clipboard text uses LF for hard line breaks and joins soft wraps.
+		 * Paste handling preserves text in bracketed mode; ordinary paste
+		 * converts line endings to Enter keystrokes (see paste.h). */
 		if ((y < sel.ne.y || lastx >= linelen) &&
 		    (!(last->mode & ATTR_WRAP) || sel.type == SEL_RECTANGULAR))
 			*ptr++ = '\n';

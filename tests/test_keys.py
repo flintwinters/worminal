@@ -1,5 +1,6 @@
-"""Check navigation keys through X11, the PTY, and a raw-mode child."""
+"""Check keys, mouse input, and clipboard bytes through real PTYs and the micro editor."""
 
+from contextlib import contextmanager
 import os
 from pathlib import Path
 import select
@@ -52,7 +53,87 @@ def wait_title(env, window, title):
     raise AssertionError("frontend did not apply the ready input modes")
 
 
+@contextmanager
+def clipboard_owner(env, text, selection="clipboard"):
+    """Keep an external UTF-8 selection alive until GTK finishes its asynchronous request."""
+    owner = subprocess.Popen(["xclip", "-selection", selection, "-in", "-quiet"],
+                             env=env, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    try:
+        owner.stdin.write(text.encode())
+        owner.stdin.close()
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            ready = subprocess.run(["xclip", "-selection", selection, "-out", "-target", "UTF8_STRING"],
+                                   env=env, capture_output=True, timeout=2)
+            if ready.returncode == 0 and ready.stdout == text.encode():
+                break
+            time.sleep(.01)
+        else:
+            raise AssertionError("external clipboard owner did not become ready")
+        yield
+    finally:
+        owner.terminate()
+        owner.wait(timeout=2)
+        owner.stderr.close()
+
+
 class NavigationKeysTest(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("xclip"), "xclip is not installed")
+    def test_clipboard_paste_bytes(self):
+        self.check_clipboard_paste([])
+
+    @unittest.skipUnless(shutil.which("xclip"), "xclip is not installed")
+    def test_master_clipboard_paste_bytes(self):
+        self.check_clipboard_paste(["--master", "key-test"])
+
+    def check_clipboard_paste(self, connection):
+        with isolated_display() as env:
+            if connection:
+                fixtures = ROOT / "tests/fixtures" / ("preview-master" if PREVIEW else "master")
+                env["PATH"] = str(fixtures) + os.pathsep + env["PATH"]
+                env["WORMINAL_TEST_DAEMON"] = str(ROOT / DAEMON)
+            for bracket in (False, True):
+                title = f"Worminal clipboard {os.getpid()} {bracket}"
+                mode = (b"\033[?2004h" if bracket else b"\033[?2004l")
+                mode += f"\033]2;{title} ready\a".encode()
+                escapes = "".join(f"\\{byte:03o}" for byte in mode)
+                terminal = subprocess.Popen(
+                    [str(ROOT / FRONTEND), *connection, "-T", title, "-o", "-", "-e", "/bin/sh", "-c",
+                     f"stty raw -echo; printf '{escapes}R'; exec cat"],
+                    env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                try:
+                    deadline = time.monotonic() + 5
+                    window = None
+                    while time.monotonic() < deadline:
+                        result = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", title],
+                                                env=env, capture_output=True, text=True)
+                        if result.returncode == 0:
+                            window = result.stdout.splitlines()[0]
+                            break
+                        time.sleep(.01)
+                    self.assertIsNotNone(window, "clipboard window did not open")
+                    wait_title(env, window, title + " ready")
+                    self.assertEqual(read_bytes(terminal.stdout, len(mode) + 1), mode + b"R")
+                    subprocess.run(["xdotool", "windowfocus", "--sync", window], env=env, check=True)
+                    cases = ("plain", "first\nsecond\n", "first\r\nsecond\r\n",
+                             "\ttext\rnext", "\033[201~\003text", "é中" * 20000)
+                    for selection, shortcut in (("clipboard", "ctrl+shift+v"), ("primary", "shift+Insert")):
+                        for text in cases:
+                            with self.subTest(bracket=bracket, selection=selection, length=len(text)):
+                                with clipboard_owner(env, text, selection):
+                                    subprocess.run(["xdotool", "key", "--clearmodifiers", shortcut], env=env, check=True)
+                                    expected = (text.replace("\033", "").replace("\003", "") if bracket else
+                                                text.replace("\r\n", "\n").replace("\n", "\r")).encode()
+                                    if bracket:
+                                        expected = b"\033[200~" + expected + b"\033[201~"
+                                    actual = read_bytes(terminal.stdout, len(expected))
+                                    self.assertEqual(actual, expected)
+                                    self.assertFalse(select.select([terminal.stdout], [], [], .05)[0],
+                                                     "paste delivered extra bytes")
+                finally:
+                    terminal.terminate()
+                    terminal.communicate(timeout=3)
+
     def test_alternate_scroll_sends_cursor_keys(self):
         self.check_alternate_scroll([])
 
@@ -163,6 +244,12 @@ class NavigationKeysTest(unittest.TestCase):
                                    env=env, check=True)
                     subprocess.run(["xdotool", "type", "--clearmodifiers", letter],
                                    env=env, check=True)
+                if shutil.which("xclip"):
+                    pasted = "pasted é中\n\tsecond line"
+                    with clipboard_owner(env, pasted):
+                        subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+shift+v"],
+                                       env=env, check=True)
+                        time.sleep(.1)
                 subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+s", "ctrl+q"],
                                env=env, check=True)
                 try:
@@ -172,7 +259,8 @@ class NavigationKeysTest(unittest.TestCase):
                         f"micro did not exit; file contains {path.read_text()!r}; "
                         f"output {log.read_bytes()[:300]!r}"
                     ) from error
-                self.assertEqual(path.read_text(), "QYfirstX\nlastZ\n")
+                prefix = "pasted é中\n\tsecond line" if shutil.which("xclip") else ""
+                self.assertEqual(path.read_text(), "Q" + prefix + "YfirstX\nlastZ\n")
             finally:
                 if terminal.poll() is None:
                     terminal.terminate()
