@@ -5,9 +5,6 @@
 #include "browser_target.h"
 #include "build/file_explorer.h"
 
-#define BROWSER_BACKGROUND "#141414"
-#define BROWSER_DOCUMENT "<!doctype html><meta charset=\"utf-8\"><meta name=\"color-scheme\" content=\"dark\">" \
-    "<style>html{background:" BROWSER_BACKGROUND ";color:#ddd}a{color:#b7d5ff}</style>\n"
 
 struct Browser {
 	App *app;
@@ -118,7 +115,9 @@ static void
 error_page(WebKitWebView *view, const char *url, const char *message)
 {
 	char *escaped = g_markup_escape_text(message, -1);
-	char *html = g_strconcat(BROWSER_DOCUMENT, escaped, NULL);
+	char **parts = g_strsplit(file_explorer_error_html, file_explorer_message_slot, 2);
+	char *html = g_strjoinv(escaped, parts);
+	g_strfreev(parts);
 	webkit_web_view_load_alternate_html(view, html, url, NULL);
 	g_free(html); g_free(escaped);
 }
@@ -316,8 +315,12 @@ explorer_request(WebKitURISchemeRequest *request, gpointer data)
 	} else if (!g_uri_get_query(uri) && g_file_test(route, G_FILE_TEST_IS_REGULAR)) {
 		WebKitWebView *view = webkit_uri_scheme_request_get_web_view(request);
 		const char *top = view ? webkit_web_view_get_uri(view) : NULL;
-		/* Preserve direct saved file navigation without exposing file subresources to other pages. */
-		if (!top || strcmp(top, webkit_uri_scheme_request_get_uri(request))) goto denied;
+		const char *trusted = view ? g_object_get_data(G_OBJECT(view), "worminal-files-uri") : NULL;
+		/* A clicked file can be requested before WebKit updates the top-level URI.
+		 * Permit links from our exact directory document as well as direct navigation;
+		 * arbitrary pages still cannot fetch local file subresources. */
+		if (!top || (strcmp(top, webkit_uri_scheme_request_get_uri(request)) &&
+		             (!trusted || strcmp(top, trusted)))) goto denied;
 		GFile *file = g_file_new_for_path(route);
 		GFileInputStream *input = g_file_read(file, NULL, &error);
 		g_object_unref(file);
@@ -343,7 +346,7 @@ explorer_request(WebKitURISchemeRequest *request, gpointer data)
 		GFile *file = g_file_new_for_path(path);
 		if (!strcmp(route, "/list")) {
 			GFileEnumerator *items = g_file_enumerate_children(file,
-			    "standard::name,standard::type,standard::size,time::modified",
+			    "standard::name,standard::type",
 			    G_FILE_QUERY_INFO_NONE, NULL, &error);
 			if (items) {
 				GString *json = g_string_new("[");
@@ -351,11 +354,9 @@ explorer_request(WebKitURISchemeRequest *request, gpointer data)
 				while ((info = g_file_enumerator_next_file(items, NULL, &error))) {
 					const char *name = g_file_info_get_name(info);
 					char *encoded = g_base64_encode((const guchar *)name, strlen(name));
-					g_string_append_printf(json, "%s[\"%s\",%s,%" G_GOFFSET_FORMAT ",%" G_GUINT64_FORMAT "]",
+					g_string_append_printf(json, "%s[\"%s\",%s]",
 					    json->len > 1 ? "," : "", encoded,
-					    g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY ? "true" : "false",
-					    g_file_info_get_size(info),
-					    g_file_info_get_attribute_uint64(info, G_FILE_ATTRIBUTE_TIME_MODIFIED) * 1000);
+					    g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY ? "true" : "false");
 					g_free(encoded);
 					g_object_unref(info);
 				}
@@ -364,21 +365,6 @@ explorer_request(WebKitURISchemeRequest *request, gpointer data)
 				length = json->len;
 				contents = g_string_free(json, FALSE);
 				mime = "application/json";
-			}
-		} else if (!strcmp(route, "/read")) {
-			GFileInfo *info = g_file_query_info(file, "standard::type", G_FILE_QUERY_INFO_NONE, NULL, &error);
-			GFileInputStream *input = NULL;
-			if (info) {
-				if (g_file_info_get_file_type(info) == G_FILE_TYPE_REGULAR)
-					input = g_file_read(file, NULL, &error);
-				else error = g_error_new_literal(G_IO_ERROR, G_IO_ERROR_NOT_REGULAR_FILE, "Not a regular file");
-				g_object_unref(info);
-			}
-			if (input) {
-				contents = g_malloc(1048576);
-				g_input_stream_read_all(G_INPUT_STREAM(input), contents, 1048576, &length, NULL, &error);
-				g_object_unref(input);
-				mime = "application/octet-stream";
 			}
 		} else {
 			error = g_error_new_literal(G_IO_ERROR, G_IO_ERROR_NOT_FOUND, "Unknown Worminal page");
@@ -445,7 +431,7 @@ browser_new(App *app, const char *url)
 	b->view = WEBKIT_WEB_VIEW(related ? webkit_web_view_new_with_related_view(related) :
 	    webkit_web_view_new_with_context(browser_context()));
 	GdkRGBA background;
-	gdk_rgba_parse(&background, BROWSER_BACKGROUND);
+	gdk_rgba_parse(&background, file_explorer_background);
 	webkit_web_view_set_background_color(b->view, &background);
 	browsers = g_list_prepend(browsers, b);
 	host->timing("browser-view-ready");

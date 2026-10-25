@@ -9,7 +9,8 @@ offline explorer as `file-explorer/dist/index.html`. Run `npm ci` inside the sub
 `python3 manage.py explorer-build` or `python3 manage.py explorer-check` from this repository.
 `python3 manage.py explorer-lint` runs its pinned Hyperlinter; setup is in the submodule README.
 Standalone pages use a read-only folder picker; Worminal opens the calling directory automatically
-through native read-only directory and bounded text-preview endpoints.
+through native read-only directory metadata. The submodule owns the plain link listing, error pages,
+and palette; Worminal contains no browser HTML or CSS templates.
 The explorer lives at [worminal-file-explorer](https://github.com/flintwinters/worminal-file-explorer).
 Use `git submodule update --init --recursive` to initialize it and its pinned Hyperlinter.
 

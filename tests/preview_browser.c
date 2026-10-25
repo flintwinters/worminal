@@ -38,6 +38,16 @@ script_equals(Browser *b, const char *script, const char *expected)
 	return equal;
 }
 
+static void
+expect_denied(Browser *browser, const char *url)
+{
+	char *probe = g_strdup_printf("window.denied = false; fetch('%s')"
+	    ".then(r => { window.denied = !r.ok; }).catch(() => { window.denied = true; }); 'ok'", url);
+	expect_script(browser, probe, "ok");
+	g_free(probe);
+	WAIT(script_equals(browser, "String(window.denied)", "true"));
+}
+
 /* Embedded directory browsing runs through the real WebKit scheme handler. */
 static void
 check_explorer(Browser *browser)
@@ -58,29 +68,38 @@ check_explorer(Browser *browser)
 		webkit_web_view_load_uri(browser->view, targets[i]);
 		WAIT(!webkit_web_view_is_loading(browser->view));
 		WAIT(g_str_has_prefix(webkit_web_view_get_uri(browser->view), "worminal:"));
-		WAIT(script_equals(browser, "String(document.querySelectorAll('#entries tr').length)", "2"));
+		WAIT(script_equals(browser, "String(document.links.length)", "2"));
 	}
 	g_free(saved); g_free(trailing);
-	expect_script(browser, "document.querySelector('#entries button').textContent", "empty/");
-	expect_script(browser, "document.querySelectorAll('#entries button')[1].click(); 'ok'", "ok");
-	WAIT(script_equals(browser, "document.querySelector('#preview-text').textContent", "literal <text>"));
-	expect_script(browser, "document.querySelector('#preview').close(); document.querySelector('#open').click(); "
-	              "String(document.querySelector('input[aria-label=\"Folder path\"]').hidden)", "false");
-	expect_script(browser, "(() => { const p = document.querySelector('input[aria-label=\"Folder path\"]'); "
-	              "p.value += '/empty'; p.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter'})); return 'ok'; })()",
+	expect_script(browser, "String(document.querySelectorAll('table,dialog').length)", "0");
+	expect_script(browser, "getComputedStyle(document.querySelector('#open')).display", "none");
+	expect_script(browser, "getComputedStyle(document.documentElement).backgroundColor", "rgb(20, 20, 20)");
+	expect_script(browser, "Array.from(document.links).find(a => a.textContent === 'literal <name>.txt').click(); 'ok'",
 	              "ok");
-	WAIT(script_equals(browser, "String(document.querySelectorAll('#entries tr').length)", "0"));
-	expect_script(browser, "document.querySelector('#notice').textContent", "No matching files.");
+	WAIT(script_equals(browser, "document.body.textContent.trim()", "literal <text>"));
+	webkit_web_view_go_back(browser->view);
+	WAIT(script_equals(browser, "String(document.links.length)", "2"));
+	expect_script(browser, "Array.from(document.links).find(a => a.textContent === 'empty').click(); 'ok'", "ok");
+	char *empty_path = g_build_filename(directory, "empty", NULL);
+	char *empty_url = workspace_browser_target(empty_path);
+	g_free(empty_path);
+	WAIT(!g_strcmp0(webkit_web_view_get_uri(browser->view), empty_url));
+	WAIT(!webkit_web_view_is_loading(browser->view));
+	WAIT(script_equals(browser, "document.querySelector('#entries').textContent", ""));
+	g_free(empty_url);
+	/* Native errors use the submodule template and insert escaped text only. */
+	const char *message = "literal <img onerror=alert(1)> & error";
+	error_page(browser->view, "worminal:///missing", message);
+	WAIT(script_equals(browser, "document.body.textContent.trim()", message));
+	expect_script(browser, "String(document.querySelectorAll('img,script').length)", "0");
+	expect_script(browser, "getComputedStyle(document.documentElement).backgroundColor", "rgb(20, 20, 20)");
 	/* A different document in the same view must not retain filesystem privileges. */
 	webkit_web_view_load_html(browser->view, "<!doctype html><title>Untrusted</title>", "https://example.org/");
 	WAIT(!webkit_web_view_is_loading(browser->view));
-	char *probe = g_strdup("window.denied = false; fetch('worminal:///list?path=%2F')"
-	                             ".then(r => { window.denied = !r.ok; }).catch(() => { window.denied = true; }); 'ok'");
-	expect_script(browser, probe, "ok");
-	g_free(probe);
-	WAIT(script_equals(browser, "String(window.denied)", "true"));
+	expect_denied(browser, "worminal:///list?path=%2F");
 	char *file_path = g_uri_escape_string(file, "/", FALSE);
 	char *file_url = g_strconcat("worminal://", file_path, NULL);
+	expect_denied(browser, file_url);
 	webkit_web_view_load_uri(browser->view, file_url);
 	WAIT(script_equals(browser, "document.body.textContent.trim()", "literal <text>"));
 	g_free(file_path); g_free(file_url);
@@ -93,4 +112,37 @@ check_explorer(Browser *browser)
 	g_rmdir(empty);
 	g_rmdir(directory);
 	g_free(url); g_free(escaped); g_free(file); g_free(empty); g_free(directory); g_free(cwd);
+}
+
+static Page *open_browser(App *app, const char *url);
+
+static void
+check_file_views(App *app)
+{
+	/* File views retain their own tab storage while reusing the same resource's
+	 * renderer. Closing the original view must leave its sibling usable. */
+	char *file_cwd = g_get_current_dir();
+	char *file_document = g_build_filename(file_cwd, ".checks", "preview-resource.html", NULL);
+	g_assert_true(g_file_set_contents(file_document, "<!doctype html><title>Local resource</title><input>", -1, NULL));
+	char *file_url = g_filename_to_uri(file_document, NULL, NULL);
+	Page *home = open_browser(app, file_url);
+	g_free(file_url); g_free(file_cwd);
+	char *home_url = g_strdup(webkit_web_view_get_uri(home->browser->view));
+	g_assert_true(related_view(home_url) == home->browser->view);
+	g_assert_null(related_view("file:///etc/hosts"));
+	expect_script(home->browser, "sessionStorage.setItem('file-tab', 'first'); 'ok'", "ok");
+	Page *second_home = open_browser(app, home_url);
+	expect_script(second_home->browser, "String(window.opener)", "null");
+	expect_script(second_home->browser, "String(sessionStorage.getItem('file-tab'))", "null");
+	int original_home_count = g_list_length(app->pages);
+	app_close(home);
+	WAIT(g_list_length(app->pages) == original_home_count - 1);
+	home = second_home;
+	g_free(home_url);
+	expect_script(home->browser, "sessionStorage.setItem('surviving-tab', 'yes'); "
+	              "sessionStorage.getItem('surviving-tab')", "yes");
+	int home_count = g_list_length(app->pages);
+	app_close(home);
+	WAIT(g_list_length(app->pages) == home_count - 1);
+	g_unlink(file_document); g_free(file_document);
 }

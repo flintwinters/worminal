@@ -88,22 +88,31 @@ def step(output, command, dependencies, *, depfile=False):
 
 
 def generate_explorer():
-    """Embed the standalone artifact in the lazy browser module, including installed/remote views."""
+    """Embed submodule-owned pages and their presentation contract in the lazy browser module."""
     explorer = ROOT / "file-explorer"
     if not (explorer / "package.json").exists():
         raise ValueError("Initialize file-explorer before building: git submodule update --init")
-    inputs = [explorer / name for name in ("package.json", "package-lock.json", "tsconfig.json", "vite.config.ts")]
+    inputs = [explorer / name for name in ("package.json", "package-lock.json", "tsconfig.json", "vite.config.ts",
+                                           "tools/build.mjs")]
     inputs += [path for directory in ("apps", "packages") for path in (explorer / directory).rglob("*")
                if path.is_file() and "node_modules" not in path.parts]
-    artifact = explorer / "dist/index.html"
-    if not artifact.exists() or any(path.stat().st_mtime_ns > artifact.stat().st_mtime_ns for path in inputs):
+    artifacts = [explorer / "dist" / name for name in ("index.html", "error.html", "theme.json")]
+    if any(not path.exists() for path in artifacts) or any(
+            source.stat().st_mtime_ns > min(path.stat().st_mtime_ns for path in artifacts) for source in inputs):
         invoke(["python3", str(explorer / "manage.py"), "build"])
-    data = artifact.read_bytes()
-    # Fixed-width octal bytes preserve UTF-8 and cannot merge with adjacent C escapes.
-    chunks = ['"' + "".join(f"\\{byte:03o}" for byte in data[start:start + 24]) + '"'
-              for start in range(0, len(data), 24)]
-    content = "/* Generated from file-explorer/dist/index.html. */\nstatic const char file_explorer_html[] =\n"
-    content += "\n".join(chunks) + ";\n"
+    theme = json.loads(artifacts[2].read_text())
+    error = artifacts[1].read_bytes()
+    slot = theme["message_slot"].encode()
+    if not slot or error.count(slot) != 1:
+        raise ValueError("Explorer error page must contain exactly one declared message slot")
+    resources = {"html": artifacts[0].read_bytes(), "error_html": error,
+                 "background": theme["background"].encode(), "message_slot": slot}
+    content = "/* Generated from file-explorer/dist. */\n"
+    for name, data in resources.items():
+        # Fixed-width octal bytes preserve UTF-8 and cannot merge with adjacent C escapes.
+        chunks = ['"' + "".join(f"\\{byte:03o}" for byte in data[start:start + 24]) + '"'
+                  for start in range(0, len(data), 24)]
+        content += f"static const char file_explorer_{name}[] =\n" + "\n".join(chunks) + ";\n"
     header = ROOT / "build/file_explorer.h"
     header.parent.mkdir(parents=True, exist_ok=True)
     if not header.exists() or header.read_text() != content:

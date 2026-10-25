@@ -45,7 +45,8 @@ class BuildTests(unittest.TestCase):
     def test_explorer_embedding_rebuilds_when_sources_change_and_preserves_utf8(self):
         explorer = self.root / "file-explorer"
         explorer.mkdir()
-        for name in ("package.json", "package-lock.json", "tsconfig.json", "vite.config.ts"):
+        for name in ("package.json", "package-lock.json", "tsconfig.json", "vite.config.ts", "tools/build.mjs"):
+            (explorer / name).parent.mkdir(parents=True, exist_ok=True)
             (explorer / name).write_text("{}")
         source = explorer / "apps/explorer/src/main.ts"
         source.parent.mkdir(parents=True)
@@ -55,12 +56,15 @@ class BuildTests(unittest.TestCase):
         def bundle(_command):
             artifact.parent.mkdir(exist_ok=True)
             artifact.write_text('<title>Files — Worminal</title>"\\' + source.read_text())
+            (artifact.parent / "error.html").write_text("Error: {{message}}")
+            (artifact.parent / "theme.json").write_text('{"background":"#141414","message_slot":"{{message}}"}')
 
         with patch.object(build, "invoke", side_effect=bundle) as invoked:
             build.generate_explorer()
             header = self.root / "build/file_explorer.h"
             content = header.read_text()
-            encoded = bytes(int(value, 8) for value in re.findall(r"\\([0-7]{3})", content))
+            html = content.split("static const char file_explorer_html[] =\n", 1)[1].split(";", 1)[0]
+            encoded = bytes(int(value, 8) for value in re.findall(r"\\([0-7]{3})", html))
             self.assertEqual(encoded, artifact.read_bytes())
             timestamp = header.stat().st_mtime_ns
             build.generate_explorer()
@@ -72,6 +76,13 @@ class BuildTests(unittest.TestCase):
             build.generate_explorer()
             self.assertEqual(invoked.call_count, 2)
             self.assertNotEqual(header.read_text(), content)
+            # Invalid template contracts must never replace a valid generated header.
+            os.utime(source, ns=(1, 1))
+            valid = header.read_bytes()
+            (artifact.parent / "error.html").write_text("Missing slot")
+            with self.assertRaisesRegex(ValueError, "exactly one declared message slot"):
+                build.generate_explorer()
+            self.assertEqual(header.read_bytes(), valid)
 
     def test_browser_and_preview_proof_both_generate_the_embedded_explorer(self):
         with patch.object(build, "pkg_flags", return_value=[]), patch.object(build, "generate_explorer") as generate:

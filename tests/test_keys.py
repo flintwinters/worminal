@@ -121,7 +121,8 @@ class NavigationKeysTest(unittest.TestCase):
                         for text in cases:
                             with self.subTest(bracket=bracket, selection=selection, length=len(text)):
                                 with clipboard_owner(env, text, selection):
-                                    subprocess.run(["xdotool", "key", "--clearmodifiers", shortcut], env=env, check=True)
+                                    subprocess.run(["xdotool", "key", "--clearmodifiers", shortcut],
+                                                   env=env, check=True)
                                     expected = (text.replace("\033", "").replace("\003", "") if bracket else
                                                 text.replace("\r\n", "\n").replace("\n", "\r")).encode()
                                     if bracket:
