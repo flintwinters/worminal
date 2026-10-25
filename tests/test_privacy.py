@@ -4,6 +4,9 @@ import contextlib
 import importlib.util
 import io
 from pathlib import Path
+import subprocess
+import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -12,6 +15,21 @@ from tools.git_index import tracked_files
 
 
 class PrivacyTests(unittest.TestCase):
+    def test_cli_scans_requested_repository_instead_of_parent(self):
+        root = Path(__file__).resolve().parent.parent
+        checks = root / ".checks"
+        checks.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=checks) as directory:
+            repository = Path(directory)
+            subprocess.run(["git", "init", "-q", directory], check=True)
+            (repository / "fixture.txt").write_text("ghp_" + "a" * 30)
+            subprocess.run(["git", "-C", directory, "add", "fixture.txt"], check=True)
+            result = subprocess.run([sys.executable, str(root / "manage.py"), "check-privacy",
+                                     "--repository", directory], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn("fixture.txt:1: service credential", result.stdout)
+            self.assertNotIn("ghp_" + "a" * 30, result.stdout)
+
     def test_forced_private_file_is_rejected_even_without_recognized_credentials(self):
         root = Path(__file__).resolve().parent.parent
         with patch("tools.privacy.git", side_effect=[b"100644 abc 0\t.env\0", b"CUSTOM_SETTING=opaque"]):
