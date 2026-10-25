@@ -17,6 +17,8 @@ a per-request completion gate keeps GTK callbacks behind completed widget setup.
 Install as the regular user into `~/.local` by default so builds retain that user's Alacritty configuration.
 `src/terminal` owns terminal state,
 `src/gtk` paints release views, `src/x11` preserves the original renderer, and `src/workspace` connects the service.
+Both frontends share paste filtering: bracketed text preserves line endings, while ordinary paste
+normalizes CRLF/LF to Enter.
 GTK redraws changed rows and cursor damage, including overlapping glyph ink;
 blink ticks damage only visible blinking rows, while catalog style changes invalidate their own pixels.
 compact rows paint matching background runs before glyphs, with scalar fallback on fractional device grids.

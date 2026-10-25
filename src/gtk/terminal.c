@@ -7,6 +7,7 @@
 #include <fontconfig/fontconfig.h>
 #include "preview.h"
 #include "win.h"
+#include "paste.h"
 #include WORMINAL_THEME_HEADER
 
 struct Terminal {
@@ -504,14 +505,13 @@ pasted(GtkClipboard *clipboard, const char *value, gpointer data)
 	Terminal *t = g_object_get_data(G_OBJECT(widget), "terminal");
 	if (t && value) {
 		char *clean = g_strdup(value);
-		for (char *p = clean; *p; p++)
-			if (*p == '\n') *p = '\r';
-		gboolean bracket = t->page->mode & MODE_BRCKTPASTE;
-		if (bracket) input(t, "\033[200~", 6);
+		PasteFilter filter = {.bracketed = !!(t->page->mode & MODE_BRCKTPASTE)};
+		size_t length = paste_filter(&filter, clean, strlen(clean));
+		if (filter.bracketed) input(t, PASTE_BEGIN, sizeof(PASTE_BEGIN) - 1);
 		/* Bound each protocol packet. The transport applies its own queue limit. */
-		for (size_t offset = 0, length = strlen(clean); offset < length; offset += 32768)
+		for (size_t offset = 0; offset < length; offset += 32768)
 			input(t, clean + offset, MIN(32768, length - offset));
-		if (bracket) input(t, "\033[201~", 6);
+		if (filter.bracketed) input(t, PASTE_END, sizeof(PASTE_END) - 1);
 		g_free(clean);
 	}
 	g_object_unref(widget);

@@ -28,6 +28,7 @@ char *argv0;
 #include "arg.h"
 #include "st.h"
 #include "win.h"
+#include "paste.h"
 #include "session_view.h"
 #include "url.h"
 #include "wire.h"
@@ -124,6 +125,7 @@ typedef struct {
 
 typedef struct {
 	Atom xtarget;
+	PasteFilter paste;
 	char *primary, *clipboard;
 	struct timespec tclick1;
 	struct timespec tclick2;
@@ -510,21 +512,23 @@ clipcopy(const Arg *dummy)
 	XSetSelectionOwner(xw.dpy, clipboard, xw.win, CurrentTime);
 }
 
+static void
+request_paste(Atom selection)
+{
+	xsel.paste = (PasteFilter){.bracketed = !!IS_SET(MODE_BRCKTPASTE)};
+	XConvertSelection(xw.dpy, selection, xsel.xtarget, selection, xw.win, CurrentTime);
+}
+
 void
 clippaste(const Arg *dummy)
 {
-	Atom clipboard;
-
-	clipboard = XInternAtom(xw.dpy, "CLIPBOARD", 0);
-	XConvertSelection(xw.dpy, clipboard, xsel.xtarget, clipboard,
-			xw.win, CurrentTime);
+	request_paste(XInternAtom(xw.dpy, "CLIPBOARD", 0));
 }
 
 void
 selpaste(const Arg *dummy)
 {
-	XConvertSelection(xw.dpy, XA_PRIMARY, xsel.xtarget, XA_PRIMARY,
-			xw.win, CurrentTime);
+	request_paste(XA_PRIMARY);
 }
 
 void
@@ -842,7 +846,7 @@ selnotify(XEvent *e)
 {
 	ulong nitems, ofs, rem;
 	int format;
-	uchar *data, *last, *repl;
+	uchar *data;
 	Atom type, incratom, property = None;
 
 	incratom = XInternAtom(xw.dpy, "INCR", 0);
@@ -900,24 +904,12 @@ selnotify(XEvent *e)
 			continue;
 		}
 
-		/*
-		 * As seen in getsel:
-		 * Line endings are inconsistent in the terminal and GUI world
-		 * copy and pasting. When receiving some selection data,
-		 * replace all '\n' with '\r'.
-		 * FIXME: Fix the computer world.
-		 */
-		repl = data;
-		last = data + nitems * format / 8;
-		while ((repl = memchr(repl, '\n', last - repl))) {
-			*repl++ = '\r';
-		}
-
-		if (IS_SET(MODE_BRCKTPASTE) && ofs == 0)
-			ttywrite("\033[200~", 6, 0);
-		ttywrite((char *)data, nitems * format / 8, 1);
-		if (IS_SET(MODE_BRCKTPASTE) && rem == 0)
-			ttywrite("\033[201~", 6, 0);
+		size_t length = paste_filter(&xsel.paste, (char *)data, nitems * format / 8);
+		if (xsel.paste.bracketed && ofs == 0)
+			ttywrite(PASTE_BEGIN, sizeof(PASTE_BEGIN) - 1, 0);
+		ttywrite((char *)data, length, 1);
+		if (xsel.paste.bracketed && rem == 0)
+			ttywrite(PASTE_END, sizeof(PASTE_END) - 1, 0);
 		XFree(data);
 		/* number of 32-bit chunks returned */
 		ofs += nitems * format / 32;

@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 /* Exercise terminal history without opening an X window. */
 #include <assert.h>
+#include "../src/terminal/paste.h"
 
 #include "../src/terminal/st.c"
 
@@ -34,6 +35,16 @@ void xclipcopy(void) {}
 int
 main(void)
 {
+	/* CRLF may straddle X11 property chunks; a subsequent LF is still another Enter. */
+	PasteFilter paste = {0};
+	char paste_first[] = "one\r", paste_second[] = "\n\ntwo\n";
+	assert(paste_filter(&paste, paste_first, strlen(paste_first)) == 4);
+	size_t pasted = paste_filter(&paste, paste_second, strlen(paste_second));
+	assert(pasted == 5 && memcmp(paste_second, "\rtwo\r", pasted) == 0);
+	paste = (PasteFilter){.bracketed = 1};
+	char text[] = "one\r\n\033[201~\003two";
+	pasted = paste_filter(&paste, text, strlen(text));
+	assert(pasted == 13 && memcmp(text, "one\r\n[201~two", pasted) == 0);
 	check_session_transfer();
 	check_session_view();
 	Arg one = { .i = 1 }, page = { .i = -1 };

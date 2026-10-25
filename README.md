@@ -193,7 +193,9 @@ four protocol combinations, including queued input and failure rollback. These c
 
 Click a tab label to select it. Typing returns scrollback to the live screen.
 In applications that capture the mouse, hold Shift while dragging to select text, release the mouse button,
-then press Ctrl+Shift+C to copy.
+then press Ctrl+Shift+C to copy. Ctrl+Shift+V pastes the clipboard; Shift+Insert and middle-click
+paste the primary selection. Bracketed paste preserves text line endings; ordinary paste treats
+CRLF and LF as one Enter each.
 
 HTTP and HTTPS links underline on hover and open in your **local** browser via `xdg-open`, even for remote shells.
 Links can wrap across visible rows. OSC 52 clipboard sequences also update the viewing host's clipboard.
