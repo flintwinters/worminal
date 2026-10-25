@@ -785,36 +785,11 @@ main(int argc, char **argv)
 	const char *base = g_getenv("WORMINAL_PREVIEW_FIXTURE");
 	g_assert_nonnull(base);
 	char *url = g_strconcat(base, "/page", NULL);
-	/* File views retain their own tab storage while reusing the same resource's
-	 * renderer. Closing the original view must leave its sibling usable. */
-	char *file_cwd = g_get_current_dir();
-	char *file_document = g_build_filename(file_cwd, ".checks", "preview-resource.html", NULL);
-	g_assert_true(g_file_set_contents(file_document, "<!doctype html><title>Local resource</title><input>", -1, NULL));
-	char *file_url = g_filename_to_uri(file_document, NULL, NULL);
-	Page *home = open_browser(app, file_url);
-	g_free(file_url); g_free(file_cwd);
-	char *home_url = g_strdup(webkit_web_view_get_uri(home->browser->view));
-	g_assert_true(related_view(home_url) == home->browser->view);
-	g_assert_null(related_view("file:///etc/hosts"));
-	expect_script(home->browser, "sessionStorage.setItem('file-tab', 'first'); 'ok'", "ok");
-	Page *second_home = open_browser(app, home_url);
-	expect_script(second_home->browser, "String(window.opener)", "null");
-	expect_script(second_home->browser, "String(sessionStorage.getItem('file-tab'))", "null");
-	int original_home_count = g_list_length(app->pages);
-	app_close(home);
-	WAIT(g_list_length(app->pages) == original_home_count - 1);
-	home = second_home;
-	g_free(home_url);
-	expect_script(home->browser, "sessionStorage.setItem('surviving-tab', 'yes'); "
-	              "sessionStorage.getItem('surviving-tab')", "yes");
-	int home_count = g_list_length(app->pages);
-	app_close(home);
-	WAIT(g_list_length(app->pages) == home_count - 1);
-	g_unlink(file_document); g_free(file_document);
+	check_file_views(app);
 	/* Also exercise the current default directory page, independently of its scheme. */
-	home = open_browser(app, NULL);
+	Page *home = open_browser(app, NULL);
 	check_explorer(home->browser);
-	home_count = g_list_length(app->pages);
+	int home_count = g_list_length(app->pages);
 	app_close(home);
 	WAIT(g_list_length(app->pages) == home_count - 1);
 	Page *web = open_browser(app, url);

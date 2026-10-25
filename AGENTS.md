@@ -84,7 +84,8 @@ Running daemons that predate the protocol cannot gain it through installation; p
 Investigate remote Codex scrolling separately from tested wheel modes.
 
 The default browser target is the calling shell directory under worminal:///. Native builds embed the
-`file-explorer` submodule's offline HTML in the lazy browser module. The host supplies directory metadata
-and bounded read-only text previews only to the embedded page; other pages cannot use these endpoints.
+`file-explorer` submodule's plain directory links, error template, and palette in the lazy browser module.
+The submodule owns all browser HTML/CSS. The host supplies directory metadata only to the embedded
+page and streams ordinary file navigation; other pages cannot use the metadata endpoint.
 The independent TypeScript workspace retains a folder picker outside Worminal.
 Use `manage.py explorer-build`, `explorer-check`, and `explorer-lint` after `npm ci` in the submodule.
