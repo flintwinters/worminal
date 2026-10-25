@@ -88,7 +88,26 @@ changed(WebKitWebView *view, GParamSpec *property, Browser *b)
 static void
 load_changed(WebKitWebView *view, WebKitLoadEvent event, Browser *b)
 {
-	if (event == WEBKIT_LOAD_STARTED) host->timing("browser-load-start");
+	if (event == WEBKIT_LOAD_STARTED) {
+		const char *url = webkit_web_view_get_uri(view);
+		const char *scheme = url ? g_uri_peek_scheme(url) : NULL;
+		/* Saved links and address-bar file URLs bypass the shell target resolver.
+		 * Redirect only the top-level load: directory loads can fail before WebKit
+		 * emits a response-policy decision, and subframes must not replace this page. */
+		if (scheme && !g_ascii_strcasecmp(scheme, "file")) {
+			char *hostname = NULL;
+			char *path = g_filename_from_uri(url, &hostname, NULL);
+			char *target = path && (!hostname || !g_ascii_strcasecmp(hostname, "localhost")) &&
+			               g_file_test(path, G_FILE_TEST_IS_DIR) ? workspace_browser_target(path) : NULL;
+			g_free(path); g_free(hostname);
+			if (target) {
+				webkit_web_view_load_uri(view, target);
+				free(target);
+				return;
+			}
+		}
+		host->timing("browser-load-start");
+	}
 	if (event == WEBKIT_LOAD_COMMITTED) host->timing("browser-load-commit");
 	if (event == WEBKIT_LOAD_FINISHED) host->timing("browser-load-finish");
 	if (event == WEBKIT_LOAD_STARTED) notice(b, NULL);
@@ -150,7 +169,6 @@ close_requested(WebKitWebView *view, Browser *b)
 static gboolean
 policy(WebKitWebView *view, WebKitPolicyDecision *decision, WebKitPolicyDecisionType type, Browser *b)
 {
-	(void)view; (void)b;
 	if (type == WEBKIT_POLICY_DECISION_TYPE_RESPONSE) {
 		if (!webkit_response_policy_decision_is_mime_type_supported(WEBKIT_RESPONSE_POLICY_DECISION(decision))) {
 			webkit_policy_decision_download(decision);

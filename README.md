@@ -98,7 +98,8 @@ Inside a Worminal terminal, `worminal --new-browser-tab [URL|FILE]` replaces tha
 ending its shell. Omitting the target opens the built-in file explorer; Ctrl+K reveals the address entry.
 Absolute and relative paths resolve in the calling shell directory. Files open as encoded `file://`
 URLs; directories open in the embedded explorer.
-Explicit URLs, including `about:blank`, are preserved. Native builds embed the generated explorer HTML
+Local directory `file://` URLs, including saved links, also open the explorer. Other explicit URLs,
+including `about:blank`, are preserved. Native builds embed the generated explorer HTML
 in the lazy browser module, so installed builds and remote viewing machines use their own local copy.
 Initialize the explorer submodule and run `npm ci` there before the first native build.
 

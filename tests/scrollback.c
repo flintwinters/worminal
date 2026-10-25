@@ -1,7 +1,7 @@
 #define _GNU_SOURCE
 /* Exercise terminal history without opening an X window. */
 #include <assert.h>
-#include "../src/terminal/paste.h"
+#include "paste.h"
 
 #include "../src/terminal/st.c"
 

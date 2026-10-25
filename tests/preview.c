@@ -788,7 +788,9 @@ main(int argc, char **argv)
 	/* File views retain their own tab storage while reusing the same resource's
 	 * renderer. Closing the original view must leave its sibling usable. */
 	char *file_cwd = g_get_current_dir();
-	char *file_url = g_filename_to_uri(file_cwd, NULL, NULL);
+	char *file_document = g_build_filename(file_cwd, ".checks", "preview-resource.html", NULL);
+	g_assert_true(g_file_set_contents(file_document, "<!doctype html><title>Local resource</title><input>", -1, NULL));
+	char *file_url = g_filename_to_uri(file_document, NULL, NULL);
 	Page *home = open_browser(app, file_url);
 	g_free(file_url); g_free(file_cwd);
 	char *home_url = g_strdup(webkit_web_view_get_uri(home->browser->view));
@@ -808,6 +810,7 @@ main(int argc, char **argv)
 	int home_count = g_list_length(app->pages);
 	app_close(home);
 	WAIT(g_list_length(app->pages) == home_count - 1);
+	g_unlink(file_document); g_free(file_document);
 	/* Also exercise the current default directory page, independently of its scheme. */
 	home = open_browser(app, NULL);
 	check_explorer(home->browser);
