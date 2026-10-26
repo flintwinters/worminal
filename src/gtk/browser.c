@@ -204,7 +204,10 @@ static gboolean
 load_failed(WebKitWebView *view, WebKitLoadEvent event, const char *url, GError *error, Browser *b)
 {
 	(void)event; (void)b;
-	if (!g_error_matches(error, WEBKIT_NETWORK_ERROR, WEBKIT_NETWORK_ERROR_CANCELLED))
+	/* Download policy interrupts navigation normally; replacing the current document
+	 * with alternate HTML here loses the directory the user needs to return to. */
+	if (!g_error_matches(error, WEBKIT_NETWORK_ERROR, WEBKIT_NETWORK_ERROR_CANCELLED) &&
+	    !g_error_matches(error, WEBKIT_POLICY_ERROR, WEBKIT_POLICY_ERROR_FRAME_LOAD_INTERRUPTED_BY_POLICY_CHANGE))
 		error_page(view, url, error->message);
 	return TRUE;
 }
@@ -264,6 +267,25 @@ policy(WebKitWebView *view, WebKitPolicyDecision *decision, WebKitPolicyDecision
 			return TRUE;
 		}
 		const char *scheme = g_uri_peek_scheme(url);
+		const char *trusted = g_object_get_data(G_OBJECT(view), "worminal-files-uri");
+		if (scheme && !g_ascii_strcasecmp(scheme, WORKSPACE_BROWSER_SCHEME) &&
+		    trusted && !g_strcmp0(webkit_web_view_get_uri(view), trusted)) {
+			GUri *uri = g_uri_parse(url, G_URI_FLAGS_ENCODED_QUERY, NULL);
+			const char *path = uri ? g_uri_get_path(uri) : NULL;
+			/* WebKit cannot download custom-scheme streams. File links from our
+			 * exact directory document must use native file navigation instead;
+			 * keep the custom scheme for directory metadata and guarded fetches. */
+			char *file = path && (!g_uri_get_host(uri) || !*g_uri_get_host(uri)) &&
+			    !g_uri_get_query(uri) && !g_file_test(path, G_FILE_TEST_IS_DIR) ?
+			    g_filename_to_uri(path, NULL, NULL) : NULL;
+			if (uri) g_uri_unref(uri);
+			if (file) {
+				webkit_policy_decision_ignore(decision);
+				webkit_web_view_load_uri(view, file);
+				g_free(file);
+				return TRUE;
+			}
+		}
 		if (!scheme || (g_ascii_strcasecmp(scheme, "http") && g_ascii_strcasecmp(scheme, "https") &&
 		                g_ascii_strcasecmp(scheme, "about") && g_ascii_strcasecmp(scheme, "file") &&
 		                g_ascii_strcasecmp(scheme, "data") && g_ascii_strcasecmp(scheme, "blob") &&
