@@ -346,7 +346,7 @@ explorer_request(WebKitURISchemeRequest *request, gpointer data)
 		GFile *file = g_file_new_for_path(path);
 		if (!strcmp(route, "/list")) {
 			GFileEnumerator *items = g_file_enumerate_children(file,
-			    "standard::name,standard::type",
+			    "standard::name,standard::type,standard::size,time::modified,time::modified-usec",
 			    G_FILE_QUERY_INFO_NONE, NULL, &error);
 			if (items) {
 				GString *json = g_string_new("[");
@@ -354,9 +354,12 @@ explorer_request(WebKitURISchemeRequest *request, gpointer data)
 				while ((info = g_file_enumerator_next_file(items, NULL, &error))) {
 					const char *name = g_file_info_get_name(info);
 					char *encoded = g_base64_encode((const guchar *)name, strlen(name));
-					g_string_append_printf(json, "%s[\"%s\",%s]",
+					g_string_append_printf(json, "%s[\"%s\",%s,%" G_GOFFSET_FORMAT ",%" G_GUINT64_FORMAT "]",
 					    json->len > 1 ? "," : "", encoded,
-					    g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY ? "true" : "false");
+					    g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY ? "true" : "false",
+					    g_file_info_get_size(info),
+					    g_file_info_get_attribute_uint64(info, G_FILE_ATTRIBUTE_TIME_MODIFIED) * 1000 +
+					    g_file_info_get_attribute_uint32(info, G_FILE_ATTRIBUTE_TIME_MODIFIED_USEC) / 1000);
 					g_free(encoded);
 					g_object_unref(info);
 				}
