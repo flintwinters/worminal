@@ -97,6 +97,7 @@ The old preview executable names remain build aliases and share the v2 workspace
 `--attach` opens existing tabs without creating another shell. Closing a window preserves its service tabs.
 Inside a Worminal terminal, `worminal --new-browser-tab [URL|FILE]` replaces that terminal with a browser,
 ending its shell. Omitting the target opens the built-in file explorer; Ctrl+K reveals the address entry.
+Ctrl+F finds text in the current page; Enter and Shift+Enter move between matches, and Escape closes find.
 Absolute and relative paths resolve in the calling shell directory. Files open as encoded `file://`
 URLs; directories open in the embedded explorer.
 Local directory `file://` URLs, including saved links, also open the explorer. Other explicit URLs,
