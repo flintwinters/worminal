@@ -210,3 +210,17 @@ def generate_theme(config_path=None, output=OUTPUT):
     output.parent.mkdir(exist_ok=True)
     if not output.exists() or output.read_text() != result:
         output.write_text(result)
+
+
+def explorer_font():
+    """Export the terminal's configured font as CSS build input."""
+    path = find_config()
+    header = theme_header(read_config(path) if path else {})
+    family_value = re.search(r"theme_font_family = (.*);", header)[1]
+    family = None if family_value == "NULL" else json.loads(family_value)
+    size = float(re.search(r"theme_font_size = (.*);", header)[1])
+    # Native fallback lives in config.h; keep the explorer tied to that authority.
+    fallback = re.search(r'static char \*font = "([^"]+)";',
+                         (ROOT / "src/config.h").read_text())[1].split(":")
+    return {"family": family or fallback[0],
+            "size": size or float(next(item[5:] for item in fallback if item.startswith("size=")))}

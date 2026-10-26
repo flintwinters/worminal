@@ -3,6 +3,7 @@
 
 from contextlib import chdir
 import os
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -13,6 +14,7 @@ except ModuleNotFoundError as error:
     raise SystemExit("Install Typer to use manage.py: python3 -m pip install typer") from error
 
 from tools import build as native_build
+from tools.theme import explorer_font
 from tools.icon import generate_icon
 from tools.privacy import check_privacy
 from tools.git_index import tracked_files
@@ -284,7 +286,8 @@ def explorer_command(command):
         typer.echo("Initialize the file-explorer submodule first: git submodule update --init", err=True)
         raise typer.Exit(1)
     raise typer.Exit(run([sys.executable, str(script), command],
-                         env={"WORMINAL_PALETTE": str(ROOT / "assets/palette.json"), **os.environ}))
+                         env={**os.environ, "WORMINAL_PALETTE": str(ROOT / "assets/palette.json"),
+                              "WORMINAL_FONT_JSON": json.dumps(explorer_font())}))
 
 
 @app.command("explorer-build")
