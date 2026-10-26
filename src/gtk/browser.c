@@ -193,10 +193,11 @@ static gboolean
 load_failed(WebKitWebView *view, WebKitLoadEvent event, const char *url, GError *error, Browser *b)
 {
 	(void)event; (void)b;
-	/* Download policy interrupts navigation normally; replacing the current document
-	 * with alternate HTML here loses the directory the user needs to return to. */
+	/* Downloads and media documents hand navigation to another loader. WebKit's
+	 * WILL_HANDLE_LOAD is preliminary, not a failure; alternate HTML aborts the player. */
 	if (!g_error_matches(error, WEBKIT_NETWORK_ERROR, WEBKIT_NETWORK_ERROR_CANCELLED) &&
-	    !g_error_matches(error, WEBKIT_POLICY_ERROR, WEBKIT_POLICY_ERROR_FRAME_LOAD_INTERRUPTED_BY_POLICY_CHANGE))
+	    !g_error_matches(error, WEBKIT_POLICY_ERROR, WEBKIT_POLICY_ERROR_FRAME_LOAD_INTERRUPTED_BY_POLICY_CHANGE) &&
+	    !g_error_matches(error, WEBKIT_PLUGIN_ERROR, WEBKIT_PLUGIN_ERROR_WILL_HANDLE_LOAD))
 		error_page(view, url, error->message);
 	return TRUE;
 }

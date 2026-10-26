@@ -48,15 +48,7 @@ check_browser_find(Page *page)
 	WAIT(script_equals(b, "document.activeElement.tagName + ':' + getSelection().toString()", "A:Popup"));
 	expect_script(b, "document.querySelector('a').addEventListener('click', e => {"
 	              "e.preventDefault(); window.findActivated = true; }); 'ok'", "ok");
-	GdkEvent *event = gdk_event_new(GDK_KEY_PRESS);
-	event->key.window = g_object_ref(gtk_widget_get_window(browser_view(b)));
-	event->key.keyval = GDK_KEY_Return;
-	gdk_event_set_device(event, gdk_seat_get_keyboard(gdk_display_get_default_seat(
-	    gtk_widget_get_display(browser_view(b)))));
-	gtk_widget_event(browser_view(b), event);
-	event->type = GDK_KEY_RELEASE;
-	gtk_widget_event(browser_view(b), event);
-	gdk_event_free(event);
+	send_browser_key(b, GDK_KEY_Return, 0);
 	WAIT(script_equals(b, "String(window.findActivated)", "true"));
 	gtk_widget_show_all(browser_widget(b));
 	g_assert_false(find_visible(b));

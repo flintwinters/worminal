@@ -133,7 +133,9 @@ page_title(Page *page, const char *title)
 void
 app_page_url(Page *page, const char *url)
 {
-	if (!url || !g_strcmp0(url, page->url)) return;
+	/* Media-document handoffs can report an empty URI before their replacement load.
+	 * Keep the last valid destination rather than publishing that transient state. */
+	if (!url || !*url || !g_strcmp0(url, page->url)) return;
 	g_free(page->url);
 	page->url = g_strdup(url);
 	WireBuffer buffer = {0};
