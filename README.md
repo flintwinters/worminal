@@ -8,9 +8,8 @@ The `file-explorer` submodule is a TypeScript npm workspace building a plain dar
 offline explorer as `file-explorer/dist/index.html`. Run `npm ci` inside the submodule, then
 `python3 manage.py explorer-build` or `python3 manage.py explorer-check` from this repository.
 `python3 manage.py explorer-lint` runs its pinned Hyperlinter; setup is in the submodule README.
-Standalone pages use a read-only folder picker; Worminal opens the calling directory automatically
-through native read-only directory metadata. The submodule owns the plain link listing, error pages,
-and palette; Worminal contains no browser HTML or CSS templates.
+Standalone browsers use a read-only folder picker. Inside Worminal, the independent page uses a generic
+read-only directory metadata API. Worminal neither embeds the page nor needs reinstalling when it changes.
 The explorer lives at [worminal-file-explorer](https://github.com/flintwinters/worminal-file-explorer).
 Use `git submodule update --init --recursive` to initialize it and its pinned Hyperlinter.
 
@@ -95,16 +94,20 @@ install builds that rollback frontend and `worminald-x11`. Installation never mi
 For a remote workspace, install the current release remotely and use `--master user@host`.
 The old preview executable names remain build aliases and share the v2 workspace.
 `--attach` opens existing tabs without creating another shell. Closing a window preserves its service tabs.
-Inside a Worminal terminal, `worminal --new-browser-tab [URL|FILE]` replaces that terminal with a browser,
-ending its shell. Omitting the target opens the built-in file explorer; Ctrl+K reveals the address entry.
-Ctrl+F finds text in the current page; Enter and Shift+Enter move between matches.
+Inside a Worminal terminal, `worminal --new-browser-tab URL|FILE` replaces that terminal with a browser,
+ending its shell. A target is required: HTTP(S), `file://` and other supported URLs are preserved;
+absolute and relative filesystem paths become encoded `file://` URLs. Local files use normal WebKit handling.
+Ctrl+K reveals the address entry. Ctrl+F finds page text; Enter and Shift+Enter move between matches.
 Escape selects the result and focuses its link for Enter. Repeating Ctrl+F selects the query for replacement.
-Absolute and relative paths resolve in the calling shell directory. Files open as encoded `file://`
-URLs; directories open in the embedded explorer.
-Local directory `file://` URLs, including saved links, also open the explorer. Other explicit URLs,
-including `about:blank`, are preserved. Native builds embed the generated explorer HTML
-in the lazy browser module, so installed builds and remote viewing machines use their own local copy.
-Initialize the explorer submodule and run `npm ci` there before the first native build.
+
+The file explorer is an independent local HTML application. Run `python3 manage.py explorer-build`,
+then open its current `file-explorer/dist/index.html` with `--new-browser-tab`.
+From a Worminal terminal, `python3 /path/to/file-explorer/manage.py open` passes that HTML file and
+its caller's directory explicitly. Rebuild the explorer and reopen or reload the page to use new output;
+Worminal needs no rebuild or reinstall. Native builds require neither the explorer submodule nor npm.
+Selected local HTML documents receive `window.worminal.readDirectory("/absolute/path")` for read-only metadata.
+Entries are `[base64Name, isDirectory, bytes, modifiedMs]`. Only the selected top-level document,
+including its query routes, retains access; subframes and other navigated pages do not.
 
 Ctrl+Shift+T opens a terminal, Ctrl+Shift+N opens another window,
 and Ctrl+Shift+W closes the active tab. Ctrl+Tab/Shift+Ctrl+Tab and Alt+1 through Alt+9 switch tabs.
@@ -251,7 +254,7 @@ diagnostic captures belong in `.checks/`.
 `python3 manage.py clean` removes build outputs, including legacy root objects, while preserving `.checks/`.
 `python3 manage.py check-build` checks build and cleanup behavior without compiling the app.
 Keep appearance in the Alacritty configuration described above and terminal defaults in `src/config.h`;
-edit neither generated headers nor compiler command records. Browser page styling belongs to `file-explorer/`.
+edit neither generated headers nor compiler command records. Application styling belongs to each HTML application.
 
 | Path | Responsibility |
 | --- | --- |

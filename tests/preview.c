@@ -788,12 +788,13 @@ main(int argc, char **argv)
 	g_assert_nonnull(base);
 	char *url = g_strconcat(base, "/page", NULL);
 	check_file_views(app);
-	/* Also exercise the current default directory page, independently of its scheme. */
-	Page *home = open_browser(app, NULL);
-	check_explorer(home->browser);
-	int home_count = g_list_length(app->pages);
-	app_close(home);
-	WAIT(g_list_length(app->pages) == home_count - 1);
+	if (g_getenv("WORMINAL_PREVIEW_LOCAL_APP")) {
+		Page *home = open_browser(app, g_getenv("WORMINAL_PREVIEW_LOCAL_APP"));
+		check_explorer(home->browser);
+		int home_count = g_list_length(app->pages);
+		app_close(home);
+		WAIT(g_list_length(app->pages) == home_count - 1);
+	}
 	Page *web = open_browser(app, url);
 	g_assert_true(related_view(url) == web->browser->view);
 	g_assert_null(related_view("https://unrelated.invalid/"));
@@ -908,7 +909,7 @@ main(int argc, char **argv)
 	WAIT(g_list_length(app->pages) == before_tls + 1 && app->active && app->active->browser);
 	Page *failed = app->active;
 	WAIT(script_equals(failed->browser, "String(document.body.textContent.includes('Certificate'))", "true"));
-	expect_script(failed->browser, "getComputedStyle(document.documentElement).backgroundColor", "rgb(20, 20, 20)");
+	expect_script(failed->browser, "getComputedStyle(document.documentElement).backgroundColor", "rgb(24, 24, 24)");
 	g_assert_null(webkit_web_view_get_title(failed->browser->view));
 	app_close(failed);
 	WAIT(g_list_length(app->pages) == before_tls);
@@ -926,7 +927,7 @@ main(int argc, char **argv)
 	g_free(test_cwd);
 	char *quoted_frontend = g_shell_quote(frontend_path);
 	char *convert_script = g_strdup_printf("stty raw -echo; printf CONVERT_READY; "
-	    "dd bs=1 count=1 >/dev/null 2>&1; %s --new-browser-tab; sleep 30", quoted_frontend);
+	    "dd bs=1 count=1 >/dev/null 2>&1; %s --new-browser-tab about:blank; sleep 30", quoted_frontend);
 	char *convert_command[] = {"/bin/sh", "-c", convert_script, NULL};
 	converter->command = g_strdupv(convert_command);
 	show_app(converter);

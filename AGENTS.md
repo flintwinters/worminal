@@ -85,12 +85,13 @@ The receiver stages and validates state before commit; the donor then closes PTY
 Running daemons that predate the protocol cannot gain it through installation; preserve their live sessions.
 Investigate remote Codex scrolling separately from tested wheel modes.
 
-The default browser target is the calling shell directory under worminal:///. Native builds embed the
-`file-explorer` submodule's plain directory links, error template, and palette in the lazy browser module.
-The submodule owns all browser HTML/CSS, the isolated-world find presentation helper,
-and the built-in palette shared with `tools/theme.py`.
-The host supplies directory metadata only to the embedded
-page; file activation uses native file navigation so unsupported types can download.
-Other pages cannot use the metadata endpoint.
-The independent TypeScript workspace retains a folder picker outside Worminal.
+`--new-browser-tab URL|FILE` requires an explicit target and preserves arbitrary explicit URLs.
+Local paths and file URLs use native WebKit handling. Worminal knows no explorer assets or build paths.
+The independently compiled `file-explorer/dist/index.html` is opened directly; changing it needs no native
+rebuild or reinstall. Its own `manage.py open` passes the HTML target and caller directory.
+Generic read-only directory metadata belongs to the initially selected local document, including query routes.
+A top-frame-only script owns its private per-view credential; subframes and other navigated documents have no access.
+Native browser error/find chrome belongs to `src/gtk`; native palette defaults belong to `assets/palette.json`.
+The independent TypeScript workspace retains a folder picker outside Worminal. Parent explorer commands
+supply its palette as build input; standalone builds retain their own defaults.
 Use `manage.py explorer-build`, `explorer-check`, and `explorer-lint` after `npm ci` in the submodule.

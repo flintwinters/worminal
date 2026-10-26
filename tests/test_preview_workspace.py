@@ -182,7 +182,7 @@ class PreviewWorkspaceTest(unittest.TestCase):
 
     def test_command_converts_calling_terminal_and_preserves_order(self):
         cases = (("https://example.invalid/converted", "https://example.invalid/converted"),
-                 ("about:blank", "about:blank"), (None, "worminal://" + ROOT.as_uri()[7:]))
+                 ("about:blank", "about:blank"), (str(ROOT), ROOT.as_uri()))
         for executable, (url, expected) in product((DAEMON, ROOT / "worminal"), cases):
             with self.subTest(executable=executable.name, url=url):
                 self.assert_browser_conversion(executable, url, expected)
@@ -221,7 +221,7 @@ class PreviewWorkspaceTest(unittest.TestCase):
             special.write_text("<title>Local page</title>")
             plain = directory / "plain.html"
             plain.write_text("<title>Plain page</title>")
-            cases = ((None, "worminal://" + directory.as_uri()[7:]),
+            cases = ((str(directory), directory.as_uri()),
                      (str(special), special.as_uri()), (special.name, special.as_uri()),
                      ("./" + special.name, special.as_uri()), (plain.name, plain.as_uri()),
                      (special.as_uri(), special.as_uri()),
@@ -235,7 +235,7 @@ class PreviewWorkspaceTest(unittest.TestCase):
             with self.subTest(executable=executable.name):
                 env = {key: value for key, value in self.env.items()
                        if key not in ("DISPLAY", "WAYLAND_DISPLAY")}
-                result = subprocess.run([str(executable), "--new-browser-tab"], env=env,
+                result = subprocess.run([str(executable), "--new-browser-tab", "about:blank"], env=env,
                                         capture_output=True, timeout=5)
                 self.assertEqual(result.returncode, 1)
                 self.assertIn(b"Open worminal", result.stderr)

@@ -92,10 +92,7 @@ def dim_color(value):
 
 
 def theme_header(config):
-    # Read only when building: management commands also run before submodule initialization.
-    source = ROOT / "file-explorer/packages/files/src/palette.json"
-    if not source.is_file():
-        raise ValueError("Initialize file-explorer before building: git submodule update --init")
+    source = ROOT / "assets/palette.json"
     defaults = json.loads(source.read_text())
     font = config.get("font", {})
     if not isinstance(font, dict):

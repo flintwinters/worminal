@@ -18,11 +18,11 @@ main(int argc, char **argv)
 {
 	timing("main");
 	if (argc >= 2 && !strcmp(argv[1], "--new-browser-tab")) {
-		if (argc > 3) { g_printerr("usage: worminal --new-browser-tab [URL|FILE]\n"); return 2; }
+		if (argc != 3) { g_printerr("usage: worminal --new-browser-tab URL|FILE\n"); return 2; }
 		char daemon[4096];
 		/* Preserve the calling PTY without loading GTK just to exec its service. */
 		if (workspace_daemon_path(daemon, sizeof(daemon)))
-			execl(daemon, daemon, "--new-browser-tab", argc == 3 ? argv[2] : NULL, (char *)NULL);
+			execl(daemon, daemon, "--new-browser-tab", argv[2], (char *)NULL);
 		perror("Could not run the workspace browser command");
 		return 1;
 	}

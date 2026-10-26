@@ -87,34 +87,21 @@ def step(output, command, dependencies, *, depfile=False):
         pending_dep.unlink(missing_ok=True)
 
 
-def generate_explorer():
-    """Embed submodule-owned pages and their presentation contract in the lazy browser module."""
-    explorer = ROOT / "file-explorer"
-    if not (explorer / "package.json").exists():
-        raise ValueError("Initialize file-explorer before building: git submodule update --init")
-    inputs = [explorer / name for name in ("package.json", "package-lock.json", "tsconfig.json", "vite.config.ts",
-                                           "tools/build.mjs")]
-    inputs += [path for directory in ("apps", "packages") for path in (explorer / directory).rglob("*")
-               if path.is_file() and "node_modules" not in path.parts]
-    artifacts = [explorer / "dist" / name for name in ("index.html", "error.html", "theme.json", "find.js")]
-    if any(not path.exists() for path in artifacts) or any(
-            source.stat().st_mtime_ns > min(path.stat().st_mtime_ns for path in artifacts) for source in inputs):
-        invoke(["python3", str(explorer / "manage.py"), "build"])
-    theme = json.loads(artifacts[2].read_text())
-    error = artifacts[1].read_bytes()
-    slot = theme["message_slot"].encode()
-    if not slot or error.count(slot) != 1:
-        raise ValueError("Explorer error page must contain exactly one declared message slot")
-    resources = {"html": artifacts[0].read_bytes(), "error_html": error,
-                 "background": theme["background"].encode(), "message_slot": slot,
-                 "find_script": artifacts[3].read_bytes()}
-    content = "/* Generated from file-explorer/dist. */\n"
+def generate_browser_resources():
+    """Compile native browser chrome; web applications remain ordinary runtime files."""
+    resources = {name: (ROOT / "src/gtk" / source).read_bytes() for name, source in
+                 (("error_html", "browser-error.html"), ("find_script", "browser-find.js"),
+                  ("local_script", "browser-local.js"))}
+    if resources["error_html"].count(b"{{message}}") != 1:
+        raise ValueError("Browser error page requires exactly one message slot")
+    if resources["local_script"].count(b"%") != 2 or resources["local_script"].count(b"%s") != 2:
+        raise ValueError("Local document script requires exactly two format slots")
+    content = "/* Generated native browser resources. */\n"
     for name, data in resources.items():
-        # Fixed-width octal bytes preserve UTF-8 and cannot merge with adjacent C escapes.
         chunks = ['"' + "".join(f"\\{byte:03o}" for byte in data[start:start + 24]) + '"'
                   for start in range(0, len(data), 24)]
-        content += f"static const char file_explorer_{name}[] =\n" + "\n".join(chunks) + ";\n"
-    header = ROOT / "build/file_explorer.h"
+        content += f"static const char browser_{name}[] =\n" + "\n".join(chunks) + ";\n"
+    header = ROOT / "build/browser_resources.h"
     header.parent.mkdir(parents=True, exist_ok=True)
     if not header.exists() or header.read_text() != content:
         header.write_text(content)
@@ -140,7 +127,7 @@ class Builder:
             self.program(target, ["tests/browser_cpu.c"], variant="browser-cpu", flags=["-fPIC"],
                          libs=["-shared", "-lrt"])
         elif target == "build/browser.so":
-            generate_explorer()
+            generate_browser_resources()
             old_flags = self.cflags
             self.cflags = [*CPPFLAGS, *words("CPPFLAGS"), *words("CFLAGS", "-O3"),
                            *pkg_flags("--cflags", PREVIEW_PACKAGES)]
@@ -170,7 +157,7 @@ class Builder:
                 self.cflags = old_flags
         elif target in ("worminald", "worminald-preview", "build/frontend.so", "build/preview_test"):
             if target == "build/preview_test":
-                generate_explorer()
+                generate_browser_resources()
             flags = ["-DWORMINAL_PREVIEW_PROTOCOL"]
             if target == "build/frontend.so":
                 flags += ["-fPIC", "-ffunction-sections", "-fdata-sections"]

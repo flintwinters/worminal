@@ -315,6 +315,9 @@ def main():
             # Preserve the compositor's socket directory, while isolating browser storage.
             env["XDG_RUNTIME_DIR"] = display_env["XDG_RUNTIME_DIR"]
         env["GDK_BACKEND"] = "wayland" if backend == "wayland" else "x11"
+        local_app = ROOT / "file-explorer/dist/index.html"
+        if local_app.is_file():
+            env["WORMINAL_PREVIEW_LOCAL_APP"] = local_app.as_uri()
         env["WORMINAL_PREVIEW_FIXTURE"] = url
         env["WORMINAL_PREVIEW_TLS_FIXTURE"] = tls_url
         env["GTK_USE_PORTAL"] = "0"

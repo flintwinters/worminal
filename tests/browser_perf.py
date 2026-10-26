@@ -16,7 +16,7 @@ from rich.table import Table
 from perf_metrics import descendants, memory, startup_usage
 from browser_profile import collect as collect_cpu
 from preview import profile
-from visible_latency import capture_failure, find_window, ready, snapshot, stop, summarize, wait_for
+from visible_latency import image_bytes, capture_failure, find_window, ready, snapshot, stop, summarize, wait_for
 from window_perf import keypress, window_for_pid
 from x11 import isolated_display
 
@@ -37,6 +37,14 @@ class Canvas(BaseHTTPRequestHandler):
 
     def log_message(self, *_args):
         pass
+
+
+def local_app_target():
+    from urllib.parse import urlencode
+    page = ROOT / "file-explorer/dist/index.html"
+    if not page.is_file():
+        raise RuntimeError("Build the independent local app first: python3 manage.py explorer-build")
+    return page.as_uri() + "?" + urlencode({"path": str(ROOT)})
 
 
 @contextmanager
@@ -72,8 +80,8 @@ def content_visible(window, target):
     height = min(160, size.height - 60)
     if height <= 0:
         return False
-    data = window.get_image(16, 60, min(512, size.width - 32), height,
-                            X.ZPixmap, 0xffffffff).data
+    data = image_bytes(window.get_image(16, 60, min(512, size.width - 32), height,
+                                        X.ZPixmap, 0xffffffff))
     return len(data) // 4 - data.count(color.to_bytes(3, "little")) > 32
 
 
@@ -101,9 +109,9 @@ def sample(executable, target, log, cold_open=False, trace_startup=False, stored
             for index, phase in enumerate(("cold",) if cold_open else ("first", "additional")):
                 title = f"Browser perf terminal {index}"
                 command = [str(ROOT / "build/latency_echo"), "--exec", str(executable), "--new-browser-tab",
-                           *([target] if target else [])]
+                           target or local_app_target()]
                 launch = ([str(executable), "-T", title, "--surf",
-                           target or "worminal://" + ROOT.as_uri()[7:]] if cold_open else
+                           target or local_app_target()] if cold_open else
                           [str(executable), "-T", title, "-e", *command])
                 started = time.monotonic_ns()
                 process = subprocess.Popen(launch,
@@ -144,11 +152,6 @@ def sample(executable, target, log, cold_open=False, trace_startup=False, stored
                     keypress(connection, XK.XK_a)
                     wait_for(lambda: ready(window, 0x789abc))
                     values[phase + "_input"] = (time.monotonic_ns() - started) / 1e6
-                else:
-                    def explorer_title():
-                        title = window.get_full_property(connection.intern_atom("_NET_WM_NAME"), X.AnyPropertyType)
-                        return title and str(ROOT) in bytes(title.value).decode("utf-8")
-                    wait_for(explorer_title)
                 resources[phase] = memory(descendants(owner.pid))
                 if startup:
                     resources[phase]["startup"] = startup
@@ -234,7 +237,7 @@ def main():
                         "Each target and trial uses a fresh profile. ") +
                        "Visible waits for expected page pixels; HTTP and file URLs verify "
                        "real-key JavaScript response. "
-                       "Explorer uses Worminal plain HTML directory links. Warm filesystem caches. "
+                       "Explorer loads its independently compiled local HTML document. Warm filesystem caches. "
                        "Memory includes frontend descendants, excludes service/shells. "
                        "Excludes desktop compositing and physical display latency."}
     if args.compare:

@@ -51,15 +51,25 @@ def find_window(connection, title):
     return None
 
 
+def image_bytes(image):
+    # Xlib String8 decodes valid UTF-8 payloads, including ASCII-colored pixels.
+    # Reverse that conversion before sampling or passing the buffer to Pillow.
+    data = image.data
+    return data.encode("utf-8") if isinstance(data, str) else data
+
+
 def pixels(window):
     size = window.get_geometry()
-    return window.get_image(size.width // 4, size.height // 4,
-                            size.width // 2, size.height // 2, X.ZPixmap, 0xffffffff).data
+    return image_bytes(window.get_image(size.width // 4, size.height // 4,
+                                        size.width // 2, size.height // 2, X.ZPixmap, 0xffffffff))
 
 
 def ready(window, color=0x112233):
     size = window.get_geometry()
-    data = window.get_image(size.width // 2, size.height // 2, 1, 1, X.ZPixmap, 0xffffffff).data
+    data = image_bytes(window.get_image(size.width // 2, size.height // 2, 1, 1, X.ZPixmap, 0xffffffff))
+    # A mapped window can still lack a readable pixel.
+    if not data:
+        return False
     return int.from_bytes(data, sys.byteorder) & 0xffffff == color
 
 
@@ -68,7 +78,7 @@ def capture_failure(window):
         from PIL import Image
         size = window.get_geometry()
         capture = window.get_image(0, 0, size.width, size.height, X.ZPixmap, 0xffffffff)
-        Image.frombytes("RGB", (size.width, size.height), capture.data, "raw", "BGRX").save(
+        Image.frombytes("RGB", (size.width, size.height), image_bytes(capture), "raw", "BGRX").save(
             ROOT / ".checks/visible-latency-failure.png")
     except Exception:
         pass  # Preserve the original failure even if its window has disappeared.

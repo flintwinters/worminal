@@ -822,7 +822,7 @@ usage(FILE *stream)
 	        "usage: worminal [--master user@host] [--surf URL | --attach]\n"
 	        "       [-aiv] [-c class] [-n name] [-f font] [-g COLSxROWS] [-T title]\n"
 	        "       [-o file] [-l line] [-e command ...]\n"
-	        "       worminal --new-browser-tab [URL|FILE]  Replace this terminal with a browser\n"
+	        "       worminal --new-browser-tab URL|FILE  Replace this terminal with a browser\n"
 	        "       worminal -h | --help       Show help and version\n"
 	        "       worminal -v | --version    Show version\n");
 }

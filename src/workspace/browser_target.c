@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/stat.h>
 #include "browser_target.h"
 
 static int
@@ -16,7 +15,7 @@ alpha(unsigned char c)
 char *
 workspace_browser_target(const char *text)
 {
-	if (!text) text = ".";
+	if (!text) return strdup(WORKSPACE_BROWSER_HOME);
 	if (!*text) return strdup(text);
 	const unsigned char *scheme = (const unsigned char *)text;
 	if (alpha(*scheme)) {
@@ -39,11 +38,9 @@ workspace_browser_target(const char *text)
 	if (!path) return NULL;
 	size_t length = strlen(path);
 	if (length > 65536) { free(path); errno = ENAMETOOLONG; return NULL; }
-	struct stat info;
-	int directory = stat(path, &info) == 0 && S_ISDIR(info.st_mode);
 	char *url = malloc(12 + 3 * length);
 	if (!url) { free(path); return NULL; }
-	char *out = stpcpy(url, directory ? "worminal://" : "file://");
+	char *out = stpcpy(url, "file://");
 	const char hex[] = "0123456789ABCDEF";
 	for (const unsigned char *p = (const unsigned char *)path; *p; p++) {
 		if (alpha(*p) || (*p >= '0' && *p <= '9') || strchr("/-._~", *p)) *out++ = *p;
