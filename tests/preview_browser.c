@@ -45,18 +45,33 @@ script_equals(Browser *b, const char *script, const char *expected)
 }
 
 static void
-send_browser_key(Browser *b, guint key, guint mods)
+send_widget_key(GtkWidget *widget, guint key, guint mods)
 {
 	GdkEvent *event = gdk_event_new(GDK_KEY_PRESS);
-	event->key.window = g_object_ref(gtk_widget_get_window(browser_view(b)));
+	event->key.window = g_object_ref(gtk_widget_get_window(widget));
 	event->key.keyval = key;
 	event->key.state = mods;
+	/* GTK entry bindings translate hardware codes, unlike WebKit's keyval path. */
+	GdkKeymapKey *keys = NULL;
+	int count = 0;
+	if (gdk_keymap_get_entries_for_keyval(gdk_keymap_get_for_display(
+	    gtk_widget_get_display(widget)), key, &keys, &count) && count) {
+		event->key.hardware_keycode = keys[0].keycode;
+		event->key.group = keys[0].group;
+	}
+	g_free(keys);
 	gdk_event_set_device(event, gdk_seat_get_keyboard(gdk_display_get_default_seat(
-	    gtk_widget_get_display(browser_view(b)))));
-	gtk_widget_event(browser_view(b), event);
+	    gtk_widget_get_display(widget))));
+	gtk_widget_event(widget, event);
 	event->type = GDK_KEY_RELEASE;
-	gtk_widget_event(browser_view(b), event);
+	gtk_widget_event(widget, event);
 	gdk_event_free(event);
+}
+
+static void
+send_browser_key(Browser *b, guint key, guint mods)
+{
+	send_widget_key(browser_view(b), key, mods);
 }
 
 static void
