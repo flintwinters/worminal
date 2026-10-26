@@ -48,6 +48,15 @@ expect_denied(Browser *browser, const char *url)
 	WAIT(script_equals(browser, "String(window.denied)", "true"));
 }
 
+static void
+expect_sort(Browser *browser, const char *key, const char *first_file)
+{
+	char *script = g_strdup_printf("document.querySelector('[data-sort=%s]').click(); "
+	                              "document.links[1].textContent", key);
+	expect_script(browser, script, first_file);
+	g_free(script);
+}
+
 /* Embedded directory browsing runs through the real WebKit scheme handler. */
 static void
 check_explorer(Browser *browser)
@@ -57,8 +66,16 @@ check_explorer(Browser *browser)
 	g_assert_nonnull(g_mkdtemp(directory));
 	char *empty = g_build_filename(directory, "empty", NULL);
 	char *file = g_build_filename(directory, "literal <name>.txt", NULL);
+	char *recent = g_build_filename(directory, "recent.z", NULL);
 	g_assert_cmpint(g_mkdir(empty, 0700), ==, 0);
 	g_assert_true(g_file_set_contents(file, "literal <text>", -1, NULL));
+	g_assert_true(g_file_set_contents(recent, "new", -1, NULL));
+	GFile *old_file = g_file_new_for_path(file), *new_file = g_file_new_for_path(recent);
+	g_assert_true(g_file_set_attribute_uint64(old_file, G_FILE_ATTRIBUTE_TIME_MODIFIED,
+	                                       1000, G_FILE_QUERY_INFO_NONE, NULL, NULL));
+	g_assert_true(g_file_set_attribute_uint64(new_file, G_FILE_ATTRIBUTE_TIME_MODIFIED,
+	                                       2000, G_FILE_QUERY_INFO_NONE, NULL, NULL));
+	g_object_unref(old_file); g_object_unref(new_file);
 	char *escaped = g_uri_escape_string(directory, NULL, FALSE);
 	char *url = g_strconcat(WORKSPACE_BROWSER_HOME "files?path=", escaped, NULL);
 	char *saved = g_filename_to_uri(directory, NULL, NULL);
@@ -68,28 +85,34 @@ check_explorer(Browser *browser)
 		webkit_web_view_load_uri(browser->view, targets[i]);
 		WAIT(!webkit_web_view_is_loading(browser->view));
 		WAIT(g_str_has_prefix(webkit_web_view_get_uri(browser->view), "worminal:"));
-		WAIT(script_equals(browser, "String(document.links.length)", "2"));
+		WAIT(script_equals(browser, "String(document.links.length)", "3"));
 	}
 	g_free(saved); g_free(trailing);
 	expect_script(browser, "String(document.querySelectorAll('table,dialog').length)", "0");
 	expect_script(browser, "getComputedStyle(document.querySelector('#open')).display", "none");
-	expect_script(browser, "document.querySelector('#sort').value", "name");
+	expect_script(browser, "String(document.querySelectorAll('select').length)", "0");
+	expect_script(browser, "document.querySelector('[data-sort=name]').textContent", "Name ↑");
 	expect_script(browser, "document.links[0].textContent", "empty");
 	expect_script(browser, "getComputedStyle(document.links[0]).textDecorationLine", "none");
+	expect_sort(browser, "modified", "recent.z");
+	expect_sort(browser, "modified", "literal <name>.txt");
+	expect_sort(browser, "size", "literal <name>.txt");
+	expect_sort(browser, "size", "recent.z");
+	expect_sort(browser, "extension", "literal <name>.txt");
+	expect_sort(browser, "extension", "recent.z");
 	expect_script(browser, "getComputedStyle(document.documentElement).backgroundColor", "rgb(20, 20, 20)");
 	expect_script(browser, "Array.from(document.links).find(a => a.textContent === 'literal <name>.txt').click(); 'ok'",
 	              "ok");
 	WAIT(script_equals(browser, "document.body.textContent.trim()", "literal <text>"));
 	webkit_web_view_go_back(browser->view);
-	WAIT(script_equals(browser, "String(document.links.length)", "2"));
-	expect_script(browser, "Array.from(document.links).find(a => a.textContent === 'empty').click(); 'ok'", "ok");
-	char *empty_path = g_build_filename(directory, "empty", NULL);
-	char *empty_url = workspace_browser_target(empty_path);
-	g_free(empty_path);
-	WAIT(!g_strcmp0(webkit_web_view_get_uri(browser->view), empty_url));
+	WAIT(script_equals(browser, "String(document.links.length)", "3"));
+	expect_script(browser, "document.querySelector('[data-sort=modified]').click(); "
+	              "document.querySelector('[data-sort=extension]').click(); "
+	              "Array.from(document.links).find(a => a.textContent === 'empty').click(); 'ok'", "ok");
+	WAIT(script_equals(browser, "String(new URLSearchParams(location.search).get('path')?.endsWith('/empty'))", "true"));
 	WAIT(!webkit_web_view_is_loading(browser->view));
 	WAIT(script_equals(browser, "document.querySelector('#entries').textContent", ""));
-	g_free(empty_url);
+	expect_script(browser, "document.querySelector('[data-sort=extension]').textContent", "Extension ↑");
 	/* Native errors use the submodule template and insert escaped text only. */
 	const char *message = "literal <img onerror=alert(1)> & error";
 	error_page(browser->view, "worminal:///missing", message);
@@ -111,6 +134,7 @@ check_explorer(Browser *browser)
 	WAIT(script_equals(browser, "document.body.textContent.trim()", "literal <text>"));
 	g_assert_cmpstr(webkit_web_view_get_uri(browser->view), ==, file_url);
 	g_free(file_url);
+	g_unlink(recent); g_free(recent);
 	g_unlink(file);
 	g_rmdir(empty);
 	g_rmdir(directory);
