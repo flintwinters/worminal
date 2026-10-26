@@ -551,6 +551,8 @@ press_browser_key(Page *page, guint key, guint mods)
 	g_assert_true(shortcut(page->app->window, &event, page->app));
 }
 
+#include "preview_find.c"
+
 static Page *
 open_browser(App *app, const char *url)
 {
@@ -808,6 +810,7 @@ main(int argc, char **argv)
 	WAIT(g_list_length(app->pages) == sibling_count - 1);
 	select_page(web);
 	check_tabs(app, terminal, web);
+	check_browser_find(web);
 	press_browser_key(web, GDK_KEY_k, GDK_CONTROL_MASK);
 	g_assert_true(gtk_widget_get_visible(web->browser->entry));
 	g_assert_true(gtk_window_get_focus(GTK_WINDOW(app->window)) == web->browser->entry);
@@ -971,7 +974,7 @@ main(int argc, char **argv)
 	check_outline_focus(app);
 	gtk_widget_destroy(app->window);
 	g_free(url); g_free(other);
-	g_print("Preview %s: terminal, resize, selection, clipboard, IME, ownership, reconnect, browser sharing, conversion, "
+	g_print("Preview %s: terminal, resize, selection, clipboard, IME, ownership, reconnect, browser sharing, conversion, find, "
 	        "navigation, storage, popups, downloads, permissions, TLS rejection and renderer recovery passed.\n",
 	        backend ? backend : "default");
 	return 0;

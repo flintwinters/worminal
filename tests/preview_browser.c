@@ -52,7 +52,7 @@ static void
 expect_sort(Browser *browser, const char *key, const char *first_file)
 {
 	char *script = g_strdup_printf("document.querySelector('[data-sort=%s]').click(); "
-	                              "document.links[1].textContent", key);
+	                              "document.querySelectorAll('#entries a')[1].textContent", key);
 	expect_script(browser, script, first_file);
 	g_free(script);
 }
@@ -85,15 +85,15 @@ check_explorer(Browser *browser)
 		webkit_web_view_load_uri(browser->view, targets[i]);
 		WAIT(!webkit_web_view_is_loading(browser->view));
 		WAIT(g_str_has_prefix(webkit_web_view_get_uri(browser->view), "worminal:"));
-		WAIT(script_equals(browser, "String(document.links.length)", "3"));
+		WAIT(script_equals(browser, "String(document.querySelectorAll('#entries a').length)", "3"));
 	}
 	g_free(saved); g_free(trailing);
 	expect_script(browser, "String(document.querySelectorAll('table,dialog').length)", "0");
 	expect_script(browser, "getComputedStyle(document.querySelector('#open')).display", "none");
 	expect_script(browser, "String(document.querySelectorAll('select').length)", "0");
 	expect_script(browser, "document.querySelector('[data-sort=name]').textContent", "Name ↑");
-	expect_script(browser, "document.links[0].textContent", "empty");
-	expect_script(browser, "getComputedStyle(document.links[0]).textDecorationLine", "none");
+	expect_script(browser, "document.querySelectorAll('#entries a')[0].textContent", "empty");
+	expect_script(browser, "getComputedStyle(document.querySelectorAll('#entries a')[0]).textDecorationLine", "none");
 	expect_sort(browser, "modified", "recent.z");
 	expect_sort(browser, "modified", "literal <name>.txt");
 	expect_sort(browser, "size", "literal <name>.txt");
@@ -101,14 +101,16 @@ check_explorer(Browser *browser)
 	expect_sort(browser, "extension", "literal <name>.txt");
 	expect_sort(browser, "extension", "recent.z");
 	expect_script(browser, "getComputedStyle(document.documentElement).backgroundColor", "rgb(20, 20, 20)");
-	expect_script(browser, "Array.from(document.links).find(a => a.textContent === 'literal <name>.txt').click(); 'ok'",
+	expect_script(browser, "Array.from(document.querySelectorAll('#entries a'))"
+	              ".find(a => a.textContent === 'literal <name>.txt').click(); 'ok'",
 	              "ok");
 	WAIT(script_equals(browser, "document.body.textContent.trim()", "literal <text>"));
 	webkit_web_view_go_back(browser->view);
-	WAIT(script_equals(browser, "String(document.links.length)", "3"));
+	WAIT(script_equals(browser, "String(document.querySelectorAll('#entries a').length)", "3"));
 	expect_script(browser, "document.querySelector('[data-sort=modified]').click(); "
 	              "document.querySelector('[data-sort=extension]').click(); "
-	              "Array.from(document.links).find(a => a.textContent === 'empty').click(); 'ok'", "ok");
+	              "Array.from(document.querySelectorAll('#entries a'))"
+	              ".find(a => a.textContent === 'empty').click(); 'ok'", "ok");
 	WAIT(script_equals(browser, "String(new URLSearchParams(location.search).get('path')?.endsWith('/empty'))", "true"));
 	WAIT(!webkit_web_view_is_loading(browser->view));
 	WAIT(script_equals(browser, "document.querySelector('#entries').textContent", ""));

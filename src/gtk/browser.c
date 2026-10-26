@@ -9,7 +9,7 @@
 struct Browser {
 	App *app;
 	Page *page;
-	GtkWidget *box, *entry, *notice;
+	GtkWidget *box, *entry, *find, *notice;
 	WebKitWebView *view;
 };
 static const BrowserHost *host;
@@ -69,6 +69,64 @@ location(GtkEntry *entry, Browser *b)
 	gtk_widget_grab_focus(GTK_WIDGET(b->view));
 }
 
+static gboolean
+find_visible(Browser *b)
+{
+	return b->find && gtk_widget_get_visible(b->find);
+}
+
+static void
+find_close(Browser *b)
+{
+	if (!b->find) return;
+	gtk_widget_hide(b->find);
+	/* WebKit keeps match highlights until the owner explicitly finishes searching. */
+	webkit_find_controller_search_finish(webkit_web_view_get_find_controller(b->view));
+}
+
+static void
+find_changed(GtkEntry *entry, Browser *b)
+{
+	GtkStyleContext *style = gtk_widget_get_style_context(b->find);
+	gtk_style_context_remove_class(style, "error");
+	gtk_widget_set_tooltip_text(b->find, "Enter: next match; Shift+Enter: previous; Escape: close");
+	WebKitFindController *controller = webkit_web_view_get_find_controller(b->view);
+	const char *text = gtk_entry_get_text(entry);
+	if (!find_visible(b) || !*text) webkit_find_controller_search_finish(controller);
+	else webkit_find_controller_search(controller, text,
+	    WEBKIT_FIND_OPTIONS_CASE_INSENSITIVE | WEBKIT_FIND_OPTIONS_WRAP_AROUND, G_MAXUINT);
+}
+
+static void
+find_failed(WebKitFindController *controller, Browser *b)
+{
+	(void)controller;
+	if (!find_visible(b) || !*gtk_entry_get_text(GTK_ENTRY(b->find))) return;
+	gtk_style_context_add_class(gtk_widget_get_style_context(b->find), "error");
+	gtk_widget_set_tooltip_text(b->find, "No matches");
+}
+
+static void
+browser_find(Browser *b)
+{
+	if (!b->find) {
+		b->find = gtk_search_entry_new();
+		gtk_entry_set_placeholder_text(GTK_ENTRY(b->find), "Find in page");
+		/* As with the URL entry, moving a live view must not reveal a closed search. */
+		gtk_widget_set_no_show_all(b->find, TRUE);
+		gtk_box_pack_start(GTK_BOX(b->box), b->find, FALSE, FALSE, 0);
+		gtk_box_reorder_child(GTK_BOX(b->box), b->find, 0);
+		g_signal_connect(b->find, "changed", G_CALLBACK(find_changed), b);
+		g_signal_connect(webkit_web_view_get_find_controller(b->view),
+		    "failed-to-find-text", G_CALLBACK(find_failed), b);
+	}
+	if (b->entry) gtk_widget_hide(b->entry);
+	gtk_widget_show(b->find);
+	gtk_widget_grab_focus(b->find);
+	gtk_editable_select_region(GTK_EDITABLE(b->find), 0, -1);
+	find_changed(GTK_ENTRY(b->find), b);
+}
+
 static void
 changed(WebKitWebView *view, GParamSpec *property, Browser *b)
 {
@@ -107,7 +165,7 @@ load_changed(WebKitWebView *view, WebKitLoadEvent event, Browser *b)
 	}
 	if (event == WEBKIT_LOAD_COMMITTED) host->timing("browser-load-commit");
 	if (event == WEBKIT_LOAD_FINISHED) host->timing("browser-load-finish");
-	if (event == WEBKIT_LOAD_STARTED) notice(b, NULL);
+	if (event == WEBKIT_LOAD_STARTED) { notice(b, NULL); find_close(b); }
 	changed(view, NULL, b);
 }
 
@@ -467,6 +525,7 @@ GtkWidget *browser_widget(Browser *b) { return b->box; }
 GtkWidget *browser_view(Browser *b) { return GTK_WIDGET(b->view); }
 static void browser_location(Browser *b)
 {
+	find_close(b);
 	if (!b->entry) {
 		b->entry = gtk_entry_new();
 		gtk_entry_set_placeholder_text(GTK_ENTRY(b->entry), "URL");
@@ -491,15 +550,28 @@ location_visible(Browser *b)
 gboolean
 browser_shortcut(Page *page, guint key, guint mods)
 {
+	gboolean find_key = mods == GDK_CONTROL_MASK && key == GDK_KEY_f;
+	gboolean find_step = page->browser && find_visible(page->browser) &&
+	    gtk_widget_is_focus(page->browser->find) &&
+	    (key == GDK_KEY_Return || key == GDK_KEY_KP_Enter) && (!mods || mods == GDK_SHIFT_MASK);
 	gboolean location_key = mods == GDK_CONTROL_MASK && key == GDK_KEY_k;
 	gboolean history_key = mods == GDK_MOD1_MASK && (key == GDK_KEY_Left || key == GDK_KEY_Right);
 	gboolean reload_key = (mods == GDK_CONTROL_MASK && key == GDK_KEY_r) || (!mods && key == GDK_KEY_F5);
 	gboolean escape = !mods && key == GDK_KEY_Escape && page->browser &&
-	    (location_visible(page->browser) || webkit_web_view_is_loading(page->browser->view));
-	if (!location_key && !history_key && !reload_key && !escape) return FALSE;
-	host->select(page);
+	    (find_visible(page->browser) || location_visible(page->browser) ||
+	     webkit_web_view_is_loading(page->browser->view));
+	if (!find_key && !find_step && !location_key && !history_key && !reload_key && !escape) return FALSE;
+	/* Selecting re-focuses the web view; match stepping must keep the find entry focused. */
+	if (!find_step) host->select(page);
 	Browser *b = page->browser;
-	if (location_key) browser_location(b);
+	if (find_key) browser_find(b);
+	else if (find_step) {
+		if (*gtk_entry_get_text(GTK_ENTRY(b->find))) {
+			WebKitFindController *controller = webkit_web_view_get_find_controller(b->view);
+			if (mods == GDK_SHIFT_MASK) webkit_find_controller_search_previous(controller);
+			else webkit_find_controller_search_next(controller);
+		}
+	} else if (location_key) browser_location(b);
 	else if (history_key) {
 		if (key == GDK_KEY_Left) webkit_web_view_go_back(b->view);
 		else webkit_web_view_go_forward(b->view);
@@ -507,7 +579,8 @@ browser_shortcut(Page *page, guint key, guint mods)
 		notice(b, NULL);
 		webkit_web_view_reload(b->view);
 	} else {
-		if (location_visible(b)) gtk_widget_hide(b->entry);
+		if (find_visible(b)) find_close(b);
+		else if (location_visible(b)) gtk_widget_hide(b->entry);
 		else webkit_web_view_stop_loading(b->view);
 		gtk_widget_grab_focus(GTK_WIDGET(b->view));
 	}
@@ -526,6 +599,7 @@ void browser_bind(Browser *b, Page *page, const char *url)
 void browser_free(Browser *b)
 {
 	browsers = g_list_remove(browsers, b);
+	g_signal_handlers_disconnect_by_data(webkit_web_view_get_find_controller(b->view), b);
 	g_signal_handlers_disconnect_by_data(b->view, b);
 	if (!b->app->closing) gtk_widget_destroy(b->box);
 	g_object_unref(b->box);
