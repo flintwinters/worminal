@@ -14,7 +14,12 @@ font loading and shell startup overlap.
 Validated launches overlap connection requests and shell startup with widget construction;
 a per-request completion gate keeps GTK callbacks behind completed widget setup.
 `manage.py build` compiles Alacritty colors, font family, size, spacing, and scrollback into a generated C header.
-Install as the regular user into `~/.local` by default so builds retain that user's Alacritty configuration.
+Build as the regular user to retain that user's Alacritty configuration; new installations default to `~/.local`.
+For installed fixes, resolve `command -v worminal`, `/proc/<pid>/exe`, and loaded module paths before choosing a prefix.
+A prior fix was installed into `~/.local` while live windows used `/usr/local`; reopening still loaded old code.
+Publish to the actual prefix and compare installed artifacts with the verified build. Privileged publication uses
+`manage.py install --prefix PREFIX --skip-build` after the regular-user build, preserving its configuration.
+Running owners retain loaded modules until all their windows close; verify loaded code before claiming a fix is active.
 `src/terminal` owns terminal state,
 `src/gtk` paints release views, `src/x11` preserves the original renderer, and `src/workspace` connects the service.
 Both frontends share paste filtering: bracketed text preserves line endings, while ordinary paste
