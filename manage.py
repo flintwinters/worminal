@@ -314,9 +314,10 @@ def explorer_lint():
 
 
 @app.command()
-def install(prefix: Path = typer.Option(None, help="Installation prefix (default: PREFIX or ~/.local).")):
+def install(prefix: Path = typer.Option(None, help="Installation prefix (default: PREFIX or ~/.local)."),
+            skip_build: bool = typer.Option(False, help="Publish an existing user build without rebuilding.")):
     """Build and install binaries, manual, desktop launcher, and icon; supports DESTDIR staging."""
-    native_build.install(prefix)
+    native_build.install(prefix, skip_build=skip_build)
 
 
 @app.command()

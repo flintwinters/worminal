@@ -275,9 +275,11 @@ def installation_files(prefix=None):
     return [(ROOT / source, staging / str(destination).lstrip("/"), mode) for source, destination, mode in files]
 
 
-def install(prefix=None):
+def install(prefix=None, *, skip_build=False):
     files = installation_files(prefix)
-    build_targets("worminal-x11", "worminald-x11")
+    # Privileged publication must retain the regular user's compiled appearance.
+    if not skip_build:
+        build_targets("worminal-x11", "worminald-x11")
     for source, destination, mode in files:
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_name(destination.name + ".pending")

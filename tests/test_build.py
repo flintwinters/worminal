@@ -169,6 +169,9 @@ class BuildTests(unittest.TestCase):
             self.assertFalse((installed / "bin/worminal").is_symlink())
             self.assertEqual(previous.read_text(), "previous client")
             compile_build.assert_called_once_with("worminal-x11", "worminald-x11")
+            compile_build.reset_mock()
+            build.install("/opt/worminal", skip_build=True)
+            compile_build.assert_not_called()
             files = build.installation_files("/opt/worminal")
             self.assertLess(next(i for i, (source, _, _) in enumerate(files) if source.name == "frontend.so"),
                             next(i for i, (source, _, _) in enumerate(files) if source.name == "worminal"))
