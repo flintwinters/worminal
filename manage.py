@@ -117,6 +117,12 @@ def build_preview():
     native_build.build_targets("worminal-preview", "worminald-preview")
 
 
+@app.command("build-x11")
+def build_x11():
+    """Build release binaries and the original X11 rollback pair."""
+    native_build.build_targets("worminal-x11", "worminald-x11")
+
+
 def preview_checks(backend):
     native_build.build_targets("worminal-preview", "worminald-preview", "build/preview_test")
     return run([sys.executable, "tests/preview.py", backend])
@@ -257,6 +263,13 @@ def lint():
 def clean():
     """Remove generated binaries and headers."""
     native_build.clean()
+
+
+@app.command("check-build")
+def check_build():
+    """Check build freshness, installation, and cleanup without building the app."""
+    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                          "-p", "test_build.py", "-q"]))
 
 
 def explorer_command(command):
