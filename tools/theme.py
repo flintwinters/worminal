@@ -12,17 +12,6 @@ import tomllib
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / "build" / "theme.h"
 NAMES = ("black", "red", "green", "yellow", "blue", "magenta", "cyan", "white")
-DEFAULTS = {
-    "primary": {"foreground": "#d8d8d8", "background": "#181818"},
-    "normal": dict(zip(NAMES, (
-        "#181818", "#ac4242", "#90a959", "#f4bf75",
-        "#6a9fb5", "#aa759f", "#75b5aa", "#d8d8d8",
-    ))),
-    "bright": dict(zip(NAMES, (
-        "#6b6b6b", "#c55555", "#aac474", "#feca88",
-        "#82b8c8", "#c28cb8", "#93d3c3", "#f8f8f8",
-    ))),
-}
 HEX_COLOR = re.compile(r"(?:#|0x)[0-9a-fA-F]{6}\Z")
 DIM_DEFAULTS = dict(zip(NAMES, (
     "#0f0f0f", "#712b2b", "#5f6f3a", "#a17e4d",
@@ -103,6 +92,11 @@ def dim_color(value):
 
 
 def theme_header(config):
+    # Read only when building: management commands also run before submodule initialization.
+    source = ROOT / "file-explorer/packages/files/src/palette.json"
+    if not source.is_file():
+        raise ValueError("Initialize file-explorer before building: git submodule update --init")
+    defaults = json.loads(source.read_text())
     font = config.get("font", {})
     if not isinstance(font, dict):
         raise ValueError("[font] must be a table")
@@ -152,7 +146,7 @@ def theme_header(config):
     palette = {}
     for group, offset in (("normal", 0), ("bright", 8)):
         for index, name in enumerate(NAMES):
-            value = tables[group].get(name, DEFAULTS[group][name])
+            value = tables[group].get(name, defaults[group][name])
             palette[offset + index] = color(value, f"colors.{group}.{name}")
     indexed = colors.get("indexed_colors", [])
     if not isinstance(indexed, list):
@@ -165,9 +159,9 @@ def theme_header(config):
             raise ValueError("indexed_colors indices must be 16 through 255")
         palette[index] = color(entry.get("color"), f"indexed_colors[{index}].color")
 
-    foreground = color(tables["primary"].get("foreground", DEFAULTS["primary"]["foreground"]),
+    foreground = color(tables["primary"].get("foreground", defaults["primary"]["foreground"]),
                        "colors.primary.foreground")
-    background = color(tables["primary"].get("background", DEFAULTS["primary"]["background"]),
+    background = color(tables["primary"].get("background", defaults["primary"]["background"]),
                        "colors.primary.background")
 
     def cursor_color(key, default):
