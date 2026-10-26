@@ -1,4 +1,6 @@
 /* Shared real-WebKit script assertions and embedded filesystem regressions. */
+static GtkWidget *dialog_of_type(GType type);
+
 static char *script_result;
 static gboolean script_done;
 static void
@@ -88,6 +90,24 @@ check_explorer(Browser *browser)
 		WAIT(script_equals(browser, "String(document.querySelectorAll('#entries a').length)", "3"));
 	}
 	g_free(saved); g_free(trailing);
+	/* Downloadable files must not replace the directory with an error page. */
+	expect_script(browser, "Array.from(document.querySelectorAll('#entries a'))"
+	              ".find(a => a.textContent === 'recent.z').click(); 'ok'", "ok");
+	WAIT(dialog_of_type(GTK_TYPE_FILE_CHOOSER_DIALOG));
+	gtk_dialog_response(GTK_DIALOG(dialog_of_type(GTK_TYPE_FILE_CHOOSER_DIALOG)), GTK_RESPONSE_CANCEL);
+	WAIT(!webkit_web_view_is_loading(browser->view));
+	g_assert_cmpstr(webkit_web_view_get_uri(browser->view), ==, url);
+	expect_script(browser, "String(document.querySelectorAll('#entries a').length)", "3");
+	/* A file can disappear between listing and activation; Back must keep the listing. */
+	g_assert_cmpint(g_unlink(file), ==, 0);
+	expect_script(browser, "Array.from(document.querySelectorAll('#entries a'))"
+	              ".find(a => a.textContent === 'literal <name>.txt').click(); 'ok'", "ok");
+	WAIT(script_equals(browser, "String(document.querySelector('#entries') === null)", "true"));
+	g_assert_true(webkit_web_view_can_go_back(browser->view));
+	g_assert_true(browser_shortcut(browser->page, GDK_KEY_Left, GDK_MOD1_MASK));
+	WAIT(script_equals(browser, "String(document.querySelectorAll('#entries a').length)", "3"));
+	g_assert_true(g_file_set_contents(file, "literal <text>", -1, NULL));
+
 	expect_script(browser, "String(document.querySelectorAll('table,dialog').length)", "0");
 	expect_script(browser, "getComputedStyle(document.querySelector('#open')).display", "none");
 	expect_script(browser, "String(document.querySelectorAll('select').length)", "0");
