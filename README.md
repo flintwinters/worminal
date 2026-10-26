@@ -245,6 +245,9 @@ Worminal advertises `xterm-256color` for application compatibility.
 
 The root [manage.py](manage.py) is the entrypoint for builds, checks, and measurements.
 Run `python3 manage.py --help` for available commands. Builds use `-O3` by default.
+Browser UI checks include native local-media controls and playback with a private silent PulseAudio sink
+(requires `pulseaudio`). Regenerate the tiny media fixtures with `python3 manage.py media-fixtures`
+when needed (requires `ffmpeg`).
 
 Root executables are `worminal`/`worminald` (GTK) and `worminal-x11`/`worminald-x11`
 (rollback). Preview names are compatibility builds created on demand.

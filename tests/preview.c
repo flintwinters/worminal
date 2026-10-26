@@ -609,6 +609,8 @@ reload_wait(Browser *b)
 	g_signal_handler_disconnect(b->view, handler);
 }
 
+#include "preview_media.c"
+
 static void
 paint(Terminal *t, const char *name)
 {
@@ -788,6 +790,7 @@ main(int argc, char **argv)
 	g_assert_nonnull(base);
 	char *url = g_strconcat(base, "/page", NULL);
 	check_file_views(app);
+	check_browser_media(app);
 	if (g_getenv("WORMINAL_PREVIEW_LOCAL_APP")) {
 		Page *home = open_browser(app, g_getenv("WORMINAL_PREVIEW_LOCAL_APP"));
 		check_explorer(home->browser);
@@ -976,7 +979,7 @@ main(int argc, char **argv)
 	gtk_widget_destroy(app->window);
 	g_free(url); g_free(other);
 	g_print("Preview %s: terminal, resize, selection, clipboard, IME, ownership, reconnect, browser sharing, "
-	        "conversion, find, "
+	        "conversion, find, media, "
 	        "navigation, storage, popups, downloads, permissions, TLS rejection and renderer recovery passed.\n",
 	        backend ? backend : "default");
 	return 0;

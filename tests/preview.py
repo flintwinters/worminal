@@ -84,6 +84,35 @@ def profile(env):
 
 
 @contextmanager
+def audio(env):
+    """Decode real media into a private silent sink, independent of desktop audio devices."""
+    if not shutil.which("pulseaudio"):
+        raise RuntimeError("Install pulseaudio for private browser media checks.")
+    runtime = Path(env["XDG_RUNTIME_DIR"]) / "pulse"
+    runtime.mkdir(mode=0o700)
+    socket = runtime / "native"
+    environment = {**env, "PULSE_RUNTIME_PATH": str(runtime), "PULSE_SERVER": "unix:" + str(socket),
+                   "PULSE_SINK": "worminal-tests"}
+    log_path = runtime / "server.log"
+    with log_path.open("wb") as log:
+        process = subprocess.Popen(["pulseaudio", "-n", "--daemonize=no", "--use-pid-file=no",
+                                    "--exit-idle-time=-1", "--log-target=stderr",
+                                    "--load=module-null-sink sink_name=worminal-tests",
+                                    "--load=module-native-protocol-unix auth-anonymous=1"],
+                                   env=environment, stdout=log, stderr=log)
+        try:
+            deadline = time.monotonic() + 5
+            while not socket.exists() and process.poll() is None and time.monotonic() < deadline:
+                time.sleep(.01)
+            if not socket.exists():
+                raise RuntimeError("Private audio did not start: " + log_path.read_text(errors="replace")[-1000:])
+            yield environment
+        finally:
+            process.terminate()
+            process.wait(timeout=5)
+
+
+@contextmanager
 def service(env):
     daemon = subprocess.Popen([str(ROOT / "worminald"), "--serve"], env=env,
                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -310,7 +339,8 @@ def broker_check(env, url, log):
 def main():
     backend = sys.argv[1] if len(sys.argv) == 2 else "x11"
     display = {"x11": isolated_display, "wayland": wayland_display, "qtile": qtile_display}[backend]
-    with display() as display_env, profile(display_env) as env, fixture() as url, fixture(tls=True) as tls_url:
+    with display() as display_env, profile(display_env) as env, audio(env) as env, \
+            fixture() as url, fixture(tls=True) as tls_url:
         if backend == "wayland":
             # Preserve the compositor's socket directory, while isolating browser storage.
             env["XDG_RUNTIME_DIR"] = display_env["XDG_RUNTIME_DIR"]

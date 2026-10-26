@@ -128,6 +128,12 @@ def preview_checks(backend):
     return run([sys.executable, "tests/preview.py", backend])
 
 
+@app.command("media-fixtures")
+def media_fixtures():
+    """Regenerate silent browser media fixtures (requires ffmpeg)."""
+    raise typer.Exit(run_proof_script("tests/media_fixtures.py"))
+
+
 @app.command("check-preview")
 def check_preview():
     """Check combined terminal/browser behavior on private Xvfb, locally and through SSH fixtures."""

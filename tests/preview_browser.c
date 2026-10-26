@@ -45,6 +45,44 @@ script_equals(Browser *b, const char *script, const char *expected)
 }
 
 static void
+send_browser_key(Browser *b, guint key, guint mods)
+{
+	GdkEvent *event = gdk_event_new(GDK_KEY_PRESS);
+	event->key.window = g_object_ref(gtk_widget_get_window(browser_view(b)));
+	event->key.keyval = key;
+	event->key.state = mods;
+	gdk_event_set_device(event, gdk_seat_get_keyboard(gdk_display_get_default_seat(
+	    gtk_widget_get_display(browser_view(b)))));
+	gtk_widget_event(browser_view(b), event);
+	event->type = GDK_KEY_RELEASE;
+	gtk_widget_event(browser_view(b), event);
+	gdk_event_free(event);
+}
+
+static void
+send_browser_click(Browser *b, double x, double y)
+{
+	GdkDevice *pointer = gdk_seat_get_pointer(gdk_display_get_default_seat(gtk_widget_get_display(browser_view(b))));
+	GdkEvent *motion = gdk_event_new(GDK_MOTION_NOTIFY);
+	motion->motion.window = g_object_ref(gtk_widget_get_window(browser_view(b)));
+	motion->motion.x = x; motion->motion.y = y;
+	gdk_event_set_device(motion, pointer);
+	gtk_widget_event(browser_view(b), motion);
+	gdk_event_free(motion);
+	GdkEvent *event = gdk_event_new(GDK_BUTTON_PRESS);
+	event->button.window = g_object_ref(gtk_widget_get_window(browser_view(b)));
+	event->button.button = 1;
+	event->button.x = x; event->button.y = y;
+	event->button.time = (guint32)(g_get_monotonic_time() / 1000);
+	gdk_event_set_device(event, pointer);
+	gtk_widget_event(browser_view(b), event);
+	event->type = GDK_BUTTON_RELEASE;
+	event->button.state = GDK_BUTTON1_MASK;
+	gtk_widget_event(browser_view(b), event);
+	gdk_event_free(event);
+}
+
+static void
 expect_denied(Browser *browser, const char *url)
 {
 	char *probe = g_strdup_printf("window.denied = false; fetch('%s')"
