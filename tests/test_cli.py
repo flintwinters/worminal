@@ -24,7 +24,7 @@ class CommandLineTest(unittest.TestCase):
                 shutil.copy2(ROOT / name, path / name)
             env = {**os.environ, "WORMINAL_SHARED_SOCKET_SCOPE": path.name,
                    "DISPLAY": "invalid", "WAYLAND_DISPLAY": "invalid"}
-            result = subprocess.run([str(path / "worminal"), "--new-browser-tab"],
+            result = subprocess.run([str(path / "worminal"), "--new-browser-tab", "about:blank"],
                                     env=env, capture_output=True, text=True, timeout=5)
             self.assertEqual(result.returncode, 1)
             self.assertIn("No preview workspace service is running", result.stderr)
@@ -32,6 +32,12 @@ class CommandLineTest(unittest.TestCase):
                                      env=env, capture_output=True, text=True, timeout=5)
             self.assertEqual(invalid.returncode, 2)
             self.assertIn("usage:", invalid.stderr)
+            for name in ("worminal", "worminald"):
+                missing = subprocess.run([str(path / name), "--new-browser-tab"],
+                                         env=env, capture_output=True, text=True, timeout=5)
+                self.assertEqual(missing.returncode, 2)
+                self.assertIn("URL|FILE", missing.stderr)
+
 
     def test_launcher_does_not_link_graphics_libraries(self):
         dependencies = subprocess.check_output(["ldd", str(ROOT / "worminal")], text=True)

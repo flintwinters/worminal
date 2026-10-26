@@ -23,7 +23,7 @@ class BuildTests(unittest.TestCase):
         self.addCleanup(self.root_patch.stop)
 
     def test_release_and_rollback_own_matching_protocols(self):
-        with patch.object(build, "pkg_flags", return_value=[]), patch.object(build, "generate_explorer"):
+        with patch.object(build, "pkg_flags", return_value=[]), patch.object(build, "generate_browser_resources"):
             builder = build.Builder()
             with patch.object(builder, "program") as program:
                 for name in ("worminal", "worminald", "worminal-preview", "worminald-preview"):
@@ -42,51 +42,37 @@ class BuildTests(unittest.TestCase):
                     self.assertNotIn("-DWORMINAL_PREVIEW_PROTOCOL", kwargs["flags"])
                     self.assertIn('-DWORKSPACE_DAEMON="worminald-x11"', kwargs["flags"])
 
-    def test_explorer_embedding_rebuilds_when_sources_change_and_preserves_utf8(self):
-        explorer = self.root / "file-explorer"
-        explorer.mkdir()
-        for name in ("package.json", "package-lock.json", "tsconfig.json", "vite.config.ts", "tools/build.mjs"):
-            (explorer / name).parent.mkdir(parents=True, exist_ok=True)
-            (explorer / name).write_text("{}")
-        source = explorer / "apps/explorer/src/main.ts"
+    def test_native_browser_resources_are_independent_and_preserve_utf8(self):
+        source = self.root / "src/gtk/browser-find.js"
         source.parent.mkdir(parents=True)
-        source.write_text("first")
-        artifact = explorer / "dist/index.html"
-
-        def bundle(_command):
-            artifact.parent.mkdir(exist_ok=True)
-            artifact.write_text('<title>Files — Worminal</title>"\\' + source.read_text())
-            (artifact.parent / "error.html").write_text("Error: {{message}}")
-            (artifact.parent / "find.js").write_text("var WorminalFind = {};")
-            (artifact.parent / "theme.json").write_text('{"background":"#141414","message_slot":"{{message}}"}')
-
-        with patch.object(build, "invoke", side_effect=bundle) as invoked:
-            build.generate_explorer()
-            header = self.root / "build/file_explorer.h"
+        source.write_text('const label = "Find — text";')
+        template = source.with_name("browser-error.html")
+        template.write_text("Error: {{message}}")
+        source.with_name("browser-local.js").write_text("const target = '%s', key = '%s';")
+        with patch.object(build, "invoke") as invoked:
+            build.generate_browser_resources()
+            header = self.root / "build/browser_resources.h"
             content = header.read_text()
-            html = content.split("static const char file_explorer_html[] =\n", 1)[1].split(";", 1)[0]
-            encoded = bytes(int(value, 8) for value in re.findall(r"\\([0-7]{3})", html))
-            self.assertEqual(encoded, artifact.read_bytes())
+            script = content.split("static const char browser_find_script[] =\n", 1)[1].split(";", 1)[0]
+            encoded = bytes(int(value, 8) for value in re.findall(r"\\([0-7]{3})", script))
+            self.assertEqual(encoded, source.read_bytes())
             timestamp = header.stat().st_mtime_ns
-            build.generate_explorer()
-            self.assertEqual(invoked.call_count, 1)
+            build.generate_browser_resources()
             self.assertEqual(header.stat().st_mtime_ns, timestamp)
             source.write_text("changed")
-            later = artifact.stat().st_mtime_ns + 1_000_000
-            os.utime(source, ns=(later, later))
-            build.generate_explorer()
-            self.assertEqual(invoked.call_count, 2)
+            build.generate_browser_resources()
             self.assertNotEqual(header.read_text(), content)
-            # Invalid template contracts must never replace a valid generated header.
-            os.utime(source, ns=(1, 1))
             valid = header.read_bytes()
-            (artifact.parent / "error.html").write_text("Missing slot")
-            with self.assertRaisesRegex(ValueError, "exactly one declared message slot"):
-                build.generate_explorer()
+            template.write_text("Missing slot")
+            with self.assertRaisesRegex(ValueError, "exactly one message slot"):
+                build.generate_browser_resources()
             self.assertEqual(header.read_bytes(), valid)
+            invoked.assert_not_called()
+            self.assertFalse((self.root / "file-explorer").exists())
 
-    def test_browser_and_preview_proof_both_generate_the_embedded_explorer(self):
-        with patch.object(build, "pkg_flags", return_value=[]), patch.object(build, "generate_explorer") as generate:
+    def test_browser_and_preview_proof_generate_only_native_resources(self):
+        with patch.object(build, "pkg_flags", return_value=[]), \
+                patch.object(build, "generate_browser_resources") as generate:
             builder = build.Builder()
             with patch.object(builder, "program"):
                 builder.target("build/browser.so")

@@ -1,4 +1,4 @@
-"""Resource accounting includes children owned by non-main Linux threads."""
+"""Resource accounting and pixel sampling for performance checks."""
 
 import os
 from pathlib import Path
@@ -7,11 +7,26 @@ import subprocess
 import sys
 import threading
 import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 from perf_metrics import descendants, memory, startup_usage
+from visible_latency import ready
 
 
 class PerfMetricsTests(unittest.TestCase):
+    def test_binary_and_utf8_decoded_pixels_are_sampled_without_corruption(self):
+        window = Mock()
+        window.get_geometry.return_value = SimpleNamespace(width=400, height=300)
+        for payload in ("", b""):
+            window.get_image.return_value.data = payload
+            self.assertFalse(ready(window))
+        for color in (0x112233, 0x00a9c2):
+            pixel = color.to_bytes(4, sys.byteorder)
+            for payload in (pixel, pixel.decode("utf-8")):
+                window.get_image.return_value.data = payload
+                self.assertTrue(ready(window, color))
+
     def test_worker_owned_child_is_counted_while_worker_is_alive(self):
         ready, release = threading.Event(), threading.Event()
         children, errors = [], []

@@ -27,7 +27,11 @@ static void
 expect_script(Browser *b, const char *script, const char *expected)
 {
 	char *value = evaluate(b, script);
-	if (strcmp(value, expected)) g_error("Expected %s; got %s", expected, value);
+	if (strcmp(value, expected)) {
+		char *body = evaluate(b, "document.body.textContent.slice(0, 300)");
+		g_error("Expected %s; got %s at %s; page: %s", expected, value,
+		    webkit_web_view_get_uri(b->view), body);
+	}
 	g_free(value);
 }
 
@@ -64,7 +68,7 @@ static void
 check_explorer(Browser *browser)
 {
 	char *cwd = g_get_current_dir();
-	char *directory = g_build_filename(cwd, ".checks", "explorer- #?% ü-XXXXXX", NULL);
+	char *directory = g_build_filename(cwd, ".checks", "explorer- +#?% ü-XXXXXX", NULL);
 	g_assert_nonnull(g_mkdtemp(directory));
 	char *empty = g_build_filename(directory, "empty", NULL);
 	char *file = g_build_filename(directory, "literal <name>.txt", NULL);
@@ -79,17 +83,16 @@ check_explorer(Browser *browser)
 	                                       2000, G_FILE_QUERY_INFO_NONE, NULL, NULL));
 	g_object_unref(old_file); g_object_unref(new_file);
 	char *escaped = g_uri_escape_string(directory, NULL, FALSE);
-	char *url = g_strconcat(WORKSPACE_BROWSER_HOME "files?path=", escaped, NULL);
-	char *saved = g_filename_to_uri(directory, NULL, NULL);
-	char *trailing = g_strconcat(saved, "/", NULL);
-	const char *targets[] = {saved, trailing, url};
+	char *url = g_strconcat(g_getenv("WORMINAL_PREVIEW_LOCAL_APP"), "?path=", escaped, NULL);
+	const char *targets[] = {url};
 	for (size_t i = 0; i < G_N_ELEMENTS(targets); i++) {
 		webkit_web_view_load_uri(browser->view, targets[i]);
 		WAIT(!webkit_web_view_is_loading(browser->view));
-		WAIT(g_str_has_prefix(webkit_web_view_get_uri(browser->view), "worminal:"));
-		WAIT(script_equals(browser, "String(document.querySelectorAll('#entries a').length)", "3"));
+		WAIT(g_str_has_prefix(webkit_web_view_get_uri(browser->view), "file:"));
+		expect_script(browser, "typeof window.worminal", "object");
+		WAIT(script_equals(browser, "String(Boolean(document.querySelector('#entries')?.textContent))", "true"));
+		expect_script(browser, "String(document.querySelectorAll('#entries a').length)", "3");
 	}
-	g_free(saved); g_free(trailing);
 	/* Downloadable files must not replace the directory with an error page. */
 	expect_script(browser, "Array.from(document.querySelectorAll('#entries a'))"
 	              ".find(a => a.textContent === 'recent.z').click(); 'ok'", "ok");
@@ -140,7 +143,7 @@ check_explorer(Browser *browser)
 	error_page(browser->view, "worminal:///missing", message);
 	WAIT(script_equals(browser, "document.body.textContent.trim()", message));
 	expect_script(browser, "String(document.querySelectorAll('img,script').length)", "0");
-	expect_script(browser, "getComputedStyle(document.documentElement).backgroundColor", "rgb(20, 20, 20)");
+	expect_script(browser, "getComputedStyle(document.documentElement).backgroundColor", "rgb(24, 24, 24)");
 	/* A different document in the same view must not retain filesystem privileges. */
 	webkit_web_view_load_html(browser->view, "<!doctype html><title>Untrusted</title>", "https://example.org/");
 	WAIT(!webkit_web_view_is_loading(browser->view));
@@ -148,13 +151,12 @@ check_explorer(Browser *browser)
 	char *file_path = g_uri_escape_string(file, "/", FALSE);
 	char *file_url = g_strconcat("worminal://", file_path, NULL);
 	expect_denied(browser, file_url);
-	webkit_web_view_load_uri(browser->view, file_url);
-	WAIT(script_equals(browser, "document.body.textContent.trim()", "literal <text>"));
 	g_free(file_path); g_free(file_url);
 	file_url = g_filename_to_uri(file, NULL, NULL);
 	webkit_web_view_load_uri(browser->view, file_url);
 	WAIT(script_equals(browser, "document.body.textContent.trim()", "literal <text>"));
 	g_assert_cmpstr(webkit_web_view_get_uri(browser->view), ==, file_url);
+	expect_denied(browser, "worminal:///list?path=%2F");
 	g_free(file_url);
 	g_unlink(recent); g_free(recent);
 	g_unlink(file);
@@ -172,13 +174,30 @@ check_file_views(App *app)
 	 * renderer. Closing the original view must leave its sibling usable. */
 	char *file_cwd = g_get_current_dir();
 	char *file_document = g_build_filename(file_cwd, ".checks", "preview-resource.html", NULL);
-	g_assert_true(g_file_set_contents(file_document, "<!doctype html><title>Local resource</title><input>", -1, NULL));
+	g_assert_true(g_file_set_contents(file_document, "<!doctype html><title>Local resource</title><input>"
+	    "<script>if(parent!==window)parent.postMessage(typeof window.worminal,'*')</script>", -1, NULL));
 	char *file_url = g_filename_to_uri(file_document, NULL, NULL);
 	Page *home = open_browser(app, file_url);
 	g_free(file_url); g_free(file_cwd);
 	char *home_url = g_strdup(webkit_web_view_get_uri(home->browser->view));
 	g_assert_true(related_view(home_url) == home->browser->view);
 	g_assert_null(related_view("file:///etc/hosts"));
+	/* A selected local HTML app gets the generic metadata API, including query routes. */
+	char *route = g_strconcat(home_url, "?route=two", NULL);
+	webkit_web_view_load_uri(home->browser->view, route);
+	WAIT(!webkit_web_view_is_loading(home->browser->view));
+	g_free(route);
+	expect_script(home->browser, "window.worminal.readDirectory('/')"
+	              ".then(rows => window.localEntryCount = rows.length); 'asked'", "asked");
+	WAIT(script_equals(home->browser, "typeof window.localEntryCount", "number"));
+	expect_denied(home->browser, "worminal:///list?path=%2F");
+	expect_script(home->browser, "window.childBridge='pending'; "
+	              "addEventListener('message', e => window.childBridge=e.data);"
+	              "const frame=document.createElement('iframe'); frame.setAttribute('sandbox','allow-scripts');"
+	              "frame.src=location.href; document.body.append(frame); 'created'", "created");
+	WAIT(script_equals(home->browser, "window.childBridge", "undefined"));
+
+
 	expect_script(home->browser, "sessionStorage.setItem('file-tab', 'first'); 'ok'", "ok");
 	Page *second_home = open_browser(app, home_url);
 	expect_script(second_home->browser, "String(window.opener)", "null");
@@ -190,6 +209,13 @@ check_file_views(App *app)
 	g_free(home_url);
 	expect_script(home->browser, "sessionStorage.setItem('surviving-tab', 'yes'); "
 	              "sessionStorage.getItem('surviving-tab')", "yes");
+	/* Replacing the on-disk app needs neither a native rebuild nor a new owner process. */
+	g_assert_true(g_file_set_contents(file_document, "<!doctype html><title>Updated local resource</title>", -1, NULL));
+	Page *latest = open_browser(app, home->url);
+	WAIT(!g_strcmp0(webkit_web_view_get_title(latest->browser->view), "Updated local resource"));
+	int latest_count = g_list_length(app->pages);
+	app_close(latest);
+	WAIT(g_list_length(app->pages) == latest_count - 1);
 	int home_count = g_list_length(app->pages);
 	app_close(home);
 	WAIT(g_list_length(app->pages) == home_count - 1);

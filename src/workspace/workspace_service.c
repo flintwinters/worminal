@@ -470,7 +470,7 @@ client_message(Client *client, WirePacket *packet)
 			wire_put_string(&error, !tab
 			    ? "This shell is not in this workspace. Open worminal and run the command there; "
 			      "keep WORMINAL_SHARED_SOCKET_SCOPE unchanged."
-			    : "Invalid browser URL: omit it for the file explorer, or supply one nonempty URL up to 65536 bytes.");
+			    : "Invalid browser URL: supply one nonempty URL up to 65536 bytes.");
 			client_send(client, WIRE_ERROR, 0, &error);
 			wire_buffer_free(&error); free(url);
 			return;
@@ -873,8 +873,10 @@ main(int argc, char **argv)
 	if (argc == 3 && (!strcmp(argv[1], "--handoff") || !strcmp(argv[1], "--handin")))
 		return handoff_command(argv[2], !strcmp(argv[1], "--handin"));
 #ifdef WORMINAL_PREVIEW_PROTOCOL
-	if ((argc == 2 || argc == 3) && strcmp(argv[1], "--new-browser-tab") == 0)
-		return browser_command(argc == 3 ? argv[2] : NULL);
+	if (argc >= 2 && strcmp(argv[1], "--new-browser-tab") == 0) {
+		if (argc != 3) { fputs("usage: worminald --new-browser-tab URL|FILE\n", stderr); return 2; }
+		return browser_command(argv[2]);
+	}
 #endif
 	if (argc == 2 && strcmp(argv[1], "--serve") == 0)
 		return service_diagnostics(serve);
@@ -890,7 +892,7 @@ main(int argc, char **argv)
 	}
 	fprintf(stderr, "usage: worminald --serve|--bridge|--stop\n       worminald --handin NAME | --handoff NAME\n");
 #ifdef WORMINAL_PREVIEW_PROTOCOL
-	fputs("       worminald --new-browser-tab [URL|FILE]\n", stderr);
+	fputs("       worminald --new-browser-tab URL|FILE\n", stderr);
 #endif
 	return 2;
 }

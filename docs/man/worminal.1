@@ -76,10 +76,10 @@ Transfers are local, same-user Linux operations, limited to 100 tabs and a 512 M
 A v1 receiver rejects workspaces containing browser records.
 .SH OPTIONS
 .TP
-.BI --new-browser-tab " [URL|FILE]"
+.BI --new-browser-tab " URL|FILE"
 Replace the calling Worminal terminal with a browser, ending its shell and PTY.
-Omit the target to open the built-in file explorer. Absolute and relative filepaths
-are converted to file URLs relative to the calling shell's directory. Explicit URLs
+A target is required. Absolute and relative filepaths are converted to file URLs
+relative to the calling shell's directory. Explicit URLs
 are preserved; use about:blank for a blank page. Run this command inside a Worminal terminal.
 .PP
 GTK accepts the options below except -w. X11 geometry positioning and stty_args apply only

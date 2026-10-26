@@ -277,7 +277,8 @@ def explorer_command(command):
     if not script.exists():
         typer.echo("Initialize the file-explorer submodule first: git submodule update --init", err=True)
         raise typer.Exit(1)
-    raise typer.Exit(run([sys.executable, str(script), command]))
+    raise typer.Exit(run([sys.executable, str(script), command],
+                         env={"WORMINAL_PALETTE": str(ROOT / "assets/palette.json"), **os.environ}))
 
 
 @app.command("explorer-build")
