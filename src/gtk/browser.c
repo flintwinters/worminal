@@ -11,6 +11,7 @@ struct Browser {
 	Page *page;
 	GtkWidget *box, *entry, *find, *notice;
 	WebKitWebView *view;
+	gboolean select_find;
 };
 static const BrowserHost *host;
 static WebKitWebContext *context;
@@ -90,16 +91,28 @@ find_present(Browser *b, const char *action)
 }
 
 static void
+find_completed(Browser *b)
+{
+	/* After navigation, WebKit can claim the primary selection while searching.
+	 * Reapply Ctrl+F's selection on completion, unless editing or closing superseded it. */
+	if (b->select_find && gtk_widget_is_focus(b->find))
+		gtk_editable_select_region(GTK_EDITABLE(b->find), 0, -1);
+	b->select_find = FALSE;
+}
+
+static void
 find_matched(WebKitFindController *controller, guint matches, Browser *b)
 {
 	(void)controller; (void)matches;
 	if (find_visible(b)) find_present(b, "show");
+	find_completed(b);
 }
 
 static void
 find_close(Browser *b)
 {
 	if (!b->find) return;
+	b->select_find = FALSE;
 	gtk_widget_hide(b->find);
 	find_present(b, "clear");
 	/* WebKit keeps match highlights until the owner explicitly finishes searching. */
@@ -109,6 +122,7 @@ find_close(Browser *b)
 static void
 find_changed(GtkEntry *entry, Browser *b)
 {
+	b->select_find = FALSE;
 	find_present(b, "clear");
 	GtkStyleContext *style = gtk_widget_get_style_context(b->find);
 	gtk_style_context_remove_class(style, "error");
@@ -124,6 +138,7 @@ static void
 find_failed(WebKitFindController *controller, Browser *b)
 {
 	(void)controller;
+	find_completed(b);
 	if (!find_visible(b) || !*gtk_entry_get_text(GTK_ENTRY(b->find))) return;
 	find_present(b, "clear");
 	gtk_style_context_add_class(gtk_widget_get_style_context(b->find), "error");
@@ -151,6 +166,7 @@ browser_find(Browser *b)
 	/* Starting a search can return focus from an accepted link to WebKit.
 	 * Establish the entry selection after that focus transition. */
 	find_changed(GTK_ENTRY(b->find), b);
+	b->select_find = *gtk_entry_get_text(GTK_ENTRY(b->find)) != '\0';
 	gtk_widget_grab_focus(b->find);
 	gtk_editable_select_region(GTK_EDITABLE(b->find), 0, -1);
 }
