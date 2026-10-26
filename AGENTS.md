@@ -93,5 +93,5 @@ Generic read-only directory metadata belongs to the initially selected local doc
 A top-frame-only script owns its private per-view credential; subframes and other navigated documents have no access.
 Native browser error/find chrome belongs to `src/gtk`; native palette defaults belong to `assets/palette.json`.
 The independent TypeScript workspace retains a folder picker outside Worminal. Parent explorer commands
-supply its palette as build input; standalone builds retain their own defaults.
+supply its palette and resolved terminal font as build inputs; standalone builds retain their own defaults.
 Use `manage.py explorer-build`, `explorer-check`, and `explorer-lint` after `npm ci` in the submodule.
