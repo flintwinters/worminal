@@ -28,6 +28,8 @@ Unchanged frames do not repaint or consume the immediate paint allowance for the
 Tab claims can present their first complete response early; cached mapping and rapid selections keep GTK's frame clock.
 `tools/build.py` owns builds and installation; `manage.py` owns
 checks and latency measurements on private displays.
+Generated modules, test binaries and configuration headers belong in `build/`; preserve diagnostics in `.checks/`.
+Root binaries retain release and X11 rollback names; preview aliases are built on demand.
 `manage.py latency-visible` measures real key events to visible echo and fresh/additional window presentation
 using distinct launch canvases on private Xvfb; --shell includes real interactive initialization.
 It excludes desktop compositing and physical display latency.

@@ -201,12 +201,17 @@ class BuildTests(unittest.TestCase):
         (self.root / "build/object.o").touch()
         (self.root / ".checks").mkdir()
         (self.root / ".checks/failure.log").touch()
-        for name in ("worminal", "worminald", "worminal.command.json"):
+        outputs = ("worminal", "worminald", "worminal-x11", "worminald-x11",
+                   "worminal-preview", "worminald-preview")
+        generated = [name + suffix for name in outputs for suffix in ("", ".command.json", ".pending")]
+        generated += ["st.o", "x.o"]
+        for name in generated:
             (self.root / name).touch()
+        (self.root / "config.h").write_text("user configuration")
         build.clean()
         self.assertFalse((self.root / "build").exists())
-        self.assertFalse((self.root / "worminal").exists())
-        self.assertFalse((self.root / "worminal.command.json").exists())
+        self.assertTrue(all(not (self.root / name).exists() for name in generated))
+        self.assertEqual((self.root / "config.h").read_text(), "user configuration")
         self.assertTrue((self.root / ".checks/failure.log").exists())
 
     def test_relative_install_prefix_is_rejected(self):

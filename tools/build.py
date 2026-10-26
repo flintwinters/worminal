@@ -265,6 +265,9 @@ def clean():
     for name in ("worminal", "worminald", "worminal-x11", "worminald-x11", "worminal-preview", "worminald-preview"):
         for suffix in ("", ".command.json", ".pending"):
             (ROOT / (name + suffix)).unlink(missing_ok=True)
+    # Pre-Python builds left these objects outside the owned build directory.
+    for name in ("st.o", "x.o"):
+        (ROOT / name).unlink(missing_ok=True)
 
 
 def installation_files(prefix=None):

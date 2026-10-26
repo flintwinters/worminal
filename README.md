@@ -241,6 +241,16 @@ Worminal advertises `xterm-256color` for application compatibility.
 The root [manage.py](manage.py) is the entrypoint for builds, checks, and measurements.
 Run `python3 manage.py --help` for available commands. Builds use `-O3` by default.
 
+Root executables are `worminal`/`worminald` (GTK) and `worminal-x11`/`worminald-x11`
+(rollback). Preview names are compatibility builds created on demand.
+Build the release and rollback pairs together with `python3 manage.py build-x11`.
+Generated modules, objects, test binaries, and compiled configuration headers belong in `build/`;
+diagnostic captures belong in `.checks/`.
+`python3 manage.py clean` removes build outputs, including legacy root objects, while preserving `.checks/`.
+`python3 manage.py check-build` checks build and cleanup behavior without compiling the app.
+Keep appearance in the Alacritty configuration described above and terminal defaults in `src/config.h`;
+edit neither generated headers nor compiler command records. Browser page styling belongs to `file-explorer/`.
+
 | Path | Responsibility |
 | --- | --- |
 | [src/terminal](src/terminal) | Terminal state and scrollback |
