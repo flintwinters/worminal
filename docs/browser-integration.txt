@@ -70,7 +70,8 @@ Explicit URLs (including about:blank) stay unchanged.
 The default target uses worminal:/// followed by the encoded calling shell directory. The lazy browser
 module embeds file-explorer/dist/index.html. Initialize submodules and run npm ci in file-explorer before
 building. The same offline artifact uses a folder picker outside Worminal; embedded views open the
-calling directory automatically as plain links in enumeration order. Folder links navigate and file
+calling directory automatically as plain links, with sorting and compile-time colors owned by the
+submodule. Folder links navigate and file
 links use normal browser file handling. The submodule also owns the error template and shared palette.
 The native scheme handler supplies directory metadata only to the exact embedded document served
 to that WebView; navigating to another document revokes access. Native code contains no HTML or CSS

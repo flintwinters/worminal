@@ -73,6 +73,9 @@ check_explorer(Browser *browser)
 	g_free(saved); g_free(trailing);
 	expect_script(browser, "String(document.querySelectorAll('table,dialog').length)", "0");
 	expect_script(browser, "getComputedStyle(document.querySelector('#open')).display", "none");
+	expect_script(browser, "document.querySelector('#sort').value", "name");
+	expect_script(browser, "document.links[0].textContent", "empty");
+	expect_script(browser, "getComputedStyle(document.links[0]).textDecorationLine", "none");
 	expect_script(browser, "getComputedStyle(document.documentElement).backgroundColor", "rgb(20, 20, 20)");
 	expect_script(browser, "Array.from(document.links).find(a => a.textContent === 'literal <name>.txt').click(); 'ok'",
 	              "ok");
