@@ -76,10 +76,26 @@ find_visible(Browser *b)
 }
 
 static void
+find_present(Browser *b, const char *action)
+{
+	char *script = g_strconcat(file_explorer_find_script, "\nWorminalFind.update('", action, "');", NULL);
+	webkit_web_view_evaluate_javascript(b->view, script, -1, "worminal-find", NULL, NULL, NULL, NULL);
+	g_free(script);
+}
+
+static void
+find_matched(WebKitFindController *controller, guint matches, Browser *b)
+{
+	(void)controller; (void)matches;
+	if (find_visible(b)) find_present(b, "show");
+}
+
+static void
 find_close(Browser *b)
 {
 	if (!b->find) return;
 	gtk_widget_hide(b->find);
+	find_present(b, "clear");
 	/* WebKit keeps match highlights until the owner explicitly finishes searching. */
 	webkit_find_controller_search_finish(webkit_web_view_get_find_controller(b->view));
 }
@@ -87,9 +103,10 @@ find_close(Browser *b)
 static void
 find_changed(GtkEntry *entry, Browser *b)
 {
+	find_present(b, "clear");
 	GtkStyleContext *style = gtk_widget_get_style_context(b->find);
 	gtk_style_context_remove_class(style, "error");
-	gtk_widget_set_tooltip_text(b->find, "Enter: next match; Shift+Enter: previous; Escape: close");
+	gtk_widget_set_tooltip_text(b->find, "Enter: next match; Shift+Enter: previous; Escape: select result");
 	WebKitFindController *controller = webkit_web_view_get_find_controller(b->view);
 	const char *text = gtk_entry_get_text(entry);
 	if (!find_visible(b) || !*text) webkit_find_controller_search_finish(controller);
@@ -102,6 +119,7 @@ find_failed(WebKitFindController *controller, Browser *b)
 {
 	(void)controller;
 	if (!find_visible(b) || !*gtk_entry_get_text(GTK_ENTRY(b->find))) return;
+	find_present(b, "clear");
 	gtk_style_context_add_class(gtk_widget_get_style_context(b->find), "error");
 	gtk_widget_set_tooltip_text(b->find, "No matches");
 }
@@ -119,6 +137,8 @@ browser_find(Browser *b)
 		g_signal_connect(b->find, "changed", G_CALLBACK(find_changed), b);
 		g_signal_connect(webkit_web_view_get_find_controller(b->view),
 		    "failed-to-find-text", G_CALLBACK(find_failed), b);
+		g_signal_connect(webkit_web_view_get_find_controller(b->view),
+		    "found-text", G_CALLBACK(find_matched), b);
 	}
 	if (b->entry) gtk_widget_hide(b->entry);
 	gtk_widget_show(b->find);
@@ -497,7 +517,7 @@ browser_new(App *app, const char *url)
 	browsers = g_list_prepend(browsers, b);
 	host->timing("browser-view-ready");
 	/* Adapt surf's conservative defaults; keep WebKit's normal UA/site support.
-	 * No standalone surf configuration, scripts, or X-property command transport. */
+	 * No standalone surf configuration or X-property command transport. */
 	WebKitSettings *settings = webkit_settings_new_with_settings(
 	    "enable-javascript", TRUE, "auto-load-images", TRUE, "default-charset", "UTF-8",
 	    "enable-developer-extras", FALSE, "enable-dns-prefetching", FALSE,
@@ -579,7 +599,7 @@ browser_shortcut(Page *page, guint key, guint mods)
 		notice(b, NULL);
 		webkit_web_view_reload(b->view);
 	} else {
-		if (find_visible(b)) find_close(b);
+		if (find_visible(b)) { find_close(b); find_present(b, "accept"); }
 		else if (location_visible(b)) gtk_widget_hide(b->entry);
 		else webkit_web_view_stop_loading(b->view);
 		gtk_widget_grab_focus(GTK_WIDGET(b->view));
