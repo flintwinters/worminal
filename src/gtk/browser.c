@@ -148,9 +148,11 @@ browser_find(Browser *b)
 	}
 	if (b->entry) gtk_widget_hide(b->entry);
 	gtk_widget_show(b->find);
+	/* Starting a search can return focus from an accepted link to WebKit.
+	 * Establish the entry selection after that focus transition. */
+	find_changed(GTK_ENTRY(b->find), b);
 	gtk_widget_grab_focus(b->find);
 	gtk_editable_select_region(GTK_EDITABLE(b->find), 0, -1);
-	find_changed(GTK_ENTRY(b->find), b);
 }
 
 static void

@@ -54,11 +54,20 @@ check_browser_find(Page *page)
 	g_assert_false(find_visible(b));
 	press_browser_key(page, GDK_KEY_f, GDK_CONTROL_MASK);
 	WAIT(responses == 6);
+	g_assert_true(gtk_window_get_focus(GTK_WINDOW(page->app->window)) == b->find);
+	g_assert_true(gtk_editable_get_selection_bounds(GTK_EDITABLE(b->find), &start, &end));
+	g_assert_cmpint(start, ==, 0);
+	g_assert_cmpint(end, ==, 5);
+	/* Reopening after accepting and activating a link must allow one-key deletion. */
+	gtk_editable_delete_selection(GTK_EDITABLE(b->find));
+	g_assert_cmpstr(gtk_entry_get_text(GTK_ENTRY(b->find)), ==, "");
+	gtk_entry_set_text(GTK_ENTRY(b->find), "popup");
+	WAIT(responses == 7);
 	press_browser_key(page, GDK_KEY_k, GDK_CONTROL_MASK);
 	g_assert_false(find_visible(b));
 	press_browser_key(page, GDK_KEY_Escape, 0);
 	press_browser_key(page, GDK_KEY_f, GDK_CONTROL_MASK);
-	WAIT(responses == 7);
+	WAIT(responses == 8);
 	press_browser_key(page, GDK_KEY_r, GDK_CONTROL_MASK);
 	WAIT(!webkit_web_view_is_loading(b->view));
 	g_assert_false(find_visible(b));
