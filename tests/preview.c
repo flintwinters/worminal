@@ -974,7 +974,8 @@ main(int argc, char **argv)
 	check_outline_focus(app);
 	gtk_widget_destroy(app->window);
 	g_free(url); g_free(other);
-	g_print("Preview %s: terminal, resize, selection, clipboard, IME, ownership, reconnect, browser sharing, conversion, find, "
+	g_print("Preview %s: terminal, resize, selection, clipboard, IME, ownership, reconnect, browser sharing, "
+	        "conversion, find, "
 	        "navigation, storage, popups, downloads, permissions, TLS rejection and renderer recovery passed.\n",
 	        backend ? backend : "default");
 	return 0;

@@ -57,6 +57,7 @@ class BuildTests(unittest.TestCase):
             artifact.parent.mkdir(exist_ok=True)
             artifact.write_text('<title>Files — Worminal</title>"\\' + source.read_text())
             (artifact.parent / "error.html").write_text("Error: {{message}}")
+            (artifact.parent / "find.js").write_text("var WorminalFind = {};")
             (artifact.parent / "theme.json").write_text('{"background":"#141414","message_slot":"{{message}}"}')
 
         with patch.object(build, "invoke", side_effect=bundle) as invoked:

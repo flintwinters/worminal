@@ -96,7 +96,7 @@ def generate_explorer():
                                            "tools/build.mjs")]
     inputs += [path for directory in ("apps", "packages") for path in (explorer / directory).rglob("*")
                if path.is_file() and "node_modules" not in path.parts]
-    artifacts = [explorer / "dist" / name for name in ("index.html", "error.html", "theme.json")]
+    artifacts = [explorer / "dist" / name for name in ("index.html", "error.html", "theme.json", "find.js")]
     if any(not path.exists() for path in artifacts) or any(
             source.stat().st_mtime_ns > min(path.stat().st_mtime_ns for path in artifacts) for source in inputs):
         invoke(["python3", str(explorer / "manage.py"), "build"])
@@ -106,7 +106,8 @@ def generate_explorer():
     if not slot or error.count(slot) != 1:
         raise ValueError("Explorer error page must contain exactly one declared message slot")
     resources = {"html": artifacts[0].read_bytes(), "error_html": error,
-                 "background": theme["background"].encode(), "message_slot": slot}
+                 "background": theme["background"].encode(), "message_slot": slot,
+                 "find_script": artifacts[3].read_bytes()}
     content = "/* Generated from file-explorer/dist. */\n"
     for name, data in resources.items():
         # Fixed-width octal bytes preserve UTF-8 and cannot merge with adjacent C escapes.
