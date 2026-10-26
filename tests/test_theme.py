@@ -5,13 +5,26 @@ import os
 import unittest
 from unittest.mock import patch
 
-from tools.theme import find_config, read_config, theme_header
+from tools.theme import explorer_font, find_config, font_height, read_config, theme_header
 
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "alacritty"
 
 
 class ThemeTest(unittest.TestCase):
+    def test_explorer_line_height_uses_terminal_metrics_and_offset(self):
+        config = {"font": {"normal": {"family": "monospace"}, "size": 14,
+                           "offset": {"y": -7}}}
+        with patch("tools.theme.find_config", return_value="configured"), \
+                patch("tools.theme.read_config", return_value=config), \
+                patch("tools.theme.font_height", return_value=25) as metrics:
+            self.assertEqual(explorer_font(), {"family": "monospace", "size": 14,
+                                               "lineHeight": 18})
+            metrics.assert_called_once_with("monospace", 14)
+            config["font"]["offset"]["y"] = -100
+            self.assertEqual(explorer_font()["lineHeight"], 1)
+        self.assertGreater(font_height("monospace", 14), 14)
+
     def test_default_alacritty_palette(self):
         header = theme_header({})
         self.assertIn('[0] = "#181818"', header)

@@ -1,6 +1,7 @@
 """Resolve Alacritty appearance and scrolling into a C header at build time."""
 
 import copy
+import ctypes
 import json
 import math
 import os
@@ -222,5 +223,41 @@ def explorer_font():
     # Native fallback lives in config.h; keep the explorer tied to that authority.
     fallback = re.search(r'static char \*font = "([^"]+)";',
                          (ROOT / "src/config.h").read_text())[1].split(":")
-    return {"family": family or fallback[0],
-            "size": size or float(next(item[5:] for item in fallback if item.startswith("size=")))}
+    result = {"family": family or fallback[0],
+              "size": size or float(next(item[5:] for item in fallback if item.startswith("size=")))}
+    offset = int(re.search(r"theme_font_offset_y = (.*);", header)[1])
+    result["lineHeight"] = max(1, font_height(result["family"], result["size"]) + offset)
+    return result
+
+
+def font_height(family, size):
+    """Match terminal_font: 96 DPI, separately rounded Pango ascent and descent."""
+    pango = ctypes.CDLL("libpango-1.0.so.0")
+    cairo = ctypes.CDLL("libpangocairo-1.0.so.0")
+    gobject = ctypes.CDLL("libgobject-2.0.so.0")
+
+    def bind(library, name, result, *arguments):
+        function = getattr(library, name)
+        function.restype = result
+        function.argtypes = arguments
+        return function
+
+    pointer = ctypes.c_void_p
+    integer = ctypes.c_int
+    font_map = bind(cairo, "pango_cairo_font_map_get_default", pointer)()
+    context = bind(pango, "pango_font_map_create_context", pointer, pointer)(font_map)
+    font = bind(pango, "pango_font_description_new", pointer)()
+    metrics = None
+    try:
+        bind(cairo, "pango_cairo_context_set_resolution", None, pointer, ctypes.c_double)(context, 96)
+        bind(pango, "pango_font_description_set_family", None, pointer, ctypes.c_char_p)(font, family.encode())
+        bind(pango, "pango_font_description_set_size", None, pointer, integer)(font, int(max(4, size) * 1024))
+        language = bind(pango, "pango_context_get_language", pointer, pointer)(context)
+        metrics = bind(pango, "pango_context_get_metrics", pointer, pointer, pointer, pointer)(context, font, language)
+        return sum((bind(pango, f"pango_font_metrics_get_{part}", integer, pointer)(metrics) + 1023) // 1024
+                   for part in ("ascent", "descent"))
+    finally:
+        if metrics:
+            bind(pango, "pango_font_metrics_unref", None, pointer)(metrics)
+        bind(pango, "pango_font_description_free", None, pointer)(font)
+        bind(gobject, "g_object_unref", None, pointer)(context)
