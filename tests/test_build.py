@@ -79,6 +79,13 @@ class BuildTests(unittest.TestCase):
                 builder.target("build/preview_test")
             self.assertEqual(generate.call_count, 2)
 
+    def test_manage_detaches_from_the_desktop_display(self):
+        import manage
+        desktop = {name: "desktop" for name in manage.DESKTOP_VARIABLES}
+        with patch.dict(os.environ, desktop):
+            manage.root()
+            self.assertFalse(set(manage.DESKTOP_VARIABLES) & set(os.environ))
+
     def test_defaults_and_environment_flags(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(build, "pkg_flags", return_value=[]):
             self.assertIn("-O3", build.compile_flags())

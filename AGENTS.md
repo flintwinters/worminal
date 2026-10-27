@@ -14,6 +14,8 @@ font loading and shell startup overlap.
 Validated launches overlap connection requests and shell startup with widget construction;
 a per-request completion gate keeps GTK callbacks behind completed widget setup.
 `manage.py` is internal build/test/install tooling, never a user-facing application launcher.
+Checks run only on private virtual displays and never on the desktop; `manage.py` drops the desktop's
+display variables. `manage.py check` (full Xvfb graphical suite) is the routine regression run.
 User workflows use the native application executable; do not require Python to launch the explorer.
 `manage.py build` compiles Alacritty colors, font family, size, spacing, and scrollback into a generated C header.
 The active installation is `/usr/local/bin/worminal`, with modules in `/usr/local/lib/worminal`.

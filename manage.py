@@ -32,9 +32,15 @@ LEGACY_FILE_LINES = {"src/terminal/st.c": 3225, "src/x11/x.c": 3417,
                      "tests/test_native.py": 1333}
 
 
+# Checks own private virtual displays; none may draw on or inject into the developer's desktop.
+DESKTOP_VARIABLES = ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY")
+
+
 @app.callback()
 def root():
     os.chdir(ROOT)
+    for name in DESKTOP_VARIABLES:
+        os.environ.pop(name, None)
 
 
 def run(args, *, env=None):
