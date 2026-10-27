@@ -96,7 +96,9 @@ The old preview executable names remain build aliases and share the v2 workspace
 `--attach` opens existing tabs without creating another shell. Closing a window preserves its service tabs.
 Inside a Worminal terminal, `worminal --new-browser-tab URL|FILE` replaces that terminal with a browser,
 ending its shell. A target is required: HTTP(S), `file://` and other supported URLs are preserved;
-absolute and relative filesystem paths become encoded `file://` URLs. Local files use normal WebKit handling.
+bare hosts such as `youtube.com` default to HTTPS. Existing paths and explicit `./`, `../`, or absolute paths
+become encoded `file://` URLs. Prefix missing dotted filenames with `./` to distinguish them from hosts.
+Local files use normal WebKit handling.
 Ctrl+K reveals the address entry. Ctrl+F finds page text; Enter and Shift+Enter move between matches.
 Escape selects the result and focuses its link for Enter. Repeating Ctrl+F selects the query for replacement.
 

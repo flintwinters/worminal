@@ -290,6 +290,15 @@ def explorer_command(command):
                               "WORMINAL_FONT_JSON": json.dumps(explorer_font())}))
 
 
+@app.command("check-browser-target")
+def check_browser_target():
+    """Check browser target detection, path encoding and terminal conversion privately."""
+    check_file_limits()
+    native_build.build_targets("worminal", "worminald", "worminald-preview")
+    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                         "-p", "test_preview_workspace.py", "-k", "browser_command", "-q"]))
+
+
 @app.command("explorer-build")
 def explorer_build():
     """Build file-explorer/dist/index.html (run npm ci in the submodule first)."""

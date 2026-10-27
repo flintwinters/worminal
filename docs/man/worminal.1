@@ -79,7 +79,8 @@ A v1 receiver rejects workspaces containing browser records.
 .BI --new-browser-tab " URL|FILE"
 Replace the calling Worminal terminal with a browser, ending its shell and PTY.
 A target is required. Absolute and relative filepaths are converted to file URLs
-relative to the calling shell's directory. Explicit URLs
+relative to the calling shell's directory. Bare hostnames default to HTTPS; existing paths take precedence.
+Prefix missing dotted filenames with ./ to distinguish them from hostnames. Explicit URLs
 are preserved; use about:blank for a blank page. Run this command inside a Worminal terminal.
 .PP
 GTK accepts the options below except -w. X11 geometry positioning and stty_args apply only

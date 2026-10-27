@@ -89,7 +89,8 @@ The receiver stages and validates state before commit; the donor then closes PTY
 Running daemons that predate the protocol cannot gain it through installation; preserve their live sessions.
 Investigate remote Codex scrolling separately from tested wheel modes.
 
-`--new-browser-tab URL|FILE` requires an explicit target and preserves arbitrary explicit URLs.
+`--new-browser-tab URL|FILE` requires a target and preserves explicit URLs. Bare hosts default to HTTPS;
+existing paths win, and ./ or ../ disambiguate missing local paths.
 Local paths and file URLs use native WebKit handling. Worminal knows no explorer assets or build paths.
 The independently compiled `file-explorer/dist/index.html` is opened directly; changing it needs no native
 rebuild or reinstall. Its own `manage.py open` passes the HTML target and caller directory.
