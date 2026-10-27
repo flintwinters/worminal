@@ -180,9 +180,17 @@ class PreviewWorkspaceTest(unittest.TestCase):
             output += chunk
         self.assertIn(digest, output)
 
-    def test_command_converts_calling_terminal_and_preserves_order(self):
+    def test_browser_command_converts_calling_terminal_and_preserves_order(self):
         cases = (("https://example.invalid/converted", "https://example.invalid/converted"),
-                 ("about:blank", "about:blank"), (str(ROOT), ROOT.as_uri()))
+                 ("about:blank", "about:blank"), ("data:text/plain,hello", "data:text/plain,hello"),
+                 ("custom+app:item", "custom+app:item"),
+                 ("youtube.com", "https://youtube.com"),
+                 ("example.invalid/watch?v=1#part", "https://example.invalid/watch?v=1#part"),
+                 ("example.invalid:8443/path", "https://example.invalid:8443/path"),
+                 ("localhost:8080", "https://localhost:8080"),
+                 ("127.0.0.1:8080/path", "https://127.0.0.1:8080/path"),
+                 ("[::1]:8080/path", "https://[::1]:8080/path"),
+                 (str(ROOT), ROOT.as_uri()))
         for executable, (url, expected) in product((DAEMON, ROOT / "worminal"), cases):
             with self.subTest(executable=executable.name, url=url):
                 self.assert_browser_conversion(executable, url, expected)
@@ -221,11 +229,16 @@ class PreviewWorkspaceTest(unittest.TestCase):
             special.write_text("<title>Local page</title>")
             plain = directory / "plain.html"
             plain.write_text("<title>Plain page</title>")
+            (directory / "youtube.com").write_text("Local file wins over a bare hostname")
+            (directory / "broken.example").symlink_to("missing.html")
             cases = ((str(directory), directory.as_uri()),
                      (str(special), special.as_uri()), (special.name, special.as_uri()),
                      ("./" + special.name, special.as_uri()), (plain.name, plain.as_uri()),
                      (special.as_uri(), special.as_uri()),
-                     ("missing.html", (directory / "missing.html").as_uri()))
+                     ("./missing.html", directory.as_uri() + "/./missing.html"),
+                     ("../missing.html", directory.as_uri() + "/../missing.html"),
+                     ("youtube.com", (directory / "youtube.com").as_uri()),
+                     ("broken.example", (directory / "broken.example").as_uri()))
             for executable, (target, expected) in product((DAEMON, ROOT / "worminal"), cases):
                 with self.subTest(executable=executable.name, target=target):
                     self.assert_browser_conversion(executable, target, expected, directory)
