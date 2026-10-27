@@ -390,7 +390,7 @@ python3 manage.py check-privacy
 ```
 
 Keep machine destinations in environment configuration. Commit hooks check staged content, commit messages,
-and identities; push hooks and CI scan reachable history. Use `check-privacy --history` to run that scan locally.
+and identities; push hooks scan reachable history. Use `check-privacy --history` to run that scan locally.
 Reports show locations and categories without matched values; pattern checks cannot guarantee complete coverage.
 Submodules have separate histories: audit the explorer with
 `python3 manage.py check-privacy --repository file-explorer --history` before publishing its commits.
@@ -398,7 +398,6 @@ The October 2026 audit of explorer revision `db3c883` found no matches across it
 Its pinned public Hyperlinter dependency retains upstream author identities and fixture email addresses;
 its scanned history had no credential, private-key, private-network, or home-path findings.
 Publish explorer commits to its public repository before publishing a Worminal commit that references them.
-Require the Privacy CI job in branch rules to enforce checks even when hooks are bypassed.
 Create merge commits locally with the anonymous identity: server-generated merges can fail the history check.
 
 ## Origins and license

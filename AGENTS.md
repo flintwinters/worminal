@@ -50,7 +50,7 @@ scheduler queue waits, and milestone logging is opt-in because diagnostic I/O ca
 `--profile-cpu` attributes startup CPU samples without kernel profiling privileges; its timings are diagnostic.
 `manage.py render-perf` compares actual release-module painting, exact pixels, CPU and memory on private backends.
 The upstream source and license remain in the repository. Keep machine destinations in environment configuration
-and use anonymous commit identities. Run `manage.py privacy-setup` in fresh clones; privacy hooks and CI guard
+and use anonymous commit identities. Run `manage.py privacy-setup` in fresh clones; privacy hooks guard
 staged content and history.
 
 `src/gtk` is the release GTK 3/Pango-Cairo/WebKitGTK 4.1 frontend for native Wayland and X11. It shares terminal cells,
