@@ -826,6 +826,7 @@ main(int argc, char **argv)
 	WAIT(!webkit_web_view_is_loading(web->browser->view));
 	check_outline(app);
 	expect_script(web->browser, "document.title", "Fixture");
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(web->label)), ==, "Fixture");
 
 	expect_script(web->browser, "document.querySelector('input').value='local form'; localStorage.setItem('saved','yes');"
 	              "document.cookie='session=local;path=/'; document.querySelector('input').value", "local form");

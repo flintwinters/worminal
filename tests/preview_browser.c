@@ -274,12 +274,13 @@ check_file_views(App *app)
 	/* File views retain their own tab storage while reusing the same resource's
 	 * renderer. Closing the original view must leave its sibling usable. */
 	char *file_cwd = g_get_current_dir();
-	char *file_document = g_build_filename(file_cwd, ".checks", "preview-resource.html", NULL);
+	char *file_document = g_build_filename(file_cwd, ".checks", "preview-resource #?% ü.html", NULL);
 	g_assert_true(g_file_set_contents(file_document, "<!doctype html><title>Local resource</title><input>"
 	    "<script>window.documentVersion='first';"
 	    "if(parent!==window)parent.postMessage(typeof window.worminal,'*')</script>", -1, NULL));
 	char *file_url = g_filename_to_uri(file_document, NULL, NULL);
 	Page *home = open_browser(app, file_url);
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(home->label)), ==, "preview-resource #?% ü.html");
 	g_free(file_url); g_free(file_cwd);
 	char *home_url = g_strdup(webkit_web_view_get_uri(home->browser->view));
 	g_assert_true(related_view(home_url) == home->browser->view);
@@ -289,6 +290,7 @@ check_file_views(App *app)
 	webkit_web_view_load_uri(home->browser->view, route);
 	WAIT(!webkit_web_view_is_loading(home->browser->view));
 	g_free(route);
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(home->label)), ==, "preview-resource #?% ü.html");
 	expect_script(home->browser, "window.worminal.readDirectory('/')"
 	              ".then(rows => window.localEntryCount = rows.length); 'asked'", "asked");
 	WAIT(script_equals(home->browser, "typeof window.localEntryCount", "number"));
@@ -341,7 +343,19 @@ check_file_views(App *app)
 	Page *latest = open_browser(app, home->url);
 	WAIT(!g_strcmp0(webkit_web_view_get_title(latest->browser->view), "Updated local resource"));
 	expect_script(latest->browser, "window.documentVersion", "second");
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(latest->label)), ==, "preview-resource #?% ü.html");
 	expect_script(latest->browser, "getComputedStyle(document.body).color", "rgb(1, 2, 3)");
+	/* A URI change must update the label even when the document title stays unchanged. */
+	char *parent = g_path_get_dirname(file_document);
+	char *other_path = g_build_filename(parent, "other #file.html", NULL);
+	g_assert_true(g_file_set_contents(other_path, "<!doctype html><title>Updated local resource</title>", -1, NULL));
+	char *other_url = g_filename_to_uri(other_path, NULL, NULL);
+	webkit_web_view_load_uri(latest->browser->view, other_url);
+	WAIT(!g_strcmp0(webkit_web_view_get_uri(latest->browser->view), other_url));
+	WAIT(!webkit_web_view_is_loading(latest->browser->view));
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(latest->label)), ==, "other #file.html");
+	g_unlink(other_path);
+	g_free(parent); g_free(other_path); g_free(other_url);
 	int latest_count = g_list_length(app->pages);
 	app_close(latest);
 	WAIT(g_list_length(app->pages) == latest_count - 1);
