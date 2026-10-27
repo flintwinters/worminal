@@ -1,5 +1,9 @@
 /* Internal WebKit views move between local windows; profiles stay on this machine. */
+#define _GNU_SOURCE
 #include <webkit2/webkit2.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <gio/gunixinputstream.h>
 #include "preview.h"
 #include "browser_module.h"
 #include "browser_target.h"
@@ -392,7 +396,21 @@ local_document(const char *url)
 	return document;
 }
 
-/* Local HTML explicitly selected by the user may read directory metadata.
+static void
+local_response(WebKitURISchemeRequest *request, GInputStream *stream, gint64 length, const char *type)
+{
+	WebKitURISchemeResponse *response = webkit_uri_scheme_response_new(stream, length);
+	webkit_uri_scheme_response_set_content_type(response, type);
+	SoupMessageHeaders *headers = soup_message_headers_new(SOUP_MESSAGE_HEADERS_RESPONSE);
+	soup_message_headers_append(headers, "Access-Control-Allow-Origin", "null");
+	/* WebKitURISchemeResponse takes full ownership of the Soup headers. */
+	webkit_uri_scheme_response_set_http_headers(response, headers);
+	webkit_uri_scheme_request_finish_with_response(request, response);
+	g_object_unref(response);
+	g_object_unref(stream);
+}
+
+/* Local HTML explicitly selected by the user may read metadata and bounded files.
  * Navigating away never grants the next document that capability. */
 static void
 local_request(WebKitURISchemeRequest *request, gpointer data)
@@ -407,10 +425,11 @@ local_request(WebKitURISchemeRequest *request, gpointer data)
 	GUri *uri = g_uri_parse(webkit_uri_scheme_request_get_uri(request), G_URI_FLAGS_ENCODED_QUERY, &error);
 	if (!uri) goto fail;
 	if (!allowed || (g_uri_get_host(uri) && *g_uri_get_host(uri)) ||
-		strcmp(g_uri_get_path(uri), "/list")) {
+		(strcmp(g_uri_get_path(uri), "/list") && strcmp(g_uri_get_path(uri), "/file"))) {
 		g_uri_unref(uri);
 		goto denied;
 	}
+	gboolean read_file = !strcmp(g_uri_get_path(uri), "/file");
 	/* URLSearchParams uses form encoding: decode spaces while preserving literal %2B. */
 	GHashTable *params = g_uri_parse_params(g_uri_get_query(uri) ? g_uri_get_query(uri) : "",
 	    -1, "&", G_URI_PARAMS_WWW_FORM, &error);
@@ -424,8 +443,25 @@ local_request(WebKitURISchemeRequest *request, gpointer data)
 	const char *path = g_hash_table_lookup(params, "path");
 	if (!path || !g_path_is_absolute(path)) {
 		g_hash_table_unref(params);
-		error = g_error_new_literal(G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT, "Directory path must be absolute");
+		error = g_error_new_literal(G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT, "Local path must be absolute");
 		goto fail;
+	}
+	if (read_file) {
+		/* Open nonblocking before fstat: a replacement FIFO must never stall GTK.
+		 * Bound data and reject devices on the descriptor actually returned, not a prior stat. */
+		int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOCTTY);
+		struct stat info;
+		g_hash_table_unref(params);
+		if (fd < 0 || fstat(fd, &info) || !S_ISREG(info.st_mode) ||
+		    info.st_size < 0 || info.st_size > 32 * 1024 * 1024) {
+			if (fd >= 0) close(fd);
+			error = g_error_new_literal(G_IO_ERROR, G_IO_ERROR_FAILED,
+			    "Preview requires a regular file no larger than 32 MiB");
+			goto fail;
+		}
+		GInputStream *stream = g_unix_input_stream_new(fd, TRUE);
+		local_response(request, stream, info.st_size, "application/octet-stream");
+		return;
 	}
 	GFile *file = g_file_new_for_path(path);
 	GFileEnumerator *items = g_file_enumerate_children(file,
@@ -453,19 +489,11 @@ local_request(WebKitURISchemeRequest *request, gpointer data)
 	g_string_append_c(json, ']');
 	gsize length = json->len;
 	GInputStream *stream = g_memory_input_stream_new_from_data(g_string_free(json, FALSE), length, g_free);
-	WebKitURISchemeResponse *response = webkit_uri_scheme_response_new(stream, length);
-	webkit_uri_scheme_response_set_content_type(response, "application/json");
-	SoupMessageHeaders *headers = soup_message_headers_new(SOUP_MESSAGE_HEADERS_RESPONSE);
-	soup_message_headers_append(headers, "Access-Control-Allow-Origin", "null");
-	/* WebKitURISchemeResponse takes full ownership of the Soup headers. */
-	webkit_uri_scheme_response_set_http_headers(response, headers);
-	webkit_uri_scheme_request_finish_with_response(request, response);
-	g_object_unref(response);
-	g_object_unref(stream);
+	local_response(request, stream, length, "application/json");
 	return;
  denied:
 	error = g_error_new_literal(G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
-	    "Directory access requires the selected local document");
+	    "Local access requires the selected local document");
  fail:
 	webkit_uri_scheme_request_finish_error(request, error);
 	g_error_free(error);
