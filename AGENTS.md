@@ -93,8 +93,8 @@ Investigate remote Codex scrolling separately from tested wheel modes.
 existing paths win, and ./ or ../ disambiguate missing local paths.
 Local paths and file URLs use native WebKit handling. Worminal knows no explorer assets or build paths.
 The independently compiled `file-explorer/dist/index.html` is opened directly; changing it needs no native
-rebuild or reinstall. Explorer builds publish atomically; live tabs detect new revisions and refresh.
-Its own `manage.py open` passes a content-versioned HTML target and caller directory to bypass stale cached pages.
+rebuild, reinstall, or frontend restart: normal Ctrl+R or reopening reads the new artifact.
+Its own `manage.py open` passes the HTML target and caller directory.
 Generic read-only directory metadata and bounded regular-file reads belong to the initially selected local document,
 including query routes.
 A top-frame-only script owns its private per-view credential; subframes and other navigated documents have no access.
