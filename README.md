@@ -104,8 +104,8 @@ Escape selects the result and focuses its link for Enter. Repeating Ctrl+F selec
 
 The file explorer is an independent local HTML application. Run `python3 manage.py explorer-build`,
 then open its current `file-explorer/dist/index.html` with `--new-browser-tab`.
-From a Worminal terminal, `python3 /path/to/file-explorer/manage.py open` passes that HTML file and
-its caller's directory explicitly. Rebuild the explorer and reopen or reload the page to use new output;
+Use the native command `worminal --new-browser-tab /absolute/path/to/file-explorer/dist/index.html`
+from a Worminal terminal. Rebuild the explorer and press Ctrl+R in its browser tab or reopen it to use new output;
 Worminal needs no rebuild or reinstall. Native builds require neither the explorer submodule nor npm.
 Selected local HTML documents receive `window.worminal.readDirectory("/absolute/path")` for read-only metadata.
 Entries are `[base64Name, isDirectory, bytes, modifiedMs]`. Only the selected top-level document,
