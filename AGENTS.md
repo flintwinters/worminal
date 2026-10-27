@@ -55,6 +55,7 @@ staged content and history.
 
 `src/gtk` is the release GTK 3/Pango-Cairo/WebKitGTK 4.1 frontend for native Wayland and X11. It shares terminal cells,
 keys and directory-basename labels with the original frontend. Its Cairo tab strip uses terminal metrics and colors.
+File-browser tabs show decoded filenames; web tabs retain document titles.
 One GTK owner per display/workspace accepts separate launches and moves live browser views between local windows;
 remote machines share saved URLs only. `worminald` uses the v2 endpoint; browser records have no PTY.
 Its shell command converts the calling PTY's ordered tab into a browser. GTK and WebKit never enter the service.

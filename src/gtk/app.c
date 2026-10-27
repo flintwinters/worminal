@@ -115,19 +115,34 @@ void app_focus(Page *page) { size_message(page, WIRE_FOCUS); }
 void app_resize(Page *page) { size_message(page, WIRE_RESIZE); }
 
 static void
+page_label(Page *page)
+{
+	int length;
+	const char *name = page->terminal ? tab_label(page->directory ? page->directory : "?", &length) : page->title;
+	char *label = page->terminal ? g_strndup(name, length) : NULL;
+	if (!page->terminal && page->url) {
+		GUri *uri = g_uri_parse(page->url, G_URI_FLAGS_ENCODED, NULL);
+		if (uri && !g_ascii_strcasecmp(g_uri_get_scheme(uri) ?: "", "file")) {
+			char *path = g_uri_unescape_string(g_uri_get_path(uri), NULL);
+			if (path) label = g_filename_display_basename(path);
+			g_free(path);
+		}
+		if (uri) g_uri_unref(uri);
+	}
+	gtk_label_set_text(GTK_LABEL(page->label), label ? label : name);
+	g_free(label);
+	/* Catalog titles are applied together; refresh metrics after selection. */
+	if (!page->app->syncing) tabs_refresh(page->app);
+}
+
+static void
 page_title(Page *page, const char *title)
 {
 	g_free(page->title);
 	page->title = g_strdup(title ? title : "Worminal");
-	int length;
-	const char *name = page->terminal ? tab_label(page->directory ? page->directory : "?", &length) : page->title;
-	char *label = page->terminal ? g_strndup(name, length) : g_strdup(name);
-	gtk_label_set_text(GTK_LABEL(page->label), label);
-	g_free(label);
+	page_label(page);
 	if (page->app->active == page)
 		gtk_window_set_title(GTK_WINDOW(page->app->window), page->title);
-	/* Catalog titles are applied together; refresh metrics after selection. */
-	if (!page->app->syncing) tabs_refresh(page->app);
 }
 
 void
@@ -138,6 +153,8 @@ app_page_url(Page *page, const char *url)
 	if (!url || !*url || !g_strcmp0(url, page->url)) return;
 	g_free(page->url);
 	page->url = g_strdup(url);
+	/* URI and title notifications need not arrive together or in the same order. */
+	page_label(page);
 	WireBuffer buffer = {0};
 	wire_put_string(&buffer, url);
 	app_send(page->app, WIRE_BROWSER_NAVIGATE, page->id, buffer.data, buffer.len);
