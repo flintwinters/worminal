@@ -216,7 +216,8 @@ class Builder:
                          libs=["-Wl,--gc-sections", *self.libs, *pkg_flags("--libs", ("xtst",))])
         elif target in ("build/scrollback_test", "build/url_test"):
             scrollback = target == "build/scrollback_test"
-            sources = (["tests/scrollback.c", *(f"src/{source}" for source in SESSION_SUPPORT)] if scrollback
+            support = ("terminal/defaults.c", *SESSION_SUPPORT)
+            sources = (["tests/scrollback.c", *(f"src/{source}" for source in support)] if scrollback
                        else ["tests/url.c", "src/x11/url.c"])
             flags = ["-O1", "-g", "-fsanitize=address,undefined"]
             if scrollback:

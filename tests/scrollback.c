@@ -5,14 +5,6 @@
 
 #include "../src/terminal/st.c"
 
-unsigned int defaultfg = 258;
-unsigned int defaultbg = 259;
-unsigned int defaultcs = 257;
-unsigned int tabspaces = 8;
-wchar_t *worddelimiters = L" ";
-int allowaltscreen = 1;
-char *vtiden = "\033[?6c";
-
 void xsetmode(int set, unsigned int flags) {}
 void xsetpointermotion(int set) {}
 void xsettitle(char *title) {}
@@ -29,6 +21,7 @@ void xclipcopy(void) {}
 #undef strescseq
 #include "session_transfer_checks.h"
 #include "session_view_checks.h"
+#include "session_process_checks.h"
 #define term (session->term)
 #define strescseq (session->strescseq)
 
@@ -328,5 +321,6 @@ main(void)
 	assert(ttyread() == strlen(batch));
 	assert(term.line[0][35].u == '9');
 	close(descriptors[1]);
+	check_session_process();
 	return 0;
 }
