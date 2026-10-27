@@ -792,6 +792,7 @@ main(int argc, char **argv)
 	check_file_views(app);
 	check_browser_media(app);
 	if (g_getenv("WORMINAL_PREVIEW_LOCAL_APP")) {
+		check_explorer_refresh(app);
 		Page *home = open_browser(app, g_getenv("WORMINAL_PREVIEW_LOCAL_APP"));
 		check_explorer(home->browser);
 		int home_count = g_list_length(app->pages);
