@@ -13,6 +13,8 @@ and can run with no windows. Each window maps early while its connection worker 
 font loading and shell startup overlap.
 Validated launches overlap connection requests and shell startup with widget construction;
 a per-request completion gate keeps GTK callbacks behind completed widget setup.
+`manage.py` is internal build/test/install tooling, never a user-facing application launcher.
+User workflows use the native application executable; do not require Python to launch the explorer.
 `manage.py build` compiles Alacritty colors, font family, size, spacing, and scrollback into a generated C header.
 The active installation is `/usr/local/bin/worminal`, with modules in `/usr/local/lib/worminal`.
 Build as the regular user to retain that user's Alacritty configuration, then publish with
@@ -94,7 +96,8 @@ existing paths win, and ./ or ../ disambiguate missing local paths.
 Local paths and file URLs use native WebKit handling. Worminal knows no explorer assets or build paths.
 The independently compiled `file-explorer/dist/index.html` is opened directly; changing it needs no native
 rebuild, reinstall, or frontend restart: normal Ctrl+R or reopening reads the new artifact.
-Its own `manage.py open` passes the HTML target and caller directory.
+Launch the explorer through the native browser CLI with the HTML target explicitly.
+Explorer changes take effect on explicit page reload/reopen; do not add live updates without a request.
 Generic read-only directory metadata and bounded regular-file reads belong to the initially selected local document,
 including query routes.
 A top-frame-only script owns its private per-view credential; subframes and other navigated documents have no access.
