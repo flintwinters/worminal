@@ -268,6 +268,46 @@ check_explorer(Browser *browser)
 
 static Page *open_browser(App *app, const char *url);
 
+/* A live owner must pick up a published explorer build without manual reload. */
+static void
+check_explorer_refresh(App *app)
+{
+	char *cwd = g_get_current_dir();
+	char *directory = g_build_filename(cwd, ".checks", "explorer-refresh-XXXXXX", NULL);
+	g_assert_nonnull(g_mkdtemp(directory));
+	char *path = g_build_filename(directory, "index.html", NULL);
+	char *source_path = g_filename_from_uri(g_getenv("WORMINAL_PREVIEW_LOCAL_APP"), NULL, NULL);
+	char *source = NULL;
+	g_assert_true(g_file_get_contents(source_path, &source, NULL, NULL));
+	g_assert_true(g_file_set_contents(path, source, -1, NULL));
+	char *url = g_filename_to_uri(path, NULL, NULL);
+	char *escaped = g_uri_escape_string(directory, NULL, FALSE);
+	char *target = g_strconcat(url, "?path=", escaped, "&sort=name&desc=0", NULL);
+	Page *page = open_browser(app, target);
+	WAIT(script_equals(page->browser, "document.querySelector('#path')?.textContent", directory));
+	GRegex *version = g_regex_new("name=\"explorer-build\" content=\"[^\"]+\"", 0, 0, NULL);
+	char *updated = g_regex_replace_literal(version, source, -1, 0,
+	    "name=\"explorer-build\" content=\"next-build\"", 0, NULL);
+	g_assert_cmpstr(source, !=, updated);
+	/* g_file_set_contents publishes by replacement, matching the explorer build operation. */
+	g_assert_true(g_file_set_contents(path, updated, -1, NULL));
+	WAIT(script_equals(page->browser, "new URLSearchParams(location.search).get('build')", "next-build"));
+	WAIT(script_equals(page->browser, "document.querySelector('#path')?.textContent", directory));
+	expect_script(page->browser, "document.querySelector('[data-sort=name]').textContent", "Name ↑");
+	/* A second launch through the same owner also reads the new revision. */
+	Page *second = open_browser(app, target);
+	WAIT(script_equals(second->browser, "document.querySelector('meta[name=explorer-build]')?.content", "next-build"));
+	int count = g_list_length(app->pages);
+	app_close(second);
+	WAIT(g_list_length(app->pages) == count - 1);
+	app_close(page);
+	WAIT(g_list_length(app->pages) == count - 2);
+	g_regex_unref(version);
+	g_unlink(path); g_rmdir(directory);
+	g_free(cwd); g_free(directory); g_free(path); g_free(source_path); g_free(source);
+	g_free(url); g_free(escaped); g_free(target); g_free(updated);
+}
+
 static void
 check_file_views(App *app)
 {
