@@ -415,6 +415,12 @@ client_message(Client *client, WirePacket *packet)
 	Tab *tab = tab_for_id(packet->tab);
 	uint32_t cols, rows, direction, amount;
 	Launch launch;
+	if (packet->type == WIRE_CAPABILITIES) {
+		uint32_t features;
+		if (!client->ready && !packet->tab && wire_get_u32(packet, &features) && packet->pos == packet->len)
+			client->features = features & WIRE_FEATURE_COPY_ROWS;
+		return;
+	}
 	if (packet->type == WIRE_HANDIN || packet->type == WIRE_HANDOFF) {
 		char *name = wire_get_string(packet);
 		int okay = 0;

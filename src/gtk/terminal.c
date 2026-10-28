@@ -793,6 +793,13 @@ terminal_packet(Terminal *t, WirePacket *p)
 		t->frame = (SessionFrame){v[0], v[1], v[2], v[3], v[4], v[5]};
 		tsessionimportframe(t->session, &t->frame);
 		t->page->live = TRUE;
+	} else if (p->type == WIRE_COPY_ROWS) {
+		uint32_t source, destination, count;
+		if (!t->session || !wire_get_u32(p, &source) || !wire_get_u32(p, &destination) ||
+		    !wire_get_u32(p, &count) || p->pos != p->len || !count || count > (uint32_t)t->frame.rows ||
+		    source > (uint32_t)t->frame.rows - count || destination > (uint32_t)t->frame.rows - count) return;
+		tsessioncopyrows(t->session, source, destination, count);
+		for (uint32_t row = destination; row < destination + count; row++) t->damaged_rows[row] = TRUE;
 	} else if (p->type == WIRE_ROW) {
 		uint32_t row;
 		if (!t->session || !wire_get_u32(p, &row) || row >= (uint32_t)t->frame.rows ||

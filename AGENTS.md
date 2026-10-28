@@ -79,6 +79,7 @@ Service output batching sleeps to its existing deadline rather than adding a fre
 The SSH bridge forwards both directions independently; congested display output must never block incoming input.
 Catalog broadcasts describe changed state, not parser operations; complete frames queue before transport flushing.
 Dirty rows replicate only when their encoded cells differ from the last queued viewport; ownership release frees it.
+Negotiated row moves preserve scrolling as a move plus exposed rows; legacy clients retain complete row packets.
 `manage.py check-preview*` and `preview-perf` validate GTK; `build-preview` retains compatibility binary names.
 Private Wayland checks use a project-local Weston runtime and matching virtual-seat ABI, without X11 fallback.
 

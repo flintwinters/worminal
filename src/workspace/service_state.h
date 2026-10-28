@@ -7,6 +7,7 @@ typedef struct Client Client;
 typedef struct Tab Tab;
 struct Client {
 	int fd, ready;
+	uint32_t features;
 	pid_t pid;
 	int needs_resync;
 	WireReader input;

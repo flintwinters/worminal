@@ -5,6 +5,10 @@ case "$*" in
   "-T -C key-test worminald --bridge") ;;
   *) exit 64 ;;
 esac
+if [ -n "${WORMINAL_TEST_REAL_MASTER:-}" ]; then
+  exec /usr/bin/ssh -T -C -o BatchMode=yes -o ConnectTimeout=10 "$WORMINAL_TEST_REAL_MASTER" \
+    "env WORMINAL_SHARED_SOCKET_SCOPE=$WORMINAL_SHARED_SOCKET_SCOPE worminald --bridge"
+fi
 if [ -n "${WORMINAL_TEST_BRIDGE_DELAY:-}" ]; then
   sleep "$WORMINAL_TEST_BRIDGE_DELAY"
 fi

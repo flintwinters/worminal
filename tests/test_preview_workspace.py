@@ -424,6 +424,54 @@ class PreviewWorkspaceTest(unittest.TestCase):
         print(f"Rows for 12 wheel events with no scrollback: {rows}")
         self.assertEqual(rows, 0, "scrolling a stationary viewport sent full screen snapshots")
 
+    def check_scrolling_row_moves(self, negotiated):
+        if negotiated:
+            send(self.peer, 28, payload=number(1))
+        code = ("import os\nos.write(1,'READY\\r\\none界\\r\\ntwo\\r\\nthree'.encode())\n"
+                "os.write(1,b'\\x1b]2;copy-ready\\a')\n"
+                "os.read(0,1); os.write(1,b'\\r\\nNEW-UP\\x1b]2;copy-up\\a')\n"
+                "os.read(0,1); os.write(1,b'\\x1b[H\\x1b[LNEW-DOWN\\x1b]2;copy-down\\a')\n"
+                "os.read(0,1)\n")
+        tab = self.launch("stty raw -echo; exec python3 -u -c " + shlex.quote(code))
+        screen = [None] * 4
+
+        def frame_until(title):
+            moves, rows = [], []
+            while True:
+                kind, identity, payload = wire_packet(self.peer, version=2)
+                if identity == tab and kind == 9:
+                    row, = struct.unpack_from("!I", payload)
+                    screen[row] = [struct.unpack_from("!4I", payload, offset)
+                                   for offset in range(4, len(payload), 16)]
+                    rows.append(row)
+                elif identity == tab and kind == 29:
+                    source, destination, count = struct.unpack("!3I", payload)
+                    self.assertTrue(0 < count <= 4 and source <= 4 - count and destination <= 4 - count)
+                    screen[destination:destination + count] = [r[:] for r in screen[source:source + count]]
+                    moves.append((source, destination, count))
+                if kind == 7 and records(payload)[0][5] == title:
+                    return moves, rows
+
+        frame_until("copy-ready")
+        original = [r[:] for r in screen]
+        send(self.peer, 3, tab, b"x")
+        moves, rows = frame_until("copy-up")
+        self.assertEqual(screen[:3], original[1:], "scroll-up lost Unicode cells or attributes")
+        self.assertEqual(moves, [(1, 0, 3)] if negotiated else [])
+        self.assertEqual(rows, [3] if negotiated else [0, 1, 2, 3])
+        previous = [r[:] for r in screen]
+        send(self.peer, 3, tab, b"x")
+        moves, rows = frame_until("copy-down")
+        self.assertEqual(screen[1:], previous[:3], "overlapping downward move corrupted cells")
+        self.assertEqual(moves, [(0, 1, 3)] if negotiated else [])
+        self.assertEqual(rows, [0] if negotiated else [0, 1, 2, 3])
+
+    def test_scrolling_uses_negotiated_row_moves(self):
+        self.check_scrolling_row_moves(True)
+
+    def test_scrolling_preserves_legacy_row_packets_without_negotiation(self):
+        self.check_scrolling_row_moves(False)
+
     def test_stale_resize_cannot_reclaim_another_controller(self):
         tab = self.launch("stty raw -echo; printf READY; exec cat")
         with self.connect() as peer:

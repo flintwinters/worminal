@@ -13,6 +13,16 @@ check_session_view(void)
 		row[7].mode = ATTR_WRAP;
 		tsessionimportrow(view, y, row, 8);
 	}
+	Glyph saved[3][8];
+	for (int y = 0; y < 3; y++) memcpy(saved[y], view->term.line[y], sizeof(saved[y]));
+	tsessioncleandirty(view);
+	tsessioncopyrows(view, 1, 0, 2);
+	assert(view->term.line[0][0].u == 'B' && view->term.line[1][0].u == 'C');
+	assert(view->term.line[0][7].mode & ATTR_WRAP);
+	assert(tsessionrowdirty(view, 0) && tsessionrowdirty(view, 1) && !tsessionrowdirty(view, 2));
+	tsessioncopyrows(view, 0, 1, 2);
+	assert(view->term.line[1][0].u == 'B' && view->term.line[2][0].u == 'C');
+	for (int y = 0; y < 3; y++) tsessionimportrow(view, y, saved[y], 8);
 	frame = (SessionFrame){4, 3, 3, 2, 2, 0};
 	tsessionimportframe(view, &frame);
 	assert(view->term.histlen == 0 && view->term.hist == NULL);

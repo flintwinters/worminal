@@ -47,7 +47,13 @@ enum wire_type {
 	WIRE_COMMAND_DONE,
 	WIRE_HANDIN,
 	WIRE_HANDOFF,
+	WIRE_CAPABILITIES,
+	WIRE_COPY_ROWS,
 };
+
+/* Advertise before HELLO/ATTACH. Older daemons ignore the optional packet;
+ * unadvertised clients must continue receiving the original row encoding. */
+enum { WIRE_FEATURE_COPY_ROWS = 1u << 0 };
 
 typedef struct {
 	unsigned char *data;

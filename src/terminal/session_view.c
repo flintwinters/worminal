@@ -121,3 +121,18 @@ tsessionimportrow(TermSession *chosen, int row, const Glyph *glyphs, int cols)
 	memcpy(term->line[row], glyphs, cols * sizeof(*glyphs));
 	term->dirty[row] = 1;
 }
+
+/* Imported row moves have memmove semantics, including overlapping ranges. */
+void
+tsessioncopyrows(TermSession *chosen, int source, int destination, int count)
+{
+	Term *term = &chosen->term;
+	if (count < 1 || count > term->row || source < 0 || destination < 0 ||
+	    source > term->row - count || destination > term->row - count)
+		die("invalid imported row move\n");
+	for (int step = 0; step < count; step++) {
+		int offset = destination > source ? count - 1 - step : step;
+		memmove(term->line[destination + offset], term->line[source + offset], term->col * sizeof(Glyph));
+		term->dirty[destination + offset] = 1;
+	}
+}
