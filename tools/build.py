@@ -15,7 +15,7 @@ VERSION = "0.9.3"
 BROWSER_ABI = next(line.split()[2] for line in (ROOT / "src/gtk/browser_module.h").read_text().splitlines()
                    if line.startswith("#define WORMINAL_BROWSER_ABI "))
 BROWSER_MODULE = f"browser-v{BROWSER_ABI}.so"
-SESSION_SUPPORT = ("terminal/session_view.c", "terminal/session_transfer.c")
+SESSION_SUPPORT = ("terminal/session_view.c", "terminal/session_transfer.c", "terminal/render_sync.c")
 COMMON = ("terminal/defaults.c", "terminal/st.c", *SESSION_SUPPORT,
           "workspace/wire.c", "workspace/workspace_socket.c")
 CLIENT = (*COMMON, "workspace/workspace_client.c", "x11/x.c", "x11/url.c")

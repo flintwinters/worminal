@@ -685,10 +685,10 @@ class NativeTerminalTest(unittest.TestCase):
                 for window in windows():
                     subprocess.run(["xdotool", "windowclose", window], env=env,
                                    check=True)
-                owner.wait(timeout=3)
-                self.assertEqual(owner.returncode, 0)
-                second.wait(timeout=3)
-                self.assertEqual(second.returncode, 0)
+                _, owner_errors = owner.communicate(timeout=3)
+                _, second_errors = second.communicate(timeout=3)
+                self.assertEqual(owner.returncode, 0, owner_errors.decode(errors="replace"))
+                self.assertEqual(second.returncode, 0, second_errors.decode(errors="replace"))
             finally:
                 for process in (owner, second):
                     if process is not None:

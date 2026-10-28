@@ -22,6 +22,7 @@
 #include "win.h"
 #include "st_state.h"
 #include "session_transfer.h"
+#include "render_sync.h"
 #include WORMINAL_THEME_HEADER
 
 #if   defined(__linux)
@@ -1166,6 +1167,7 @@ void
 treset(void)
 {
 	uint i;
+	tsessionsetsync(session, 0);
 
 	term.c = (TCursor){{
 		.mode = ATTR_NULL,
@@ -1826,6 +1828,9 @@ tsetmode(int priv, int set, const int *args, int narg)
 				break;
 			case 2004: /* 2004: bracketed paste mode */
 				xsetmode(set, MODE_BRCKTPASTE);
+				break;
+			case 2026: /* Synchronized application redraw. */
+				tsessionsetsync(session, set);
 				break;
 			/* Not implemented mouse modes. See comments there. */
 			case 1001: /* mouse highlight mode; can hang the

@@ -2,6 +2,23 @@
 #ifndef WORMINAL_WORKSPACE_FRAMES_H
 #define WORMINAL_WORKSPACE_FRAMES_H
 
+static int
+frame_state_equal(SessionFrame before, SessionFrame after)
+{
+	return before.cols == after.cols && before.rows == after.rows && before.cursor_x == after.cursor_x &&
+	    before.cursor_y == after.cursor_y && before.scroll == after.scroll && before.alternate == after.alternate;
+}
+
+static int
+frame_changed_since(TermSession *session, SessionFrame before)
+{
+	SessionFrame after = tsessionframe(session);
+	if (!frame_state_equal(before, after)) return 1;
+	for (int row = 0; row < after.rows; row++)
+		if (tsessionrowdirty(session, row)) return 1;
+	return 0;
+}
+
 static void
 frame_encode_row(WireBuffer *buffer, Line line, int cols)
 {
@@ -67,25 +84,32 @@ frame_copy_rows(Client *client, Tab *tab, SessionFrame frame, WireBuffer *curren
 	return 1;
 }
 
-static void
+static int
 send_frame(Client *client, Tab *tab, int full)
 {
 	if (!tab->session)
-		return;
+		return 0;
 	SessionFrame frame = tsessionframe(tab->session);
 	WireBuffer buffer = {0}, current = {0};
+	int sent = 0;
 	if (!client || client->fd < 0 || !client->ready)
-		return;
+		return 0;
+	if (tsessionrenderdelay(tab->session)) {
+		tab->pending_frame = 1;
+		if (full) tab->screen.len = 0; /* Deferred claims/resyncs still require every row. */
+		return 0;
+	}
 	if (client->output.len - client->sent > 1024u * 1024u) {
 		client->needs_resync = 1;
-		return;
+		return 0;
 	}
 	size_t row_bytes = (size_t)frame.cols * WIRE_CELL_BYTES;
-	full |= tab->screen_cols != frame.cols || tab->screen.len != row_bytes * frame.rows;
+	full |= tab->screen_frame.cols != frame.cols || tab->screen.len != row_bytes * frame.rows;
 	if (full) {
 		tab->screen.len = 0;
-		tab->screen_cols = frame.cols;
 	}
+	int changed = full || !frame_state_equal(frame, tab->screen_frame);
+	size_t queued_before = client->output.len - client->sent;
 	wire_put_u32(&buffer, frame.cols);
 	wire_put_u32(&buffer, frame.rows);
 	wire_put_u32(&buffer, frame.cursor_x);
@@ -95,8 +119,11 @@ send_frame(Client *client, Tab *tab, int full)
 	/* Queue a complete frame before waking SSH; row writes can fragment compression. */
 	if (!client_queue(client, WIRE_FRAME, tab->id, &buffer))
 		goto done;
-	if (!full && (client->features & WIRE_FEATURE_COPY_ROWS) && frame_copy_rows(client, tab, frame, &current) < 0)
-		goto done;
+	if (!full && (client->features & WIRE_FEATURE_COPY_ROWS)) {
+		int moved = frame_copy_rows(client, tab, frame, &current);
+		if (moved < 0) goto done;
+		changed |= moved;
+	}
 	for (int row = 0; row < frame.rows; row++) {
 		buffer.len = 0;
 		if (!full && !tsessionrowdirty(tab->session, row))
@@ -112,21 +139,36 @@ send_frame(Client *client, Tab *tab, int full)
 			continue;
 		if (!client_queue(client, WIRE_ROW, tab->id, &buffer))
 			goto done;
+		changed = 1;
 		if (full) wire_put_bytes(&tab->screen, cells, row_bytes);
 		else memcpy(tab->screen.data + row * row_bytes, cells, row_bytes);
 	}
-	client_send(client, WIRE_FRAME_FINISH, tab->id, NULL);
+	if (!changed && !tab->frame_reply) {
+		/* client_queue compacts any sent prefix but never flushes. Discard only
+		 * this unchanged frame's header; retain earlier queued packet bytes. */
+		client->output.len = queued_before;
+		goto done;
+	}
+	sent = client_send(client, WIRE_FRAME_FINISH, tab->id, NULL);
+	if (sent) {
+		tab->screen_frame = frame;
+		tab->frame_reply = 0;
+	}
 done:
 	wire_buffer_free(&current);
 	wire_buffer_free(&buffer);
+	return sent;
 }
 
-static void
+static int
 flush_frame(Tab *tab)
 {
-	send_frame(tab->controller, tab, 0);
+	if (tsessionrenderdelay(tab->session)) return 0;
+	int sent = send_frame(tab->controller, tab, 0);
+	if (sent) tab->input_frame = 0;
 	tsessioncleandirty(tab->session);
 	tab->pending_frame = 0;
+	return sent;
 }
 
 #endif

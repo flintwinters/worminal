@@ -2,6 +2,7 @@
 #ifndef WORMINAL_SERVICE_STATE_H
 #define WORMINAL_SERVICE_STATE_H
 #include "st.h"
+#include "session_view.h"
 #include "wire.h"
 typedef struct Client Client;
 typedef struct Tab Tab;
@@ -21,7 +22,9 @@ struct Tab {
 	WireBuffer input;
 	size_t input_sent;
 	WireBuffer screen; /* Encoded cells last queued to the controller, not PTY dirty state. */
-	int screen_cols;
+	SessionFrame screen_frame;
+	WireBuffer catalog; /* Last published metadata stays stable during synchronized redraws. */
+	int catalog_pending;
 	char *title, *initial_title, *directory, *clipboard;
 	char *url; /* Non-NULL marks a browser record: no terminal or PTY. */
 	char **colors;
@@ -30,6 +33,7 @@ struct Tab {
 	Client *print_client;
 	int pending_frame;
 	int input_frame;
+	int frame_reply;
 	Tab *next;
 };
 
@@ -37,6 +41,7 @@ static inline void
 tab_release_control(Tab *tab)
 {
 	tab->controller = NULL;
+	tab->frame_reply = 0;
 	wire_buffer_free(&tab->screen);
 	tab->screen = (WireBuffer){0};
 }
