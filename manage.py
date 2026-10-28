@@ -250,6 +250,19 @@ def check_headless():
     raise typer.Exit(run_headless_checks())
 
 
+@app.command("check-bridge")
+def check_bridge():
+    """Verify input and output stay independent under SSH bridge congestion, on v1 and v2."""
+    native_build.build_targets("worminald-x11", "worminald-preview")
+    for version, daemon in (("1", "worminald-x11"), ("2", "worminald-preview")):
+        code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                    "-p", "test_workspace.py", "-k", "bridge_congestion", "-q"],
+                   env={**os.environ, "WORMINAL_TEST_WORKSPACE_DAEMON": daemon,
+                        "WORMINAL_TEST_BRIDGE_VERSION": version})
+        if code:
+            raise typer.Exit(code)
+
+
 @app.command("check-window-state")
 def check_window_state():
     """Check the public session-bus directory interface on a private bus and display."""
