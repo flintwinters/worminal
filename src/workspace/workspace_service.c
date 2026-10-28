@@ -458,7 +458,7 @@ client_message(Client *client, WirePacket *packet)
 		tsessionremove(tab->session); tab->session = NULL;
 		wire_buffer_free(&tab->input); tab->input = (WireBuffer){0}; tab->input_sent = 0;
 		tab->pending_frame = tab->input_frame = 0;
-		tab->controller = tab->print_client = NULL;
+		tab_release_control(tab); tab->print_client = NULL;
 		tab->mode = 0;
 		free(tab->title); tab->title = xstrdup("Browser");
 		free(tab->directory); tab->directory = xstrdup("");
