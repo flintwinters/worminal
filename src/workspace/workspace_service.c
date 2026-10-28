@@ -26,6 +26,7 @@
 #include "frame_schedule.h"
 #include "service_diagnostics.h"
 #include "workspace_handoff.h"
+#include "workspace_bridge.h"
 typedef struct {
 	uint32_t cols, rows, allowalt, argc, envc;
 	char *title, *cwd, *line, *output, *windowid;
@@ -799,34 +800,9 @@ static int
 bridge(void)
 {
 	int fd = workspace_ensure();
-	char buffer[16384];
 	if (fd < 0)
 		return 1;
-	for (;;) {
-		fd_set readers;
-		FD_ZERO(&readers);
-		FD_SET(0, &readers);
-		FD_SET(fd, &readers);
-		if (select(fd + 1, &readers, NULL, NULL, NULL) < 0) {
-			if (errno == EINTR)
-				continue;
-			break;
-		}
-		int source = FD_ISSET(fd, &readers) ? fd : 0;
-		int target = source == fd ? 1 : fd;
-		ssize_t count = read(source, buffer, sizeof(buffer));
-		if (count <= 0)
-			break;
-		for (ssize_t done = 0; done < count;) {
-			ssize_t written = write(target, buffer + done, count - done);
-			if (written < 0 && errno == EINTR)
-				continue;
-			if (written <= 0)
-				goto out;
-			done += written;
-		}
-	}
-out:
+	workspace_bridge(fd);
 	close(fd);
 	return 0;
 }

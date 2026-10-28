@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+import select
 import socket
 import struct
 import subprocess
@@ -10,7 +11,7 @@ import unittest
 import uuid
 
 
-from workspace_protocol import number, string, send, wait_kind
+from workspace_protocol import number, string, send, wait_kind, read_exact
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -19,6 +20,52 @@ HELLO, INPUT, FOCUS, CATALOG, FRAME, ROW, FINISH, CLIPBOARD, STOP, PRINT = 1, 3,
 
 
 class WorkspaceServiceTest(unittest.TestCase):
+    def test_bridge_congestion_does_not_block_opposite_direction(self):
+        for congested_output in (True, False):
+            with self.subTest(congested_output=congested_output):
+                scope = f"bridge-congestion-{os.getpid()}-{uuid.uuid4().hex}"
+                env = {**os.environ, "WORMINAL_SHARED_SOCKET_SCOPE": scope}
+                with socket.socket(socket.AF_UNIX) as listener:
+                    endpoint = ("worminal-workspace-v2" if os.environ.get("WORMINAL_TEST_BRIDGE_VERSION") == "2"
+                                else "worminal-workspace")
+                    listener.bind(f"\0{endpoint}-{os.getuid()}-{scope}")
+                    listener.listen(1)
+                    listener.settimeout(3)
+                    local, remote = socket.socketpair()
+                    remote.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
+                    process = subprocess.Popen([str(DAEMON), "--bridge"], env=env,
+                                               stdin=remote, stdout=remote, stderr=subprocess.PIPE)
+                    remote.close()
+                    try:
+                        with local, listener.accept()[0] as service:
+                            sender, receiver = (service, local) if congested_output else (local, service)
+                            sender.setblocking(False)
+                            payload = bytes(range(256)) * 16384
+                            sent = 0
+                            deadline = time.monotonic() + 3
+                            # Fill the transport and bridge buffers without consuming
+                            # the destination. Readiness settling proves backpressure.
+                            while sent < len(payload) and time.monotonic() < deadline:
+                                if not select.select([], [sender], [], .2)[1]:
+                                    break
+                                try:
+                                    sent += sender.send(payload[sent:])
+                                except BlockingIOError:
+                                    continue
+                            self.assertGreater(sent, 0)
+                            self.assertLess(sent, len(payload), "fixture did not saturate bridge")
+                            sender.settimeout(2)
+                            receiver.settimeout(2)
+                            marker = b"opposite-direction-still-responsive"
+                            receiver.sendall(marker)
+                            self.assertEqual(read_exact(sender, len(marker)), marker)
+                            # Draining resumes exact, ordered delivery after short writes.
+                            self.assertEqual(read_exact(receiver, sent), payload[:sent])
+                    finally:
+                        local.close()
+                        process.terminate()
+                        process.communicate(timeout=3)
+
     def test_blocked_pty_does_not_pause_new_shells_or_parser_replies(self):
         scope = f"blocked-{os.getpid()}-{uuid.uuid4().hex}"
         env = {**os.environ, "WORMINAL_SHARED_SOCKET_SCOPE": scope}
