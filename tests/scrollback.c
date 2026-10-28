@@ -40,6 +40,7 @@ main(void)
 	assert(pasted == 13 && memcmp(text, "one\r\n[201~two", pasted) == 0);
 	check_session_transfer();
 	check_session_view();
+	check_render_sync();
 	Arg one = { .i = 1 }, page = { .i = -1 };
 	int i, before;
 

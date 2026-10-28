@@ -472,6 +472,172 @@ class PreviewWorkspaceTest(unittest.TestCase):
     def test_scrolling_preserves_legacy_row_packets_without_negotiation(self):
         self.check_scrolling_row_moves(False)
 
+    def test_synchronized_redraw_freezes_its_metadata_without_blocking_other_tabs(self):
+        code = ("import os\nos.write(1,b'READY\\x1b]2;stable\\a')\n"
+                "os.read(0,1)\n"
+                "os.write(1,b'\\x1b[?2026h\\x1b[?25l\\x1b[Hpartial\\x1b]2;partial\\a')\n"
+                "os.read(0,1)\n"
+                "os.write(1,b'\\x1b[H\\x1b[2KCOMPLETE\\x1b[?25h\\x1b]2;complete\\a\\x1b[?2026l')\n"
+                "os.read(0,1)\n")
+        tab = self.launch('stty raw -echo; exec python3 -u -c ' + shlex.quote(code))
+        wait_kind(self.peer, 7)
+        other = self.launch("stty raw -echo; printf READY; dd bs=1 count=1 >/dev/null 2>&1; "
+                            "printf '\\033]2;other-changed\\a'; exec cat")
+        wait_kind(self.peer, 10, other)
+        send(self.peer, 3, tab, b'x')
+        printed = b''
+        while b'\x1b]2;partial\a' not in printed:
+            _, chunk = wait_kind(self.peer, 14, tab)
+            printed += chunk
+        send(self.peer, 3, other, b'x')
+        while True:
+            kind, identity, payload = wire_packet(self.peer, version=2)
+            self.assertFalse(identity == tab and kind in (8, 9, 10), 'partial redraw escaped its gate')
+            if kind == 7:
+                titles = {record[0]: record[5] for record in records(payload)}
+                self.assertEqual(titles[tab], 'stable', 'transient redraw metadata was published')
+                if titles[other] == 'other-changed':
+                    break
+        # Explicit snapshots and catalog queries also respect the same gate.
+        with self.connect() as peer:
+            send(peer, 19)
+            _, payload = wait_kind(peer, 7)
+            self.assertEqual(records(payload)[0][5], 'stable')
+            send(peer, 4, tab, number(40) + number(4))
+            send(peer, 3, tab, b'y')
+            rows = []
+            first = ''
+            while True:
+                kind, identity, payload = wire_packet(peer, version=2)
+                if identity == tab and kind == 9:
+                    row, = struct.unpack_from('!I', payload)
+                    rows.append(row)
+                    if not row:
+                        first = ''.join(chr(struct.unpack_from('!I', payload, offset)[0])
+                                        for offset in range(4, len(payload), 16))
+                if kind == 7 and records(payload)[0][5] == 'complete':
+                    break
+            self.assertEqual(rows, [0, 1, 2, 3], 'deferred ownership claim lost its full snapshot')
+            self.assertTrue(first.startswith('COMPLETE'))
+
+    def test_synchronized_redraw_timeout_publishes_without_pty_activity_or_busy_wait(self):
+        code = ("import os\nos.write(1,b'READY')\nos.read(0,1)\n"
+                "os.write(1,b'\\x1b[?2026h\\x1b[HRECOVERED\\x1b]2;held\\a')\n"
+                "os.read(0,1)\n")
+        tab = self.launch('stty raw -echo; exec python3 -u -c ' + shlex.quote(code))
+        wait_kind(self.peer, 10, tab)
+        started = time.monotonic()
+        before_cpu = cpu_time(self.daemon.pid)
+        send(self.peer, 3, tab, b'x')
+        visible = False
+        while True:
+            kind, identity, payload = wire_packet(self.peer, version=2)
+            if identity == tab and kind == 9 and struct.unpack_from('!I', payload)[0] == 0:
+                text = ''.join(chr(struct.unpack_from('!I', payload, offset)[0])
+                               for offset in range(4, len(payload), 16))
+                visible = text.startswith('RECOVERED')
+            if visible and kind == 10 and identity == tab:
+                break
+        elapsed = time.monotonic() - started
+        self.assertGreater(elapsed, .09, 'redraw was published before its bounded hold expired')
+        self.assertLess(elapsed, .75, 'a missing end marker froze the view')
+        self.assertLess(cpu_time(self.daemon.pid) - before_cpu, .08, 'render gate busy-waited')
+        _, payload = wait_kind(self.peer, 7)
+        self.assertEqual(records(payload)[0][5], 'held')
+
+    def test_input_without_local_echo_does_not_send_an_empty_frame(self):
+        tab = self.launch('stty raw -echo; printf READY; exec sleep 30')
+        wait_kind(self.peer, 10, tab)
+        send(self.peer, 3, tab, b'x')
+        send(self.peer, 19)  # Ordered barrier after input, with no child output possible.
+        while True:
+            kind, identity, _ = wire_packet(self.peer, version=2)
+            self.assertFalse(identity == tab and kind in (8, 9, 10), 'input generated an unchanged frame')
+            if kind == 7:
+                break
+
+        with self.connect() as peer:
+            send(peer, 19)
+            wait_kind(peer, 7)
+            send(peer, 3, tab, b'y')  # Input can claim a tab even when the child is silent.
+            rows = []
+            while True:
+                kind, identity, payload = wire_packet(peer, version=2)
+                if identity == tab and kind == 9:
+                    rows.append(struct.unpack_from('!I', payload)[0])
+                if identity == tab and kind == 10:
+                    break
+            self.assertEqual(rows, [0, 1, 2, 3])
+
+    def test_synchronized_redraw_keeps_parser_replies_live(self):
+        code = ("import os\nos.write(1,b'READY')\nos.read(0,1)\n"
+                "os.write(1,b'\\x1b[?2026h\\x1b[6n')\n"
+                "reply=b''\nwhile not reply.endswith(b'R'): reply+=os.read(0,32)\n"
+                "os.write(1,b'\\x1b[HREPLIED\\x1b[?2026l\\x1b]2;replied\\a')\n"
+                "os.read(0,1)\n")
+        tab = self.launch('stty raw -echo; exec python3 -u -c ' + shlex.quote(code))
+        wait_kind(self.peer, 10, tab)
+        send(self.peer, 3, tab, b'x')
+        visible = False
+        while True:
+            kind, identity, payload = wire_packet(self.peer, version=2)
+            if identity == tab and kind == 9 and struct.unpack_from('!I', payload)[0] == 0:
+                visible = ''.join(chr(struct.unpack_from('!I', payload, offset)[0])
+                                  for offset in range(4, len(payload), 16)).startswith('REPLIED')
+            if kind == 7 and records(payload)[0][5] == 'replied':
+                break
+        self.assertTrue(visible, 'render deferral blocked the parser reply or its final frame')
+
+    def test_unchanged_frame_preserves_a_partially_sent_snapshot(self):
+        checks = ROOT / '.checks'
+        checks.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix='frame-queue-', dir=checks) as directory:
+            marker = Path(directory) / 'raw-ready'
+            code = ("import os,tty\nfrom pathlib import Path\ntty.setraw(0)\n"
+                    f"Path({str(marker)!r}).touch()\n"
+                    "os.read(0,1); os.write(1,b'\\x1b]2;finished\\a'); os.read(0,1)\n")
+            args = ['python3', '-u', '-c', code]
+            payload = b''.join((number(400), number(200), number(1), number(len(args)), number(0),
+                                string('queue'), string(str(ROOT)), string(''), string(''), string(''),
+                                *(string(arg) for arg in args)))
+            send(self.peer, 1, payload=payload)
+            tab = None
+            rows, frames, finished = 0, 0, 0
+            while rows < 70:
+                kind, identity, _ = wire_packet(self.peer, version=2)
+                if kind == 8:
+                    tab = identity
+                    frames += 1
+                if kind == 9:
+                    rows += 1
+            # The 1.28 MiB snapshot exceeds the Unix socket's send buffer.
+            # Stop reading midway so a no-op redraw must retain its queued tail.
+            deadline = time.monotonic() + 3
+            while not marker.exists():
+                if time.monotonic() > deadline:
+                    self.fail('raw PTY fixture did not become ready')
+                time.sleep(.001)
+            send(self.peer, 3, tab, b'x')
+            with self.connect() as observer:
+                while True:
+                    send(observer, 19)
+                    _, catalog = wait_kind(observer, 7)
+                    if records(catalog)[0][5] == 'finished':
+                        break
+                    if time.monotonic() > deadline:
+                        self.fail('blocked display output prevented the no-op update')
+                    time.sleep(.001)
+            while True:
+                kind, identity, payload = wire_packet(self.peer, version=2)
+                if identity == tab:
+                    frames += kind == 8
+                    rows += kind == 9
+                    finished += kind == 10
+                if kind == 7 and records(payload)[0][5] == 'finished':
+                    break
+            self.assertEqual((frames, rows, finished), (1, 200, 1),
+                             'unchanged frame corrupted queued bytes or added a redundant frame')
+
     def test_stale_resize_cannot_reclaim_another_controller(self):
         tab = self.launch("stty raw -echo; printf READY; exec cat")
         with self.connect() as peer:
@@ -489,8 +655,8 @@ class PreviewWorkspaceTest(unittest.TestCase):
 
     def test_new_tab_output_frame_latency(self):
         # A separately paced tab keeps the shared batching clock active.
-        background = ("import os,time\nos.write(1,b'READY')\nwhile True:\n"
-                      " os.write(1,b'\\x1b[H.'); time.sleep(.004)\n")
+        background = ("import os,time\nos.write(1,b'READY'); i=0\nwhile True:\n"
+                      " os.write(1,b'\\x1b[H'+bytes([46+i%2])); i+=1; time.sleep(.004)\n")
         self.launch(f"exec python3 -u -c {shlex.quote(background)}")
         samples, frames, count = [], 0, 40
         started_cpu = cpu_time(self.daemon.pid)

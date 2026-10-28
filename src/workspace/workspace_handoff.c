@@ -149,6 +149,7 @@ free_tab(Tab *tab)
 		free(tab->colors);
 	}
 	wire_buffer_free(&tab->input);
+	wire_buffer_free(&tab->catalog);
 	free(tab);
 }
 

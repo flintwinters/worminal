@@ -70,7 +70,7 @@ def check_file_limits():
         raise typer.Exit(1)
 
 
-def run_checks():
+def run_checks(match=None):
     if check_privacy(ROOT):
         return 1
     native_build.build_targets(
@@ -82,8 +82,9 @@ def run_checks():
     code = run_native_checks()
     if code:
         return code
-    code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-q"])
-    return code or preview_checks("x11")
+    code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-q",
+                *(["-k", match] if match else [])])
+    return code or (0 if match else preview_checks("x11"))
 
 
 def run_native_checks():
@@ -191,9 +192,9 @@ def check_preview_qtile():
 
 
 @app.command()
-def check():
+def check(match: str = typer.Option(None, help="Run matching Python checks; full suite is the default.")):
     """Run the local native and private-display regression suite."""
-    raise typer.Exit(run_checks())
+    raise typer.Exit(run_checks(match))
 
 
 @app.command("check-privacy")
@@ -272,7 +273,8 @@ def check_network(daemon: Path = typer.Option(None, help="Compatible v2 daemon b
     raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                          "-p", "test_preview_workspace.py", "-k", "redundant_catalog",
                          "-k", "frame_transport", "-k", "redraw_rows", "-k", "scroll_at_boundary",
-                         "-k", "scrolling_", "-q"],
+                         "-k", "scrolling_", "-k", "synchronized_redraw", "-k", "input_without_local_echo",
+                         "-k", "partially_sent_snapshot", "-q"],
                         env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(daemon.resolve())}))
 
 
@@ -509,6 +511,13 @@ def latency_shell():
 def master_perf(host: str):
     """Compare ordinary SSH with v2 input/frame latency, scrolling, and tab-switch traffic."""
     raise typer.Exit(run([sys.executable, "tests/master_perf.py", host]))
+
+
+@app.command("codex-perf")
+def codex_perf(host: str, visible: bool = typer.Option(False, help="Observe real GTK pixels on private Xvfb.")):
+    """Compare unsubmitted typing in real Codex through ordinary SSH and --master."""
+    native_build.build_targets("worminald")
+    raise typer.Exit(run([sys.executable, "tests/codex_visible_perf.py" if visible else "tests/codex_perf.py", host]))
 
 
 @app.command("window-perf")

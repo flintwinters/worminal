@@ -2,6 +2,30 @@
 #include "../src/terminal/session_view.h"
 
 static void
+check_render_sync(void)
+{
+	TermSession *previous = tsessioncurrent(), *model = tsessionnew(8, 3);
+	const char *begin = "\033[?2026h", *end = "\033[?2026l";
+	twrite(begin, strlen(begin), 0);
+	int64_t deadline = model->render_sync_deadline;
+	assert(deadline && tsessionrenderdelay(model) > 0);
+	twrite(begin, strlen(begin), 0);
+	assert(model->render_sync_deadline == deadline);
+	model->render_sync_deadline = 1;
+	assert(tsessionrenderdelay(model) == 0 && model->render_sync_expired);
+	twrite(begin, strlen(begin), 0);
+	assert(model->render_sync_deadline == 0); /* Repeated begins cannot starve paint. */
+	twrite(end, strlen(end), 0);
+	assert(!model->render_sync_expired);
+	twrite(begin, strlen(begin), 0);
+	assert(tsessionrenderdelay(model) > 0);
+	treset();
+	assert(tsessionrenderdelay(model) == 0 && !model->render_sync_expired);
+	tsessionremove(model);
+	tsessionuse(previous);
+}
+
+static void
 check_session_view(void)
 {
 	TermSession *previous = tsessioncurrent(), *view = tsessionviewnew(8, 3);

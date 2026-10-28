@@ -75,6 +75,8 @@ struct TermSession {
 	char ttybuf[BUFSIZ];
 	int ttybuflen;
 	int remote_scroll;
+	int64_t render_sync_deadline;
+	int render_sync_expired;
 	TCursor saved[2];
 	struct TermSession *next;
 };

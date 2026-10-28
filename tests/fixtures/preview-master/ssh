@@ -6,8 +6,11 @@ case "$*" in
   *) exit 64 ;;
 esac
 if [ -n "${WORMINAL_TEST_REAL_MASTER:-}" ]; then
+  remote_daemon=${WORMINAL_TEST_REMOTE_DAEMON:-worminald}
+  case "$remote_daemon" in *[!a-zA-Z0-9_./-]* | "") exit 64 ;; esac
+  case "$WORMINAL_SHARED_SOCKET_SCOPE" in *[!a-zA-Z0-9_-]* | "") exit 64 ;; esac
   exec /usr/bin/ssh -T -C -o BatchMode=yes -o ConnectTimeout=10 "$WORMINAL_TEST_REAL_MASTER" \
-    "env WORMINAL_SHARED_SOCKET_SCOPE=$WORMINAL_SHARED_SOCKET_SCOPE worminald --bridge"
+    "env WORMINAL_SHARED_SOCKET_SCOPE=$WORMINAL_SHARED_SOCKET_SCOPE $remote_daemon --bridge"
 fi
 if [ -n "${WORMINAL_TEST_BRIDGE_DELAY:-}" ]; then
   sleep "$WORMINAL_TEST_BRIDGE_DELAY"

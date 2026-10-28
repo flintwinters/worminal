@@ -17,6 +17,7 @@
 #include "win.h"
 #include "session_view.h"
 #include "session_transfer.h"
+#include "render_sync.h"
 #include "wire.h"
 #include "workspace_socket.h"
 #include "browser_target.h"
@@ -208,25 +209,40 @@ catalog_buffer(void)
 	wire_put_u32(&buffer, closed_id);
 	wire_put_u32(&buffer, fallback_id);
 	for (Tab *tab = tabs; tab; tab = tab->next) {
-		wire_put_u32(&buffer, tab->id);
+		if (tab->session && tsessionrenderdelay(tab->session) && tab->catalog.len) {
+			wire_put_bytes(&buffer, tab->catalog.data, tab->catalog.len);
+			tab->catalog_pending = 1;
+			continue;
+		}
+		WireBuffer entry = {0};
+		wire_put_u32(&entry, tab->id);
 #ifdef WORMINAL_PREVIEW_PROTOCOL
-		wire_put_u32(&buffer, tab->url != NULL);
-		wire_put_string(&buffer, tab->url);
+		wire_put_u32(&entry, tab->url != NULL);
+		wire_put_string(&entry, tab->url);
 #endif
-		wire_put_u32(&buffer, tab->mode);
-		wire_put_u32(&buffer, tab->cursor);
-		wire_put_string(&buffer, tab->title);
-		wire_put_string(&buffer, tab->directory);
-		wire_put_u32(&buffer, sizeof(colorname) / sizeof(colorname[0]));
+		wire_put_u32(&entry, tab->mode);
+		wire_put_u32(&entry, tab->cursor);
+		wire_put_string(&entry, tab->title);
+		wire_put_string(&entry, tab->directory);
+		wire_put_u32(&entry, sizeof(colorname) / sizeof(colorname[0]));
 		for (size_t i = 0; i < sizeof(colorname) / sizeof(colorname[0]); i++)
-			wire_put_string(&buffer, tab->colors && tab->colors[i] ? tab->colors[i] : colorname[i]);
+			wire_put_string(&entry, tab->colors && tab->colors[i] ? tab->colors[i] : colorname[i]);
+		wire_put_bytes(&buffer, entry.data, entry.len);
+		wire_buffer_free(&tab->catalog);
+		tab->catalog = entry;
+		if (tab->catalog_pending) catalog_dirty = 1;
+		tab->catalog_pending = 0;
 	}
 	return buffer;
 }
 
+static int flush_frame(Tab *);
+
 static void
 send_catalog(Client *client)
 {
+	for (Tab *tab = tabs; tab; tab = tab->next)
+		if (tab->pending_frame) flush_frame(tab);
 	WireBuffer buffer = catalog_buffer();
 	client_send(client, WIRE_CATALOG, 0, &buffer);
 	wire_buffer_free(&buffer);
@@ -237,8 +253,7 @@ send_catalog(Client *client)
 static void
 broadcast_catalog(void)
 {
-	if (!catalog_dirty)
-		return;
+	if (!catalog_dirty) return;
 	WireBuffer buffer = catalog_buffer();
 	catalog_dirty = 0;
 	/* Repeated settings and hide/show pairs can leave the catalog unchanged.
@@ -392,6 +407,7 @@ tab_close(Tab *tab)
 			lasttab = lasttab->next;
 	}
 	wire_buffer_free(&tab->input);
+	wire_buffer_free(&tab->catalog);
 	tab_release_control(tab);
 	if (tab->session)
 		tsessionremove(tab->session);
@@ -575,21 +591,26 @@ client_message(Client *client, WirePacket *packet)
 		/* The controller receives incremental rows even while its tab is hidden.
 		 * Keep pending dirty rows when focus requires no full snapshot. */
 		if (new_controller || resized) {
-			send_frame(client, tab, 1);
-			tab->pending_frame = 0;
-			tsessioncleandirty(tab->session);
+			if (send_frame(client, tab, 1)) {
+				tab->pending_frame = 0;
+				tsessioncleandirty(tab->session);
+			}
 		}
 		break;
 	}
-	case WIRE_INPUT:
+	case WIRE_INPUT: {
 		if (packet->len > 65536)
 			break;
 		take_control(tab, client);
 		tsessionuse(tab->session);
+		SessionFrame before = tsessionframe(tab->session);
 		ttywrite((char *)packet->data, packet->len, 1);
-		send_frame(client, tab, 0);
-		tsessioncleandirty(tab->session);
+		/* An implicit ownership claim needs a baseline. Otherwise PTY input is
+		 * not a screen update unless local echo or a scrollback reset changed it. */
+		if ((!tab->screen.len || frame_changed_since(tab->session, before)) && send_frame(client, tab, 0))
+			tsessioncleandirty(tab->session);
 		break;
+	}
 	case WIRE_RELEASE:
 		if (tab->controller == client)
 			tab_release_control(tab);
@@ -608,8 +629,8 @@ client_message(Client *client, WirePacket *packet)
 			kscrollup(&steps);
 		else
 			kscrolldown(&steps);
-		send_frame(client, tab, 0);
-		tsessioncleandirty(tab->session);
+		tab->frame_reply = 1; /* Explicit scroll requests retain their completion response. */
+		if (send_frame(client, tab, 0)) tsessioncleandirty(tab->session);
 		break;
 	default:
 		break;
@@ -631,6 +652,7 @@ serve(void)
 		fd_set readers, writers;
 		int maxfd = listener;
 		int pending = 0;
+		long sync_delay = 0;
 		int watch_directories = 0;
 		FD_ZERO(&readers);
 		FD_ZERO(&writers);
@@ -643,6 +665,7 @@ serve(void)
 		int64_t directory_ns = monotonic_ns();
 		for (Tab *tab = tabs; tab; tab = tab->next) {
 			if (!tab->session) continue;
+			if (tab->catalog_pending && !tsessionrenderdelay(tab->session)) catalog_dirty = 1;
 			watch_directories = 1;
 			if (directory_ns >= next_directory_ns) refresh_directory(tab);
 		}
@@ -670,7 +693,11 @@ serve(void)
 					maxfd = client->fd;
 			}
 		for (Tab *tab = tabs; tab; tab = tab->next) {
-			pending |= tab->pending_frame;
+			long delay = tab->session ? tsessionrenderdelay(tab->session) : 0;
+			if (tab->pending_frame) {
+				if (!delay) pending = 1;
+				else if (!sync_delay || delay < sync_delay) sync_delay = delay;
+			}
 			int fd = tab->session ? tsessionfd(tab->session) : -1;
 			if (fd >= 0) {
 				FD_SET(fd, &readers);
@@ -689,8 +716,10 @@ serve(void)
 			long delay = MAX(next_directory_ns - monotonic_ns(), 0);
 			if (!pending || delay < flush_delay.tv_nsec) flush_delay.tv_nsec = delay;
 		}
+		if (sync_delay && ((!pending && !watch_directories) || sync_delay < flush_delay.tv_nsec))
+			flush_delay.tv_nsec = sync_delay;
 		if (pselect(maxfd + 1, &readers, &writers, NULL,
-		            pending || watch_directories ? &flush_delay : NULL, NULL) < 0) {
+		            pending || watch_directories || sync_delay ? &flush_delay : NULL, NULL) < 0) {
 			if (errno == EINTR)
 				continue;
 			return service_failure("workspace pselect");
@@ -705,10 +734,9 @@ serve(void)
 			ttyread();
 			refresh_directory(tab);
 			tab->pending_frame = 1;
-			if (tab->input_frame) {
-				/* The first reply bypasses batching; subsequent output still batches. */
+			if (tab->input_frame || (tab->controller && !tab->screen.len)) {
+				/* First input replies and deferred ownership claims bypass batching. */
 				flush_frame(tab);
-				tab->input_frame = 0;
 			}
 		}
 		if (handin_listener >= 0 && FD_ISSET(handin_listener, &readers)) {
@@ -756,8 +784,7 @@ serve(void)
 		int emitted = 0;
 		for (Tab *tab = tabs; tab; tab = tab->next)
 			if (tab->pending_frame && due) {
-				flush_frame(tab);
-				emitted = 1;
+				emitted |= flush_frame(tab);
 			}
 		/* Only emitted PTY frames advance the output batching deadline. */
 		if (emitted) last_frame = now;
