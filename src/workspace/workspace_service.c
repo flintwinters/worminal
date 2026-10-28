@@ -74,7 +74,7 @@ client_drop(Client *client)
 	client->sent = 0;
 	for (Tab *tab = tabs; tab; tab = tab->next)
 		if (tab->controller == client)
-			tab->controller = NULL;
+			tab_release_control(tab);
 	for (Tab *tab = tabs; tab; tab = tab->next)
 		if (tab->print_client == client)
 			tab->print_client = NULL;
@@ -134,6 +134,8 @@ take_control(Tab *tab, Client *client)
 {
 	if (tab->controller && tab->controller != client)
 		client_send(tab->controller, WIRE_RELEASE, tab->id, NULL);
+	if (tab->controller != client)
+		tab_release_control(tab);
 	tab->controller = client;
 }
 
@@ -230,7 +232,7 @@ send_catalog(Client *client)
 	wire_buffer_free(&buffer);
 }
 
-static void flush_frame(Tab *);
+#include "workspace_frames.h"
 
 static void
 broadcast_catalog(void)
@@ -256,58 +258,6 @@ broadcast_catalog(void)
 	/* Close/fallback identities are one-shot events, not persistent state. */
 	memset(published_catalog.data + sizeof(uint32_t), 0, 2 * sizeof(uint32_t));
 	closed_id = fallback_id = 0;
-}
-
-static void
-send_frame(Client *client, Tab *tab, int full)
-{
-	if (!tab->session)
-		return;
-	SessionFrame frame = tsessionframe(tab->session);
-	WireBuffer buffer = {0};
-	if (!client || client->fd < 0 || !client->ready)
-		return;
-	if (client->output.len - client->sent > 1024u * 1024u) {
-		client->needs_resync = 1;
-		return;
-	}
-	wire_put_u32(&buffer, frame.cols);
-	wire_put_u32(&buffer, frame.rows);
-	wire_put_u32(&buffer, frame.cursor_x);
-	wire_put_u32(&buffer, frame.cursor_y);
-	wire_put_u32(&buffer, frame.scroll);
-	wire_put_u32(&buffer, frame.alternate);
-	/* Queue a complete frame before waking SSH; row writes can fragment compression. */
-	if (!client_queue(client, WIRE_FRAME, tab->id, &buffer))
-		goto done;
-	wire_buffer_free(&buffer);
-	buffer = (WireBuffer){0};
-	for (int row = 0; row < frame.rows; row++) {
-		if (!full && !tsessionrowdirty(tab->session, row))
-			continue;
-		Line line = tsessionviewline(tab->session, row);
-		wire_put_u32(&buffer, row);
-		for (int col = 0; col < frame.cols; col++) {
-			wire_put_u32(&buffer, line[col].u);
-			wire_put_u32(&buffer, line[col].mode);
-			wire_put_u32(&buffer, line[col].fg);
-			wire_put_u32(&buffer, line[col].bg);
-		}
-		if (!client_queue(client, WIRE_ROW, tab->id, &buffer))
-			goto done;
-		buffer.len = 0;
-	}
-	client_send(client, WIRE_FRAME_FINISH, tab->id, NULL);
-done:
-	wire_buffer_free(&buffer);
-}
-
-static void
-flush_frame(Tab *tab)
-{
-	send_frame(tab->controller, tab, 0);
-	tsessioncleandirty(tab->session);
-	tab->pending_frame = 0;
 }
 
 static void
@@ -442,6 +392,7 @@ tab_close(Tab *tab)
 			lasttab = lasttab->next;
 	}
 	wire_buffer_free(&tab->input);
+	tab_release_control(tab);
 	if (tab->session)
 		tsessionremove(tab->session);
 	free(tab->url);
@@ -635,7 +586,7 @@ client_message(Client *client, WirePacket *packet)
 		break;
 	case WIRE_RELEASE:
 		if (tab->controller == client)
-			tab->controller = NULL;
+			tab_release_control(tab);
 		break;
 	case WIRE_CLOSE:
 		tab_close(tab);
@@ -651,7 +602,7 @@ client_message(Client *client, WirePacket *packet)
 			kscrollup(&steps);
 		else
 			kscrolldown(&steps);
-		send_frame(client, tab, 1);
+		send_frame(client, tab, 0);
 		tsessioncleandirty(tab->session);
 		break;
 	default:

@@ -16,6 +16,8 @@
 #define WORKSPACE_DAEMON "worminald"
 #endif
 #define WIRE_MAX_BYTES (8u * 1024u * 1024u)
+/* Rune, attributes, foreground, background: independent of native Glyph padding. */
+#define WIRE_CELL_BYTES (4u * sizeof(uint32_t))
 
 enum wire_type {
 	WIRE_HELLO = 1,

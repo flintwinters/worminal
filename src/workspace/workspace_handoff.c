@@ -140,6 +140,7 @@ export_tab(Tab *tab, int fd)
 static void
 free_tab(Tab *tab)
 {
+	tab_release_control(tab);
 	if (tab->session) tsessionremove(tab->session);
 	free(tab->title); free(tab->initial_title); free(tab->directory);
 	free(tab->clipboard); free(tab->url);

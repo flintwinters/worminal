@@ -265,13 +265,13 @@ def check_bridge():
 
 @app.command("check-network")
 def check_network(daemon: Path = typer.Option(None, help="Compatible v2 daemon binary to check a baseline.")):
-    """Check redundant network traffic and complete-frame transport flushing."""
+    """Check redundant catalogs/rows, stationary scrolling, and complete-frame flushing."""
     if daemon is None:
         native_build.build_targets("worminald-preview")
         daemon = ROOT / "worminald-preview"
     raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                          "-p", "test_preview_workspace.py", "-k", "redundant_catalog",
-                         "-k", "frame_transport", "-q"],
+                         "-k", "frame_transport", "-k", "redraw_rows", "-k", "scroll_at_boundary", "-q"],
                         env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(daemon.resolve())}))
 
 

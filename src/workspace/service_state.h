@@ -19,6 +19,8 @@ struct Tab {
 	TermSession *session;
 	WireBuffer input;
 	size_t input_sent;
+	WireBuffer screen; /* Encoded cells last queued to the controller, not PTY dirty state. */
+	int screen_cols;
 	char *title, *initial_title, *directory, *clipboard;
 	char *url; /* Non-NULL marks a browser record: no terminal or PTY. */
 	char **colors;
@@ -29,5 +31,13 @@ struct Tab {
 	int input_frame;
 	Tab *next;
 };
+
+static inline void
+tab_release_control(Tab *tab)
+{
+	tab->controller = NULL;
+	wire_buffer_free(&tab->screen);
+	tab->screen = (WireBuffer){0};
+}
 
 #endif
