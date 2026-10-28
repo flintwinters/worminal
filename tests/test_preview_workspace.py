@@ -365,6 +365,65 @@ class PreviewWorkspaceTest(unittest.TestCase):
                             "frame header flushed before rows and completion were queued")
             self.stop()
 
+    def test_unchanged_redraw_rows_do_not_replicate(self):
+        code = ("import os\nrows=['READY fixed','café 界','unchanged','last']\n"
+                "rows=[r.encode() for r in rows]\n"
+                "def render():\n"
+                " os.write(1,b'\\x1b[H'+b'\\r\\n'.join(b'\\x1b[2K'+r for r in rows))\n"
+                "render(); os.write(1,b'\\x1b]2;paint-ready\\a')\n"
+                "for i in range(3):\n"
+                " os.read(0,1)\n"
+                " if i==1: rows[1]=b'\\x1b[31m'+rows[1]+b'\\x1b[0m'\n"
+                " render(); os.write(1,f'\\x1b]2;paint-{i}\\a'.encode())\n"
+                "os.read(0,1)\n")
+        tab = self.launch("stty raw -echo; exec python3 -u -c " + shlex.quote(code))
+        wait_kind(self.peer, 7)
+        counts = []
+        for index in range(3):
+            send(self.peer, 3, tab, b"x")
+            rows = []
+            while True:
+                kind, identity, payload = wire_packet(self.peer, version=2)
+                if identity == tab and kind == 9:
+                    rows.append(payload)
+                if kind == 7 and records(payload)[0][5] == f"paint-{index}":
+                    break  # Catalogs follow their corresponding complete frame.
+            counts.append(len(rows))
+            if index == 1 and len(rows) == 1:
+                self.assertEqual(struct.unpack_from("!I", rows[0])[0], 1)
+                self.assertEqual(struct.unpack_from("!4I", rows[0], 4)[2], 1,
+                                 "attribute-only change was lost")
+        print(f"Rows for identical / color-only / identical redraws: {counts}")
+        self.assertEqual(counts, [0, 1, 0])
+        # A new controller still needs every row, even with no further PTY writes.
+        with self.connect() as peer:
+            send(peer, 19)
+            wait_kind(peer, 7)
+            send(peer, 4, tab, number(40) + number(4))
+            rows = []
+            while True:
+                kind, _, payload = wire_packet(peer, version=2)
+                if kind == 9:
+                    rows.append(struct.unpack_from("!I", payload)[0])
+                if kind == 10:
+                    break
+            self.assertEqual(rows, [0, 1, 2, 3], "new controller received an incomplete snapshot")
+
+    def test_scroll_at_boundary_does_not_replicate_rows(self):
+        tab = self.launch("stty raw -echo; printf READY; exec cat")
+        wait_kind(self.peer, 10, tab)
+        rows = 0
+        for index in range(12):
+            send(self.peer, 6, tab, number(index % 2) + number(3))
+            while True:
+                kind, identity, _ = wire_packet(self.peer, version=2)
+                if identity == tab and kind == 9:
+                    rows += 1
+                if identity == tab and kind == 10:
+                    break
+        print(f"Rows for 12 wheel events with no scrollback: {rows}")
+        self.assertEqual(rows, 0, "scrolling a stationary viewport sent full screen snapshots")
+
     def test_stale_resize_cannot_reclaim_another_controller(self):
         tab = self.launch("stty raw -echo; printf READY; exec cat")
         with self.connect() as peer:

@@ -796,7 +796,7 @@ terminal_packet(Terminal *t, WirePacket *p)
 	} else if (p->type == WIRE_ROW) {
 		uint32_t row;
 		if (!t->session || !wire_get_u32(p, &row) || row >= (uint32_t)t->frame.rows ||
-		    p->len - p->pos != (size_t)t->frame.cols * 16) return;
+		    p->len - p->pos != (size_t)t->frame.cols * WIRE_CELL_BYTES) return;
 		Glyph cells[400];
 		for (int x = 0; x < t->frame.cols; x++) {
 			uint32_t mode;

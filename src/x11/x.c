@@ -2710,7 +2710,7 @@ workspace_message(WirePacket *packet)
 		uint32_t row;
 		SessionFrame frame = tsessionframe(tab->terminal);
 		if (!wire_get_u32(packet, &row) || row >= (uint32_t)frame.rows ||
-		    packet->len - packet->pos != (size_t)frame.cols * 16)
+		    packet->len - packet->pos != (size_t)frame.cols * WIRE_CELL_BYTES)
 			die("invalid workspace row\n");
 		Glyph *glyphs = xmalloc(frame.cols * sizeof(*glyphs));
 		for (int col = 0; col < frame.cols; col++) {
