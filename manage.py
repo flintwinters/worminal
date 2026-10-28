@@ -271,7 +271,8 @@ def check_network(daemon: Path = typer.Option(None, help="Compatible v2 daemon b
         daemon = ROOT / "worminald-preview"
     raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                          "-p", "test_preview_workspace.py", "-k", "redundant_catalog",
-                         "-k", "frame_transport", "-k", "redraw_rows", "-k", "scroll_at_boundary", "-q"],
+                         "-k", "frame_transport", "-k", "redraw_rows", "-k", "scroll_at_boundary",
+                         "-k", "scrolling_", "-q"],
                         env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(daemon.resolve())}))
 
 
@@ -392,6 +393,8 @@ def latency_visible(trials: int = typer.Option(10, min=1), keys: int = typer.Opt
                     saved_tabs: int = typer.Option(0, min=0, help="Seed service-owned tabs before measurement."),
                     varied_labels: bool = typer.Option(False, help="Seed tabs in distinct project-local directories."),
                     bridge_delay_ms: int = typer.Option(None, min=0, help="Use a private delayed SSH bridge fixture."),
+                    master: str = typer.Option(None, help="Measure real SSH using an isolated remote workspace."),
+                    remote_echo: str = typer.Option(None, help="Path to build/latency_echo on the remote host."),
                     snapshot: Path = typer.Option(None, help="Save current binaries/modules as a comparison baseline."),
                     compare: Path = typer.Option(None, help="Alternate trials with a saved baseline directory.")):
     """Measure real key events to visible echo and fresh/additional window presentation."""
@@ -407,6 +410,8 @@ def latency_visible(trials: int = typer.Option(10, min=1), keys: int = typer.Opt
         options += ["--trace-startup"]
     if bridge_delay_ms is not None:
         options += ["--bridge-delay-ms", str(bridge_delay_ms)]
+    if master:
+        options += ["--real-master", master, "--remote-echo", remote_echo or ""]
     raise typer.Exit(run([sys.executable, "tests/visible_latency.py", "--trials", str(trials),
                           "--keys", str(keys), "--saved-tabs", str(saved_tabs), *options]))
 
@@ -502,7 +507,7 @@ def latency_shell():
 
 @app.command("master-perf")
 def master_perf(host: str):
-    """Measure SSH tab-switch traffic; set WORMINAL_MASTER_DAEMON for a test build."""
+    """Compare ordinary SSH with v2 input/frame latency, scrolling, and tab-switch traffic."""
     raise typer.Exit(run([sys.executable, "tests/master_perf.py", host]))
 
 

@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <locale.h>
@@ -635,8 +636,10 @@ connect_worker(GTask *task, gpointer source, gpointer data, GCancellable *cancel
 		/* Launch the child while GTK maps the window. The wire request stays
 		 * immutable; widgets and response parsing stay on GTK. */
 		struct timeval timeout = {.tv_sec = 3};
+		uint32_t features = htonl(WIRE_FEATURE_COPY_ROWS);
 		if (request->payload.len + 16 > OUTPUT_LIMIT ||
 		    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0 ||
+		    !wire_write(fd, WIRE_CAPABILITIES, 0, &features, sizeof(features)) ||
 		    !wire_write(fd, request->type, 0, request->payload.data, request->payload.len)) {
 			close(fd);
 			fd = -1;

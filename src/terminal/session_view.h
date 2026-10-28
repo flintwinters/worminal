@@ -16,5 +16,6 @@ int tsessionrowdirty(TermSession *, int);
 void tsessioncleandirty(TermSession *);
 void tsessionimportframe(TermSession *, const SessionFrame *);
 void tsessionimportrow(TermSession *, int, const Glyph *, int);
+void tsessioncopyrows(TermSession *, int, int, int);
 
 #endif

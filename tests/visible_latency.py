@@ -86,7 +86,7 @@ def capture_failure(window):
 
 def launch(env, connection, title, log, color=0x112233, history=False, master=None, cwd=None, prefix=()):
     started = time.monotonic_ns()
-    command = [str(ROOT / "build/latency_echo"), "--color", f"{color:06x}",
+    command = [env.get("WORMINAL_TEST_REMOTE_ECHO", str(ROOT / "build/latency_echo")), "--color", f"{color:06x}",
                *(["--history"] if history else [])]
     if env.get("WORMINAL_LATENCY_SHELL"):
         command = [env["WORMINAL_LATENCY_SHELL"], "-i", "-c", 'exec "$@"', "worminal-latency", *command]
@@ -136,12 +136,18 @@ def typing(connection, window, count):
     expected = {}
     time.sleep(.05)
     for symbol in (XK.XK_m, XK.XK_W):
+        before = pixels(window)
         press(symbol)
-        time.sleep(.05)
-        expected[symbol] = pixels(window)
+        def changed():
+            current = pixels(window)
+            return current if current != before else None
+        expected[symbol] = wait_for(changed)
     if expected[XK.XK_m] == expected[XK.XK_W]:
         capture_failure(window)
         raise RuntimeError(f"Distinct calibration glyphs missing in {window.get_wm_name()!r}")
+    for symbol in (XK.XK_m, XK.XK_W):
+        press(symbol)
+        wait_for(lambda: pixels(window) == expected[symbol])
     samples = []
     for index in range(count):
         symbol = XK.XK_W if index % 2 else XK.XK_m
@@ -271,6 +277,8 @@ def main():
     parser.add_argument("--shell", action="store_true")
     parser.add_argument("--startup-resources", action="store_true")
     parser.add_argument("--bridge-delay-ms", type=int)
+    parser.add_argument("--real-master")
+    parser.add_argument("--remote-echo")
     parser.add_argument("--snapshot", type=Path)
     parser.add_argument("--compare", type=Path)
     args = parser.parse_args()
@@ -282,7 +290,9 @@ def main():
         parser.error("--trials exceeds the unique RGB readiness-color capacity")
     if args.bridge_delay_ms is not None and args.bridge_delay_ms < 0:
         parser.error("--bridge-delay-ms must be nonnegative")
-    master = "preview-test" if args.bridge_delay_ms is not None else None
+    if args.real_master and (not args.remote_echo or args.saved_tabs or args.varied_labels):
+        parser.error("--real-master requires --remote-echo and supports no saved/varied-label tabs")
+    master = "preview-test" if args.bridge_delay_ms is not None or args.real_master else None
     if args.snapshot:
         snapshot(args.snapshot.resolve())
         return
@@ -318,7 +328,13 @@ def main():
             if master:
                 env.update(PATH=str(ROOT / "tests/fixtures/preview-master") + os.pathsep + env["PATH"],
                            WORMINAL_TEST_DAEMON=str(executable.parent / "worminald"),
-                           WORMINAL_TEST_BRIDGE_DELAY=f"{args.bridge_delay_ms / 1000:.3f}")
+                           WORMINAL_TEST_BRIDGE_DELAY=f"{(args.bridge_delay_ms or 0) / 1000:.3f}")
+            if args.real_master:
+                env.update(WORMINAL_TEST_REAL_MASTER=args.real_master, WORMINAL_TEST_REMOTE_ECHO=args.remote_echo)
+                scope = env["WORMINAL_SHARED_SOCKET_SCOPE"]
+                stack.callback(subprocess.run, ["/usr/bin/ssh", "-T", "-o", "BatchMode=yes", args.real_master,
+                               f"env WORMINAL_SHARED_SOCKET_SCOPE={scope} worminald --stop"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
             connection = display.Display(env["DISPLAY"])
             stack.callback(connection.close)
             log_name = "visible-latency.log" if len(variants) == 1 else f"visible-latency-{label}.log"
@@ -347,7 +363,7 @@ def main():
                                         "Approximate VmHWM counters are not simultaneous peak RSS or PSS. "
                                         "Daemon-owned shell CPU/memory is excluded. "
                                         "Sampling occurs after readiness and can perturb later timings.",
-              "transport": "private SSH bridge fixture" if master else "local",
+              "transport": "real SSH" if args.real_master else "private SSH bridge fixture" if master else "local",
               "bridge_delay_ms": args.bridge_delay_ms, "trace_startup": args.trace_startup,
               "interactive_shell": os.environ.get("SHELL", "/bin/sh") if args.shell else None,
               "frontend_memory_samples": resources,
@@ -409,7 +425,8 @@ def main():
         console.print("Diagnostic traces are cumulative from launcher main, include logging overhead, "
                       "and do not replace visible-pixel observations.")
     if master:
-        console.print(f"Private SSH bridge fixture, {args.bridge_delay_ms} ms requested startup delay; no remote host.")
+        console.print(f"Real SSH to {args.real_master}" if args.real_master else
+                      f"Private SSH bridge fixture, {args.bridge_delay_ms} ms startup delay; no remote host.")
     console.print(f"Raw measurements: {path.relative_to(ROOT)}")
 
 
