@@ -77,6 +77,7 @@ Hidden terminal views defer cell buffers until first use or frame, and font layo
 and blink timers until mapped or used. Empty tab strips defer Pango layouts until catalog refresh.
 Service output batching sleeps to its existing deadline rather than adding a fresh interval after partial bursts.
 The SSH bridge forwards both directions independently; congested display output must never block incoming input.
+Catalog broadcasts describe changed state, not parser operations; complete frames queue before transport flushing.
 `manage.py check-preview*` and `preview-perf` validate GTK; `build-preview` retains compatibility binary names.
 Private Wayland checks use a project-local Weston runtime and matching virtual-seat ABI, without X11 fallback.
 

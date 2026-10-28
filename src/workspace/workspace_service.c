@@ -38,6 +38,7 @@ static Tab *tabs, *lasttab;
 static uint32_t next_id = 1;
 static uint32_t closed_id, fallback_id;
 static int catalog_dirty;
+static WireBuffer published_catalog;
 static int running = 1;
 static int handin_listener = -1;
 
@@ -103,7 +104,7 @@ client_flush(Client *client)
 }
 
 static int
-client_send(Client *client, uint32_t type, uint32_t tab, const WireBuffer *buffer)
+client_queue(Client *client, uint32_t type, uint32_t tab, const WireBuffer *buffer)
 {
 	size_t length = buffer ? buffer->len : 0;
 	if (client->fd < 0)
@@ -119,7 +120,13 @@ client_send(Client *client, uint32_t type, uint32_t tab, const WireBuffer *buffe
 		return 0;
 	}
 	wire_append_packet(&client->output, type, tab, buffer ? buffer->data : NULL, length);
-	return client_flush(client);
+	return 1;
+}
+
+static int
+client_send(Client *client, uint32_t type, uint32_t tab, const WireBuffer *buffer)
+{
+	return client_queue(client, type, tab, buffer) && client_flush(client);
 }
 
 static void
@@ -188,8 +195,8 @@ service_print(const char *bytes, size_t length)
 	wire_buffer_free(&buffer);
 }
 
-static void
-send_catalog(Client *client)
+static WireBuffer
+catalog_buffer(void)
 {
 	WireBuffer buffer = {0};
 	uint32_t count = 0;
@@ -212,6 +219,13 @@ send_catalog(Client *client)
 		for (size_t i = 0; i < sizeof(colorname) / sizeof(colorname[0]); i++)
 			wire_put_string(&buffer, tab->colors && tab->colors[i] ? tab->colors[i] : colorname[i]);
 	}
+	return buffer;
+}
+
+static void
+send_catalog(Client *client)
+{
+	WireBuffer buffer = catalog_buffer();
 	client_send(client, WIRE_CATALOG, 0, &buffer);
 	wire_buffer_free(&buffer);
 }
@@ -223,14 +237,24 @@ broadcast_catalog(void)
 {
 	if (!catalog_dirty)
 		return;
-	/* Input modes and the imported screen (notably alternate-screen state)
-	 * must agree when clients observe a changed title or directory. */
+	WireBuffer buffer = catalog_buffer();
+	catalog_dirty = 0;
+	/* Repeated settings and hide/show pairs can leave the catalog unchanged.
+	 * Do not let them rebroadcast state or bypass the frame batch deadline. */
+	if (buffer.len == published_catalog.len && !memcmp(buffer.data, published_catalog.data, buffer.len)) {
+		wire_buffer_free(&buffer);
+		return;
+	}
+	/* Import pending screens before publishing changed input modes, titles or directories. */
 	for (Tab *tab = tabs; tab; tab = tab->next)
 		if (tab->pending_frame) flush_frame(tab);
 	for (Client *client = clients; client; client = client->next)
 		if (client->ready)
-			send_catalog(client);
-	catalog_dirty = 0;
+			client_send(client, WIRE_CATALOG, 0, &buffer);
+	wire_buffer_free(&published_catalog);
+	published_catalog = buffer;
+	/* Close/fallback identities are one-shot events, not persistent state. */
+	memset(published_catalog.data + sizeof(uint32_t), 0, 2 * sizeof(uint32_t));
 	closed_id = fallback_id = 0;
 }
 
@@ -253,7 +277,8 @@ send_frame(Client *client, Tab *tab, int full)
 	wire_put_u32(&buffer, frame.cursor_y);
 	wire_put_u32(&buffer, frame.scroll);
 	wire_put_u32(&buffer, frame.alternate);
-	if (!client_send(client, WIRE_FRAME, tab->id, &buffer))
+	/* Queue a complete frame before waking SSH; row writes can fragment compression. */
+	if (!client_queue(client, WIRE_FRAME, tab->id, &buffer))
 		goto done;
 	wire_buffer_free(&buffer);
 	buffer = (WireBuffer){0};
@@ -268,7 +293,7 @@ send_frame(Client *client, Tab *tab, int full)
 			wire_put_u32(&buffer, line[col].fg);
 			wire_put_u32(&buffer, line[col].bg);
 		}
-		if (!client_send(client, WIRE_ROW, tab->id, &buffer))
+		if (!client_queue(client, WIRE_ROW, tab->id, &buffer))
 			goto done;
 		buffer.len = 0;
 	}
@@ -792,6 +817,7 @@ serve(void)
 		}
 	}
 	tsessionhangupall();
+	wire_buffer_free(&published_catalog);
 	close(listener);
 	return 0;
 }

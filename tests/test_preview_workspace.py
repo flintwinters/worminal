@@ -293,6 +293,78 @@ class PreviewWorkspaceTest(unittest.TestCase):
             else:
                 self.fail("missing mode catalog")
 
+    def test_redundant_catalog_operations_do_not_broadcast(self):
+        # A redraw can set a title/style repeatedly and hide/show the cursor
+        # without changing the catalog clients should see at its boundary.
+        code = ("import os\nos.write(1,b'READY')\n"
+                "for i in range(12):\n"
+                " os.read(0,1)\n"
+                " os.write(1,b'\\x1b[?25l\\x1b[?25h\\x1b[2 q\\x1b]2;test\\aCYCLE')\n"
+                "os.read(0,1)\n")
+        tab = self.launch("stty raw -echo; exec python3 -u -c " + shlex.quote(code))
+        self.peer.settimeout(.05)
+        try:
+            while True:
+                wire_packet(self.peer, version=2)
+        except socket.timeout:
+            pass
+        self.peer.settimeout(2)
+        catalogs, catalog_bytes = 0, 0
+
+        def observe(kind, payload):
+            nonlocal catalogs, catalog_bytes
+            if kind == 7:
+                catalogs += 1
+                catalog_bytes += 16 + len(payload)
+
+        for _ in range(12):
+            send(self.peer, 3, tab, b"x")
+            printed = b""
+            while True:
+                kind, identity, payload = wire_packet(self.peer, version=2)
+                observe(kind, payload)
+                if kind == 14 and identity == tab:
+                    printed += payload
+                if b"CYCLE" in printed:
+                    break
+        self.peer.settimeout(.1)
+        try:
+            while True:
+                kind, _, payload = wire_packet(self.peer, version=2)
+                observe(kind, payload)
+        except socket.timeout:
+            pass
+        print(f"12 unchanged redraw catalogs: {catalogs} packets / {catalog_bytes} bytes")
+        self.assertEqual(catalogs, 0, "parser operations rebroadcast unchanged tab state")
+
+    def test_frame_transport_flush_contains_completion(self):
+        self.peer.close()
+        self.stop()
+        checks = ROOT / ".checks"
+        checks.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="frame-transport-", dir=checks) as directory:
+            library, log = Path(directory) / "transport.so", Path(directory) / "send.log"
+            subprocess.run(["cc", "-shared", "-fPIC", "-Wall", "-Wextra", "-o", str(library),
+                            str(ROOT / "tests/service_transport.c"), "-ldl"], check=True)
+            self.daemon = subprocess.Popen([str(DAEMON), "--serve"],
+                                           env={**self.env, "LD_PRELOAD": str(library),
+                                                "WORMINAL_TEST_SEND_LOG": str(log)},
+                                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            self.peer = self.connect()
+            self.addCleanup(self.peer.close)
+            self.launch("stty raw -echo; printf READY; exec cat")
+            # An attach catalog is an ordered barrier after the launch frame.
+            send(self.peer, 19)
+            wait_kind(self.peer, 7)
+            calls = [tuple(map(int, line.split())) for line in log.read_text().splitlines()]
+            frames = [(first, last, size) for first, last, size in calls if first == 8]
+            print(f"Frame flushes: {len(frames)} starts; "
+                  f"{sum(last == 10 for _, last, _ in frames)} include completion")
+            self.assertTrue(frames, "no frame transport calls recorded")
+            self.assertTrue(all(last == 10 for _, last, _ in frames),
+                            "frame header flushed before rows and completion were queued")
+            self.stop()
+
     def test_stale_resize_cannot_reclaim_another_controller(self):
         tab = self.launch("stty raw -echo; printf READY; exec cat")
         with self.connect() as peer:

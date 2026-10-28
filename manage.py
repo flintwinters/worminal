@@ -263,6 +263,18 @@ def check_bridge():
             raise typer.Exit(code)
 
 
+@app.command("check-network")
+def check_network(daemon: Path = typer.Option(None, help="Compatible v2 daemon binary to check a baseline.")):
+    """Check redundant network traffic and complete-frame transport flushing."""
+    if daemon is None:
+        native_build.build_targets("worminald-preview")
+        daemon = ROOT / "worminald-preview"
+    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                         "-p", "test_preview_workspace.py", "-k", "redundant_catalog",
+                         "-k", "frame_transport", "-q"],
+                        env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(daemon.resolve())}))
+
+
 @app.command("check-window-state")
 def check_window_state():
     """Check the public session-bus directory interface on a private bus and display."""
