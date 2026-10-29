@@ -264,6 +264,17 @@ def check_bridge():
             raise typer.Exit(code)
 
 
+@app.command("check-master-startup")
+def check_master_startup(executable: Path = typer.Option(None, help="Executable to check; defaults to project build.")):
+    """Check native --master startup and keyboard input on private Xvfb with a local SSH fixture."""
+    native_build.build_targets()
+    env = dict(os.environ)
+    if executable:
+        env["WORMINAL_TEST_EXECUTABLE"] = str(executable.resolve())
+    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                         "-p", "test_master_startup.py", "-q"], env=env))
+
+
 @app.command("check-network")
 def check_network(daemon: Path = typer.Option(None, help="Compatible v2 daemon binary to check a baseline.")):
     """Check redundant catalogs/rows, stationary scrolling, and complete-frame flushing."""
