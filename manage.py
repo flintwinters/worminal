@@ -266,8 +266,11 @@ def check_bridge():
 
 
 @app.command("check-master-startup")
-def check_master_startup(executable: Path = typer.Option(None, help="Executable to check; defaults to project build.")):
-    """Check native --master startup and keyboard input on private Xvfb with a local SSH fixture."""
+def check_master_startup(
+    executable: Path = typer.Option(None, help="Executable to check; defaults to project build."),
+    master: str = typer.Option(None, help="Use real SSH with a private remote workspace."),
+):
+    """Check native --master startup and input on private Xvfb, using an isolated workspace."""
     native_build.build_targets()
     native_build.build_targets("build/workspace_client_test")
     code = run(["build/workspace_client_test"])
@@ -276,6 +279,8 @@ def check_master_startup(executable: Path = typer.Option(None, help="Executable 
     env = dict(os.environ)
     if executable:
         env["WORMINAL_TEST_EXECUTABLE"] = str(executable.resolve())
+    if master:
+        env["WORMINAL_TEST_REAL_MASTER"] = master
     raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                          "-p", "test_master_startup.py", "-q"], env=env))
 

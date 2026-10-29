@@ -87,9 +87,10 @@ Private Wayland checks use a project-local Weston runtime and matching virtual-s
 Current jobs: prioritize remaining launch latency, while auditing input, rendering, output delivery, and view switching
 until further gains require correctness, resource, or compatibility compromises; review remaining compatibility gaps.
 Investigate intermittent local workspace loss after idle time; no root cause is confirmed.
-Investigate reported blank master windows followed by desktop freezes; root cause is unconfirmed.
+Investigate reported desktop freezes during master connections; root cause is unconfirmed.
 `manage.py check-master-startup` checks the native launcher through an isolated SSH fixture;
 `--executable /usr/local/bin/worminal` checks the installed frontend on private Xvfb.
+`--master HOST` uses real SSH with a private remote workspace and preserves existing sessions.
 SSH clients spawn without running GUI-process fork hooks; keep that invariant in transport startup.
 Daemon lifecycle, event-loop failures and fatal terminal errors go to syslog for journal diagnosis.
 Continue auditing first-frame presentation and peak startup resources after the verified first-window worker overlap.

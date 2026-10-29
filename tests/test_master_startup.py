@@ -18,6 +18,11 @@ class MasterStartupTest(unittest.TestCase):
     def test_master_launcher_accepts_keyboard_input(self):
         executable = Path(os.environ.get("WORMINAL_TEST_EXECUTABLE", ROOT / "worminal"))
         with isolated_display() as env:
+            if master := env.get("WORMINAL_TEST_REAL_MASTER"):
+                self.addCleanup(subprocess.run,
+                    ["/usr/bin/ssh", "-T", "-oBatchMode=yes", "-oConnectTimeout=5", master,
+                     f"env WORMINAL_SHARED_SOCKET_SCOPE={env['WORMINAL_SHARED_SOCKET_SCOPE']} worminald --stop"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
             env.update(GDK_BACKEND="x11", NO_AT_BRIDGE="1", GTK_USE_PORTAL="0",
                        WORMINAL_TEST_DAEMON=str(ROOT / "worminald"),
                        PATH=str(ROOT / "tests/fixtures/preview-master") + os.pathsep + env["PATH"])

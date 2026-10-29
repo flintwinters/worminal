@@ -41,7 +41,9 @@ workspace_client_open_process(const char *master, pid_t *process)
 		if (!error) error = posix_spawn_file_actions_adddup2(&actions, sockets[1], 1);
 		if (!error && sockets[1] > 1) error = posix_spawn_file_actions_addclose(&actions, sockets[1]);
 		/* Full frames contain repeated glyph fields; retain SSH compression. */
-		char *args[] = {"ssh", "-T", "-C", (char *)master, WORKSPACE_DAEMON, "--bridge", NULL};
+		/* An unreachable host must not leave an apparently connected empty view indefinitely. */
+		char *args[] = {"ssh", "-T", "-C", "-oConnectTimeout=10", (char *)master,
+		                WORKSPACE_DAEMON, "--bridge", NULL};
 		if (!error) error = posix_spawnp(&child, "ssh", &actions, NULL, args, environ);
 		posix_spawn_file_actions_destroy(&actions);
 	}

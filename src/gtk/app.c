@@ -413,6 +413,9 @@ catalog(App *app, WirePacket *packet)
 		app->syncing = FALSE;
 		if (app->attached && !app->pending) gtk_widget_destroy(app->window);
 	}
+	/* Starting SSH is not a workspace handshake. Clear its status only when
+	 * the first catalog has actually been accepted. */
+	if (!app->attached && app->master) app_status(app, NULL);
 	app->attached = TRUE;
 	window_state_changed(app);
 	return TRUE;
@@ -674,7 +677,9 @@ connected(GObject *source, GAsyncResult *result, gpointer data)
 		disconnected(app);
 	} else {
 		app->fd = fd;
-		app_status(app, NULL);
+		char *status = app->master ? g_strdup_printf("Connecting to %s...", app->master) : NULL;
+		app_status(app, status);
+		g_free(status);
 		/* Output floods must yield to GTK input and frame-clock redraw sources. */
 		app->reader = g_unix_fd_add_full(G_PRIORITY_DEFAULT_IDLE, fd,
 		    G_IO_IN | G_IO_HUP | G_IO_ERR, received, app, NULL);

@@ -470,9 +470,12 @@ check_initial_dimensions(void)
 	g_object_unref(page.widget);
 }
 
+#include "preview_connection.c"
+
 static void
 check_connection_gate(void)
 {
+	check_remote_pending_status();
 	App *app = new_app();
 	/* Fail before any transport/daemon work. A nested main loop must not
 	 * dispatch the failure callback against an unfinished window. */

@@ -37,9 +37,10 @@ int
 main(int argc, char **argv)
 {
 	if (argc > 1) {
-		assert(argc == 6 && !strcmp(argv[1], "-T") && !strcmp(argv[2], "-C"));
-		assert(!strcmp(argv[3], "spawn-test") && !strcmp(argv[4], "worminald"));
-		assert(!strcmp(argv[5], "--bridge"));
+		assert(argc == 7 && !strcmp(argv[1], "-T") && !strcmp(argv[2], "-C"));
+		assert(!strcmp(argv[3], "-oConnectTimeout=10"));
+		assert(!strcmp(argv[4], "spawn-test") && !strcmp(argv[5], "worminald"));
+		assert(!strcmp(argv[6], "--bridge"));
 		char byte;
 		assert(read(0, &byte, 1) == 1);
 		assert(write(1, &byte, 1) == 1);
