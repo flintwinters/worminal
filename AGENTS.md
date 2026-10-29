@@ -90,6 +90,7 @@ Investigate intermittent local workspace loss after idle time; no root cause is 
 Investigate reported blank master windows followed by desktop freezes; root cause is unconfirmed.
 `manage.py check-master-startup` checks the native launcher through an isolated SSH fixture;
 `--executable /usr/local/bin/worminal` checks the installed frontend on private Xvfb.
+SSH clients spawn without running GUI-process fork hooks; keep that invariant in transport startup.
 Daemon lifecycle, event-loop failures and fatal terminal errors go to syslog for journal diagnosis.
 Continue auditing first-frame presentation and peak startup resources after the verified first-window worker overlap.
 Browser cold startup is dominated by engine initialization; preserve lazy startup, persistent profiles and

@@ -26,7 +26,8 @@ proof_app = typer.Typer(help="Run proofs on private Xvfb displays.")
 app.add_typer(proof_app, name="proof")
 MAX_FILE_LINES = 1000
 MAX_LINE_LENGTH = 120
-NATIVE_CHECKS = ("build/scrollback_test", "build/url_test", "build/frame_schedule_test")
+NATIVE_CHECKS = ("build/scrollback_test", "build/url_test", "build/frame_schedule_test",
+                 "build/workspace_client_test")
 # These merged files exceed the limit; prevent further growth until they are split.
 LEGACY_FILE_LINES = {"src/terminal/st.c": 3225, "src/x11/x.c": 3417,
                      "tests/test_native.py": 1333}
@@ -157,10 +158,10 @@ def setup_preview_wayland():
 
 
 @app.command("prove-preview-regressions")
-def prove_preview_regressions():
+def prove_preview_regressions(match: str = typer.Option(None, help="Only run matching regression proofs.")):
     """Compile project-local counterfactuals and require critical regression tests to fail."""
     from tools.regressions import prove
-    prove()
+    prove(match)
 
 
 @app.command("preview-perf")
@@ -268,6 +269,10 @@ def check_bridge():
 def check_master_startup(executable: Path = typer.Option(None, help="Executable to check; defaults to project build.")):
     """Check native --master startup and keyboard input on private Xvfb with a local SSH fixture."""
     native_build.build_targets()
+    native_build.build_targets("build/workspace_client_test")
+    code = run(["build/workspace_client_test"])
+    if code:
+        raise typer.Exit(code)
     env = dict(os.environ)
     if executable:
         env["WORMINAL_TEST_EXECUTABLE"] = str(executable.resolve())

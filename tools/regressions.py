@@ -10,11 +10,11 @@ from tools import build
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def prove():
+def prove(match=None):
     directory = ROOT / ".checks/regressions"
     directory.mkdir(parents=True, exist_ok=True)
     builder = build.Builder()
-    service_support = [*(f"src/{source}" for source in build.COMMON), "src/workspace/workspace_handoff.c"]
+    service_support = [f"src/{source}" for source in build.SERVER if source != "workspace/workspace_service.c"]
     # Restore the blocking service write path; the reused PTY regression must fail.
     service = directory / "service.c"
     service.write_text((ROOT / "src/workspace/workspace_service.c").read_text().replace(
@@ -38,7 +38,7 @@ def prove():
     ordering = directory / "mode-ordering.c"
     ordering.write_text((ROOT / "src/workspace/workspace_service.c").read_text().replace(
         "if (tab->input_frame) {", "if (0) {").replace(
-        "if (tab->pending_frame) flush_frame(tab);", "/* Missing pre-catalog frame flush. */"))
+        "if (tab->pending_frame) flush_frame(tab);", "; /* Missing pre-catalog frame flush. */"))
     ordered_daemon = directory / "unordered-preview"
     builder.program(ordered_daemon, [*service_support, str(ordering)],
                     variant="ordering-proof", flags=["-DWORMINAL_PREVIEW_PROTOCOL"])
@@ -55,7 +55,8 @@ def prove():
         "../src/terminal/st.c", str(ROOT / "src/terminal/st.c")).replace(
         '"session_view_checks.h"', f'"{view_header}"'))
     view_binary = directory / "parser-view"
-    builder.program(view_binary, [str(view_test), *(f"src/{source}" for source in build.SESSION_SUPPORT)],
+    session_support = ["src/terminal/defaults.c", *(f"src/{source}" for source in build.SESSION_SUPPORT)]
+    builder.program(view_binary, [str(view_test), *session_support],
                     variant="parser-view-proof", flags=["-Itests", "-ffunction-sections", "-fdata-sections"],
                     libs=["-Wl,--gc-sections", "-lm"])
     cases.append(("replica does not reflow", [str(view_binary)], os.environ,
@@ -64,8 +65,7 @@ def prove():
     crop.write_text((ROOT / "src/terminal/session_view.c").read_text().replace(
         "if (term->line[y][cols - 1].mode & ATTR_WIDE) term->line[y][cols - 1] = blank;", ""))
     crop_binary = directory / "uncropped-view"
-    support = [str(crop) if source.endswith("session_view.c") else f"src/{source}"
-               for source in build.SESSION_SUPPORT]
+    support = [str(crop) if source.endswith("session_view.c") else source for source in session_support]
     builder.program(crop_binary, ["tests/scrollback.c", *support], variant="crop-view-proof",
                     flags=["-Itests", "-ffunction-sections", "-fdata-sections"], libs=["-Wl,--gc-sections", "-lm"])
     cases.append(("replica crops wide cells", [str(crop_binary)], os.environ,
@@ -81,7 +81,7 @@ def prove():
         test.write_text((ROOT / "tests/scrollback.c").read_text().replace(
             '../src/terminal/st.c', str(parser)))
         binary = directory / name
-        builder.program(binary, [str(test), *(f"src/{source}" for source in build.SESSION_SUPPORT)],
+        builder.program(binary, [str(test), *session_support],
                         variant=f"{name}-proof",
                         flags=["-Itests", "-ffunction-sections", "-fdata-sections"],
                         libs=["-Wl,--gc-sections", "-lm"])
@@ -98,7 +98,31 @@ def prove():
         "MODBIT(session->saved[0].state, savedend || (saved.state & CURSOR_WRAPNEXT && savedx == col - 1), "
         "CURSOR_WRAPNEXT);")
     parser_case("pending-wrap", stale_cursor, b"term.line[3 / width][3 % width].u == 'd'")
-    for index, (name, command, env, expected) in enumerate(cases):
+    # Restore fork/exec at the SSH launch boundary: registered GUI hooks must be detected.
+    client = directory / "fork-client.c"
+    source = (ROOT / "src/workspace/workspace_client.c").read_text()
+    unsafe = source.replace(
+        'if (!error) error = posix_spawnp(&child, "ssh", &actions, NULL, args, environ);',
+        '''if (!error) {
+            child = fork();
+            if (child < 0) error = errno;
+            if (child == 0) {
+                dup2(sockets[1], 0); dup2(sockets[1], 1);
+                close(sockets[0]); close(sockets[1]);
+                execvp("ssh", args); _exit(127);
+            }
+        }''')
+    if unsafe == source:
+        raise ValueError("SSH counterfactual no longer removes the spawn fix")
+    client.write_text(unsafe)
+    binary = directory / "fork-client"
+    builder.program(binary, ["tests/workspace_client.c", str(client)],
+                    variant="fork-client-proof", libs=["-pthread"])
+    cases.append(("SSH bypasses GUI fork hooks", [str(binary)], os.environ, b"fork_hooks == 0"))
+    selected = [case for case in cases if match is None or match.casefold() in case[0].casefold()]
+    if not selected:
+        raise ValueError(f"No regression proof matches: {match}")
+    for index, (name, command, env, expected) in enumerate(selected):
         with (directory / f"failure-{index}.log").open("wb") as log:
             result = subprocess.run(command, cwd=ROOT, env=env, stdout=log, stderr=log, timeout=15)
         log_data = (directory / f"failure-{index}.log").read_bytes()

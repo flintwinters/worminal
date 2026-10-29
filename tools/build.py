@@ -208,6 +208,9 @@ class Builder:
                           *pkg_flags("--libs", packages)], [f"tests/{name}.c"])
         elif target == "build/frame_schedule_test":
             self.program(target, ["tests/frame_schedule.c"], variant="frame-schedule", libs=[])
+        elif target == "build/workspace_client_test":
+            self.program(target, ["tests/workspace_client.c", "src/workspace/workspace_client.c"],
+                         variant="workspace-client", libs=["-pthread"])
         elif target == "build/view_state_test":
             # view_state.c includes x.c to exercise internal state; compile that translation unit once.
             sources = ["tests/view_state.c", "src/terminal/defaults.c", "src/x11/url.c", "src/workspace/wire.c",
