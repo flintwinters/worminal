@@ -9,7 +9,11 @@ The app is a GTK terminal/browser built on st 0.9.3. A per-user `worminald` serv
 terminal state, and bounded main-screen scrollback; views connect locally or through `--master user@host` over SSH.
 Main-screen width changes reflow soft-wrapped text. GTK replicas keep one imported viewport;
 reflow and scrollback are not recomputed in the GTK frontend. A tab has one live painting view
-and can run with no windows. Each window maps early while its connection worker sends the initial launch request;
+and can run with no windows. The service atomically saves ordered terminal directories and browser URLs
+under XDG_STATE_HOME (default ~/.local/state), isolated by protocol/workspace scope; restarts create fresh
+shells with WORMINAL_RESTORE=1, never replay commands or restore processes/scrollback. Shell startup must
+respect that one-shot marker; manage.py check-restore covers recovery with real zsh startup.
+Each window maps early while its connection worker sends the initial launch request;
 font loading and shell startup overlap.
 Validated launches overlap connection requests and shell startup with widget construction;
 a per-request completion gate keeps GTK callbacks behind completed widget setup.

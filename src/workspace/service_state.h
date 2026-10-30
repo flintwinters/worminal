@@ -25,6 +25,7 @@ struct Tab {
 	SessionFrame screen_frame;
 	WireBuffer catalog; /* Last published metadata stays stable during synchronized redraws. */
 	int catalog_pending;
+	int restoring_directory; /* Ignore inherited daemon cwd until the restored shell execs. */
 	char *title, *initial_title, *directory, *clipboard;
 	char *url; /* Non-NULL marks a browser record: no terminal or PTY. */
 	char **colors;

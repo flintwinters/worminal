@@ -9,6 +9,7 @@
 #include <string.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
@@ -28,11 +29,8 @@
 #include "service_diagnostics.h"
 #include "workspace_handoff.h"
 #include "workspace_bridge.h"
-typedef struct {
-	uint32_t cols, rows, allowalt, argc, envc;
-	char *title, *cwd, *line, *output, *windowid;
-	char **args, **env;
-} Launch;
+#include "workspace_restore.h"
+#include "workspace_launch.h"
 
 static Client *clients;
 static Tab *tabs, *lasttab;
@@ -40,7 +38,8 @@ static uint32_t next_id = 1;
 static uint32_t closed_id, fallback_id;
 static int catalog_dirty;
 static WireBuffer published_catalog;
-static int running = 1;
+static volatile sig_atomic_t running = 1;
+static int restored_launch;
 static int handin_listener = -1;
 
 static Tab *
@@ -254,6 +253,7 @@ static void
 broadcast_catalog(void)
 {
 	if (!catalog_dirty) return;
+	workspace_restore_save(tabs);
 	WireBuffer buffer = catalog_buffer();
 	catalog_dirty = 0;
 	/* Repeated settings and hide/show pairs can leave the catalog unchanged.
@@ -281,6 +281,14 @@ refresh_directory(Tab *tab)
 	char path[64], directory[PATH_MAX];
 	pid_t child = tsessionpid(tab->session);
 	ssize_t length;
+	if (tab->restoring_directory) {
+		struct stat owner, shell;
+		snprintf(path, sizeof(path), "/proc/%ld/exe", (long)child);
+		/* applylaunch changes cwd before exec; ignore the inherited daemon cwd. */
+		if (stat(path, &shell) < 0 || stat("/proc/self/exe", &owner) < 0 ||
+		    (owner.st_dev == shell.st_dev && owner.st_ino == shell.st_ino)) return;
+		tab->restoring_directory = 0;
+	}
 	snprintf(path, sizeof(path), "/proc/%ld/cwd", (long)child);
 	length = child > 0 ? readlink(path, directory, sizeof(directory) - 1) : -1;
 	/* An unreadable directory must clear the previous value, not advertise it. */
@@ -302,51 +310,6 @@ monotonic_ns(void)
 	return (int64_t)now.tv_sec * 1000000000 + now.tv_nsec;
 }
 
-static void
-launch_free(Launch *launch)
-{
-	free(launch->title);
-	free(launch->cwd);
-	free(launch->line);
-	free(launch->output);
-	free(launch->windowid);
-	for (uint32_t i = 0; i < launch->argc; i++)
-		free(launch->args[i]);
-	for (uint32_t i = 0; i < launch->envc; i++)
-		free(launch->env[i]);
-	free(launch->args);
-	free(launch->env);
-}
-
-static int
-launch_read(WirePacket *packet, Launch *launch)
-{
-	memset(launch, 0, sizeof(*launch));
-	if (!wire_get_u32(packet, &launch->cols) || !wire_get_u32(packet, &launch->rows) ||
-	    !wire_get_u32(packet, &launch->allowalt) || !wire_get_u32(packet, &launch->argc) ||
-	    !wire_get_u32(packet, &launch->envc) || launch->cols < 1 || launch->cols > 400 ||
-	    launch->rows < 1 || launch->rows > 200 || launch->argc > 1024 || launch->envc > 8192)
-		return 0;
-	launch->title = wire_get_string(packet);
-	launch->cwd = wire_get_string(packet);
-	launch->line = wire_get_string(packet);
-	launch->output = wire_get_string(packet);
-	launch->windowid = wire_get_string(packet);
-	if (!launch->title || !launch->cwd || !launch->line || !launch->output ||
-	    !launch->windowid)
-		return 0;
-	launch->args = calloc(launch->argc + 1, sizeof(char *));
-	launch->env = calloc(launch->envc + 1, sizeof(char *));
-	if (!launch->args || !launch->env)
-		abort();
-	for (uint32_t i = 0; i < launch->argc; i++)
-		if (!(launch->args[i] = wire_get_string(packet)))
-			return 0;
-	for (uint32_t i = 0; i < launch->envc; i++)
-		if (!(launch->env[i] = wire_get_string(packet)))
-			return 0;
-	return packet->pos == packet->len;
-}
 
 static Tab *
 tab_start(Client *client, Launch *launch)
@@ -361,6 +324,7 @@ tab_start(Client *client, Launch *launch)
 	tab->title = xstrdup(*launch->title ? launch->title : "Worminal");
 	tab->initial_title = xstrdup(tab->title);
 	tab->directory = xstrdup(cwd);
+	tab->restoring_directory = launch->restored;
 	tab->cursor = 2;
 	tab->controller = client;
 	if (strcmp(launch->output, "-") == 0)
@@ -372,19 +336,40 @@ tab_start(Client *client, Launch *launch)
 	else
 		tabs = tab;
 	lasttab = tab;
-	/* An omitted environment means inherit the daemon (not an empty environment),
-	 * as required by SSH launches that must keep the remote account settings. */
-	ttysetlaunch(cwd, launch->envc ? launch->env : NULL, *launch->windowid ? launch->windowid : NULL);
-	ttynew(*launch->line ? launch->line : NULL, "/bin/sh",
-	       *launch->output ? launch->output : NULL,
-	       launch->argc ? launch->args : NULL);
-	ttysetlaunch(NULL, NULL, NULL);
+	launch_pty(launch, cwd);
 	int fd = tsessionfd(tab->session);
 	if (!tsessionprivatefds(tab->session) ||
 	    (fd >= 0 && fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) < 0))
 		tsessionstop(tab->session);
 	catalog_dirty = 1;
 	return tab;
+}
+
+#ifdef WORMINAL_PREVIEW_PROTOCOL
+static Tab *
+tab_browser(const char *url)
+{
+	Tab *tab = calloc(1, sizeof(*tab));
+	if (!tab) abort();
+	tab->id = next_id++;
+	tab->title = xstrdup("Browser");
+	tab->initial_title = xstrdup("Browser");
+	tab->directory = xstrdup("");
+	tab->url = xstrdup(url);
+	if (lasttab) lasttab->next = tab;
+	else tabs = tab;
+	lasttab = tab;
+	catalog_dirty = 1;
+	return tab;
+}
+#endif
+
+
+static void
+stop_service(int signal_number)
+{
+	(void)signal_number;
+	running = 0;
 }
 
 static void
@@ -490,6 +475,7 @@ client_message(Client *client, WirePacket *packet)
 		return;
 	}
 	if (packet->type == WIRE_ATTACH) {
+		restored_launch = 0;
 		client->ready = 1;
 		send_catalog(client);
 		return;
@@ -501,18 +487,8 @@ client_message(Client *client, WirePacket *packet)
 			return;
 		}
 		if (packet->type == WIRE_BROWSER) {
-			tab = calloc(1, sizeof(*tab));
-			if (!tab)
-				abort();
-			tab->id = next_id++;
-			tab->title = xstrdup("Browser");
-			tab->directory = xstrdup("");
-			tab->initial_title = xstrdup("Browser");
-			if (lasttab)
-				lasttab->next = tab;
-			else
-				tabs = tab;
-			lasttab = tab;
+			restored_launch = 0;
+			tab = tab_browser(url);
 			client->ready = 1;
 			client_send(client, WIRE_CREATED, tab->id, NULL);
 		} else if (!client->ready || !tab || !tab->url) {
@@ -533,13 +509,19 @@ client_message(Client *client, WirePacket *packet)
 			return;
 		}
 		client->ready = 1;
-		tab = tab_start(client, &launch);
+		int reused = restored_launch && tabs && packet->type == WIRE_HELLO && !launch.argc && !*launch.line;
+		if (reused) {
+			tab = tabs;
+			if (tab->session) take_control(tab, client);
+		} else tab = tab_start(client, &launch);
+		restored_launch = 0;
 #ifdef WORMINAL_PREVIEW_PROTOCOL
 		client_send(client, WIRE_CREATED, tab->id, NULL);
 #endif
 		launch_free(&launch);
 		broadcast_catalog();
-		send_frame(client, tab, 1);
+		if (reused) send_catalog(client);
+		if (tab->session) send_frame(client, tab, 1);
 		return;
 	}
 	if (!client->ready || !tab)
@@ -648,6 +630,19 @@ serve(void)
 	ttyrawhook = service_input;
 	if (listener < 0)
 		return service_failure("workspace listen");
+	struct sigaction stop = {.sa_handler = stop_service};
+	sigemptyset(&stop.sa_mask);
+	sigaction(SIGTERM, &stop, NULL);
+	sigaction(SIGINT, &stop, NULL);
+	sigaction(SIGHUP, &stop, NULL);
+	sigset_t blocked, previous_mask;
+	sigemptyset(&blocked);
+	sigaddset(&blocked, SIGTERM); sigaddset(&blocked, SIGINT); sigaddset(&blocked, SIGHUP);
+#ifdef WORMINAL_PREVIEW_PROTOCOL
+	restored_launch = workspace_restore_start(tab_start, tab_browser);
+#else
+	restored_launch = workspace_restore_start(tab_start, NULL);
+#endif
 	for (; running;) {
 		fd_set readers, writers;
 		int maxfd = listener;
@@ -718,8 +713,14 @@ serve(void)
 		}
 		if (sync_delay && ((!pending && !watch_directories) || sync_delay < flush_delay.tv_nsec))
 			flush_delay.tv_nsec = sync_delay;
-		if (pselect(maxfd + 1, &readers, &writers, NULL,
-		            pending || watch_directories || sync_delay ? &flush_delay : NULL, NULL) < 0) {
+		sigprocmask(SIG_BLOCK, &blocked, &previous_mask);
+		if (!running) { sigprocmask(SIG_SETMASK, &previous_mask, NULL); break; }
+		int wait_result = pselect(maxfd + 1, &readers, &writers, NULL,
+		            pending || watch_directories || sync_delay ? &flush_delay : NULL, &previous_mask);
+		int wait_error = errno;
+		sigprocmask(SIG_SETMASK, &previous_mask, NULL);
+		errno = wait_error;
+		if (wait_result < 0) {
 			if (errno == EINTR)
 				continue;
 			return service_failure("workspace pselect");
@@ -800,6 +801,7 @@ serve(void)
 			free(dead);
 		}
 	}
+	workspace_restore_save(tabs);
 	tsessionhangupall();
 	wire_buffer_free(&published_catalog);
 	close(listener);

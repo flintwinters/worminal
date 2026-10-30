@@ -77,7 +77,8 @@ def profile(env):
         runtime = base / "runtime"
         runtime.mkdir(mode=0o700)
         yield {**env, "XDG_RUNTIME_DIR": str(runtime), "XDG_DATA_HOME": str(base / "data"),
-               "XDG_CACHE_HOME": str(base / "cache"), "NO_AT_BRIDGE": "1", "SHELL": "/bin/sh",
+               "XDG_CACHE_HOME": str(base / "cache"), "XDG_STATE_HOME": str(base / "state"),
+               "NO_AT_BRIDGE": "1", "SHELL": "/bin/sh",
                # Browser GPU helpers can finish cache writes after the UI process exits.
                "MESA_SHADER_CACHE_DISABLE": "true",
                "WEBKIT_DISABLE_DMABUF_RENDERER": "1", "G_DEBUG": "fatal-criticals"}
@@ -356,6 +357,8 @@ def main():
         env.pop("DBUS_SESSION_BUS_ADDRESS", None)
         for remote in (False, True):
             trial_env = dict(env)
+            # Local and remote proofs start independent workspaces, including recovery state.
+            trial_env["WORMINAL_SHARED_SOCKET_SCOPE"] += "-remote" if remote else "-local"
             if remote:
                 trial_env["PATH"] = str(ROOT / "tests/fixtures/preview-master") + os.pathsep + env["PATH"]
                 trial_env["WORMINAL_PREVIEW_TEST_MASTER"] = "preview-test"

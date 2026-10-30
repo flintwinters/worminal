@@ -45,7 +45,10 @@ def root():
 
 
 def run(args, *, env=None):
-    return subprocess.run(args, env=env).returncode
+    # Maintenance checks must never read or overwrite the user's recovery recipes.
+    private_env = {**(os.environ if env is None else env),
+                   "XDG_STATE_HOME": str(ROOT / ".checks" / "state")}
+    return subprocess.run(args, env=private_env).returncode
 
 
 def check_file_limits():
@@ -102,7 +105,7 @@ def run_headless_checks():
     if code:
         return code
     patterns = ("test_build.py", "test_perf_metrics.py", "test_cli.py", "test_workspace.py",
-                "test_preview_workspace.py", "test_theme.py", "test_privacy.py", "test_handoff.py")
+                "test_preview_workspace.py", "test_theme.py", "test_privacy.py", "test_handoff.py", "test_restore.py")
     for pattern in patterns:
         code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                     "-p", pattern, "-q"])
@@ -244,6 +247,14 @@ def check_handoff(baseline: Path = typer.Option(
         code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                     "-p", "test_handoff.py", "-q"], env=env)
     raise typer.Exit(code)
+
+
+@app.command("check-restore")
+def check_restore():
+    """Check tab/directory recovery across daemon shutdowns and crashes, including real zsh startup."""
+    native_build.build_targets("worminald-x11", "worminald-preview")
+    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                         "-p", "test_restore.py", "-q"]))
 
 
 @app.command("check-headless")

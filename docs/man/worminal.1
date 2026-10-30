@@ -61,6 +61,26 @@ to stop it and end its tabs.
 connects over SSH to a service on that host; the remote account needs
 .B worminald
 in its PATH. Further hosts can be reached with ordinary SSH inside a tab.
+.SH RESTART RECOVERY
+The service automatically saves ordered terminal working directories and browser URLs in
+$XDG_STATE_HOME/worminal (default ~/.local/state/worminal), separately for each protocol and workspace scope.
+After a daemon or computer restart, terminal tabs start fresh default shells in their saved directories;
+browser tabs reopen their saved URLs. Commands, environments, running programs, scrollback, and window layouts
+are not restored. Missing directories fall back to the home directory, then /.
+The first ordinary launch selects the restored workspace without adding a shell;
+explicit commands and subsequent launches still create new tabs.
+Closing a tab removes its recovery entry. Stopping the service retains its recovery entries.
+Files are private and atomically replaced after state changes; unreadable or malformed recovery files
+are preserved and disable saving for that daemon rather than being overwritten.
+.PP
+Restored shells receive WORMINAL_RESTORE=1. Shell configuration that changes the initial directory
+should skip that change when this variable is present, then unset it so nested shells behave normally.
+For example, in .zshrc:
+.PP
+.nf
+[[ -n ${WORMINAL_RESTORE-} ]] || . ~/.lastfile
+unset WORMINAL_RESTORE
+.fi
 .SH SESSION TRANSFER
 Arm a running destination with
 .B worminald --handin NAME
