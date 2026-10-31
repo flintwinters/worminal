@@ -782,7 +782,8 @@ class ServiceDiagnosticsTest(unittest.TestCase):
                                 capture_output=True, text=True, timeout=3)
         self.assertEqual(result.returncode, 1)
         self.assertIn("JOURNAL[5] Workspace service started (protocol 2)", result.stderr)
-        operation = "ppoll" if os.environ.get("WORMINAL_TEST_RUST_DAEMON") else "pselect"
+        from workspace_protocol import rust_daemon
+        operation = "ppoll" if rust_daemon(DAEMON) else "pselect"
         self.assertIn(f"JOURNAL[3] workspace {operation} failed:", result.stderr)
         self.assertIn("(errno 9)", result.stderr)
         self.assertIn("JOURNAL[3] Workspace service exited with status 1", result.stderr)
@@ -808,7 +809,8 @@ class ServiceDiagnosticsTest(unittest.TestCase):
                 send(peer, 1, payload=launch)
                 _, errors = service.communicate(timeout=3)
             self.assertEqual(service.returncode, 1)
-            operation = b"posix_openpt" if os.environ.get("WORMINAL_TEST_RUST_DAEMON") else b"openpty"
+            from workspace_protocol import rust_daemon
+            operation = b"posix_openpt" if rust_daemon(DAEMON) else b"openpty"
             message = operation + b" failed: Too many open files"
             self.assertIn(b"JOURNAL[3] " + message, errors)
             self.assertEqual(errors.count(message), 2)

@@ -13,7 +13,7 @@ import time
 import unittest
 import uuid
 
-from workspace_protocol import number, string, send, wait_kind, catalog_records
+from workspace_protocol import number, string, send, wait_kind, catalog_records, rust_daemon
 
 ROOT = Path(__file__).resolve().parent.parent
 BINARIES = {1: ROOT / "worminald-x11",
@@ -139,7 +139,7 @@ class HandoffTest(HandoffFixture, unittest.TestCase):
                 self.assert_screen(donor, source, tab, "before-transfer")
                 self.command(destination, target_env, "--handin")
                 self.command(source, source_env, "--handoff")
-                if destination == 2 and target_binary is None and os.environ.get("WORMINAL_TEST_RUST_HANDOFF"):
+                if destination == 2 and target_binary is None and rust_daemon(BINARIES[2]):
                     self.assertEqual(os.getsid(receiver_process.pid), receiver_process.pid)
                 _, catalog = wait_kind(receiver, 7, version=destination)
                 records = catalog_rows(catalog, destination)

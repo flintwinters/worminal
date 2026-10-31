@@ -1,6 +1,18 @@
 """Small framed workspace test client; versions stay explicit at call sites."""
 
 import struct
+import os
+from pathlib import Path
+
+
+def rust_daemon(executable):
+    """Select implementation-specific fault injection; custom C proof binaries remain C by default."""
+    explicit = os.environ.get("WORMINAL_TEST_RUST_DAEMON")
+    if explicit is not None:
+        return explicit == "1"
+    root = Path(__file__).resolve().parent.parent
+    return Path(executable).resolve() in {root / "worminald", root / "worminald-preview",
+                                         root / "build/cargo/release/worminal-daemon"}
 
 
 def number(value):

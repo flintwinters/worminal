@@ -69,7 +69,7 @@ def rust_handoff_counterfactual(directory, name, filename, before, after, test, 
     command = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", pattern,
                "-k", test, "-q"]
     return (name, command, {**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(binary),
-                           "WORMINAL_TEST_RUST_HANDOFF": "1", "WORMINAL_TEST_RUST_DAEMON": "1"}, test.encode())
+                           "WORMINAL_TEST_RUST_DAEMON": "1"}, test.encode())
 
 
 def prove(match=None):

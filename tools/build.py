@@ -129,9 +129,14 @@ class Builder:
         step(output, [*self.cc, *objects, *(self.libs if libs is None else libs)],
              [*objects, *link_dependencies])
 
-    def rust_launcher(self, output):
-        invoke(["cargo", "build", "--locked", "--release", "--quiet", "-p", "worminal-launcher"])
-        source = ROOT / "build/cargo/release/worminal-launcher"
+    def rust_artifact(self, package):
+        if package == "worminal-daemon":
+            self.target("build/libworminal_engine.a")
+        invoke(["cargo", "build", "--locked", "--release", "--quiet", "-p", package])
+        return ROOT / "build/cargo/release" / package
+
+    def rust_program(self, output, package):
+        source = self.rust_artifact(package)
         destination = ROOT / output
         if destination.exists() and destination.read_bytes() == source.read_bytes():
             return
@@ -178,15 +183,16 @@ class Builder:
         elif target in ("worminal", "worminal-preview"):
             self.target("build/browser.so")
             self.target("build/frontend.so")
-            self.rust_launcher(target)
-        elif target in ("worminald", "worminald-preview", "build/worminald-c-v2",
-                        "build/frontend.so", "build/preview_test"):
+            self.rust_program(target, "worminal-launcher")
+        elif target in ("worminald", "worminald-preview"):
+            self.rust_program(target, "worminal-daemon")
+        elif target in ("build/worminald-c-v2", "build/frontend.so", "build/preview_test"):
             if target == "build/preview_test":
                 generate_browser_resources()
             flags = ["-DWORMINAL_PREVIEW_PROTOCOL"]
             if target == "build/frontend.so":
                 flags += ["-fPIC", "-ffunction-sections", "-fdata-sections"]
-            server = target in ("worminald", "worminald-preview", "build/worminald-c-v2")
+            server = target == "build/worminald-c-v2"
             sources = SERVER if server else PREVIEW
             if target == "build/preview_test":
                 sources = ()

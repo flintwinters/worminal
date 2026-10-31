@@ -173,14 +173,12 @@ def run_rust_process_checks():
 
 def build_rust_daemon():
     native_build.generate_theme()
-    native_build.Builder().target("build/libworminal_engine.a")
-    native_build.invoke(["cargo", "build", "--release", "--locked", "--quiet", "-p", "worminal-daemon"])
-    return ROOT / "build/cargo/release/worminal-daemon"
+    return native_build.Builder().rust_artifact("worminal-daemon")
 
 
 @app.command("build-rust-daemon")
 def build_rust_daemon_command():
-    """Build the isolated Rust service candidate; leave release and installed daemons unchanged."""
+    """Build the Rust service artifact without publishing or replacing installed daemons."""
     typer.echo(build_rust_daemon())
 
 
@@ -229,7 +227,7 @@ def check_rust_handoff():
         code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                     "-p", "test_handoff.py", "-q"],
                    env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate),
-                        "WORMINAL_TEST_RUST_HANDOFF": "1",
+                        "WORMINAL_TEST_RUST_DAEMON": "1",
                         "WORMINAL_TEST_HANDOFF_BASELINE": str(ROOT / ".checks/c-baseline/build/worminald")})
     raise typer.Exit(code)
 

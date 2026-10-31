@@ -325,42 +325,53 @@ fn c_clients_can_connect_to_a_rust_workspace_endpoint() {
         .unwrap()
         .parse()
         .unwrap();
-    let listener = socket::listen(uid, fixture.scope.as_bytes()).unwrap();
-    listener.set_nonblocking(true).unwrap();
-    let server = thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(3);
-        let mut peer = loop {
-            match listener.accept() {
-                Ok((peer, _)) => break peer,
-                Err(error)
-                    if error.kind() == std::io::ErrorKind::WouldBlock
-                        && Instant::now() < deadline =>
-                {
-                    thread::sleep(Duration::from_millis(1))
+    let prefix = format!("worminal-workspace-v2-{uid}-");
+    let mut longest = fixture.scope.clone();
+    longest.extend(std::iter::repeat_n('x', 106 - prefix.len() - longest.len()));
+    for scope in [&fixture.scope, &longest] {
+        let listener = socket::listen(uid, scope.as_bytes()).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let server = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            let mut peer = loop {
+                match listener.accept() {
+                    Ok((peer, _)) => break peer,
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::WouldBlock
+                            && Instant::now() < deadline =>
+                    {
+                        thread::sleep(Duration::from_millis(1))
+                    }
+                    Err(error) => panic!("private workspace accept failed: {error}"),
                 }
-                Err(error) => panic!("private workspace accept failed: {error}"),
-            }
-        };
-        peer.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
-        peer.set_write_timeout(Some(Duration::from_secs(3)))
+            };
+            peer.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            peer.set_write_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut header = [0; 16];
+            peer.read_exact(&mut header).unwrap();
+            let (_, packet) = Decoder::default().push(&header).unwrap();
+            assert_eq!(packet.unwrap().kind, WIRE_SERVICE_INFO);
+            let reply = Packet {
+                kind: WIRE_SERVICE_INFO,
+                tab: 0,
+                body: 4242u32.to_be_bytes().to_vec(),
+            };
+            peer.write_all(&reply.encode().unwrap()).unwrap();
+        });
+        let output = Command::new(fixture.project.join("build/wire_reference"))
+            .arg("--socket")
+            .env("WORMINAL_SHARED_SOCKET_SCOPE", scope)
+            .output()
             .unwrap();
-        let mut header = [0; 16];
-        peer.read_exact(&mut header).unwrap();
-        let (_, packet) = Decoder::default().push(&header).unwrap();
-        assert_eq!(packet.unwrap().kind, WIRE_SERVICE_INFO);
-        let reply = Packet {
-            kind: WIRE_SERVICE_INFO,
-            tab: 0,
-            body: 4242u32.to_be_bytes().to_vec(),
-        };
-        peer.write_all(&reply.encode().unwrap()).unwrap();
-    });
-    let output = Command::new(fixture.project.join("build/wire_reference"))
-        .arg("--socket")
-        .env("WORMINAL_SHARED_SOCKET_SCOPE", &fixture.scope)
-        .output()
-        .unwrap();
-    server.join().unwrap();
-    assert!(output.status.success());
-    assert_eq!(output.stdout, b"4242\n");
+        server.join().unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"4242\n");
+    }
+    // A 107-byte abstract name is legal in Linux but unreachable through legacy snprintf clients.
+    longest.push('x');
+    assert_eq!(
+        socket::listen(uid, longest.as_bytes()).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidInput
+    );
 }

@@ -23,17 +23,20 @@ class BuildTests(unittest.TestCase):
         self.addCleanup(self.root_patch.stop)
 
     def test_release_and_rollback_own_matching_protocols(self):
-        with patch.object(build, "pkg_flags", return_value=[]), patch.object(build, "generate_browser_resources"):
+        with patch.object(build, "pkg_flags", return_value=[]), patch.object(build, "generate_browser_resources"), \
+                patch.object(build, "step"):
             builder = build.Builder()
-            with patch.object(builder, "program") as program, patch.object(builder, "rust_launcher") as launcher:
+            with patch.object(builder, "program") as program, patch.object(builder, "rust_program") as rust:
                 for name in ("worminal", "worminald", "worminal-preview", "worminald-preview"):
                     builder.target(name)
-                    args, kwargs = program.call_args
-                    self.assertIn("-DWORMINAL_PREVIEW_PROTOCOL", kwargs["flags"])
                     if name in ("worminal", "worminal-preview"):
-                        launcher.assert_called_with(name)
+                        rust.assert_called_with(name, "worminal-launcher")
                     else:
-                        self.assertIn("src/workspace/workspace_service.c", args[1])
+                        rust.assert_called_with(name, "worminal-daemon")
+                        self.assertEqual(program.call_args.args[0], "build/frontend.so")
+                builder.target("build/worminald-c-v2")
+                self.assertIn("src/workspace/workspace_service.c", program.call_args.args[1])
+                self.assertIn("-DWORMINAL_PREVIEW_PROTOCOL", program.call_args.kwargs["flags"])
                 builder.target("build/frontend.so")
                 args, kwargs = program.call_args
                 self.assertIn("src/gtk/app.c", args[1])
@@ -44,6 +47,34 @@ class BuildTests(unittest.TestCase):
                     args, kwargs = program.call_args
                     self.assertNotIn("-DWORMINAL_PREVIEW_PROTOCOL", kwargs["flags"])
                     self.assertIn('-DWORKSPACE_DAEMON="worminald-x11"', kwargs["flags"])
+
+    def test_rust_publication_preserves_running_inodes_and_failed_builds(self):
+        source = self.root / "build/cargo/release/worminal-daemon"
+        source.parent.mkdir(parents=True)
+        source.write_bytes(b"new daemon")
+        output = self.root / "worminald"
+        output.write_bytes(b"running daemon")
+        with patch.object(build, "pkg_flags", return_value=[]):
+            builder = build.Builder()
+        with patch.object(build, "invoke") as cargo, patch.object(builder, "target") as target, \
+                output.open("rb") as running:
+            builder.rust_program("worminald", "worminal-daemon")
+            target.assert_called_once_with("build/libworminal_engine.a")
+            cargo.assert_called_once_with(["cargo", "build", "--locked", "--release", "--quiet",
+                                           "-p", "worminal-daemon"])
+            self.assertEqual(running.read(), b"running daemon")
+            self.assertEqual(output.read_bytes(), b"new daemon")
+            self.assertEqual(output.stat().st_mode & 0o777, 0o755)
+            identity = output.stat().st_ino
+            builder.rust_program("worminald", "worminal-daemon")
+            self.assertEqual(output.stat().st_ino, identity)
+            cargo.side_effect = subprocess.CalledProcessError(1, ["cargo"])
+            source.write_bytes(b"failed artifact")
+            with self.assertRaises(subprocess.CalledProcessError):
+                builder.rust_program("worminald", "worminal-daemon")
+            self.assertEqual(output.read_bytes(), b"new daemon")
+            self.assertEqual(output.stat().st_ino, identity)
+            self.assertFalse(output.with_name("worminald.pending").exists())
 
     def test_native_browser_resources_are_independent_and_preserve_utf8(self):
         source = self.root / "src/gtk/browser-find.js"

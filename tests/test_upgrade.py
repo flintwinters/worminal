@@ -14,7 +14,7 @@ import unittest
 from unittest.mock import patch
 
 from test_handoff import HandoffFixture, ROOT, BINARIES
-from workspace_protocol import catalog_records, number, send, string, wait_kind, service_pid
+from workspace_protocol import catalog_records, number, send, string, wait_kind, service_pid, rust_daemon
 
 
 class UpgradeTest(HandoffFixture, unittest.TestCase):
@@ -24,7 +24,9 @@ class UpgradeTest(HandoffFixture, unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory(prefix='upgrade-', dir=ROOT / '.checks')
         self.addCleanup(self.directory.cleanup)
         self.binary = Path(self.directory.name) / 'worminald'
-        shutil.copy2(os.environ.get("WORMINAL_TEST_UPGRADE_CANDIDATE", BINARIES[2]), self.binary)
+        candidate = os.environ.get("WORMINAL_TEST_UPGRADE_CANDIDATE", BINARIES[2])
+        self.rust = rust_daemon(candidate)
+        shutil.copy2(candidate, self.binary)
 
     def track_receivers(self, constructor):
         def tracked(*args, **kwargs):
@@ -189,7 +191,7 @@ class UpgradeTest(HandoffFixture, unittest.TestCase):
                         str(ROOT / 'tests/upgrade_fault.c'), '-ldl'], check=True)
         env = {'LD_PRELOAD': str(library), 'WORMINAL_TEST_UPGRADE_FAULT_FILE': str(marker),
                'WORMINAL_TEST_UPGRADE_FAULT_OPERATION':
-                   'signals' if os.environ.get('WORMINAL_TEST_RUST_DAEMON') else 'transport'}
+                   'signals' if self.rust else 'transport'}
         peer, env, parent = self.start(2, self.binary, env)
         tab, shell_pid = self.launch(peer, 2, 'setup-retained')
         self.replace()
@@ -323,7 +325,7 @@ class UpgradeTest(HandoffFixture, unittest.TestCase):
             status = Path(f'/proc/{child}/status').read_text().splitlines()
             caught = next(line.split()[1] for line in status if line.startswith('SigCgt:'))
             registered = int(caught, 16) & (1 << (signal.SIGTERM - 1))
-            if os.environ.get('WORMINAL_TEST_RUST_DAEMON'):
+            if self.rust:
                 for descriptor in Path(f'/proc/{child}/fdinfo').iterdir():
                     try: info = descriptor.read_text()
                     except FileNotFoundError: continue
