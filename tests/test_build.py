@@ -25,12 +25,15 @@ class BuildTests(unittest.TestCase):
     def test_release_and_rollback_own_matching_protocols(self):
         with patch.object(build, "pkg_flags", return_value=[]), patch.object(build, "generate_browser_resources"):
             builder = build.Builder()
-            with patch.object(builder, "program") as program:
+            with patch.object(builder, "program") as program, patch.object(builder, "rust_launcher") as launcher:
                 for name in ("worminal", "worminald", "worminal-preview", "worminald-preview"):
                     builder.target(name)
                     args, kwargs = program.call_args
                     self.assertIn("-DWORMINAL_PREVIEW_PROTOCOL", kwargs["flags"])
-                    self.assertEqual("src/gtk/launcher.c" in args[1], name in ("worminal", "worminal-preview"))
+                    if name in ("worminal", "worminal-preview"):
+                        launcher.assert_called_with(name)
+                    else:
+                        self.assertIn("src/workspace/workspace_service.c", args[1])
                 builder.target("build/frontend.so")
                 args, kwargs = program.call_args
                 self.assertIn("src/gtk/app.c", args[1])

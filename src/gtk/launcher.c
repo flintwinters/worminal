@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include "modules.h"
+#include "frontend_module.h"
 #include "windows.h"
 #include "workspace_socket.h"
 
@@ -38,12 +39,12 @@ main(int argc, char **argv)
 			return forwarded > 0 ? 0 : 1;
 		}
 	}
-	char *path = module_path("frontend.so", NULL);
+	char *path = module_path(WORMINAL_FRONTEND_FILE, NULL);
 	/* Explicit module callbacks keep GTK out of the global symbol search scope. */
 	GModule *module = path ? g_module_open(path, G_MODULE_BIND_LAZY | G_MODULE_BIND_LOCAL) : NULL;
 	g_free(path);
-	int (*entry)(int, char **, int) = NULL;
-	if (!module || !g_module_symbol(module, "worminal_frontend_v1", (gpointer *)&entry)) {
+	WorminalFrontendEntry entry = NULL;
+	if (!module || !g_module_symbol(module, WORMINAL_FRONTEND_SYMBOL, (gpointer *)&entry)) {
 		g_printerr("Cannot load terminal frontend: %s\n", g_module_error() ?: "module path unavailable");
 		if (listener >= 0) close(listener);
 		if (module) g_module_close(module);

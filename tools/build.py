@@ -129,6 +129,21 @@ class Builder:
         step(output, [*self.cc, *objects, *(self.libs if libs is None else libs)],
              [*objects, *link_dependencies])
 
+    def rust_launcher(self, output):
+        invoke(["cargo", "build", "--locked", "--release", "--quiet", "-p", "worminal-launcher"])
+        source = ROOT / "build/cargo/release/worminal-launcher"
+        destination = ROOT / output
+        if destination.exists() and destination.read_bytes() == source.read_bytes():
+            return
+        temporary = destination.with_name(destination.name + ".pending")
+        try:
+            shutil.copyfile(source, temporary)
+            temporary.chmod(0o755)
+            temporary.replace(destination)
+            destination.with_suffix(".command.json").unlink(missing_ok=True)
+        finally:
+            temporary.unlink(missing_ok=True)
+
     def target(self, target):
         if target == "build/libworminal_engine.a":
             objects = []
@@ -163,17 +178,7 @@ class Builder:
         elif target in ("worminal", "worminal-preview"):
             self.target("build/browser.so")
             self.target("build/frontend.so")
-            old_flags = self.cflags
-            packages = ("gmodule-2.0",)
-            self.cflags = [*CPPFLAGS, *words("CPPFLAGS"), *words("CFLAGS", "-O3"),
-                           *pkg_flags("--cflags", packages)]
-            try:
-                self.program(target, ["src/gtk/launcher.c", "src/gtk/windows_forward.c", "src/workspace/wire.c",
-                                      "src/workspace/workspace_socket.c"],
-                             variant="launcher", flags=["-DWORMINAL_PREVIEW_PROTOCOL"],
-                             libs=[*pkg_flags("--libs", packages), *words("LDFLAGS")])
-            finally:
-                self.cflags = old_flags
+            self.rust_launcher(target)
         elif target in ("worminald", "worminald-preview", "build/frontend.so", "build/preview_test"):
             if target == "build/preview_test":
                 generate_browser_resources()

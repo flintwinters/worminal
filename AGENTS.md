@@ -95,8 +95,10 @@ Private Wayland checks use a project-local Weston runtime and matching virtual-s
 
 Current jobs: migrate release GTK/v2 application policy to Rust above an instance-based C terminal engine,
 preserving the C X11 rollback and live sessions. The shared instance-based C parser is extracted;
-`src/terminal/engine.h` owns its ABI, ordered effects and caller-time redraw gate. Legacy programs adapt it;
-the application and active installation still run C. Rust engine bindings are generated from that header;
+`src/terminal/engine.h` owns its ABI, ordered effects and caller-time redraw gate. Legacy programs adapt it.
+Development release launches enter Rust, forward to existing C GTK owners and load their frontend lazily;
+daemon and frontend implementations remain C, and the active installation is still C.
+Rust engine bindings are generated from that header;
 the safe wrapper owns handles and copies damaged rows. `manage.py check-engine` compares the preserved parser,
 checks memory boundaries and Rust ownership, and records CPU/memory costs. Engine checks also run in the routine suite.
 The locked GTK 3/Pango/Cairo/WebKitGTK 4.1 binding probe runs through `manage.py check-rust-platform` on private Xvfb.

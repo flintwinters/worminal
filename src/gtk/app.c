@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <glib-unix.h>
 #include "preview.h"
+#include "frontend_module.h"
 #include "workspace_client.h"
 #include "workspace_socket.h"
 #include "browser_target.h"

@@ -995,6 +995,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "worminal-launcher"
+version = "0.1.0"
+dependencies = [
+ "bindgen",
+ "glib-sys",
+ "libc",
+ "worminal-protocol",
+ "worminal-workspace",
+]
+
+[[package]]
 name = "worminal-platform"
 version = "0.1.0"
 dependencies = [
