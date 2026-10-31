@@ -505,6 +505,7 @@ check_connection_gate(void)
 static void
 check_tabs(App *app, Page *terminal, Page *browser)
 {
+	check_terminal_tab_color(app, terminal, browser);
 	TabStrip *strip = g_object_get_data(G_OBJECT(app->tabstrip), "tabs");
 	g_assert_cmpint(strip->cw, ==, terminal->terminal->cw);
 	g_assert_cmpint(strip->ch, ==, terminal->terminal->ch);
@@ -555,6 +556,7 @@ press_browser_key(Page *page, guint key, guint mods)
 }
 
 #include "preview_find.c"
+#include "preview_shortcuts.c"
 
 static Page *
 open_browser(App *app, const char *url)
@@ -925,8 +927,8 @@ main(int argc, char **argv)
 	WAIT(find_page(app, webid) == NULL && find_page(peer, webid) == NULL);
 	web = open_browser(app, url);
 	expect_script(web->browser, "localStorage.getItem('saved') + ':' + document.cookie", "yes:session=local");
-	/* The shell command changes the existing record, then Ctrl+T always creates
-	 * a fresh terminal. Ctrl+Shift+B has no browser action. */
+	/* The shell command changes the existing record. Tab creation follows its
+	 * resulting type; Ctrl+Shift+B has no browser action. */
 	App *converter = new_app();
 	converter->master = g_strdup(master);
 	char *test_cwd = g_get_current_dir();
@@ -954,9 +956,7 @@ main(int argc, char **argv)
 	g_assert_null(peer->active->browser);
 	g_assert_null(converted_browser->entry);
 	WAIT(gtk_window_get_focus(GTK_WINDOW(converter->window)) == browser_view(converted_browser));
-	GdkEventKey control_t = {.type = GDK_KEY_PRESS, .keyval = GDK_KEY_t, .state = GDK_CONTROL_MASK};
-	g_assert_true(shortcut(converter->window, &control_t, converter));
-	WAIT(converter->active && converter->active->terminal && converter->active->id != converted_id);
+	check_new_tab_shortcuts(converter, converted_id);
 	GdkEventKey removed = {.type = GDK_KEY_PRESS, .keyval = GDK_KEY_b,
 	    .state = GDK_CONTROL_MASK | GDK_SHIFT_MASK};
 	g_assert_false(shortcut(converter->window, &removed, converter));

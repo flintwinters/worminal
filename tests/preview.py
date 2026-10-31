@@ -333,9 +333,16 @@ def broker_check(env, url, log, daemon):
         pending.replace(daemon)
         deadline = time.monotonic() + 5
         while True:
-            with socket.socket(socket.AF_UNIX) as peer:
-                peer.settimeout(5); peer.connect(address)
-                new_pid = service_pid(peer)
+            try:
+                with socket.socket(socket.AF_UNIX) as peer:
+                    peer.settimeout(5); peer.connect(address)
+                    new_pid = service_pid(peer)
+            except (ConnectionError, AssertionError) as error:
+                # The donor may accept this probe just before handing off and
+                # closing its connections. Protocol errors must still fail.
+                if isinstance(error, AssertionError) and str(error) != "workspace closed its connection":
+                    raise
+                new_pid = old_pid
             if new_pid != old_pid: break
             if time.monotonic() > deadline: raise RuntimeError("Daemon did not upgrade automatically")
             time.sleep(.01)
@@ -344,6 +351,8 @@ def broker_check(env, url, log, daemon):
         key("type", "--clearmodifiers", "--delay", "0", "!")
         window("Edited:shared-state!")
         key("key", "--clearmodifiers", "ctrl+t")
+        window("about:blank")
+        key("key", "--clearmodifiers", "ctrl+shift+t")
         window("Worminal")
         forwarded_env = {**env, "WORMINAL_BROKER_TEST": "caller-value"}
         forwarded = subprocess.Popen([executable, "-T", "Forwarded terminal", "-o", "-", "-e", "/bin/sh", "-c",

@@ -52,7 +52,9 @@ The browser has no navigation toolbar. Alt+Left/Right navigate history;
 Ctrl+R or F5 reloads and Escape stops loading. Ctrl+K reveals and selects the
 normally hidden address entry; Enter navigates and hides it, and Escape dismisses
 it. Tab activation and moving a browser between windows cannot reveal the entry.
-Ctrl+T always creates a terminal. Ctrl+D and Ctrl+Q close the selected browser tab;
+Ctrl+T creates a blank browser tab from a browser, or a terminal from a terminal.
+Ctrl+Shift+T always creates a terminal. Terminal tab titles use the palette red.
+Ctrl+D and Ctrl+Q close the selected browser tab;
 terminal applications retain those keys. Ctrl+Shift+B has no browser action.
 Inside a Worminal terminal, worminal --new-browser-tab URL|FILE replaces that terminal
 with a browser under the same ordered identity, ending its shell and PTY. A target is required.

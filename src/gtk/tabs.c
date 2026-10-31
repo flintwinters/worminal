@@ -1,4 +1,4 @@
-/* Match the original one-cell strip: directory names, underlines, inverted active tab. */
+/* One-cell strip: red terminal titles, browser titles, underlines, inverted active background. */
 #include "preview.h"
 
 typedef struct {
@@ -54,7 +54,9 @@ tabs_draw(GtkWidget *widget, cairo_t *cr, TabStrip *strip)
 			cairo_rectangle(cr, x, 2, MIN(width, right - x), strip->ch);
 			cairo_fill(cr);
 		}
-		gdk_cairo_set_source_rgba(cr, &active->colors[page == active ? defaultbg : defaultfg]);
+		/* ANSI red identifies terminals even when their tab is selected. */
+		int foreground = !page->url ? 1 : page == active ? defaultbg : defaultfg;
+		gdk_cairo_set_source_rgba(cr, &active->colors[foreground]);
 		cairo_move_to(cr, x + strip->cw, baseline - pango_layout_get_baseline(strip->layout) / (double)PANGO_SCALE);
 		pango_cairo_show_layout(cr, strip->layout);
 		cairo_rectangle(cr, x + strip->cw, MIN(baseline + 2, strip->ch), MAX(0, width - 2 * strip->cw), 1);
