@@ -16,8 +16,65 @@ use worminal_workspace::{
     browser_target,
     launch::Launch,
     recovery::{self, Recipe, Recovery},
-    socket,
+    rights, socket,
 };
+
+#[test]
+fn descriptor_bundles_are_owned_cloexec_and_closed_after_marker_or_capacity_rejection() {
+    use std::{
+        fs::File,
+        os::fd::{AsFd, AsRawFd},
+        os::unix::net::UnixStream,
+    };
+    let fixture = Fixture::new();
+    let path = fixture.root.join("descriptor-file");
+    fs::write(&path, b"bundle-bytes").unwrap();
+    let file = File::open(&path).unwrap();
+    let copies = || {
+        fs::read_dir("/proc/self/fd")
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| fs::read_link(entry.path()).is_ok_and(|target| target == path))
+            .count()
+    };
+    let (sender, receiver) = UnixStream::pair().unwrap();
+    assert_eq!(copies(), 1);
+    rights::send_descriptors(sender.as_fd(), &[file.as_fd(), file.as_fd()], b'H').unwrap();
+    let received = rights::receive_descriptors(receiver.as_fd(), b'H', 2).unwrap();
+    assert_eq!(received.len(), 2);
+    assert_eq!(copies(), 3);
+    for descriptor in &received {
+        let info =
+            fs::read_to_string(format!("/proc/self/fdinfo/{}", descriptor.as_raw_fd())).unwrap();
+        let flags = info
+            .lines()
+            .find_map(|line| line.strip_prefix("flags:\t"))
+            .unwrap();
+        assert_ne!(
+            u32::from_str_radix(flags, 8).unwrap() & libc::O_CLOEXEC as u32,
+            0
+        );
+    }
+    let mut received = received.into_iter();
+    let mut bytes = Vec::new();
+    File::from(received.next().unwrap())
+        .read_to_end(&mut bytes)
+        .unwrap();
+    assert_eq!(bytes, b"bundle-bytes");
+    drop(received);
+    assert_eq!(copies(), 1);
+    rights::send_descriptors(sender.as_fd(), &[file.as_fd()], b'H').unwrap();
+    assert!(rights::receive_descriptors(receiver.as_fd(), b'X', 1).is_err());
+    assert_eq!(copies(), 1);
+    rights::send_descriptors(
+        sender.as_fd(),
+        &[file.as_fd(), file.as_fd(), file.as_fd()],
+        b'H',
+    )
+    .unwrap();
+    assert!(rights::receive_descriptors(receiver.as_fd(), b'H', 1).is_err());
+    assert_eq!(copies(), 1);
+}
 
 #[test]
 fn browser_target_resolution_matches_c_for_urls_hosts_and_unix_path_bytes() {

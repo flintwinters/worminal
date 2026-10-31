@@ -13,19 +13,33 @@ from tools import build
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def rust_frame_counterfactual(directory):
+def rust_fixture(directory, name):
     source = ROOT / "rust/daemon"
-    target = directory / "rust-frame-queue"
+    target = directory / name
     shutil.copytree(source / "src", target / "src", dirs_exist_ok=True)
     manifest = tomllib.loads((source / "Cargo.toml").read_text())
     workspace = tomllib.loads((ROOT / "Cargo.toml").read_text())
-    text = '[workspace]\n[package]\nname="worminal-frame-proof"\nversion="0.1.0"\nedition="2021"\n[dependencies]\n'
+    package = f"worminal-{name}-proof"
+    text = f'[workspace]\n[package]\nname={json.dumps(package)}\n'
+    text += f'version={json.dumps(manifest["package"]["version"])}\n'
+    text += f'edition={json.dumps(workspace["workspace"]["package"]["edition"])}\n'
+    text += '[lib]\nname="worminal_daemon"\n[dependencies]\n'
     for name, dependency in manifest["dependencies"].items():
         if "path" in dependency:
             text += f'{name} = {{path={json.dumps(str((source / dependency["path"]).resolve()))}}}\n'
         else:
             text += f'{name} = {json.dumps(workspace["workspace"]["dependencies"][name])}\n'
     (target / "Cargo.toml").write_text(text)
+    return target, package
+
+
+def rust_build(directory, name, command):
+    with (directory / f"{name}-build.log").open("wb") as log:
+        subprocess.run(command, cwd=ROOT, stdout=log, stderr=log, check=True, timeout=120)
+
+
+def rust_frame_counterfactual(directory):
+    target, _ = rust_fixture(directory, "rust-frame-queue")
     mutant = target / "src/frames.rs"
     original = mutant.read_text()
     changed = original.replace("output.append(&plan.bytes)?;", "let queued = output.append(&plan.bytes);")
@@ -36,10 +50,26 @@ def rust_frame_counterfactual(directory):
     command = ["cargo", "test", "--manifest-path", str(target / "Cargo.toml"),
                "--target-dir", str(ROOT / "build/cargo"), "--offline", "--quiet",
                "queue_rejection_preserves_damage_and_the_last_delivered_baseline", "--lib"]
-    with (directory / "rust-frame-build.log").open("wb") as log:
-        subprocess.run([*command, "--no-run"], cwd=ROOT, stdout=log, stderr=log, check=True, timeout=120)
+    rust_build(directory, "rust-frame", [*command, "--no-run"])
     return ("Rust frame queue publication", command, os.environ,
             b"frames::tests::queue_rejection_preserves_damage_and_the_last_delivered_baseline --- FAILED")
+
+
+def rust_handoff_counterfactual(directory, name, filename, before, after, test):
+    slug = name.lower().replace(" ", "-")
+    target, package = rust_fixture(directory, slug)
+    mutant = target / "src" / filename
+    original = mutant.read_text()
+    if original.count(before) != 1:
+        raise ValueError(f"Rust handoff counterfactual no longer removes its ownership invariant: {name}")
+    mutant.write_text(original.replace(before, after))
+    rust_build(directory, slug, ["cargo", "build", "--manifest-path", str(target / "Cargo.toml"),
+               "--target-dir", str(ROOT / "build/cargo"), "--offline", "--quiet"])
+    binary = ROOT / "build/cargo/debug" / package
+    command = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_handoff.py",
+               "-k", test, "-q"]
+    return (name, command, {**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(binary),
+                           "WORMINAL_TEST_RUST_HANDOFF": "1"}, test.encode())
 
 
 def prove(match=None):
@@ -218,6 +248,21 @@ def prove(match=None):
                   b"updated != original"))
     if match is None or match.casefold() in "Rust frame queue publication".casefold():
         cases.append(rust_frame_counterfactual(directory))
+    ownership_cases = (
+        ("Rust commit ownership", "handoff.rs", "let commit = channel.commit()?;",
+         "let commit = channel.commit()?; channel.acknowledgement()?;",
+         "test_commit_delivery_disowns_even_when_receiver_acknowledgement_is_lost"),
+        ("Rust staged ownership", "process.rs",
+         "let flags = checked(unsafe { libc::fcntl(master.as_raw_fd(), libc::F_GETFL) })?;",
+         "process.signal(libc::SIGHUP)?;\n        " +
+         "let flags = checked(unsafe { libc::fcntl(master.as_raw_fd(), libc::F_GETFL) })?;",
+         "test_rejected_descriptor_layout_never_signals_staged_shells"),
+        ("Rust receiver isolation", "handoff.rs", "process::ensure_receiver_session()?;",
+         "/* Missing receiver session isolation. */", "test_live_round_trips_merge_without_replacing_shells"),
+    )
+    for name, filename, before, after, test in ownership_cases:
+        if match is None or match.casefold() in name.casefold():
+            cases.append(rust_handoff_counterfactual(directory, name, filename, before, after, test))
     selected = [case for case in cases if match is None or match.casefold() in case[0].casefold()]
     if not selected:
         raise ValueError(f"No regression proof matches: {match}")

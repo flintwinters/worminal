@@ -63,10 +63,7 @@ impl Service {
                 return Ok(());
             }
             WIRE_HANDIN | WIRE_HANDOFF => {
-                return self.error(
-                    client,
-                    b"Transfer failed before commit; donor sessions retained.",
-                );
+                return self.handoff_command(client, packet.kind, &packet.body);
             }
             WIRE_BROWSER_REPLACE => {
                 let session = process::session_of(peer_pid).unwrap_or(0);

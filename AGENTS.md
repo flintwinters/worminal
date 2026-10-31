@@ -114,7 +114,10 @@ its queue-rejection regression has a compiled counterfactual proof.
 The runnable Rust daemon candidate lives under build/cargo/release; release builds do not select it yet.
 `manage.py check-rust-daemon` checks v2 clients, recovery and independent SSH forwarding;
 `check-rust-daemon-wayland` runs the existing C GTK/WebKit frontend against it on private Wayland.
-Next: implement manual/automatic handoff in the Rust service, then port GTK/browser policy and prepare cutover.
+Rust manual handoff stages sealed native snapshots and descriptor ownership before commit;
+`manage.py check-rust-handoff` checks both C ABIs, reverse transfers, queued input and failed/interrupted commits.
+The receive operation enforces session isolation; compiled counterfactuals guard staged and committed ownership.
+Next: implement Rust automatic upgrades and legacy bootstrap, then port GTK/browser policy and prepare cutover.
 `manage.py check-install` stages /usr/local under .checks and verifies artifacts, native SSH input
 and resident module bytes.
 Compare parser CPU with the preserved baseline before expanding the boundary; measured costs remain higher.

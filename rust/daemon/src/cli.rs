@@ -138,8 +138,14 @@ fn reply(socket: &mut std::os::unix::net::UnixStream) -> io::Result<Packet> {
 fn request(scope: &[u8], kind: u32, body: Vec<u8>) -> io::Result<i32> {
     let mut socket =
         connect(scope).map_err(|_| io::Error::other("No preview workspace service is running."))?;
-    socket.set_read_timeout(Some(Duration::from_secs(3)))?;
-    socket.set_write_timeout(Some(Duration::from_secs(3)))?;
+    let handoff = matches!(kind, WIRE_HANDIN | WIRE_HANDOFF);
+    let timeout = if handoff {
+        u64::from(worminal_workspace::handoff::HANDOFF_TIMEOUT_SECONDS)
+    } else {
+        3
+    };
+    socket.set_read_timeout(Some(Duration::from_secs(timeout)))?;
+    socket.set_write_timeout(Some(Duration::from_secs(timeout)))?;
     socket.write_all(&Packet { kind, tab: 0, body }.encode()?)?;
     let packet = reply(&mut socket)?;
     if packet.kind == WIRE_COMMAND_DONE {
@@ -198,7 +204,13 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
             };
             let mut body = Buffer::default();
             body.put_string(&value)?;
-            return request(scope, kind, body.into_bytes());
+            let result = request(scope, kind, body.into_bytes());
+            if kind != WIRE_BROWSER_REPLACE && !matches!(&result, Ok(0)) {
+                eprintln!(
+                    "Handoff unavailable or rejected; no automatic daemon restart was attempted."
+                );
+            }
+            return result;
         }
     }
     eprintln!("usage: worminald --serve|--bridge|--stop\n       worminald --handin NAME | --handoff NAME\n       \

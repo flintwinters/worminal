@@ -1,5 +1,6 @@
 //! Application state and local transport shared by the Rust service and frontend.
 pub mod browser_target;
+pub mod handoff;
 pub mod launch;
 pub mod recovery;
 pub mod rights;

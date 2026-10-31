@@ -107,3 +107,26 @@ fn native_pending_output_is_consumed_before_new_bytes() {
         .collect();
     assert_eq!(runes, "legacyé".chars().map(u32::from).collect::<Vec<_>>());
 }
+
+#[test]
+fn oversized_native_metadata_remains_state_while_transport_rejects_the_packet() {
+    let mut tab = Tab::record(1, &vec![b'x'; worminal_protocol::MAX_PAYLOAD]);
+    let bytes = tab.metadata(1).unwrap();
+    assert!(bytes.len() > worminal_protocol::MAX_PAYLOAD);
+    let (socket, _peer) = std::os::unix::net::UnixStream::pair().unwrap();
+    let mut client = Client {
+        id: 1,
+        socket,
+        pid: 0,
+        ready: true,
+        features: 0,
+        decoder: Decoder::default(),
+        output: Queue::new(CLIENT_QUEUE),
+        needs_resync: false,
+    };
+    client.output.append(b"previously-queued").unwrap();
+    assert!(client
+        .queue(worminal_protocol::WIRE_CATALOG, 0, &bytes)
+        .is_err());
+    assert_eq!(client.output.pending(), b"previously-queued");
+}

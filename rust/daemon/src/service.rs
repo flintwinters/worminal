@@ -33,6 +33,8 @@ pub(crate) struct Service {
     pub running: bool,
     pub restored_launch: bool,
     pub pending_replace: BTreeMap<ClientId, (u32, Vec<u8>)>,
+    pub handin: Option<(u64, crate::handoff_io::Listener)>,
+    pub next_handin: u64,
     recovery: Recovery,
     published: Vec<u8>,
     pub closed: u32,
@@ -48,6 +50,7 @@ enum Source {
     Signals,
     Client(ClientId),
     Terminal(u32),
+    Handin(u64),
 }
 
 impl Service {
@@ -65,11 +68,11 @@ impl Service {
         Ok(id)
     }
 
-    pub fn queue(&mut self, client: ClientId, kind: u32, tab: u32, body: Vec<u8>) {
+    pub fn queue(&mut self, client: ClientId, kind: u32, tab: u32, body: impl AsRef<[u8]>) {
         if self
             .clients
             .get_mut(&client)
-            .is_some_and(|c| c.queue(kind, tab, body).is_err())
+            .is_some_and(|c| c.queue(kind, tab, body.as_ref()).is_err())
         {
             self.drop_client(client);
         }
@@ -179,7 +182,7 @@ impl Service {
     }
 
     fn catalog(&mut self, now: i64) -> io::Result<Vec<u8>> {
-        let mut bytes = Buffer::default();
+        let mut bytes = Buffer::with_limit(usize::MAX);
         for value in [self.tabs.len() as u32, self.closed, self.fallback] {
             bytes.put_u32(value)?;
         }
@@ -238,7 +241,7 @@ impl Service {
             .map(|c| c.id)
             .collect();
         for client in clients {
-            self.queue(client, WIRE_CATALOG, 0, bytes.clone());
+            self.queue(client, WIRE_CATALOG, 0, &bytes);
         }
         bytes[4..12].fill(0);
         self.published = bytes;
@@ -296,6 +299,14 @@ impl Service {
             },
         ];
         let mut sources = vec![Source::Listener, Source::Signals];
+        if let Some((id, listener)) = &self.handin {
+            interests.push(Interest {
+                fd: listener.as_raw_fd(),
+                read: true,
+                write: false,
+            });
+            sources.push(Source::Handin(*id));
+        }
         for (&id, client) in &self.clients {
             interests.push(Interest {
                 fd: client.socket.as_raw_fd(),
@@ -401,6 +412,7 @@ impl Service {
                     }
                     Source::Client(id) => self.client_ready(id, ready.read, ready.write)?,
                     Source::Terminal(id) => self.terminal_ready(id, ready.read, ready.write)?,
+                    Source::Handin(id) => self.receive_handoff(id),
                 }
                 if !self.running {
                     break;
@@ -432,6 +444,8 @@ pub fn serve(scope: &[u8]) -> io::Result<()> {
         running: true,
         restored_launch: false,
         pending_replace: BTreeMap::new(),
+        handin: None,
+        next_handin: 1,
         recovery,
         published: Vec::new(),
         closed: 0,

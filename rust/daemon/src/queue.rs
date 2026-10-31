@@ -8,6 +8,19 @@ pub struct Queue {
 }
 
 impl Queue {
+    pub fn from_bytes(bytes: Vec<u8>, limit: usize) -> io::Result<Self> {
+        if bytes.len() > limit {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "imported queue exceeds its bound",
+            ));
+        }
+        Ok(Self {
+            bytes,
+            sent: 0,
+            limit,
+        })
+    }
     pub fn new(limit: usize) -> Self {
         Self {
             bytes: Vec::new(),
@@ -24,9 +37,12 @@ impl Queue {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+    pub fn remaining(&self) -> usize {
+        self.limit - self.len()
+    }
 
     pub fn append(&mut self, bytes: &[u8]) -> io::Result<()> {
-        if bytes.len() > self.limit - self.len() {
+        if bytes.len() > self.remaining() {
             return Err(io::Error::new(
                 io::ErrorKind::OutOfMemory,
                 "bounded transport queue is full",

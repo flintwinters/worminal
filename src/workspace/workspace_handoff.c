@@ -21,8 +21,6 @@
 #include "st_state.h"
 #include WORMINAL_THEME_HEADER
 
-#define MAX_FDS (1 + 2 * HANDOFF_MAX_TABS)
-#define SNAPSHOT_LIMIT (512u * 1024u * 1024u)
 #define SEALS (F_SEAL_WRITE | F_SEAL_GROW | F_SEAL_SHRINK | F_SEAL_SEAL)
 
 static int
@@ -51,7 +49,7 @@ authenticate(int fd)
 {
 	struct ucred peer;
 	socklen_t size = sizeof(peer);
-	struct timeval timeout = {.tv_sec = 5};
+	struct timeval timeout = {.tv_sec = HANDOFF_TIMEOUT_SECONDS};
 	return getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &peer, &size) == 0 && peer.uid == getuid() &&
 	    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == 0 &&
 	    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) == 0;
@@ -81,7 +79,7 @@ marker(int fd, char expected, int writing)
 static int
 bundle(int fd, int *fds, int count, int writing)
 {
-	char byte = 'H', control[CMSG_SPACE(MAX_FDS * sizeof(int))] = {0};
+	char byte = 'H', control[CMSG_SPACE(HANDOFF_MAX_FDS * sizeof(int))] = {0};
 	struct iovec iov = {.iov_base = &byte, .iov_len = 1};
 	struct msghdr msg = {.msg_iov = &iov, .msg_iovlen = 1,
 	    .msg_control = control, .msg_controllen = sizeof(control)};
@@ -100,7 +98,7 @@ bundle(int fd, int *fds, int count, int writing)
 			size_t n = (c->cmsg_len - CMSG_LEN(0)) / sizeof(int);
 			int *values = (int *)CMSG_DATA(c);
 			for (size_t i = 0; i < n; i++) {
-				if (received < MAX_FDS) fds[received++] = values[i];
+				if (received < HANDOFF_MAX_FDS) fds[received++] = values[i];
 				else close(values[i]);
 			}
 		}
@@ -197,8 +195,8 @@ fail:
 static int
 send_tabs(const char *name, Tab *tabs, void (*remove_tab)(Tab *), uint32_t next_id)
 {
-	int peer = -1, fd = -1, okay = 0, fds[MAX_FDS], nfds = 1;
-	uint32_t header[] = {0x57484f31, next_id ? 2u : 1u, 0};
+	int peer = -1, fd = -1, okay = 0, fds[HANDOFF_MAX_FDS], nfds = 1;
+	uint32_t header[] = {HANDOFF_MAGIC, next_id ? HANDOFF_UPGRADE_VERSION : HANDOFF_MANUAL_VERSION, 0};
 	for (Tab *t = tabs; t; t = t->next) if (++header[2] > HANDOFF_MAX_TABS) goto done;
 	if (!header[2] && !next_id) goto done;
 	peer = local_socket(name, 0);
@@ -209,7 +207,7 @@ send_tabs(const char *name, Tab *tabs, void (*remove_tab)(Tab *), uint32_t next_
 	if (next_id && !io(fd, &next_id, sizeof(next_id), 1)) goto done;
 	for (Tab *t = tabs; t; t = t->next) {
 		if ((next_id && !io(fd, &t->id, sizeof(t->id), 1)) ||
-		    !export_tab(t, fd) || lseek(fd, 0, SEEK_CUR) > SNAPSHOT_LIMIT) goto done;
+		    !export_tab(t, fd) || lseek(fd, 0, SEEK_CUR) > HANDOFF_SNAPSHOT_LIMIT) goto done;
 		if (t->session) {
 			fds[nfds++] = tsessionfd(t->session);
 			fds[nfds++] = t->session->output_fd < 0 ? STDOUT_FILENO : t->session->output_fd;
@@ -236,7 +234,7 @@ static int
 accept_tabs(int listener, Tab **tabs, Tab **last, uint32_t *next_id, int upgrading,
             const uint32_t *ids, uint32_t count, uint32_t mapped_next, pid_t retiring_pid)
 {
-	int peer = accept4(listener, NULL, NULL, SOCK_CLOEXEC), fds[MAX_FDS], nfds = 0, okay = 0, donor = -1;
+	int peer = accept4(listener, NULL, NULL, SOCK_CLOEXEC), fds[HANDOFF_MAX_FDS], nfds = 0, okay = 0, donor = -1;
 	Tab *staged = NULL, *tail = NULL;
 	pid_t pids[HANDOFF_MAX_TABS];
 	uint32_t header[3], saved_next = mapped_next, previous_id = 0;
@@ -251,9 +249,10 @@ accept_tabs(int listener, Tab **tabs, Tab **last, uint32_t *next_id, int upgradi
 		    syscall(SYS_pidfd_send_signal, donor, 0, NULL, 0) < 0) goto done;
 	}
 	seals = fcntl(fds[0], F_GET_SEALS);
-	if (fstat(fds[0], &st) < 0 || !S_ISREG(st.st_mode) || st.st_size > SNAPSHOT_LIMIT ||
+	if (fstat(fds[0], &st) < 0 || !S_ISREG(st.st_mode) || st.st_size > HANDOFF_SNAPSHOT_LIMIT ||
 	    seals < 0 || (seals & SEALS) != SEALS || lseek(fds[0], 0, SEEK_SET) < 0 ||
-	    !io(fds[0], header, sizeof(header), 0) || header[0] != 0x57484f31 || header[1] != (upgrading ? 2u : 1u) ||
+	    !io(fds[0], header, sizeof(header), 0) || header[0] != HANDOFF_MAGIC ||
+	    header[1] != (upgrading ? HANDOFF_UPGRADE_VERSION : HANDOFF_MANUAL_VERSION) ||
 	    (!header[2] && !upgrading) || header[2] > HANDOFF_MAX_TABS || *next_id > UINT32_MAX - header[2]) goto done;
 	if (ids && (*tabs || count != header[2] || !mapped_next)) goto done;
 	if (upgrading && (*tabs || !io(fds[0], &saved_next, sizeof(saved_next), 0) || !saved_next)) goto done;

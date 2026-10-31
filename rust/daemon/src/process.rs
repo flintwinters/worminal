@@ -6,7 +6,7 @@ use std::{
     fs::{File, OpenOptions},
     io, mem,
     os::{
-        fd::{AsRawFd, FromRawFd, OwnedFd, RawFd},
+        fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd},
         unix::{
             ffi::{OsStrExt, OsStringExt},
             process::CommandExt,
@@ -65,6 +65,14 @@ pub fn prepare_service() -> io::Result<()> {
                 "cannot initialize terminal character locale",
             ));
         }
+    }
+    Ok(())
+}
+
+pub(crate) fn ensure_receiver_session() -> io::Result<()> {
+    // Redirecting descriptors does not isolate process-group cleanup. Enforce a new session
+    // in the operation accepting PTY authority, before R/C can make that ownership irrevocable.
+    unsafe {
         if libc::getsid(0) != libc::getpid() {
             checked(libc::setsid())?;
         }
@@ -364,6 +372,12 @@ enum Identity {
 pub struct ChildReaper(Rc<RefCell<Vec<Child>>>);
 
 impl ChildReaper {
+    pub(crate) fn reserve(&self, count: usize) -> io::Result<()> {
+        self.0
+            .borrow_mut()
+            .try_reserve(count)
+            .map_err(io::Error::other)
+    }
     pub fn reap(&self) -> usize {
         self.0
             .borrow_mut()
@@ -384,6 +398,17 @@ pub struct Pty {
 }
 
 impl Pty {
+    pub(crate) fn descriptor(&self) -> Option<BorrowedFd<'_>> {
+        self.master.as_ref().map(AsFd::as_fd)
+    }
+
+    pub(crate) fn disown(&mut self, _commit: &crate::handoff_io::CommitSent) {
+        if let Identity::Local(child) = mem::replace(&mut self.identity, Identity::None) {
+            // This is still our child for reaping, but the committed receiver owns all signal authority.
+            self.reaper.retain(child);
+        }
+        self.master.take();
+    }
     pub fn spawn(launch: &Launch, restored: bool, reaper: ChildReaper) -> io::Result<Self> {
         let directory = if launch.directory.is_empty() {
             std::env::var_os("HOME").unwrap_or_else(|| "/".into())
@@ -593,7 +618,11 @@ impl PreparedPty {
     }
 
     // All fallible validation is before the transaction's C marker; adoption itself cannot roll back.
-    pub(crate) fn commit(self, reaper: ChildReaper) -> Pty {
+    pub(crate) fn commit(
+        self,
+        reaper: ChildReaper,
+        _commit: &crate::handoff_io::CommitReceived,
+    ) -> Pty {
         Pty {
             master: Some(self.master),
             identity: Identity::Transferred(self.process),
@@ -682,7 +711,11 @@ mod tests {
         let pinned = PinnedProcess::prepare(child.0.id() as libc::pid_t).unwrap();
         let (master, _slave) = open_pty(80, 24).unwrap();
         let prepared = PreparedPty::validate(master, pinned).unwrap();
-        let mut pty = prepared.commit(ChildReaper::default());
+        let (donor, receiver) = crate::handoff_io::Channel::pair().unwrap();
+        receiver.ready().unwrap();
+        let _sent = donor.commit().unwrap();
+        let received = receiver.accept_commit().unwrap();
+        let mut pty = prepared.commit(ChildReaper::default(), &received);
         pty.stop();
         use std::os::unix::process::ExitStatusExt;
         assert_eq!(child.exited().signal(), Some(libc::SIGHUP));

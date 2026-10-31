@@ -10,7 +10,7 @@ use std::{
     path::PathBuf,
 };
 use worminal_engine::{self as terminal, Engine, Event, Frame, TransportState};
-use worminal_protocol::{Buffer, Decoder, Packet, WORKSPACE_INITIAL_CURSOR};
+use worminal_protocol::{Buffer, Decoder, WORKSPACE_INITIAL_CURSOR};
 use worminal_workspace::launch::Launch;
 
 pub(crate) type ClientId = u64;
@@ -33,8 +33,11 @@ pub(crate) struct Client {
 }
 
 impl Client {
-    pub fn queue(&mut self, kind: u32, tab: u32, body: Vec<u8>) -> io::Result<()> {
-        self.output.append(&Packet { kind, tab, body }.encode()?)
+    pub fn queue(&mut self, kind: u32, tab: u32, body: &[u8]) -> io::Result<()> {
+        // Preflight the complete transport budget before copying potentially large imported metadata.
+        let mut encoded = Buffer::with_limit(self.output.remaining());
+        encoded.append_packet_bytes(kind, tab, body)?;
+        self.output.append(encoded.as_bytes())
     }
 }
 
@@ -83,6 +86,7 @@ pub(crate) struct Terminal {
     pub engine: Engine,
     pub pty: Pty,
     pub pending: Vec<u8>,
+    pub remote_scroll: i32,
     pub input: Queue,
     pub printer: Printer,
 }
@@ -159,13 +163,14 @@ impl Tab {
             engine,
             pty,
             pending: Vec::new(),
+            remote_scroll: 0,
             input: Queue::new(INPUT_QUEUE),
             printer,
         });
         Ok(tab)
     }
 
-    fn record(id: u32, title: &[u8]) -> Self {
+    pub(crate) fn record(id: u32, title: &[u8]) -> Self {
         Self {
             id,
             terminal: None,
@@ -234,7 +239,9 @@ impl Tab {
             self.catalog_pending = true;
             return Ok(self.catalog.clone());
         }
-        let mut buffer = Buffer::default();
+        // Native handoff metadata can expand when default palette strings are restored. Keep
+        // packet/queue limits in the transport owner: oversized catalogs must not kill PTY owners.
+        let mut buffer = Buffer::with_limit(usize::MAX);
         buffer.put_u32(self.id)?;
         buffer.put_u32(u32::from(self.url.is_some()))?;
         buffer.put_string(self.url.as_deref().unwrap_or_default())?;
@@ -505,6 +512,7 @@ impl Tab {
         state.pending_bytes = terminal.pending.len() as i32;
         state.pending[..terminal.pending.len()].copy_from_slice(&terminal.pending);
         state.output_kind = terminal.printer.kind();
+        state.remote_scroll = terminal.remote_scroll;
         state
     }
 }

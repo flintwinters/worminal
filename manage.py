@@ -209,6 +209,21 @@ def check_rust_daemon_wayland():
                         env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate)}))
 
 
+@app.command("check-rust-handoff")
+def check_rust_handoff():
+    """Transfer private live shells among Rust, v1 C and preserved v2 C daemons in both directions."""
+    native_build.build_targets("worminald-x11", "worminald-preview")
+    candidate = build_rust_daemon()
+    code = run_rust_process_checks() or run_rust_workspace_checks()
+    if not code:
+        code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                    "-p", "test_handoff.py", "-q"],
+                   env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate),
+                        "WORMINAL_TEST_RUST_HANDOFF": "1",
+                        "WORMINAL_TEST_HANDOFF_BASELINE": str(ROOT / ".checks/c-baseline/build/worminald")})
+    raise typer.Exit(code)
+
+
 @app.command("preserve-c-baseline")
 def preserve_c_baseline():
     """Preserve built and installed C artifacts before the Rust migration; never overwrite a baseline."""

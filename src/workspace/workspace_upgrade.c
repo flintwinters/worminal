@@ -136,7 +136,7 @@ workspace_upgrade_receive(Tab **tabs, Tab **last, uint32_t *next_id, int legacy)
 	 * disappears before connecting. Pre-commit failure always leaves the donor in charge. */
 	struct pollfd ready = {.fd = 4, .events = POLLIN};
 	int status;
-	do status = poll(&ready, 1, 5000); while (status < 0 && errno == EINTR);
+	do status = poll(&ready, 1, HANDOFF_TIMEOUT_SECONDS * 1000); while (status < 0 && errno == EINTR);
 	if (status <= 0) { close(4); return 0; }
 	uint32_t manifest[HANDOFF_MAX_TABS + 3];
 	int okay;

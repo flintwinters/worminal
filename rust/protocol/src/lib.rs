@@ -62,20 +62,19 @@ impl Buffer {
     }
 
     pub fn append_packet(&mut self, packet: &Packet) -> io::Result<()> {
-        if packet.body.len() > MAX_PAYLOAD {
+        self.append_packet_bytes(packet.kind, packet.tab, &packet.body)
+    }
+
+    pub fn append_packet_bytes(&mut self, kind: u32, tab: u32, body: &[u8]) -> io::Result<()> {
+        if body.len() > MAX_PAYLOAD {
             return Err(invalid("wire packet too large"));
         }
         // Reserve the complete frame before publishing any header bytes to a transport queue.
-        self.reserve(HEADER_BYTES + packet.body.len())?;
-        for value in [
-            WIRE_VERSION,
-            packet.kind,
-            packet.tab,
-            packet.body.len() as u32,
-        ] {
+        self.reserve(HEADER_BYTES + body.len())?;
+        for value in [WIRE_VERSION, kind, tab, body.len() as u32] {
             self.bytes.extend_from_slice(&value.to_be_bytes());
         }
-        self.bytes.extend_from_slice(&packet.body);
+        self.bytes.extend_from_slice(body);
         Ok(())
     }
 
