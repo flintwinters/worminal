@@ -63,6 +63,28 @@ class PreviewWorkspaceTest(unittest.TestCase):
                 self.fail("reattached shell did not echo input")
         self.assertIsNone(self.daemon.poll())
 
+    def test_failed_exec_and_working_directory_leave_other_tabs_alive(self):
+        healthy = self.launch("stty raw -echo; printf READY; exec cat")
+        for directory, command in ((ROOT, "/worminal-missing-command"),
+                                   (ROOT / ".checks/worminal-missing-directory", "/bin/cat")):
+            launch = b"".join((number(40), number(4), number(1), number(1), number(0),
+                               string("failed"), string(str(directory)), string(""), string(""), string(""),
+                               string(command)))
+            send(self.peer, 2, payload=launch)
+            failed, _ = wait_kind(self.peer, 20)
+            while True:
+                _, catalog = wait_kind(self.peer, 7)
+                ids = [row[0] for row in records(catalog)]
+                if failed not in ids:
+                    self.assertIn(healthy, ids)
+                    break
+        send(self.peer, 3, healthy, b"SURVIVED")
+        output = b""
+        while b"SURVIVED" not in output:
+            _, chunk = wait_kind(self.peer, 14, healthy)
+            output += chunk
+        self.assertIsNone(self.daemon.poll())
+
     def setUp(self):
         self.scope = f"preview-{os.getpid()}-{uuid.uuid4().hex}"
         self.env = {**os.environ, "WORMINAL_SHARED_SOCKET_SCOPE": self.scope, "WORMINAL_INHERIT_TEST": "inherited"}
@@ -760,7 +782,8 @@ class ServiceDiagnosticsTest(unittest.TestCase):
                                 capture_output=True, text=True, timeout=3)
         self.assertEqual(result.returncode, 1)
         self.assertIn("JOURNAL[5] Workspace service started (protocol 2)", result.stderr)
-        self.assertIn("JOURNAL[3] workspace pselect failed:", result.stderr)
+        operation = "ppoll" if os.environ.get("WORMINAL_TEST_RUST_DAEMON") else "pselect"
+        self.assertIn(f"JOURNAL[3] workspace {operation} failed:", result.stderr)
         self.assertIn("(errno 9)", result.stderr)
         self.assertIn("JOURNAL[3] Workspace service exited with status 1", result.stderr)
 
@@ -785,8 +808,10 @@ class ServiceDiagnosticsTest(unittest.TestCase):
                 send(peer, 1, payload=launch)
                 _, errors = service.communicate(timeout=3)
             self.assertEqual(service.returncode, 1)
-            self.assertIn(b"JOURNAL[3] openpty failed: Too many open files", errors)
-            self.assertEqual(errors.count(b"openpty failed: Too many open files"), 2)
+            operation = b"posix_openpt" if os.environ.get("WORMINAL_TEST_RUST_DAEMON") else b"openpty"
+            message = operation + b" failed: Too many open files"
+            self.assertIn(b"JOURNAL[3] " + message, errors)
+            self.assertEqual(errors.count(message), 2)
         finally:
             if service.poll() is None:
                 service.terminate()

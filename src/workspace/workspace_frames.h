@@ -99,7 +99,7 @@ send_frame(Client *client, Tab *tab, int full)
 		if (full) tab->screen.len = 0; /* Deferred claims/resyncs still require every row. */
 		return 0;
 	}
-	if (client->output.len - client->sent > 1024u * 1024u) {
+	if (client->output.len - client->sent > WORKSPACE_FRAME_BACKLOG_BYTES) {
 		client->needs_resync = 1;
 		return 0;
 	}

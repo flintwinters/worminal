@@ -116,7 +116,7 @@ def audio(env):
 @contextmanager
 def service(env):
     private_daemon = Path(env["XDG_STATE_HOME"]).parent / ("daemon-" + env["WORMINAL_SHARED_SOCKET_SCOPE"])
-    shutil.copy2(ROOT / "worminald", private_daemon)
+    shutil.copy2(env.get("WORMINAL_TEST_PREVIEW_DAEMON", ROOT / "worminald"), private_daemon)
     daemon = subprocess.Popen([str(private_daemon), "--serve"], env=env,
                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     try:
@@ -392,7 +392,7 @@ def main():
             if remote:
                 trial_env["PATH"] = str(ROOT / "tests/fixtures/preview-master") + os.pathsep + env["PATH"]
                 trial_env["WORMINAL_PREVIEW_TEST_MASTER"] = "preview-test"
-                trial_env["WORMINAL_TEST_DAEMON"] = str(ROOT / "worminald")
+                trial_env["WORMINAL_TEST_DAEMON"] = env.get("WORMINAL_TEST_PREVIEW_DAEMON", str(ROOT / "worminald"))
             log_path = ROOT / f".checks/preview-{backend}-{'remote' if remote else 'local'}.log"
             with service(trial_env) as private_daemon, log_path.open("wb") as log:
                 startup_check(trial_env, log)

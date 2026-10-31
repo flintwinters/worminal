@@ -53,6 +53,8 @@ class RestoreTest(unittest.TestCase):
 
     def start(self):
         executable = 'worminald-preview' if self.version == 2 else 'worminald-x11'
+        if self.version == 2:
+            executable = os.environ.get('WORMINAL_TEST_PREVIEW_DAEMON', executable)
         self.latest = None
         self.process = subprocess.Popen([str(ROOT / executable), '--serve'], env=self.env,
                                         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)

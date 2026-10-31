@@ -116,7 +116,7 @@ client_queue(Client *client, uint32_t type, uint32_t tab, const WireBuffer *buff
 		client->output.len -= client->sent;
 		client->sent = 0;
 	}
-	if (client->output.len + sizeof(uint32_t) * 4 + length > 4u * 1024u * 1024u) {
+	if (client->output.len + sizeof(uint32_t) * 4 + length > WORKSPACE_CLIENT_QUEUE_BYTES) {
 		client_drop(client);
 		return 0;
 	}
@@ -155,7 +155,7 @@ service_input(const char *bytes, size_t length)
 		tab->input.len -= tab->input_sent;
 		tab->input_sent = 0;
 	}
-	if (length > 1024u * 1024u - tab->input.len) {
+	if (length > WORKSPACE_INPUT_QUEUE_BYTES - tab->input.len) {
 		WireBuffer error = {0};
 		wire_put_string(&error, "PTY input queue exceeded 1 MiB; tab stopped");
 		if (tab->controller)
@@ -173,7 +173,7 @@ flush_input(Tab *tab)
 	/* One bounded write per readiness notification keeps other tabs runnable. */
 	size_t left = tab->input.len - tab->input_sent;
 	ssize_t count = write(tsessionfd(tab->session), tab->input.data + tab->input_sent,
-	                      MIN(left, 16384));
+	                      MIN(left, WORKSPACE_IO_BYTES));
 	if (count > 0) {
 		/* Boost only a PTY read after input actually reached the child. Older
 		 * pending output must not consume the first-response latency allowance. */
@@ -674,7 +674,7 @@ serve(void)
 			watch_directories = 1;
 			if (directory_ns >= next_directory_ns) refresh_directory(tab);
 		}
-		if (directory_ns >= next_directory_ns) next_directory_ns = directory_ns + 250000000;
+		if (directory_ns >= next_directory_ns) next_directory_ns = directory_ns + WORKSPACE_DIRECTORY_INTERVAL_NS;
 		for (Tab *tab = tabs, *next; tab; tab = next) {
 			next = tab->next;
 			if (tab->session && tsessionfd(tab->session) < 0)
@@ -683,7 +683,7 @@ serve(void)
 		broadcast_catalog();
 		for (Client *client = clients; client; client = client->next)
 			if (client->fd >= 0 && client->needs_resync &&
-			    client->output.len - client->sent < 65536) {
+			    client->output.len - client->sent < WORKSPACE_RESYNC_BACKLOG_BYTES) {
 				client->needs_resync = 0;
 				for (Tab *tab = tabs; tab; tab = tab->next)
 					if (tab->controller == client)

@@ -12,7 +12,7 @@ workspace_bridge(int fd)
 {
 	struct {
 		int source, target;
-		unsigned char bytes[16384];
+		unsigned char bytes[WORKSPACE_IO_BYTES];
 		size_t length, sent;
 	} streams[2] = {{.source = 0, .target = fd}, {.source = fd, .target = 1}};
 	int descriptors[] = {0, 1, fd};

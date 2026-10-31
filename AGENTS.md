@@ -98,7 +98,7 @@ Current jobs: migrate release GTK/v2 application policy to Rust above an instanc
 preserving the C X11 rollback and live sessions. The shared instance-based C parser is extracted;
 `src/terminal/engine.h` owns its ABI, ordered effects and caller-time redraw gate. Legacy programs adapt it.
 Development release launches enter Rust, forward to existing C GTK owners and load their frontend lazily;
-daemon and frontend implementations remain C, and the active installation is still C.
+release daemon/frontend implementations and the active installation remain C.
 Rust engine bindings are generated from that header;
 the safe wrapper owns handles and copies damaged rows. `manage.py check-engine` compares the preserved parser,
 checks memory boundaries and Rust ownership, and records CPU/memory costs. Engine checks also run in the routine suite.
@@ -111,7 +111,10 @@ Rust daemon foundations cover PTYs, pinned transferred processes, bounded queues
 `manage.py check-rust-process` exercises child ownership, UTF-8/effect ordering and real zsh recovery.
 Rust frame replication atomically queues complete deltas before advancing its viewport baseline;
 its queue-rejection regression has a compiled counterfactual proof.
-The daemon crate has no runnable service yet. Next: integrate its event loop and handoff, then port GTK/browser policy.
+The runnable Rust daemon candidate lives under build/cargo/release; release builds do not select it yet.
+`manage.py check-rust-daemon` checks v2 clients, recovery and independent SSH forwarding;
+`check-rust-daemon-wayland` runs the existing C GTK/WebKit frontend against it on private Wayland.
+Next: implement manual/automatic handoff in the Rust service, then port GTK/browser policy and prepare cutover.
 `manage.py check-install` stages /usr/local under .checks and verifies artifacts, native SSH input
 and resident module bytes.
 Compare parser CPU with the preserved baseline before expanding the boundary; measured costs remain higher.

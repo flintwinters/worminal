@@ -260,6 +260,9 @@ class Builder:
             self.program(target, ["tests/recovery_reference.c", "src/workspace/workspace_restore.c",
                                   "src/workspace/wire.c"],
                          variant="recovery-reference", flags=["-DWORMINAL_PREVIEW_PROTOCOL"], libs=[])
+        elif target == "build/browser_target_reference":
+            self.program(target, ["tests/browser_target_reference.c", "src/workspace/browser_target.c"],
+                         variant="browser-target-reference", libs=[])
         elif target == "build/view_state_test":
             # view_state.c includes x.c to exercise internal state; compile that translation unit once.
             sources = ["tests/view_state.c", "src/terminal/defaults.c", f"src/{ENGINE_DEFAULTS}",

@@ -1,6 +1,7 @@
 //! Exclusive terminal handles and Rust-owned copies of cells, events, and snapshots.
 mod ffi;
 pub use ffi::{Cell, Engine, Error, Event, Frame, TransportState};
+pub use worminal_engine_sys::WORMINAL_PENDING_BYTES;
 pub use worminal_engine_sys::{MODE_FOCUS, MODE_REVERSE};
 pub use worminal_engine_sys::{
     WORMINAL_BELL, WORMINAL_CLIPBOARD, WORMINAL_CURSOR, WORMINAL_DIAGNOSTIC, WORMINAL_ICON_TITLE,

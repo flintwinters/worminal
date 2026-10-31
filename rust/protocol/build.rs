@@ -4,6 +4,10 @@ fn main() {
     let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("../..");
     let header = root.join("src/workspace/wire.h");
     println!("cargo:rerun-if-changed={}", header.display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        root.join("src/workspace/service_policy.h").display()
+    );
     bindgen::Builder::default()
         .header(header.to_str().unwrap())
         .clang_arg("-DWORMINAL_PREVIEW_PROTOCOL")

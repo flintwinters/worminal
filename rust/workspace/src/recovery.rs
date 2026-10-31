@@ -134,11 +134,21 @@ impl Drop for PendingFile {
     }
 }
 
+fn prepare_directory(path: &Path) -> io::Result<&Path> {
+    let parent = path.parent().ok_or_else(invalid)?;
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(parent)?;
+    Ok(parent)
+}
+
 impl Recovery {
     /// The object always survives a read failure, with writes disabled. A caller cannot accidentally
     /// replace damaged or unrecognized recipes with the empty workspace used after recovery fails.
     pub fn open(path: PathBuf) -> (Self, io::Result<Vec<Recipe>>) {
         let read = || -> io::Result<(Vec<u8>, Vec<Recipe>)> {
+            prepare_directory(&path)?;
             let mut file = OpenOptions::new()
                 .read(true)
                 .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
@@ -190,11 +200,7 @@ impl Recovery {
         if matches!(&self.cache, Cache::Valid(saved) if *saved == bytes) {
             return Ok(false);
         }
-        let parent = self.path.parent().ok_or_else(invalid)?;
-        fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(parent)?;
+        let parent = prepare_directory(&self.path)?;
         let mut file = None;
         for _ in 0..64 {
             let sequence = TEMPORARY_ID.fetch_add(1, Ordering::Relaxed);

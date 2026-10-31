@@ -27,6 +27,108 @@ fn checked(result: libc::c_int) -> io::Result<libc::c_int> {
     }
 }
 
+fn log(priority: libc::c_int, message: &str) {
+    if let Ok(message) = std::ffi::CString::new(message) {
+        unsafe {
+            libc::syslog(priority, b"%s\0".as_ptr().cast(), message.as_ptr());
+        }
+    }
+}
+
+pub fn diagnostic(message: &str) {
+    log(libc::LOG_NOTICE, message);
+}
+pub fn error(message: &str) {
+    log(libc::LOG_ERR, message);
+}
+
+pub(crate) fn operation(name: &str, error: io::Error) -> io::Error {
+    io::Error::new(
+        error.kind(),
+        format!(
+            "{name} failed: {error} (errno {})",
+            error.raw_os_error().unwrap_or(0)
+        ),
+    )
+}
+
+/// Call once in the headless executable, before any parser, thread, or signal registration exists.
+pub fn prepare_service() -> io::Result<()> {
+    unsafe {
+        libc::openlog(
+            b"worminald\0".as_ptr().cast(),
+            libc::LOG_PID,
+            libc::LOG_USER,
+        );
+        if libc::setlocale(libc::LC_CTYPE, b"\0".as_ptr().cast()).is_null() {
+            return Err(io::Error::other(
+                "cannot initialize terminal character locale",
+            ));
+        }
+        if libc::getsid(0) != libc::getpid() {
+            checked(libc::setsid())?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn ignore_hangup() {
+    unsafe {
+        libc::signal(libc::SIGHUP, libc::SIG_IGN);
+    }
+}
+
+pub(crate) fn detached_command(executable: &std::path::Path) -> Command {
+    let mut command = Command::new(executable);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    // Only used by the standalone, headless bridge, never by GTK or a module callback.
+    unsafe {
+        command.pre_exec(|| {
+            checked(libc::setsid())?;
+            Ok(())
+        });
+    }
+    command
+}
+
+/// The standalone bridge owns these process-global descriptors until it exits.
+pub(crate) struct StdioDescriptor(RawFd);
+impl StdioDescriptor {
+    pub(crate) fn new(fd: RawFd) -> io::Result<Self> {
+        if fd != 0 && fd != 1 {
+            return Err(io::Error::other("invalid bridge stdio descriptor"));
+        }
+        nonblocking(fd)?;
+        Ok(Self(fd))
+    }
+}
+impl io::Read for StdioDescriptor {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        let count = unsafe { libc::read(self.0, bytes.as_mut_ptr().cast(), bytes.len()) };
+        if count < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(count as usize)
+        }
+    }
+}
+impl io::Write for StdioDescriptor {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        let count = unsafe { libc::write(self.0, bytes.as_ptr().cast(), bytes.len()) };
+        if count < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(count as usize)
+        }
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
 fn os_constant(bytes: &[u8]) -> OsString {
     OsString::from_vec(
         CStr::from_bytes_with_nul(bytes)
@@ -54,7 +156,8 @@ fn open_pty(columns: u16, rows: u16) -> io::Result<(File, File)> {
         // CLOEXEC must be atomic with creation: another thread may spawn while this PTY is prepared.
         let descriptor = checked(libc::posix_openpt(
             libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC | libc::O_NONBLOCK,
-        ))?;
+        ))
+        .map_err(|error| operation("posix_openpt", error))?;
         let master = File::from_raw_fd(descriptor);
         checked(libc::grantpt(master.as_raw_fd()))?;
         checked(libc::unlockpt(master.as_raw_fd()))?;
@@ -109,6 +212,25 @@ pub fn peer_pid(fd: RawFd) -> io::Result<libc::pid_t> {
 
 pub fn session_of(pid: libc::pid_t) -> io::Result<libc::pid_t> {
     checked(unsafe { libc::getsid(pid) })
+}
+
+pub(crate) fn restore_directory(directory: &[u8]) -> Vec<u8> {
+    let usable = |directory: &[u8]| {
+        let Ok(path) = std::ffi::CString::new(directory) else {
+            return false;
+        };
+        std::fs::metadata(std::ffi::OsStr::from_bytes(directory)).is_ok_and(|info| info.is_dir())
+            && unsafe { libc::access(path.as_ptr(), libc::X_OK) } == 0
+    };
+    if usable(directory) {
+        return directory.to_vec();
+    }
+    let home = std::env::var_os("HOME").unwrap_or_default().into_vec();
+    if usable(&home) {
+        home
+    } else {
+        b"/".to_vec()
+    }
 }
 
 struct User {
@@ -364,7 +486,24 @@ impl Pty {
                 Ok(())
             });
         }
-        let child = command.spawn()?;
+        let child = match command.spawn() {
+            Ok(child) => child,
+            // C exec/cwd failures exit only the new child. Command has already reaped a failed exec;
+            // closing its slave copies exposes EOF on this tab without killing unrelated sessions.
+            Err(error)
+                if matches!(
+                    error.raw_os_error(),
+                    Some(libc::ENOENT | libc::ENOTDIR | libc::EACCES | libc::ENOEXEC | libc::E2BIG)
+                ) =>
+            {
+                return Ok(Self {
+                    master: Some(master),
+                    identity: Identity::None,
+                    reaper,
+                });
+            }
+            Err(error) => return Err(error),
+        };
         Ok(Self {
             master: Some(master),
             identity: Identity::Local(child),

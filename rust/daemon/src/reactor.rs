@@ -43,7 +43,7 @@ pub(crate) fn wait(interests: &[Interest], timeout_ns: Option<i64>) -> io::Resul
         if error.kind() == io::ErrorKind::Interrupted {
             return Ok(Vec::new());
         }
-        return Err(error);
+        return Err(crate::process::operation("workspace ppoll", error));
     }
     Ok(descriptors
         .iter()

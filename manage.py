@@ -148,7 +148,7 @@ def check_engine():
 
 def run_rust_workspace_checks():
     builder = native_build.Builder()
-    for target in ("build/wire_reference", "build/recovery_reference"):
+    for target in ("build/wire_reference", "build/recovery_reference", "build/browser_target_reference"):
         builder.target(target)
     return run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-protocol", "-p", "worminal-workspace"])
 
@@ -169,6 +169,44 @@ def run_rust_process_checks():
     native_build.generate_theme()
     native_build.Builder().target("build/libworminal_engine.a")
     return run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-daemon"])
+
+
+def build_rust_daemon():
+    native_build.generate_theme()
+    native_build.Builder().target("build/libworminal_engine.a")
+    native_build.invoke(["cargo", "build", "--release", "--locked", "--quiet", "-p", "worminal-daemon"])
+    return ROOT / "build/cargo/release/worminal-daemon"
+
+
+@app.command("build-rust-daemon")
+def build_rust_daemon_command():
+    """Build the isolated Rust service candidate; leave release and installed daemons unchanged."""
+    typer.echo(build_rust_daemon())
+
+
+@app.command("check-rust-daemon")
+def check_rust_daemon():
+    """Check the Rust service with existing C v2 clients, ownership, output and recovery fixtures."""
+    native_build.build_targets("worminald-preview")
+    candidate = build_rust_daemon()
+    code = run_rust_process_checks()
+    for pattern in ("test_preview_workspace.py", "test_restore.py", "test_workspace.py"):
+        if code:
+            break
+        code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", pattern, "-q"],
+                   env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate),
+                        "WORMINAL_TEST_RUST_DAEMON": "1", "WORMINAL_TEST_WORKSPACE_DAEMON": str(candidate),
+                        "WORMINAL_TEST_BRIDGE_VERSION": "2"})
+    raise typer.Exit(code)
+
+
+@app.command("check-rust-daemon-wayland")
+def check_rust_daemon_wayland():
+    """Exercise the C GTK/WebKit frontend against the Rust candidate on private native Wayland."""
+    native_build.build_targets("build/preview_test")
+    candidate = build_rust_daemon()
+    raise typer.Exit(run([sys.executable, "tests/preview.py", "wayland"],
+                        env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate)}))
 
 
 @app.command("preserve-c-baseline")

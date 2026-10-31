@@ -14,8 +14,8 @@ use worminal_protocol::{Buffer, Decoder, Packet, WORKSPACE_INITIAL_CURSOR};
 use worminal_workspace::launch::Launch;
 
 pub(crate) type ClientId = u64;
-pub(crate) const CLIENT_QUEUE: usize = 4 * 1024 * 1024;
-pub(crate) const INPUT_QUEUE: usize = 1024 * 1024;
+pub(crate) const CLIENT_QUEUE: usize = worminal_protocol::WORKSPACE_CLIENT_QUEUE_BYTES as usize;
+pub(crate) const INPUT_QUEUE: usize = worminal_protocol::WORKSPACE_INPUT_QUEUE_BYTES as usize;
 
 pub(crate) fn core<T>(value: Result<T, terminal::Error>) -> io::Result<T> {
     value.map_err(|error| io::Error::other(format!("terminal engine status {}", error.0)))

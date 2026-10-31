@@ -13,10 +13,66 @@ use std::{
 };
 use worminal_protocol::{Buffer, Decoder, Packet, WIRE_SERVICE_INFO};
 use worminal_workspace::{
+    browser_target,
     launch::Launch,
     recovery::{self, Recipe, Recovery},
     socket,
 };
+
+#[test]
+fn browser_target_resolution_matches_c_for_urls_hosts_and_unix_path_bytes() {
+    use std::ffi::{OsStr, OsString};
+    use std::os::unix::ffi::OsStringExt;
+    let fixture = Fixture::new();
+    let oracle = fixture.project.join("build/browser_target_reference");
+    let mut cases: Vec<OsString> = [
+        "",
+        "about:blank",
+        "https://example.invalid/a%20b",
+        "worminal:test",
+        "localhost",
+        "LOCALHOST:8080/a",
+        "host.invalid:443/path?q=x#fragment",
+        "[::1]:80/a",
+        "[::1]",
+        "[invalid]:80",
+        "host.invalid:bad",
+        "host..invalid",
+        "-host.invalid",
+        "host-.invalid",
+        "host.invalid.",
+        "./missing.invalid",
+        "../missing file",
+        "Cargo.toml",
+        "missing.invalid",
+        "file:///already%20encoded",
+        "//missing/folder",
+    ]
+    .into_iter()
+    .map(OsString::from)
+    .collect();
+    let path = fixture.root.join("space #\u{e9}");
+    fs::write(&path, b"file").unwrap();
+    cases.push(path.into_os_string());
+    let mut invalid = fixture.root.as_os_str().as_bytes().to_vec();
+    invalid.extend_from_slice(b"/missing-\xff");
+    cases.push(OsString::from_vec(invalid));
+    for case in &cases {
+        let result = Command::new(&oracle).arg(case).output().unwrap();
+        assert!(result.status.success());
+        assert_eq!(
+            browser_target::resolve(Some(case)).unwrap(),
+            result.stdout,
+            "{case:?}"
+        );
+    }
+    let result = Command::new(&oracle).output().unwrap();
+    assert!(result.status.success());
+    assert_eq!(
+        browser_target::resolve(None::<&OsStr>).unwrap(),
+        result.stdout
+    );
+}
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 

@@ -1,6 +1,7 @@
 """Exercise the headless workspace through its framed local socket."""
 
 import os
+from functools import partial
 from pathlib import Path
 import select
 import socket
@@ -11,11 +12,15 @@ import unittest
 import uuid
 
 
-from workspace_protocol import number, string, send, wait_kind, read_exact
+from workspace_protocol import number, string, send as wire_send, wait_kind as wire_wait, read_exact
 
 
 ROOT = Path(__file__).resolve().parent.parent
 DAEMON = ROOT / os.environ.get("WORMINAL_TEST_WORKSPACE_DAEMON", "worminald-x11")
+VERSION = int(os.environ.get("WORMINAL_TEST_BRIDGE_VERSION", "1"))
+ENDPOINT = "worminal-workspace-v2" if VERSION == 2 else "worminal-workspace"
+send = partial(wire_send, version=VERSION)
+wait_kind = partial(wire_wait, version=VERSION)
 HELLO, INPUT, FOCUS, CATALOG, FRAME, ROW, FINISH, CLIPBOARD, STOP, PRINT = 1, 3, 4, 7, 8, 9, 10, 11, 13, 14
 
 
@@ -26,9 +31,7 @@ class WorkspaceServiceTest(unittest.TestCase):
                 scope = f"bridge-congestion-{os.getpid()}-{uuid.uuid4().hex}"
                 env = {**os.environ, "WORMINAL_SHARED_SOCKET_SCOPE": scope}
                 with socket.socket(socket.AF_UNIX) as listener:
-                    endpoint = ("worminal-workspace-v2" if os.environ.get("WORMINAL_TEST_BRIDGE_VERSION") == "2"
-                                else "worminal-workspace")
-                    listener.bind(f"\0{endpoint}-{os.getuid()}-{scope}")
+                    listener.bind(f"\0{ENDPOINT}-{os.getuid()}-{scope}")
                     listener.listen(1)
                     listener.settimeout(3)
                     local, remote = socket.socketpair()
@@ -80,7 +83,7 @@ class WorkspaceServiceTest(unittest.TestCase):
                     peer = socket.socket(socket.AF_UNIX)
                     peer.settimeout(2)
                     try:
-                        peer.connect(f"\0worminal-workspace-{os.getuid()}-{scope}")
+                        peer.connect(f"\0{ENDPOINT}-{os.getuid()}-{scope}")
                         break
                     except OSError:
                         peer.close()
@@ -122,7 +125,7 @@ class WorkspaceServiceTest(unittest.TestCase):
     def test_partial_client_packet_does_not_pause_other_tab(self):
         scope = f"partial-{os.getpid()}-{uuid.uuid4().hex}"
         env = {**os.environ, "WORMINAL_SHARED_SOCKET_SCOPE": scope}
-        address = f"\0worminal-workspace-{os.getuid()}-{scope}"
+        address = f"\0{ENDPOINT}-{os.getuid()}-{scope}"
         service = subprocess.Popen([str(DAEMON), "--serve"], env=env,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         connections = []
@@ -151,7 +154,7 @@ class WorkspaceServiceTest(unittest.TestCase):
 
             # A readable socket with an incomplete header used to hold the service
             # in wire_read until its receive timeout, delaying every other PTY.
-            partial = struct.pack("!4I", 1, INPUT, first_tab, 3)
+            partial = struct.pack("!4I", VERSION, INPUT, first_tab, 3)
             connections[1].sendall(partial[:8])
             connections[0].settimeout(1.25)
             send(connections[0], INPUT, first_tab, b"responsive\n")
@@ -223,7 +226,7 @@ class WorkspaceServiceTest(unittest.TestCase):
     def test_two_clients_share_a_tab_and_service_survives_disconnect(self):
         scope = f"wire-{os.getpid()}-{uuid.uuid4().hex}"
         env = {**os.environ, "WORMINAL_SHARED_SOCKET_SCOPE": scope}
-        address = f"\0worminal-workspace-{os.getuid()}-{scope}"
+        address = f"\0{ENDPOINT}-{os.getuid()}-{scope}"
         service = subprocess.Popen([str(DAEMON), "--serve"], env=env,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         connections = []

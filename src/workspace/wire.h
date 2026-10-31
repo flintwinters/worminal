@@ -4,6 +4,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "service_policy.h"
 
 #ifdef WORMINAL_PREVIEW_PROTOCOL
 #define WIRE_VERSION 2
