@@ -93,7 +93,13 @@ Application synchronized redraws hold frames and their tab metadata until comple
 `manage.py check-preview*` and `preview-perf` validate GTK; `build-preview` retains compatibility binary names.
 Private Wayland checks use a project-local Weston runtime and matching virtual-seat ABI, without X11 fallback.
 
-Current jobs: audit upgrade lifecycle after the failed live bootstrap killed transferred sessions; the receiver
+Current jobs: migrate release GTK/v2 application policy to Rust above an instance-based C terminal engine,
+preserving the C X11 rollback and live sessions. Only build foundations exist so far: the locked Cargo workspace
+checks GTK 3/Pango/Cairo/WebKitGTK 4.1 through `manage.py check-rust-platform` on private Xvfb.
+Cargo outputs belong in `build/cargo`. `manage.py preserve-c-baseline` exclusively captures built and installed
+artifacts in `.checks/c-baseline`; never replace that recovery baseline with later builds.
+The C engine extraction, Rust daemon/frontend/browser ports, transfer verification and installation remain pending.
+Audit upgrade lifecycle after the failed live bootstrap killed transferred sessions; the receiver
 session-isolation fix is verified privately and has not been published to the active installation.
 Audit input, rendering, output delivery, and view switching
 until further gains require correctness, resource, or compatibility compromises; review remaining compatibility gaps.

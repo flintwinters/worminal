@@ -1,0 +1,12 @@
+[package]
+name = "worminal-platform"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+gtk.workspace = true
+glib.workspace = true
+pango.workspace = true
+cairo-rs.workspace = true
+webkit2gtk.workspace = true

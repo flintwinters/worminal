@@ -106,7 +106,7 @@ def run_headless_checks():
     code = run_native_checks()
     if code:
         return code
-    patterns = ("test_build.py", "test_perf_metrics.py", "test_cli.py", "test_workspace.py",
+    patterns = ("test_build.py", "test_migration.py", "test_perf_metrics.py", "test_cli.py", "test_workspace.py",
                 "test_preview_workspace.py", "test_theme.py", "test_privacy.py", "test_handoff.py",
                 "test_restore.py", "test_upgrade.py")
     for pattern in patterns:
@@ -125,6 +125,28 @@ def run_proof_script(path):
 def build():
     """Compile Worminal with the current Alacritty theme."""
     native_build.build_targets()
+
+
+@app.command("check-rust-platform")
+def check_rust_platform():
+    """Build locked Rust bindings and exercise GTK/WebKit on private Xvfb."""
+    native_build.invoke(["cargo", "build", "--locked", "-p", "worminal-platform"])
+    raise typer.Exit(run([sys.executable, "tests/rust_platform.py"]))
+
+
+@app.command("preserve-c-baseline")
+def preserve_c_baseline():
+    """Preserve built and installed C artifacts before the Rust migration; never overwrite a baseline."""
+    from tools.migration import preserve_baseline
+    native_build.build_targets("worminal-x11", "worminald-x11")
+    typer.echo(preserve_baseline())
+
+
+@app.command("check-migration")
+def check_migration():
+    """Verify migration baseline recovery infrastructure without touching the installation."""
+    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                         "-p", "test_migration.py", "-q"]))
 
 
 @app.command("build-preview")

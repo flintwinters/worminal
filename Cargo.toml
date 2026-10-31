@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = ["rust/platform"]
+
+[workspace.package]
+edition = "2021"
+publish = false
+
+[workspace.dependencies]
+gtk = "0.18"
+glib = "0.18"
+pango = "0.18"
+cairo-rs = "0.18"
+webkit2gtk = { version = "2", features = ["v2_40"] }
