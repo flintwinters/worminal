@@ -195,10 +195,10 @@ resize_case(Terminal *terminal, GtkWidget *widget, int cols, int rows, const cha
 	for (int y = 0; y < 2 * rows; y++) wire_buffer_free(&lines[y]);
 	g_free(lines);
 	TermSession *view = current_session();
-	g_assert_cmpint(view->term.col, ==, widths[1]);
-	g_assert_cmpint(view->term.row, ==, rows);
-	int alternate_rows = view->term.alt ? rows : 0;
-	size_t cells = (size_t)(rows + alternate_rows + view->term.histlen) * widths[1] * sizeof(Glyph);
+	g_assert_cmpint(view->engine.term.col, ==, widths[1]);
+	g_assert_cmpint(view->engine.term.row, ==, rows);
+	int alternate_rows = view->engine.term.alt ? rows : 0;
+	size_t cells = (size_t)(rows + alternate_rows + view->engine.term.histlen) * widths[1] * sizeof(Glyph);
 	cairo_surface_t *image = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
 	    gtk_widget_get_allocated_width(widget), gtk_widget_get_allocated_height(widget));
 	cairo_t *cr = cairo_create(image);
@@ -207,7 +207,7 @@ resize_case(Terminal *terminal, GtkWidget *widget, int cols, int rows, const cha
 	g_assert_cmpint(cairo_surface_write_to_png(image, path), ==, CAIRO_STATUS_SUCCESS);
 	g_print("{\"case\":\"resize_import\",\"frames\":%d,\"cycles\":%d,\"cols\":%d,\"rows\":%d,\"wall_us\":%" G_GINT64_FORMAT
 	    ",\"cpu_ns\":%" G_GINT64_FORMAT ",\"local_history_rows\":%d,\"alternate_rows\":%d,\"glyph_storage_bytes\":%zu}",
-	    2 * frames, frames, widths[1], rows, wall, cpu, view->term.histlen, alternate_rows, cells);
+	    2 * frames, frames, widths[1], rows, wall, cpu, view->engine.term.histlen, alternate_rows, cells);
 	g_free(path); cairo_destroy(cr); cairo_surface_destroy(image);
 }
 

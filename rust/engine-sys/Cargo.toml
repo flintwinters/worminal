@@ -1,0 +1,9 @@
+[package]
+name = "worminal-engine-sys"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+links = "worminal_engine"
+
+[build-dependencies]
+bindgen = { version = "0.72", default-features = false, features = ["runtime"] }

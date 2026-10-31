@@ -46,7 +46,8 @@ def wait_title(env, window, title):
     # acknowledgment that the same catalog carrying the input modes was applied.
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
-        actual = subprocess.check_output(["xdotool", "getwindowname", window], env=env, text=True).strip()
+        actual = subprocess.check_output(["xdotool", "getwindowname", window], env=env,
+                                         text=True, timeout=max(.1, deadline - time.monotonic())).strip()
         if actual == title:
             return
         time.sleep(.01)
@@ -106,7 +107,8 @@ class NavigationKeysTest(unittest.TestCase):
                     window = None
                     while time.monotonic() < deadline:
                         result = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", title],
-                                                env=env, capture_output=True, text=True)
+                                                env=env, capture_output=True, text=True,
+                                                timeout=max(.1, deadline - time.monotonic()))
                         if result.returncode == 0:
                             window = result.stdout.splitlines()[0]
                             break

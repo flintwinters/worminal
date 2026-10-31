@@ -26,10 +26,10 @@ proof_app = typer.Typer(help="Run proofs on private Xvfb displays.")
 app.add_typer(proof_app, name="proof")
 MAX_FILE_LINES = 1000
 MAX_LINE_LENGTH = 120
-NATIVE_CHECKS = ("build/scrollback_test", "build/url_test", "build/frame_schedule_test",
+NATIVE_CHECKS = ("build/url_test", "build/frame_schedule_test",
                  "build/workspace_client_test")
 # These merged files exceed the limit; prevent further growth until they are split.
-LEGACY_FILE_LINES = {"src/terminal/st.c": 3225, "src/x11/x.c": 3417,
+LEGACY_FILE_LINES = {"src/x11/x.c": 3417,
                      "tests/test_native.py": 1333}
 
 
@@ -55,6 +55,9 @@ def check_file_limits():
     index = subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=ROOT)
     problems = []
     for name in tracked_files(index):
+        # Dependency lockfiles are generated data; their size follows the resolved graph, not source complexity.
+        if name == "Cargo.lock":
+            continue
         path = ROOT / name
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
@@ -98,7 +101,8 @@ def run_native_checks():
         code = run([binary], env={**os.environ, "ASAN_OPTIONS": "detect_leaks=0"})
         if code:
             return code
-    return 0
+    from tools.engine_checks import check
+    return check()
 
 
 def run_headless_checks():
@@ -132,6 +136,13 @@ def check_rust_platform():
     """Build locked Rust bindings and exercise GTK/WebKit on private Xvfb."""
     native_build.invoke(["cargo", "build", "--locked", "-p", "worminal-platform"])
     raise typer.Exit(run([sys.executable, "tests/rust_platform.py"]))
+
+
+@app.command("check-engine")
+def check_engine():
+    """Check parser equivalence, sanitized engine boundaries, and the Rust owning wrapper."""
+    from tools.engine_checks import check
+    raise typer.Exit(check())
 
 
 @app.command("preserve-c-baseline")

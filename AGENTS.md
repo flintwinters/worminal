@@ -94,11 +94,16 @@ Application synchronized redraws hold frames and their tab metadata until comple
 Private Wayland checks use a project-local Weston runtime and matching virtual-seat ABI, without X11 fallback.
 
 Current jobs: migrate release GTK/v2 application policy to Rust above an instance-based C terminal engine,
-preserving the C X11 rollback and live sessions. Only build foundations exist so far: the locked Cargo workspace
-checks GTK 3/Pango/Cairo/WebKitGTK 4.1 through `manage.py check-rust-platform` on private Xvfb.
+preserving the C X11 rollback and live sessions. The shared instance-based C parser is extracted;
+`src/terminal/engine.h` owns its ABI, ordered effects and caller-time redraw gate. Legacy programs adapt it;
+the application and active installation still run C. Rust engine bindings are generated from that header;
+the safe wrapper owns handles and copies damaged rows. `manage.py check-engine` compares the preserved parser,
+checks memory boundaries and Rust ownership, and records CPU/memory costs. Engine checks also run in the routine suite.
+The locked GTK 3/Pango/Cairo/WebKitGTK 4.1 binding probe runs through `manage.py check-rust-platform` on private Xvfb.
 Cargo outputs belong in `build/cargo`. `manage.py preserve-c-baseline` exclusively captures built and installed
 artifacts in `.checks/c-baseline`; never replace that recovery baseline with later builds.
-The C engine extraction, Rust daemon/frontend/browser ports, transfer verification and installation remain pending.
+Next: port the daemon, then launcher/frontend/browser modules; verify transfers and publish the Rust installation.
+Compare parser CPU with the preserved baseline before expanding the boundary; measured costs remain higher.
 Audit upgrade lifecycle after the failed live bootstrap killed transferred sessions; the receiver
 session-isolation fix is verified privately and has not been published to the active installation.
 Audit input, rendering, output delivery, and view switching

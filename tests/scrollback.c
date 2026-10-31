@@ -22,8 +22,8 @@ void xclipcopy(void) {}
 #include "session_transfer_checks.h"
 #include "session_view_checks.h"
 #include "session_process_checks.h"
-#define term (session->term)
-#define strescseq (session->strescseq)
+#define term (session->engine.term)
+#define strescseq (session->engine.strescseq)
 
 int
 main(void)
@@ -156,7 +156,7 @@ main(void)
 	assert(csiescseq.narg == 1);
 	session = second;
 	assert(term.line[0][0].u == 'S' && term.c.x == 2);
-	assert(second->saved[0].x == 2 && csiescseq.narg == 2);
+	assert(second->engine.saved[0].x == 2 && csiescseq.narg == 2);
 
 	/* The active view's resize must reach the same PTY as its screen. */
 	int master, slave;
@@ -213,7 +213,7 @@ main(void)
 		assert(term.line[4 / width][4 % width].u == 'q');
 		int saved_y = 4 % width ? 4 / width : 4 / width - 1;
 		int saved_x = 4 % width ? 4 % width : width - 1;
-		assert(session->saved[0].x == saved_x && session->saved[0].y == saved_y);
+		assert(session->engine.saved[0].x == saved_x && session->engine.saved[0].y == saved_y);
 		tcursor(CURSOR_LOAD);
 		twrite("Z", 1, 0);
 		assert(term.line[saved_y][saved_x].u == 'Z');

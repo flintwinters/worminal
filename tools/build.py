@@ -15,7 +15,11 @@ VERSION = "0.9.3"
 BROWSER_ABI = next(line.split()[2] for line in (ROOT / "src/gtk/browser_module.h").read_text().splitlines()
                    if line.startswith("#define WORMINAL_BROWSER_ABI "))
 BROWSER_MODULE = f"browser-v{BROWSER_ABI}.so"
-SESSION_SUPPORT = ("terminal/session_view.c", "terminal/session_transfer.c", "terminal/render_sync.c")
+ENGINE_DEFAULTS = "terminal/engine_defaults.c"
+ENGINE = ("terminal/engine.c", ENGINE_DEFAULTS, "terminal/engine_parser.c",
+          "terminal/engine_events.c", "terminal/engine_sync.c", "terminal/engine_snapshot.c")
+SESSION_SUPPORT = ("terminal/session_view.c", "terminal/session_transfer.c", "terminal/render_sync.c",
+                   "terminal/engine_adapter.c", *ENGINE)
 COMMON = ("terminal/defaults.c", "terminal/st.c", *SESSION_SUPPORT,
           "workspace/wire.c", "workspace/workspace_socket.c")
 CLIENT = (*COMMON, "workspace/workspace_client.c", "x11/x.c", "x11/url.c")
@@ -74,7 +78,8 @@ def step(output, command, dependencies, *, depfile=False):
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_name(output.name + ".pending")
     pending_dep = dep.with_name(dep.name + ".pending")
-    args = [*command, "-o", str(temporary)]
+    args = ([str(temporary) if part == "{output}" else part for part in command]
+            if "{output}" in command else [*command, "-o", str(temporary)])
     if depfile:
         args += ["-MMD", "-MF", str(pending_dep), "-MT", str(output)]
     print(f"Build: {output.relative_to(ROOT)}", flush=True)
@@ -125,7 +130,19 @@ class Builder:
              [*objects, *link_dependencies])
 
     def target(self, target):
-        if target == "build/browser_cpu.so":
+        if target == "build/libworminal_engine.a":
+            objects = []
+            for source in ENGINE:
+                obj = f"build/obj/engine/{Path(source).with_suffix('.o')}"
+                step(obj, [*self.cc, *CPPFLAGS, *words("CPPFLAGS"), *words("CFLAGS", "-O3"),
+                           "-c", f"src/{source}"], [f"src/{source}"], depfile=True)
+                objects.append(obj)
+            step(target, [*words("AR", "ar"), "rcs", "{output}", *objects], objects)
+        elif target == "build/engine_test":
+            self.program(target, ["tests/engine.c", *(f"src/{s}" for s in ENGINE)],
+                         variant="engine-test", flags=["-O1", "-g", "-fsanitize=address,undefined"],
+                         libs=["-fsanitize=address,undefined", "-lm"])
+        elif target == "build/browser_cpu.so":
             self.program(target, ["tests/browser_cpu.c"], variant="browser-cpu", flags=["-fPIC"],
                          libs=["-shared", "-lrt"])
         elif target == "build/browser.so":
@@ -230,7 +247,8 @@ class Builder:
                          variant="workspace-client", libs=["-pthread"])
         elif target == "build/view_state_test":
             # view_state.c includes x.c to exercise internal state; compile that translation unit once.
-            sources = ["tests/view_state.c", "src/terminal/defaults.c", "src/x11/url.c", "src/workspace/wire.c",
+            sources = ["tests/view_state.c", "src/terminal/defaults.c", f"src/{ENGINE_DEFAULTS}",
+                       "src/x11/url.c", "src/workspace/wire.c",
                        "src/workspace/workspace_socket.c", "src/workspace/workspace_client.c"]
             self.program(target, sources, variant="view", flags=["-ffunction-sections", "-fdata-sections"],
                          libs=["-Wl,--gc-sections", *self.libs, *pkg_flags("--libs", ("xtst",))])

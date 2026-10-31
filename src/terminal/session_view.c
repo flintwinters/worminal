@@ -9,26 +9,18 @@
 void
 tsessionfreegrid(TermSession *chosen)
 {
-	Term *term = &chosen->term;
-	for (int y = 0; y < term->row; y++) {
-		free(term->line[y]);
-		if (term->alt) free(term->alt[y]);
-	}
-	free(term->line); free(term->alt);
-	if (term->hist)
-		for (int y = 0; y < theme_history_size; y++) free(term->hist[y]);
-	free(term->hist); free(term->dirty); free(term->tabs);
+	te_freegrid(&chosen->engine);
 }
 
 void
 tsessionviewresize(TermSession *chosen, int cols, int rows)
 {
-	Term *term = &chosen->term;
+	Term *term = &chosen->engine.term;
 	if (cols < 1 || rows < 1) die("invalid replica dimensions\n");
 	TermSession *previous = tsessioncurrent();
 	tsessionuse(chosen);
 	if ((cols != term->col && !(term->mode & MODE_ALTSCREEN)) ||
-	    chosen->sel.ne.x >= cols || chosen->sel.ne.y >= rows) selclear();
+	    chosen->engine.sel.ne.x >= cols || chosen->engine.sel.ne.y >= rows) selclear();
 	for (int y = rows; y < term->row; y++) free(term->line[y]);
 	term->line = xrealloc(term->line, rows * sizeof(*term->line));
 	term->dirty = xrealloc(term->dirty, rows * sizeof(*term->dirty));
@@ -51,9 +43,9 @@ tsessionviewnew(int cols, int rows)
 {
 	TermSession *created = tsessionalloc();
 	created->view_only = 1;
-	created->altscreen_allowed = 0;
-	created->term.mode = MODE_WRAP | MODE_UTF8;
-	created->term.c.attr = (Glyph){.fg = defaultfg, .bg = defaultbg};
+	created->engine.altscreen_allowed = 0;
+	created->engine.term.mode = MODE_WRAP | MODE_UTF8;
+	created->engine.term.c.attr = (Glyph){.fg = defaultfg, .bg = defaultbg};
 	selinit();
 	tsessionviewresize(created, cols, rows);
 	return created;
@@ -62,7 +54,7 @@ tsessionviewnew(int cols, int rows)
 SessionFrame
 tsessionframe(TermSession *chosen)
 {
-	Term *term = &chosen->term;
+	Term *term = &chosen->engine.term;
 	return (SessionFrame) {
 		.cols = term->col, .rows = term->row,
 		.cursor_x = term->c.x, .cursor_y = term->c.y,
@@ -76,7 +68,7 @@ tsessionviewline(TermSession *chosen, int row)
 	TermSession *previous = tsessioncurrent();
 	Line result;
 	tsessionuse(chosen);
-	result = tlineat(row, chosen->term.scr);
+	result = tlineat(row, chosen->engine.term.scr);
 	tsessionuse(previous);
 	return result;
 }
@@ -84,20 +76,20 @@ tsessionviewline(TermSession *chosen, int row)
 int
 tsessionrowdirty(TermSession *chosen, int row)
 {
-	return row >= 0 && row < chosen->term.row && chosen->term.dirty[row];
+	return row >= 0 && row < chosen->engine.term.row && chosen->engine.term.dirty[row];
 }
 
 void
 tsessioncleandirty(TermSession *chosen)
 {
-	memset(chosen->term.dirty, 0, chosen->term.row * sizeof(*chosen->term.dirty));
+	memset(chosen->engine.term.dirty, 0, chosen->engine.term.row * sizeof(*chosen->engine.term.dirty));
 }
 
 void
 tsessionimportframe(TermSession *chosen, const SessionFrame *frame)
 {
 	TermSession *previous = tsessioncurrent();
-	Term *term = &chosen->term;
+	Term *term = &chosen->engine.term;
 	tsessionuse(chosen);
 	if (term->col != frame->cols || term->row != frame->rows)
 		tresize(frame->cols, frame->rows);
@@ -115,7 +107,7 @@ tsessionimportframe(TermSession *chosen, const SessionFrame *frame)
 void
 tsessionimportrow(TermSession *chosen, int row, const Glyph *glyphs, int cols)
 {
-	Term *term = &chosen->term;
+	Term *term = &chosen->engine.term;
 	if (row < 0 || row >= term->row || cols != term->col)
 		die("invalid imported terminal row\n");
 	memcpy(term->line[row], glyphs, cols * sizeof(*glyphs));
@@ -126,7 +118,7 @@ tsessionimportrow(TermSession *chosen, int row, const Glyph *glyphs, int cols)
 void
 tsessioncopyrows(TermSession *chosen, int source, int destination, int count)
 {
-	Term *term = &chosen->term;
+	Term *term = &chosen->engine.term;
 	if (count < 1 || count > term->row || source < 0 || destination < 0 ||
 	    source > term->row - count || destination > term->row - count)
 		die("invalid imported row move\n");

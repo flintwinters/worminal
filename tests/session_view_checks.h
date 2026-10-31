@@ -7,20 +7,20 @@ check_render_sync(void)
 	TermSession *previous = tsessioncurrent(), *model = tsessionnew(8, 3);
 	const char *begin = "\033[?2026h", *end = "\033[?2026l";
 	twrite(begin, strlen(begin), 0);
-	int64_t deadline = model->render_sync_deadline;
+	int64_t deadline = model->engine.render_sync_deadline;
 	assert(deadline && tsessionrenderdelay(model) > 0);
 	twrite(begin, strlen(begin), 0);
-	assert(model->render_sync_deadline == deadline);
-	model->render_sync_deadline = 1;
-	assert(tsessionrenderdelay(model) == 0 && model->render_sync_expired);
+	assert(model->engine.render_sync_deadline == deadline);
+	model->engine.render_sync_deadline = 1;
+	assert(tsessionrenderdelay(model) == 0 && model->engine.render_sync_expired);
 	twrite(begin, strlen(begin), 0);
-	assert(model->render_sync_deadline == 0); /* Repeated begins cannot starve paint. */
+	assert(model->engine.render_sync_deadline == 0); /* Repeated begins cannot starve paint. */
 	twrite(end, strlen(end), 0);
-	assert(!model->render_sync_expired);
+	assert(!model->engine.render_sync_expired);
 	twrite(begin, strlen(begin), 0);
 	assert(tsessionrenderdelay(model) > 0);
 	treset();
-	assert(tsessionrenderdelay(model) == 0 && !model->render_sync_expired);
+	assert(tsessionrenderdelay(model) == 0 && !model->engine.render_sync_expired);
 	tsessionremove(model);
 	tsessionuse(previous);
 }
@@ -38,27 +38,27 @@ check_session_view(void)
 		tsessionimportrow(view, y, row, 8);
 	}
 	Glyph saved[3][8];
-	for (int y = 0; y < 3; y++) memcpy(saved[y], view->term.line[y], sizeof(saved[y]));
+	for (int y = 0; y < 3; y++) memcpy(saved[y], view->engine.term.line[y], sizeof(saved[y]));
 	tsessioncleandirty(view);
 	tsessioncopyrows(view, 1, 0, 2);
-	assert(view->term.line[0][0].u == 'B' && view->term.line[1][0].u == 'C');
-	assert(view->term.line[0][7].mode & ATTR_WRAP);
+	assert(view->engine.term.line[0][0].u == 'B' && view->engine.term.line[1][0].u == 'C');
+	assert(view->engine.term.line[0][7].mode & ATTR_WRAP);
 	assert(tsessionrowdirty(view, 0) && tsessionrowdirty(view, 1) && !tsessionrowdirty(view, 2));
 	tsessioncopyrows(view, 0, 1, 2);
-	assert(view->term.line[1][0].u == 'B' && view->term.line[2][0].u == 'C');
+	assert(view->engine.term.line[1][0].u == 'B' && view->engine.term.line[2][0].u == 'C');
 	for (int y = 0; y < 3; y++) tsessionimportrow(view, y, saved[y], 8);
 	frame = (SessionFrame){4, 3, 3, 2, 2, 0};
 	tsessionimportframe(view, &frame);
-	assert(view->term.histlen == 0 && view->term.hist == NULL);
-	assert(view->term.line[0][0].u == 'A' && view->term.line[2][0].u == 'C');
-	assert(view->remote_scroll == 2 && view->term.scr == 0);
-	assert(view->term.alt == NULL && view->term.tabs == NULL && view->view_only);
+	assert(view->engine.term.histlen == 0 && view->engine.term.hist == NULL);
+	assert(view->engine.term.line[0][0].u == 'A' && view->engine.term.line[2][0].u == 'C');
+	assert(view->remote_scroll == 2 && view->engine.term.scr == 0);
+	assert(view->engine.term.alt == NULL && view->engine.term.tabs == NULL && view->view_only);
 	frame = (SessionFrame){9, 5, 8, 4, 2, 0};
 	tsessionimportframe(view, &frame);
-	assert(view->term.line[0][0].u == 'A');
+	assert(view->engine.term.line[0][0].u == 'A');
 	for (int y = 0; y < 5; y++)
 		for (int x = y < 3 ? 4 : 0; x < 9; x++) {
-			Glyph cell = view->term.line[y][x];
+			Glyph cell = view->engine.term.line[y][x];
 			assert(cell.u == ' ' && cell.mode == 0 && cell.fg == defaultfg && cell.bg == defaultbg);
 		}
 	Glyph words[9];
@@ -89,11 +89,11 @@ check_session_view(void)
 	assert(fd >= 0 && !tsessionexport(view, fd) && lseek(fd, 0, SEEK_CUR) == 0);
 	close(fd);
 	/* A clipped wide glyph cannot leave an orphaned half-cell behind. */
-	view->term.line[1][2] = (Glyph){.u = 0x4e2d, .mode = ATTR_WIDE, .fg = defaultfg, .bg = defaultbg};
-	view->term.line[1][3] = (Glyph){.mode = ATTR_WDUMMY, .fg = defaultfg, .bg = defaultbg};
+	view->engine.term.line[1][2] = (Glyph){.u = 0x4e2d, .mode = ATTR_WIDE, .fg = defaultfg, .bg = defaultbg};
+	view->engine.term.line[1][3] = (Glyph){.mode = ATTR_WDUMMY, .fg = defaultfg, .bg = defaultbg};
 	frame.cols = 3; frame.cursor_x = 2;
 	tsessionimportframe(view, &frame);
-	assert(view->term.line[1][2].u == ' ' && !(view->term.line[1][2].mode & ATTR_WIDE));
+	assert(view->engine.term.line[1][2].u == ' ' && !(view->engine.term.line[1][2].mode & ATTR_WIDE));
 	frame.cols = 4;
 	tsessionimportframe(view, &frame);
 	Glyph pair[4];
@@ -111,8 +111,8 @@ check_session_view(void)
 		frame = (SessionFrame){cycle & 1 ? 400 : 1, cycle & 1 ? 200 : 1, 0, 0, cycle, cycle & 1};
 		tsessionimportframe(view, &frame);
 		assert(tsessioncurrent() == other);
-		assert(view->term.alt == NULL && view->term.hist == NULL && view->term.tabs == NULL);
-		assert(view->term.histlen == 0 && view->remote_scroll == cycle);
+		assert(view->engine.term.alt == NULL && view->engine.term.hist == NULL && view->engine.term.tabs == NULL);
+		assert(view->engine.term.histlen == 0 && view->remote_scroll == cycle);
 	}
 	tsessionremove(other);
 	tsessionremove(view);

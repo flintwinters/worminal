@@ -37,7 +37,7 @@ def prove(match=None):
     cases.append(("stale resize ownership", command, env, b"stale resize released the new controller"))
     ordering = directory / "mode-ordering.c"
     ordering.write_text((ROOT / "src/workspace/workspace_service.c").read_text().replace(
-        "if (tab->input_frame) {", "if (0) {").replace(
+        "if (tab->input_frame || (tab->controller && !tab->screen.len)) {", "if (0) {").replace(
         "if (tab->pending_frame) flush_frame(tab);", "; /* Missing pre-catalog frame flush. */"))
     ordered_daemon = directory / "unordered-preview"
     builder.program(ordered_daemon, [*service_support, str(ordering)],
@@ -60,7 +60,7 @@ def prove(match=None):
                     variant="parser-view-proof", flags=["-Itests", "-ffunction-sections", "-fdata-sections"],
                     libs=["-Wl,--gc-sections", "-lm"])
     cases.append(("replica does not reflow", [str(view_binary)], os.environ,
-                  b"view->term.histlen == 0 && view->term.hist == NULL"))
+                  b"view->engine.term.histlen == 0 && view->engine.term.hist == NULL"))
     crop = directory / "uncropped-view.c"
     crop.write_text((ROOT / "src/terminal/session_view.c").read_text().replace(
         "if (term->line[y][cols - 1].mode & ATTR_WIDE) term->line[y][cols - 1] = blank;", ""))
@@ -69,19 +69,28 @@ def prove(match=None):
     builder.program(crop_binary, ["tests/scrollback.c", *support], variant="crop-view-proof",
                     flags=["-Itests", "-ffunction-sections", "-fdata-sections"], libs=["-Wl,--gc-sections", "-lm"])
     cases.append(("replica crops wide cells", [str(crop_binary)], os.environ,
-                  b"view->term.line[1][2].u == ' '"))
+                  b"view->engine.term.line[1][2].u == ' '"))
     current_parser = (ROOT / "src/terminal/st.c").read_text()
 
-    def parser_case(name, source, expected):
-        if source == current_parser:
+    def parser_case(name, source, expected, path="src/terminal/st.c"):
+        if source == (ROOT / path).read_text():
             raise ValueError(f"Parser counterfactual no longer removes a fix: {name}")
         parser = directory / f"{name}-st.c"
         parser.write_text(source)
         test = directory / f"{name}-test.c"
-        test.write_text((ROOT / "tests/scrollback.c").read_text().replace(
-            '../src/terminal/st.c', str(parser)))
+        support = session_support
+        if path.endswith(".inc"):
+            unit = directory / f"{name}-parser.c"
+            unit.write_text((ROOT / "src/terminal/engine_parser.c").read_text().replace(
+                f'"{Path(path).name}"', f'"{parser}"'))
+            support = [str(unit) if item.endswith("engine_parser.c") else item for item in session_support]
+            test_source = (ROOT / "tests/scrollback.c").read_text().replace(
+                '../src/terminal/st.c', str(ROOT / "src/terminal/st.c"))
+        else:
+            test_source = (ROOT / "tests/scrollback.c").read_text().replace('../src/terminal/st.c', str(parser))
+        test.write_text(test_source)
         binary = directory / name
-        builder.program(binary, [str(test), *session_support],
+        builder.program(binary, [str(test), *support],
                         variant=f"{name}-proof",
                         flags=["-Itests", "-ffunction-sections", "-fdata-sections"],
                         libs=["-Wl,--gc-sections", "-lm"])
@@ -89,7 +98,8 @@ def prove(match=None):
 
     parser_case("read-capacity", current_parser.replace("sizeof(session->ttybuf)-buflen", "LEN(buf)-buflen"),
                 b"ttyread() == strlen(batch)")
-    stale_cursor = current_parser.replace("if (cursor.state & CURSOR_WRAPNEXT) cursor.x = oldcol;", "")
+    reflow = (ROOT / "src/terminal/engine_reflow.inc").read_text()
+    stale_cursor = reflow.replace("if (cursor.state & CURSOR_WRAPNEXT) cursor.x = oldcol;", "")
     stale_cursor = stale_cursor.replace("if (saved.state & CURSOR_WRAPNEXT) saved.x = oldcol;", "")
     stale_cursor = stale_cursor.replace("MODBIT(term.c.state, cursorend, CURSOR_WRAPNEXT);",
         "MODBIT(term.c.state, cursorend || (cursor.state & CURSOR_WRAPNEXT && term.c.x == col - 1), "
@@ -97,7 +107,34 @@ def prove(match=None):
     stale_cursor = stale_cursor.replace("MODBIT(session->saved[0].state, savedend, CURSOR_WRAPNEXT);",
         "MODBIT(session->saved[0].state, savedend || (saved.state & CURSOR_WRAPNEXT && savedx == col - 1), "
         "CURSOR_WRAPNEXT);")
-    parser_case("pending-wrap", stale_cursor, b"term.line[3 / width][3 % width].u == 'd'")
+    parser_case("pending-wrap", stale_cursor, b"term.line[3 / width][3 % width].u == 'd'",
+                "src/terminal/engine_reflow.inc")
+
+    def engine_case(name, path, original, replacement, expected):
+        source = (ROOT / path).read_text()
+        mutant = source.replace(original, replacement)
+        if mutant == source:
+            raise ValueError(f"Engine counterfactual no longer removes a fix: {name}")
+        stem = name.replace(" ", "-")
+        unit = directory / f"{stem}.c"
+        unit.write_text(mutant)
+        sources = [str(unit) if f"src/{item}" == path else f"src/{item}" for item in build.ENGINE]
+        binary = ROOT / "build/regressions" / stem
+        builder.program(binary, ["tests/engine.c", *sources], variant=f"{stem}-proof", libs=["-lm"])
+        cases.append((name, [str(binary)], os.environ, expected))
+
+    engine_case("engine effect ordering", "src/terminal/engine.c",
+                "if (engine->events) return WORMINAL_PENDING;", "",
+                b"WORMINAL_PENDING")
+    engine_case("engine redraw damage retention", "src/terminal/engine.c",
+                "if (engine->render_sync_deadline) return WORMINAL_PENDING;", "",
+                b"worminal_engine_clean(engine) == WORMINAL_PENDING")
+    engine_case("engine pending CSI validation", "src/terminal/engine_snapshot.c",
+                "(h.esc & ESC_CSI) && h.csi.len >= ESC_BUF_SIZ - 1", "0",
+                b"worminal_engine_import(data, bytes, &copy, &imported) == WORMINAL_INVALID")
+    engine_case("engine selection validation", "src/terminal/engine_snapshot.c",
+                " || !valid_selection(&h)", "",
+                b"worminal_engine_import(data, bytes, &copy, &imported) == WORMINAL_INVALID")
     # Restore fork/exec at the SSH launch boundary: registered GUI hooks must be detected.
     client = directory / "fork-client.c"
     source = (ROOT / "src/workspace/workspace_client.c").read_text()
