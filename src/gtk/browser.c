@@ -19,6 +19,7 @@ struct Browser {
 };
 static const BrowserHost *host;
 static WebKitWebContext *context;
+static gboolean retired;
 static GList *browsers;
 static char *local_document(const char *);
 
@@ -499,30 +500,43 @@ local_request(WebKitURISchemeRequest *request, gpointer data)
 	g_error_free(error);
 }
 
+static WebKitWebsiteDataManager *
+browser_profile(void)
+{
+	GObject *display = G_OBJECT(gdk_display_get_default());
+	WebKitWebsiteDataManager *manager = g_object_get_data(display, WORMINAL_BROWSER_PROFILE_KEY);
+	if (manager) return manager;
+	/* The data manager owns the cookie manager, including session cookies.
+	 * Sharing disk paths alone does not share the live profile across contexts.
+	 * https://webkitgtk.org/reference/webkit2gtk/stable/class.WebContext.html */
+	char *data = g_build_filename(g_get_user_data_dir(), "worminal-preview", NULL);
+	char *cache = g_build_filename(g_get_user_cache_dir(), "worminal-preview", NULL);
+	g_mkdir_with_parents(data, 0700);
+	g_mkdir_with_parents(cache, 0700);
+	manager = webkit_website_data_manager_new("base-data-directory", data, "base-cache-directory", cache, NULL);
+	webkit_website_data_manager_set_tls_errors_policy(manager, WEBKIT_TLS_ERRORS_POLICY_FAIL);
+	char *cookies = g_build_filename(data, "cookies.sqlite", NULL);
+	WebKitCookieManager *cookie_manager = webkit_website_data_manager_get_cookie_manager(manager);
+	webkit_cookie_manager_set_persistent_storage(cookie_manager, cookies, WEBKIT_COOKIE_PERSISTENT_STORAGE_SQLITE);
+	webkit_cookie_manager_set_accept_policy(cookie_manager, WEBKIT_COOKIE_POLICY_ACCEPT_NO_THIRD_PARTY);
+	g_free(data); g_free(cache); g_free(cookies);
+	/* The display outlives module generations; its destroy callback belongs to
+	 * GLib, so retiring browser code cannot strand a callback in this owner. */
+	g_object_set_data_full(display, WORMINAL_BROWSER_PROFILE_KEY, manager, g_object_unref);
+	return manager;
+}
+
 static WebKitWebContext *
 browser_context(void)
 {
 	if (context) return context;
 	host->timing("browser-context-start");
-	char *data = g_build_filename(g_get_user_data_dir(), "worminal-preview", NULL);
-	char *cache = g_build_filename(g_get_user_cache_dir(), "worminal-preview", NULL);
-	g_mkdir_with_parents(data, 0700);
-	g_mkdir_with_parents(cache, 0700);
-	WebKitWebsiteDataManager *manager = webkit_website_data_manager_new(
-	    "base-data-directory", data, "base-cache-directory", cache, NULL);
-	webkit_website_data_manager_set_tls_errors_policy(manager, WEBKIT_TLS_ERRORS_POLICY_FAIL);
-	context = webkit_web_context_new_with_website_data_manager(manager);
+	context = webkit_web_context_new_with_website_data_manager(browser_profile());
 	webkit_web_context_register_uri_scheme(context, WORKSPACE_BROWSER_SCHEME, local_request, NULL, NULL);
 	webkit_security_manager_register_uri_scheme_as_cors_enabled(webkit_web_context_get_security_manager(context),
 	                                                     WORKSPACE_BROWSER_SCHEME);
-	g_object_unref(manager);
-	char *cookies = g_build_filename(data, "cookies.sqlite", NULL);
-	WebKitCookieManager *cookie_manager = webkit_web_context_get_cookie_manager(context);
-	webkit_cookie_manager_set_persistent_storage(cookie_manager, cookies, WEBKIT_COOKIE_PERSISTENT_STORAGE_SQLITE);
-	webkit_cookie_manager_set_accept_policy(cookie_manager, WEBKIT_COOKIE_POLICY_ACCEPT_NO_THIRD_PARTY);
 	webkit_web_context_set_spell_checking_enabled(context, FALSE);
 	g_signal_connect(context, "download-started", G_CALLBACK(download_started), NULL);
-	g_free(data); g_free(cache); g_free(cookies);
 	host->timing("browser-context-ready");
 	return context;
 }
@@ -672,6 +686,14 @@ void browser_free(Browser *b)
 	if (!b->app->closing) gtk_widget_destroy(b->box);
 	g_object_unref(b->box);
 	g_free(b);
+	if (retired && !browsers) g_clear_object(&context);
+}
+
+G_MODULE_EXPORT void
+worminal_browser_set_retired_v1(gboolean value)
+{
+	retired = value;
+	if (retired && !browsers) g_clear_object(&context);
 }
 
 static void browser_initialize(const BrowserHost *callbacks) { host = callbacks; }

@@ -194,6 +194,13 @@ browser_peer(Page *page, gboolean live_only)
 	return NULL;
 }
 
+Browser *
+app_browser_instance(Page *page)
+{
+	Page *owner = page->browser ? page : browser_peer(page, TRUE);
+	return owner ? owner->browser : NULL;
+}
+
 static void
 move_browser(Page *from, Page *to)
 {

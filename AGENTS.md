@@ -1,6 +1,7 @@
 # Worminal
 
-Worminal is a deliberately small terminal. Favor low memory use over interface features; measure it before adding complexity.
+Worminal is a deliberately small terminal. Favor low memory use over interface features;
+measure it before adding complexity.
 Frontend replacements must preserve established user behavior, including removed shortcuts;
 plain Ctrl+N belongs to terminal applications, while Ctrl+Shift+N opens a GTK window.
 
@@ -68,7 +69,12 @@ Launchers link GLib only and forward to an existing owner before loading the GTK
 the WebKit module loads when a browser view is first claimed. Both modules use local linker scope;
 explicit host callbacks carry browser actions across the module boundary. Installed browser modules are
 ABI-named so live owners retain compatible lazy loading across upgrades.
-New browser views reuse a live renderer for matching HTTP origins or the same local file path;
+Each browser view pins its creating module; new tabs load newly installed compatible browser code.
+Old views keep their code and live state; generations share one live cookie/storage profile.
+Retired modules release unused contexts while their code stays resident
+for asynchronous callbacks. Frontend updates still require a GTK restart; this loader must be installed once first.
+New browser views reuse a live renderer within their module generation for matching origins
+or the same local file path;
 tabs retain independent navigation and session storage, and the first browser launch stays lazy.
 GTK publishes selected terminal directories and window focus through a read-only session D-Bus interface;
 `docs/window-state.md` defines the public contract and `manage.py check-window-state` checks it privately.

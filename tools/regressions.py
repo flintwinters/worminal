@@ -130,6 +130,23 @@ def prove(match=None):
                   [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_upgrade.py",
                    "-k", "empty_workspace", "-q"],
                   {**os.environ, "WORMINAL_TEST_UPGRADE_CANDIDATE": str(upgrade_binary)}, b"TimeoutExpired"))
+    # The old one-module cache cannot give new tabs updated code.
+    cached_loader = directory / "cached-browser-loader.c"
+    cached_loader.write_text((ROOT / "src/gtk/browser_loader.c").read_text().replace(
+        "load_generation(App *app)\n{", "load_generation(App *app)\n{\n\tif (latest) return latest;"))
+    cached_check = directory / "cached-browser-generations.c"
+    cached_check.write_text((ROOT / "tests/browser_generations.c").read_text().replace(
+        "../src/gtk/browser_loader.c", str(cached_loader)))
+    cached_binary = directory / "cached-browser-generations"
+    browser_packages = (*build.PREVIEW_PACKAGES, "gmodule-2.0")
+    builder.program(cached_binary, [str(cached_check)], variant="browser-generation-proof",
+                    flags=["-Itests", "-Isrc/gtk", *build.pkg_flags("--cflags", browser_packages)],
+                    libs=build.pkg_flags("--libs", browser_packages))
+    cases.append(("browser module generations",
+                  [sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                   "-p", "test_browser_generations.py", "-q"],
+                  {**os.environ, "WORMINAL_TEST_BROWSER_GENERATIONS_EXECUTABLE": str(cached_binary)},
+                  b"updated != original"))
     selected = [case for case in cases if match is None or match.casefold() in case[0].casefold()]
     if not selected:
         raise ValueError(f"No regression proof matches: {match}")

@@ -219,3 +219,23 @@ API constraints consulted
 https://docs.gtk.org/gtk3/class.IMMulticontext.html
 https://webkitgtk.org/reference/webkit2gtk/stable/signal.WebView.create.html
 https://webkitgtk.org/reference/webkit2gtk/stable/signal.WebView.permission-request.html
+
+Browser module updates
+----------------------
+With the generation-aware GTK loader, each new browser view checks the installed
+ABI-named browser module. Changed compatible code starts a new module generation;
+existing views retain their creating module, live forms, JavaScript, navigation,
+and session storage. Generations share the live profile for login cookies and
+local storage; each keeps its own URI handlers and view-private capabilities.
+Identical installs reuse the current generation. A rejected
+module falls back to the last working generation; rollback can reopen older code
+without replacing newer live views. Local-file access remains private per view.
+Unused retired engine contexts are released, while module code remains resident
+for asynchronous WebKit callbacks. Renderer sharing stays within a generation.
+This updates browser-module code, not the GTK frontend itself. An older GTK owner
+needs one initial restart to gain the loader; replacing files alone cannot add
+this capability to its already-loaded code. Explorer HTML keeps its existing
+explicit reload/reopen behavior.
+Run manage.py check-browser-generations for real-WebKit state-preservation checks
+on a private display; prove-preview-regressions --match 'browser module generations'
+checks that retaining the old one-module cache fails the regression.

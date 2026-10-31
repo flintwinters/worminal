@@ -187,6 +187,21 @@ class Builder:
                              link_dependencies=["src/gtk/frontend.map"] if target == "build/frontend.so" else [])
             finally:
                 self.cflags = old_flags
+        elif target in ("build/browser_generations_test", "build/incompatible_browser.so",
+                        "build/unresolved_browser.so"):
+            packages = (*PREVIEW_PACKAGES, "gmodule-2.0")
+            old_flags = self.cflags
+            self.cflags = [*CPPFLAGS, *words("CPPFLAGS"), *words("CFLAGS", "-O2"),
+                           *pkg_flags("--cflags", packages)]
+            library = target.endswith(".so")
+            try:
+                source = "tests/unresolved_browser.c" if target.endswith("unresolved_browser.so") else \
+                    "tests/incompatible_browser.c" if library else "tests/browser_generations.c"
+                self.program(target, [source],
+                             variant="browser-generations", flags=["-fPIC"] if library else [],
+                             libs=[*(["-shared"] if library else []), *pkg_flags("--libs", packages)])
+            finally:
+                self.cflags = old_flags
         elif target == "build/render_probe":
             old_flags = self.cflags
             self.cflags = [*CPPFLAGS, *words("CPPFLAGS"), *words("CFLAGS", "-O3"),

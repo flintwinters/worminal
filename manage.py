@@ -81,7 +81,9 @@ def run_checks(match=None):
         "worminal-x11", "worminald-x11", "worminald-preview", "build/key_injector",
         "build/placement_wm", "build/compact-worminal",
         "build/overlap_probe",
-        "build/border_probe", "build/icon_probe", "build/view_state_test", *NATIVE_CHECKS,
+        "build/border_probe", "build/icon_probe", "build/view_state_test",
+        "build/browser.so", "build/browser_generations_test", "build/incompatible_browser.so",
+        "build/unresolved_browser.so", *NATIVE_CHECKS,
     )
     code = run_native_checks()
     if code:
@@ -146,6 +148,15 @@ def preview_checks(backend):
 def media_fixtures():
     """Regenerate silent browser media fixtures (requires ffmpeg)."""
     raise typer.Exit(run_proof_script("tests/media_fixtures.py"))
+
+
+@app.command("check-browser-generations")
+def check_browser_generations():
+    """Verify updated browser code and preserved old live page state on private GTK/WebKit views."""
+    native_build.build_targets("build/browser.so", "build/browser_generations_test",
+                               "build/incompatible_browser.so", "build/unresolved_browser.so")
+    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                         "-p", "test_browser_generations.py", "-q"]))
 
 
 @app.command("check-preview")

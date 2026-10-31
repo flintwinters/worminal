@@ -5,6 +5,8 @@
 #include "preview.h"
 
 #define WORMINAL_BROWSER_ABI 3
+/* Shared framework-owned profile; module-private contexts and Browser structs stay separate. */
+#define WORMINAL_BROWSER_PROFILE_KEY "worminal-browser-profile-v1"
 #define WORMINAL_STRINGIFY_(value) #value
 #define WORMINAL_STRINGIFY(value) WORMINAL_STRINGIFY_(value)
 #define WORMINAL_BROWSER_MODULE "browser-v" WORMINAL_STRINGIFY(WORMINAL_BROWSER_ABI) ".so"
@@ -29,5 +31,9 @@ typedef struct {
 	void (*destroy)(Browser *);
 	void (*initialize)(const BrowserHost *);
 } BrowserModule;
+
+/* Optional ABI-compatible generation lifecycle hook. A retired module must keep
+ * live views usable and may release its context once no views remain. */
+G_MODULE_EXPORT void worminal_browser_set_retired_v1(gboolean);
 
 #endif
