@@ -62,3 +62,10 @@ class BaselineTests(unittest.TestCase):
         destination = migration.preserve_baseline()
         records = json.loads((destination / "manifest.json").read_text())["artifacts"]
         self.assertEqual(records[1], {"kind": "installed", "path": str(self.installed), "missing": True})
+
+    def test_recovery_artifacts_are_verified_before_cutover_preparation(self):
+        directory = migration.preserve_baseline()
+        self.assertEqual(migration.verify_baseline(), 2)
+        (directory / "build/worminal").write_bytes(b"damaged recovery binary")
+        with self.assertRaisesRegex(ValueError, "recovery artifact has changed"):
+            migration.verify_baseline()

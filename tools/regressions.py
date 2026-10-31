@@ -1,13 +1,45 @@
 """Prove critical fixes by compiling local counterfactuals, never editing working sources."""
 
 import os
+import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
+import tomllib
 
 from tools import build
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def rust_frame_counterfactual(directory):
+    source = ROOT / "rust/daemon"
+    target = directory / "rust-frame-queue"
+    shutil.copytree(source / "src", target / "src", dirs_exist_ok=True)
+    manifest = tomllib.loads((source / "Cargo.toml").read_text())
+    workspace = tomllib.loads((ROOT / "Cargo.toml").read_text())
+    text = '[workspace]\n[package]\nname="worminal-frame-proof"\nversion="0.1.0"\nedition="2021"\n[dependencies]\n'
+    for name, dependency in manifest["dependencies"].items():
+        if "path" in dependency:
+            text += f'{name} = {{path={json.dumps(str((source / dependency["path"]).resolve()))}}}\n'
+        else:
+            text += f'{name} = {json.dumps(workspace["workspace"]["dependencies"][name])}\n'
+    (target / "Cargo.toml").write_text(text)
+    mutant = target / "src/frames.rs"
+    original = mutant.read_text()
+    changed = original.replace("output.append(&plan.bytes)?;", "let queued = output.append(&plan.bytes);")
+    changed = changed.replace("core(engine.clean())\n    }", "core(engine.clean())?; queued\n    }")
+    if changed == original or "let queued" not in changed or "queued\n" not in changed:
+        raise ValueError("Rust frame counterfactual no longer removes queue publication ordering")
+    mutant.write_text(changed)
+    command = ["cargo", "test", "--manifest-path", str(target / "Cargo.toml"),
+               "--target-dir", str(ROOT / "build/cargo"), "--offline", "--quiet",
+               "queue_rejection_preserves_damage_and_the_last_delivered_baseline", "--lib"]
+    with (directory / "rust-frame-build.log").open("wb") as log:
+        subprocess.run([*command, "--no-run"], cwd=ROOT, stdout=log, stderr=log, check=True, timeout=120)
+    return ("Rust frame queue publication", command, os.environ,
+            b"frames::tests::queue_rejection_preserves_damage_and_the_last_delivered_baseline --- FAILED")
 
 
 def prove(match=None):
@@ -184,6 +216,8 @@ def prove(match=None):
                    "-p", "test_browser_generations.py", "-q"],
                   {**os.environ, "WORMINAL_TEST_BROWSER_GENERATIONS_EXECUTABLE": str(cached_binary)},
                   b"updated != original"))
+    if match is None or match.casefold() in "Rust frame queue publication".casefold():
+        cases.append(rust_frame_counterfactual(directory))
     selected = [case for case in cases if match is None or match.casefold() in case[0].casefold()]
     if not selected:
         raise ValueError(f"No regression proof matches: {match}")

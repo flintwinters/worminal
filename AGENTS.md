@@ -109,6 +109,8 @@ Rust workspace components now cover v2 framing, validated launches, atomic recov
 `manage.py check-rust-workspace` compares their encoding and transport with the C implementations.
 Rust daemon foundations cover PTYs, pinned transferred processes, bounded queues and ordered terminal effects;
 `manage.py check-rust-process` exercises child ownership, UTF-8/effect ordering and real zsh recovery.
+Rust frame replication atomically queues complete deltas before advancing its viewport baseline;
+its queue-rejection regression has a compiled counterfactual proof.
 The daemon crate has no runnable service yet. Next: integrate its event loop and handoff, then port GTK/browser policy.
 `manage.py check-install` stages /usr/local under .checks and verifies artifacts, native SSH input
 and resident module bytes.

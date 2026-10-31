@@ -182,8 +182,12 @@ def preserve_c_baseline():
 @app.command("check-migration")
 def check_migration():
     """Verify migration baseline recovery infrastructure without touching the installation."""
-    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
-                         "-p", "test_migration.py", "-q"]))
+    code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                "-p", "test_migration.py", "-q"])
+    if not code:
+        from tools.migration import verify_baseline
+        typer.echo(f"Preserved C recovery baseline: {verify_baseline()} artifact hashes verified.")
+    raise typer.Exit(code)
 
 
 @app.command("build-preview")

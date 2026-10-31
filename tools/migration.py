@@ -8,6 +8,22 @@ import subprocess
 from tools.build import ROOT, installation_files
 
 
+def verify_baseline():
+    directory = ROOT / ".checks/c-baseline"
+    manifest = json.loads((directory / "manifest.json").read_text())
+    verified = 0
+    for record in manifest["artifacts"]:
+        if record.get("missing"):
+            continue
+        artifact = directory / record["copy"]
+        if hashlib.sha256(artifact.read_bytes()).hexdigest() != record["sha256"]:
+            raise ValueError(f"Preserved C recovery artifact has changed: {record['copy']}")
+        verified += 1
+    if not verified:
+        raise ValueError("Preserved C recovery baseline contains no artifacts")
+    return verified
+
+
 def preserve_baseline():
     destination = ROOT / ".checks/c-baseline"
     # Exclusive creation prevents a later Rust build from silently replacing the C recovery artifacts.

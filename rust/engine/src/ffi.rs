@@ -161,6 +161,50 @@ impl Engine {
         self.events()
     }
 
+    fn row_status(&mut self, row: i32) -> Result<(usize, bool), Error> {
+        let (mut required, mut dirty) = (0, 0);
+        let status = unsafe {
+            sys::worminal_engine_row(
+                self.handle.as_ptr(),
+                row,
+                std::ptr::null_mut(),
+                0,
+                &mut required,
+                &mut dirty,
+            )
+        };
+        if status != sys::WORMINAL_CAPACITY as i32 {
+            check(status)?;
+        }
+        Ok((required, dirty != 0))
+    }
+
+    pub fn row_dirty(&mut self, row: i32) -> Result<bool, Error> {
+        Ok(self.row_status(row)?.1)
+    }
+
+    /// Copy into reusable Rust storage without acknowledging damage or borrowing C memory.
+    pub fn row(&mut self, row: i32, cells: &mut Vec<Cell>) -> Result<(), Error> {
+        let (mut required, _) = self.row_status(row)?;
+        cells.resize(required, Cell::default());
+        let mut dirty = 0;
+        check(unsafe {
+            sys::worminal_engine_row(
+                self.handle.as_ptr(),
+                row,
+                cells.as_mut_ptr(),
+                cells.len(),
+                &mut required,
+                &mut dirty,
+            )
+        })
+    }
+
+    /// A replication owner acknowledges damage only after committing its complete queued frame.
+    pub fn clean(&mut self) -> Result<(), Error> {
+        check(unsafe { sys::worminal_engine_clean(self.handle.as_ptr()) })
+    }
+
     fn read_rows(&mut self, now: i64, full: bool) -> Result<(Frame, Vec<(i32, Vec<Cell>)>), Error> {
         let frame = self.frame(now)?;
         let mut rows = Vec::new();
@@ -168,37 +212,14 @@ impl Engine {
             return Ok((frame, rows));
         }
         for row in 0..frame.rows {
-            let (mut required, mut dirty) = (0, 0);
-            let status = unsafe {
-                sys::worminal_engine_row(
-                    self.handle.as_ptr(),
-                    row,
-                    std::ptr::null_mut(),
-                    0,
-                    &mut required,
-                    &mut dirty,
-                )
-            };
-            if status != sys::WORMINAL_CAPACITY as i32 {
-                check(status)?;
-            }
-            if dirty == 0 && !full {
+            if !full && !self.row_dirty(row)? {
                 continue;
             }
-            let mut cells = vec![Cell::default(); required];
-            check(unsafe {
-                sys::worminal_engine_row(
-                    self.handle.as_ptr(),
-                    row,
-                    cells.as_mut_ptr(),
-                    cells.len(),
-                    &mut required,
-                    &mut dirty,
-                )
-            })?;
+            let mut cells = Vec::new();
+            self.row(row, &mut cells)?;
             rows.push((row, cells));
         }
-        check(unsafe { sys::worminal_engine_clean(self.handle.as_ptr()) })?;
+        self.clean()?;
         Ok((frame, rows))
     }
 

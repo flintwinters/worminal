@@ -90,7 +90,7 @@ pub(crate) struct Terminal {
 #[derive(Default)]
 pub(crate) struct Screen {
     pub frame: Frame,
-    pub rows: Vec<Vec<u8>>,
+    pub bytes: Vec<u8>,
 }
 
 pub(crate) struct Tab {
