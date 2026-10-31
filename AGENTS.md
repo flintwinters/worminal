@@ -1,7 +1,6 @@
 # Worminal
 
-Worminal is a deliberately small terminal. Favor cold launch to usable input and low memory over interface
-features; measure both before adding complexity.
+Worminal is a deliberately small terminal. Favor low memory use over interface features; measure it before adding complexity.
 Frontend replacements must preserve established user behavior, including removed shortcuts;
 plain Ctrl+N belongs to terminal applications, while Ctrl+Shift+N opens a GTK window.
 
@@ -48,7 +47,7 @@ It excludes desktop compositing and physical display latency.
 `manage.py interaction-perf` measures first ownership claims, cached tab switches, and wheel/page scroll pixels.
 `manage.py browser-perf` measures first/additional PTY-to-browser conversions to visible HTTP/file/explorer pixels,
 checks HTTP/file keyboard response, and records helper-inclusive memory; snapshots support alternating comparisons.
-Browser latency work prioritizes genuine cold opens: `browser-perf --cold-open` includes fresh-process launch,
+Browser cold-open measurement: `browser-perf --cold-open` includes fresh-process launch,
 GTK, service connection and WebKit startup; `--kind` isolates HTTP, file or directory targets.
 Use `--established-profile` to distinguish normal cold processes from first-use profile setup;
 all private application, helper and service processes stop between trials. Startup reports include CPU and
@@ -90,7 +89,7 @@ Private Wayland checks use a project-local Weston runtime and matching virtual-s
 
 Current jobs: audit upgrade lifecycle after the failed live bootstrap killed transferred sessions; the receiver
 session-isolation fix is verified privately and has not been published to the active installation.
-Prioritize remaining launch latency, while auditing input, rendering, output delivery, and view switching
+Audit input, rendering, output delivery, and view switching
 until further gains require correctness, resource, or compatibility compromises; review remaining compatibility gaps.
 Investigate intermittent local workspace loss after idle time; no root cause is confirmed.
 Investigate reported desktop freezes during master connections; root cause is unconfirmed.
@@ -99,7 +98,6 @@ Investigate reported desktop freezes during master connections; root cause is un
 `--master HOST` uses real SSH with a private remote workspace and preserves existing sessions.
 SSH clients spawn without running GUI-process fork hooks; keep that invariant in transport startup.
 Daemon lifecycle, event-loop failures and fatal terminal errors go to syslog for journal diagnosis.
-Continue auditing first-frame presentation and peak startup resources after the verified first-window worker overlap.
 Browser cold startup is dominated by engine initialization; preserve lazy startup, persistent profiles and
 rendering compatibility when revisiting that cost.
 `worminal`/`worminald` are GTK/v2; preview build aliases share that workspace and existing browser profiles.
