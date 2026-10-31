@@ -34,7 +34,7 @@ def git(*args):
     return subprocess.check_output(["git", *args])
 
 
-def check_privacy(root, history=False, staged=False, identities=False, message_file=None):
+def check_privacy(root, history=False, staged=False, message_file=None):
     console = Console()
     count = 0
 
@@ -55,11 +55,6 @@ def check_privacy(root, history=False, staged=False, identities=False, message_f
             count += 1
         data = git("show", f":{path.relative_to(root).as_posix()}") if staged else path.read_bytes()
         report(path.relative_to(root).as_posix(), data)
-    if identities:
-        for variable in ("GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"):
-            if not git("var", variable).startswith(b"Worminal contributor <anonymous> "):
-                console.print(f"{variable}: use the anonymous project identity (manage.py privacy-setup).")
-                count += 1
     if message_file:
         report("commit message", message_file.read_bytes())
     if history:
@@ -72,10 +67,7 @@ def check_privacy(root, history=False, staged=False, identities=False, message_f
                 report(f"history blob {oid.decode()[:12]}", git("cat-file", "blob", oid.decode()))
         for entry in git("log", "--all", "--format=%H").splitlines():
             oid = entry.decode()
-            report(f"commit {oid[:12]}", git("show", "-s", "--format=%an <%ae>%n%cn <%ce>%n%B", oid))
-            identity = git("show", "-s", "--format=%an%n%ae%n%cn%n%ce", oid).splitlines()
-            if identity != [b"Worminal contributor", b"anonymous"] * 2:
-                console.print(f"commit {oid[:12]}: non-anonymous identity", markup=False)
-                count += 1
+            # Attribution is public metadata; scan the message for accidental disclosures.
+            report(f"commit {oid[:12]}", git("show", "-s", "--format=%B", oid))
     console.print(f"Privacy check: {count} finding(s).", markup=False)
     return bool(count)

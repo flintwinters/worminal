@@ -263,25 +263,29 @@ def check(match: str = typer.Option(None, help="Run matching Python checks; full
 @app.command("check-privacy")
 def privacy(history: bool = typer.Option(False, "--history", help="Also scan reachable Git history."),
             staged: bool = typer.Option(False, "--staged", help="Scan index content instead of working files."),
-            identities: bool = typer.Option(False, "--identities", help="Require anonymous commit identities."),
             message_file: Path = typer.Option(None, "--message-file", help="Also scan a commit message."),
             repository: Path = typer.Option(ROOT, "--repository", help="Repository or initialized submodule to scan.")):
     """Scan tracked content for common private data; redact matched values."""
     repository = repository.resolve()
     message_file = message_file.resolve() if message_file else None
     with chdir(repository):
-        raise typer.Exit(int(check_privacy(repository, history, staged, identities, message_file)))
+        raise typer.Exit(int(check_privacy(repository, history, staged, message_file)))
+
+
+@app.command("check-privacy-tests")
+def check_privacy_tests():
+    """Check privacy scanning and identity-preserving hook setup."""
+    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                         "-p", "test_privacy.py", "-q"]))
 
 
 @app.command("privacy-setup")
 def privacy_setup():
-    """Install tracked privacy hooks and set an anonymous repository-local identity."""
-    for name, value in (("core.hooksPath", ".githooks"), ("user.name", "Worminal contributor"),
-                        ("user.email", "anonymous")):
-        code = run(["git", "config", "--local", name, value])
-        if code:
-            raise typer.Exit(code)
-    typer.echo("Privacy hooks and anonymous identity installed for this checkout.")
+    """Install tracked privacy hooks without changing the configured Git identity."""
+    code = run(["git", "config", "--local", "core.hooksPath", ".githooks"])
+    if code:
+        raise typer.Exit(code)
+    typer.echo("Privacy hooks installed; configured Git identity preserved.")
 
 
 @app.command("check-keys")

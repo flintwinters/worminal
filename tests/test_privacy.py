@@ -3,6 +3,7 @@
 import contextlib
 import importlib.util
 import io
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -30,17 +31,35 @@ class PrivacyTests(unittest.TestCase):
             self.assertIn("fixture.txt:1: service credential", result.stdout)
             self.assertNotIn("ghp_" + "a" * 30, result.stdout)
 
+    def test_setup_preserves_configured_identity(self):
+        root = Path(__file__).resolve().parent.parent
+        checks = root / ".checks"
+        checks.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=checks) as directory:
+            def git(*args):
+                return subprocess.check_output(["git", "-C", directory, *args]).strip()
+            git("init", "-q")
+            git("config", "user.name", "Configured Contributor")
+            git("config", "user.email", "configured")
+            subprocess.run([sys.executable, str(root / "manage.py"), "privacy-setup"],
+                           cwd=directory, check=True, capture_output=True,
+                           env={**os.environ, "GIT_DIR": str(Path(directory) / ".git")})
+            self.assertEqual(git("config", "user.name"), b"Configured Contributor")
+            self.assertEqual(git("config", "user.email"), b"configured")
+            self.assertEqual(git("config", "core.hooksPath"), b".githooks")
+
     def test_forced_private_file_is_rejected_even_without_recognized_credentials(self):
         root = Path(__file__).resolve().parent.parent
         with patch("tools.privacy.git", side_effect=[b"100644 abc 0\t.env\0", b"CUSTOM_SETTING=opaque"]):
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertTrue(check_privacy(root, staged=True))
 
-    def test_history_rejects_non_anonymous_names_without_email_addresses(self):
-        calls = [b"", b"", b"abc\n", b"", b"Person\nanonymous\nPerson\nanonymous\n"]
-        with patch("tools.privacy.git", side_effect=calls):
+    def test_history_scans_messages_without_rejecting_public_attribution(self):
+        calls = [b"", b"", b"abc\n", b"Public change\n"]
+        with patch("tools.privacy.git", side_effect=calls) as git:
             with contextlib.redirect_stdout(io.StringIO()):
-                self.assertTrue(check_privacy(Path.cwd(), history=True))
+                self.assertFalse(check_privacy(Path.cwd(), history=True))
+            self.assertEqual(git.call_args_list[-1].args, ("show", "-s", "--format=%B", "abc"))
 
     def test_staged_scan_uses_index_even_when_worktree_is_clean(self):
         root = Path(__file__).resolve().parent.parent
@@ -61,13 +80,6 @@ class PrivacyTests(unittest.TestCase):
 
     def test_index_paths_preserve_tabs_and_newlines(self):
         self.assertEqual(list(tracked_files(b"100644 abc 0\ta\tb\nc\0")), ["a\tb\nc"])
-
-    def test_personal_identity_override_is_rejected(self):
-        identity = b"Person <person@" + b"mail.invalid> 1 +0000"
-        with patch("tools.privacy.git", side_effect=[b"", identity, identity]):
-            with contextlib.redirect_stdout(io.StringIO()) as output:
-                self.assertTrue(check_privacy(Path.cwd(), identities=True))
-            self.assertNotIn(identity.decode(), output.getvalue())
 
     def test_commit_message_is_scanned(self):
         message = unittest.mock.Mock()
