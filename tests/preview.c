@@ -499,7 +499,7 @@ check_connection_gate(void)
 static void
 check_tabs(App *app, Page *terminal, Page *browser)
 {
-	check_terminal_tab_color(app, terminal, browser);
+	check_tab_title_colors(app, terminal, browser);
 	TabStrip *strip = g_object_get_data(G_OBJECT(app->tabstrip), "tabs");
 	g_assert_cmpint(strip->cw, ==, terminal->terminal->cw);
 	g_assert_cmpint(strip->ch, ==, terminal->terminal->ch);
