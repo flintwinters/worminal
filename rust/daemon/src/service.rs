@@ -42,6 +42,7 @@ pub(crate) struct Service {
     epoch: Instant,
     last_frame: i64,
     next_directory: i64,
+    pub upgrade_watch: Option<crate::upgrade_io::Watch>,
 }
 
 #[derive(Clone, Copy)]
@@ -51,6 +52,7 @@ enum Source {
     Client(ClientId),
     Terminal(u32),
     Handin(u64),
+    Upgrade,
 }
 
 impl Service {
@@ -119,6 +121,7 @@ impl Service {
 
     pub fn close(&mut self, index: usize) {
         self.closed = self.tabs[index].id;
+        self.pending_replace.retain(|_, (id, _)| *id != self.closed);
         self.fallback = self
             .tabs
             .get(index + 1)
@@ -299,6 +302,14 @@ impl Service {
             },
         ];
         let mut sources = vec![Source::Listener, Source::Signals];
+        if let Some(watch) = &self.upgrade_watch {
+            interests.push(Interest {
+                fd: watch.as_raw_fd(),
+                read: true,
+                write: false,
+            });
+            sources.push(Source::Upgrade);
+        }
         if let Some((id, listener)) = &self.handin {
             interests.push(Interest {
                 fd: listener.as_raw_fd(),
@@ -394,12 +405,24 @@ impl Service {
         self.resync(now)
     }
 
-    fn run(&mut self) -> io::Result<()> {
-        let signals = Signals::new()?;
+    fn run(&mut self, signals: Signals) -> io::Result<()> {
         process::diagnostic(&format!(
             "Workspace service started (protocol {WIRE_VERSION})"
         ));
+        match crate::upgrade_io::Watch::new() {
+            Ok(watch) => self.upgrade_watch = Some(watch),
+            Err(error) => {
+                process::diagnostic(&format!("Automatic upgrade watch unavailable: {error}"))
+            }
+        }
         while self.running {
+            if signals.stopping() {
+                break;
+            }
+            if self.try_upgrade() {
+                // Ownership is already committed. Never broadcast or checkpoint the emptied donor.
+                return Ok(());
+            }
             self.maintain()?;
             let (sources, ready) = self.wait(&signals)?;
             for ready in ready {
@@ -412,9 +435,10 @@ impl Service {
                     }
                     Source::Client(id) => self.client_ready(id, ready.read, ready.write)?,
                     Source::Terminal(id) => self.terminal_ready(id, ready.read, ready.write)?,
-                    Source::Handin(id) => self.receive_handoff(id),
+                    Source::Handin(id) => self.receive_handoff(id, &signals),
+                    Source::Upgrade => {} // The next loop drains the watch before any state publication.
                 }
-                if !self.running {
+                if !self.running || signals.stopping() {
                     break;
                 }
             }
@@ -425,8 +449,7 @@ impl Service {
     }
 }
 
-pub fn serve(scope: &[u8]) -> io::Result<()> {
-    let listener = socket::listen(process::uid(), scope)?;
+fn create(scope: &[u8], listener: UnixListener) -> io::Result<(Service, io::Result<Vec<Recipe>>)> {
     listener.set_nonblocking(true)?;
     let home = std::env::var_os("HOME").unwrap_or_else(|| "/".into());
     let root = std::env::var_os("XDG_STATE_HOME")
@@ -434,7 +457,7 @@ pub fn serve(scope: &[u8]) -> io::Result<()> {
         .filter(|path| path.is_absolute())
         .unwrap_or_else(|| PathBuf::from(home).join(".local/state"));
     let (recovery, recipes) = Recovery::open(recovery::path(&root, scope)?);
-    let mut service = Service {
+    let service = Service {
         listener,
         clients: BTreeMap::new(),
         tabs: Vec::new(),
@@ -453,7 +476,14 @@ pub fn serve(scope: &[u8]) -> io::Result<()> {
         epoch: Instant::now(),
         last_frame: 0,
         next_directory: 0,
+        upgrade_watch: None,
     };
+    Ok((service, recipes))
+}
+
+pub fn serve(scope: &[u8]) -> io::Result<()> {
+    let signals = Signals::new()?;
+    let (mut service, recipes) = create(scope, socket::listen(process::uid(), scope)?)?;
     match recipes {
         Ok(recipes) => {
             for recipe in recipes {
@@ -475,5 +505,40 @@ pub fn serve(scope: &[u8]) -> io::Result<()> {
         }
         Err(error) => process::diagnostic(&format!("Workspace recovery read: {error}")),
     }
-    service.run()
+    service.run(signals)
+}
+
+pub(crate) fn receive_upgrade(scope: &[u8], legacy: bool) -> io::Result<()> {
+    let (listener, receiving) = crate::upgrade_io::inherited_listeners()?;
+    let manifest = legacy
+        .then(crate::upgrade_io::Manifest::inherited)
+        .transpose()?;
+    // Mandatory signal setup must succeed before any C can transfer authority. A post-commit
+    // signalfd failure would otherwise drop the imported PTYs after the donor had disowned them.
+    let signals = Signals::new()?;
+    let (mut service, recipes) = create(scope, listener)?;
+    if let Err(error) = recipes {
+        process::diagnostic(&format!("Workspace recovery read: {error}"));
+    }
+    // A replacement imports live ownership, never recipe-based shells, even if recipes already exist.
+    crate::upgrade_io::wait_receiver(&receiving)?;
+    let incoming = match &manifest {
+        None => crate::handoff::Incoming::Upgrade,
+        Some(manifest) => crate::handoff::Incoming::Mapped {
+            ids: &manifest.ids,
+            next_id: manifest.next_id,
+            retiring_pid: manifest.retiring_pid,
+        },
+    };
+    crate::handoff::receive(
+        receiving.accept()?,
+        &mut service.tabs,
+        &mut service.next_id,
+        &service.reaper,
+        incoming,
+        &signals,
+    )?;
+    drop(manifest);
+    drop(receiving);
+    service.run(signals)
 }

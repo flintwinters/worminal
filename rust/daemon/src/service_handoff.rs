@@ -53,7 +53,7 @@ impl Service {
         Ok(())
     }
 
-    pub fn receive_handoff(&mut self, id: u64) {
+    pub fn receive_handoff(&mut self, id: u64, signals: &crate::reactor::Signals) {
         let Some((current, listener)) = &self.handin else {
             return;
         };
@@ -66,7 +66,8 @@ impl Service {
                 &mut self.tabs,
                 &mut self.next_id,
                 &self.reaper,
-                false,
+                handoff::Incoming::Append,
+                signals,
             )
         });
         match result {

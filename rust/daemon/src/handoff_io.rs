@@ -73,8 +73,60 @@ fn configure(fd: RawFd) -> io::Result<()> {
     Ok(())
 }
 
+pub(crate) fn inherited_descriptor(fd: RawFd) -> io::Result<OwnedFd> {
+    let flags = checked(unsafe { libc::fcntl(fd, libc::F_GETFD) })?;
+    // Reserved descriptors belong to the fresh receiver executable, with no other Rust owner.
+    let descriptor = unsafe { OwnedFd::from_raw_fd(fd) };
+    checked(unsafe { libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) })?;
+    Ok(descriptor)
+}
+
+pub(crate) fn inherited_listener(fd: RawFd, kind: libc::c_int) -> io::Result<OwnedFd> {
+    let descriptor = inherited_descriptor(fd)?;
+    for (option, expected) in [(libc::SO_ACCEPTCONN, 1), (libc::SO_TYPE, kind)] {
+        let mut actual = 0i32;
+        let mut length = mem::size_of_val(&actual) as libc::socklen_t;
+        checked(unsafe {
+            libc::getsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                option,
+                (&mut actual as *mut i32).cast(),
+                &mut length,
+            )
+        })?;
+        if actual != expected || length as usize != mem::size_of_val(&actual) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "unexpected inherited listener",
+            ));
+        }
+    }
+    let mut address: libc::sockaddr_storage = unsafe { mem::zeroed() };
+    let mut length = mem::size_of_val(&address) as libc::socklen_t;
+    checked(unsafe {
+        libc::getsockname(
+            fd,
+            (&mut address as *mut libc::sockaddr_storage).cast(),
+            &mut length,
+        )
+    })?;
+    if address.ss_family != libc::AF_UNIX as libc::sa_family_t {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "inherited listener is not local",
+        ));
+    }
+    Ok(descriptor)
+}
+
 pub(crate) struct Listener(OwnedFd);
 impl Listener {
+    pub fn inherited(fd: RawFd) -> io::Result<Self> {
+        let descriptor = inherited_listener(fd, libc::SOCK_SEQPACKET)?;
+        process::nonblocking(descriptor.as_raw_fd())?;
+        Ok(Self(descriptor))
+    }
     pub fn bind(name: &[u8]) -> io::Result<Self> {
         let (address, length) = address(name)?;
         let fd = socket()?;
@@ -106,6 +158,11 @@ impl Listener {
 impl AsRawFd for Listener {
     fn as_raw_fd(&self) -> RawFd {
         self.0.as_raw_fd()
+    }
+}
+impl AsFd for Listener {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.0.as_fd()
     }
 }
 

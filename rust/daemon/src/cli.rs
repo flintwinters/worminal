@@ -169,6 +169,11 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
                 crate::serve(scope)?;
                 return Ok(0);
             }
+            b"--upgrade-receiver" | b"--handoff-receiver" => {
+                process::prepare_service()?;
+                crate::service::receive_upgrade(scope, arguments[1] == "--handoff-receiver")?;
+                return Ok(0);
+            }
             b"--bridge" => {
                 bridge(scope)?;
                 return Ok(0);

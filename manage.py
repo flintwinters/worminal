@@ -209,6 +209,16 @@ def check_rust_daemon_wayland():
                         env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate)}))
 
 
+@app.command("check-rust-daemon-x11")
+def check_rust_daemon_x11():
+    """Exercise GTK/WebKit, SSH and live browser DOM through Rust upgrades and C reverse rollback on private Xvfb."""
+    native_build.build_targets("build/preview_test", "build/worminald-c-v2")
+    candidate = build_rust_daemon()
+    raise typer.Exit(run([sys.executable, "tests/preview.py", "x11"],
+                        env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate),
+                             "WORMINAL_TEST_UPGRADE_PEER": str(ROOT / "build/worminald-c-v2")}))
+
+
 @app.command("check-rust-handoff")
 def check_rust_handoff():
     """Transfer private live shells among Rust, v1 C and preserved v2 C daemons in both directions."""
@@ -222,6 +232,19 @@ def check_rust_handoff():
                         "WORMINAL_TEST_RUST_HANDOFF": "1",
                         "WORMINAL_TEST_HANDOFF_BASELINE": str(ROOT / ".checks/c-baseline/build/worminald")})
     raise typer.Exit(code)
+
+
+@app.command("check-rust-upgrade")
+def check_rust_upgrade():
+    """Upgrade and reverse-transfer private Rust/C daemons, including legacy bootstrap and failed replacements."""
+    native_build.build_targets("worminald-x11", "worminald-preview", "build/worminald-c-v2")
+    candidate = build_rust_daemon()
+    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                         "-p", "test_upgrade.py", "-q"],
+                        env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate),
+                             "WORMINAL_TEST_UPGRADE_PEER": str(ROOT / "build/worminald-c-v2"),
+                             "WORMINAL_TEST_RUST_DAEMON": "1",
+                             "WORMINAL_TEST_HANDOFF_BASELINE": str(ROOT / ".checks/c-baseline/build/worminald")}))
 
 
 @app.command("preserve-c-baseline")

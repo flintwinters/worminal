@@ -117,7 +117,9 @@ The runnable Rust daemon candidate lives under build/cargo/release; release buil
 Rust manual handoff stages sealed native snapshots and descriptor ownership before commit;
 `manage.py check-rust-handoff` checks both C ABIs, reverse transfers, queued input and failed/interrupted commits.
 The receive operation enforces session isolation; compiled counterfactuals guard staged and committed ownership.
-Next: implement Rust automatic upgrades and legacy bootstrap, then port GTK/browser policy and prepare cutover.
+The candidate supports automatic replacements and legacy bootstrap; committed donors never save empty recipes.
+`manage.py check-rust-upgrade` checks rollback and shell identities; `check-rust-daemon-x11` also preserves live DOM
+through Rust upgrades and C rollback. Next: select the verified Rust daemon, then port GTK/browser policy and cut over.
 `manage.py check-install` stages /usr/local under .checks and verifies artifacts, native SSH input
 and resident module bytes.
 Compare parser CPU with the preserved baseline before expanding the boundary; measured costs remain higher.

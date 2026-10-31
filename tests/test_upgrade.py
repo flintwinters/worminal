@@ -1,6 +1,7 @@
 """Automatic daemon replacement retains the endpoint, identities, PTYs, and recovery recipes."""
 import os
 import signal
+import select
 from pathlib import Path
 import shutil
 import socket
@@ -24,6 +25,33 @@ class UpgradeTest(HandoffFixture, unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.binary = Path(self.directory.name) / 'worminald'
         shutil.copy2(os.environ.get("WORMINAL_TEST_UPGRADE_CANDIDATE", BINARIES[2]), self.binary)
+
+    def track_receivers(self, constructor):
+        def tracked(*args, **kwargs):
+            pid, token = constructor(*args, **kwargs)
+            self.addCleanup(self.retire_receiver, pid, os.pidfd_open(pid), args[1])
+            return pid, token
+        return tracked
+
+    def retire_receiver(self, pid, handle, scope):
+        try:
+            env = {**os.environ, 'WORMINAL_SHARED_SOCKET_SCOPE': scope}
+            subprocess.run([str(BINARIES[2]), '--stop'], env=env, timeout=3,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            deadline = time.monotonic() + 2
+            while True:
+                try:
+                    if os.waitpid(pid, os.WNOHANG)[0]: break
+                except ChildProcessError:
+                    break  # The successful bootstrap already reaped its staging receiver.
+                if time.monotonic() >= deadline:
+                    try: signal.pidfd_send_signal(handle, signal.SIGKILL)
+                    except ProcessLookupError: pass
+                    os.waitpid(pid, 0)
+                    break
+                time.sleep(.01)
+        finally:
+            os.close(handle)
 
     def connect(self, env):
         peer = socket.socket(socket.AF_UNIX)
@@ -49,6 +77,51 @@ class UpgradeTest(HandoffFixture, unittest.TestCase):
         self.assertEqual(os.getsid(pid), pid, "replacement must have an independent daemon session")
         self.assertTrue(Path(f'/proc/{pid}/exe').samefile(self.binary))
         return peer
+
+    def changed(self, env, previous):
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            try:
+                peer = self.connect(env)
+                pid = service_pid(peer)
+            except (ConnectionRefusedError, ConnectionResetError):
+                time.sleep(.02)
+                continue
+            except AssertionError as error:
+                if str(error) != 'workspace closed its connection': raise
+                time.sleep(.02)
+                continue
+            if pid != previous:
+                self.assertEqual(os.getsid(pid), pid)
+                self.assertTrue(Path(f'/proc/{pid}/exe').samefile(self.binary))
+                return peer
+            time.sleep(.02)
+        self.fail('replacement did not take ownership')
+
+    def test_upgrade_and_reverse_rollback_preserve_shell_identity_and_order(self):
+        peer, env, parent = self.start(2, self.binary)
+        removed, _ = self.launch(peer, 2, 'removed')
+        tab, shell_pid = self.launch(peer, 2, 'retained')
+        send(peer, 5, removed, version=2)
+        send(peer, 17, payload=string('https://example.invalid/rollback'), version=2)
+        wait_kind(peer, 20, version=2)  # Drain the preceding close catalog before observing browser creation.
+        expected = self.catalog(peer)
+        self.assertEqual([row[0] for row in expected], [tab, tab + 1])
+        terminal = os.readlink(f'/proc/{shell_pid}/fd/0')
+        previous = parent.pid
+        other = os.environ.get('WORMINAL_TEST_UPGRADE_PEER', BINARIES[2])
+        for index, executable in enumerate((other, BINARIES[2])):
+            self.replace(executable)
+            peer = self.changed(env, previous)
+            previous = service_pid(peer)
+            self.assertEqual(self.catalog(peer), expected)
+            self.assertEqual(os.readlink(f'/proc/{shell_pid}/fd/0'), terminal)
+            self.assertEqual(os.getsid(shell_pid), shell_pid)
+            send(peer, 4, tab, number(40) + number(8), version=2)
+            marker = f'unchanged-shell-{index}'
+            send(peer, 3, tab, marker.encode(), version=2)
+            self.assert_screen(peer, 2, tab, marker)
+        self.assertEqual(parent.wait(timeout=3), 0)
 
     def test_replacement_preserves_gapped_ids_browser_and_live_shells(self):
         peer, env, parent = self.start(2, self.binary)
@@ -108,6 +181,38 @@ class UpgradeTest(HandoffFixture, unittest.TestCase):
         send(replacement, 4, tab, number(40) + number(8), version=2)
         self.assert_screen(replacement, 2, tab, 'retained-after-rejection')
 
+    def test_receiver_setup_failure_retains_donor_before_commit(self):
+        library = Path(self.directory.name) / 'setup-fault.so'
+        marker = Path(self.directory.name) / 'enable-fault'
+        marker.touch()
+        subprocess.run(['cc', '-shared', '-fPIC', '-Wall', '-Wextra', '-o', str(library),
+                        str(ROOT / 'tests/upgrade_fault.c'), '-ldl'], check=True)
+        env = {'LD_PRELOAD': str(library), 'WORMINAL_TEST_UPGRADE_FAULT_FILE': str(marker),
+               'WORMINAL_TEST_UPGRADE_FAULT_OPERATION':
+                   'signals' if os.environ.get('WORMINAL_TEST_RUST_DAEMON') else 'transport'}
+        peer, env, parent = self.start(2, self.binary, env)
+        tab, shell_pid = self.launch(peer, 2, 'setup-retained')
+        self.replace()
+        deadline = time.monotonic() + 8
+        output = b''
+        while b'Daemon upgrade rejected; live tabs retained' not in output and time.monotonic() < deadline:
+            if select.select([parent.stderr], [], [], max(0, deadline - time.monotonic()))[0]:
+                chunk = os.read(parent.stderr.fileno(), 4096)
+                if not chunk: break
+                output += chunk
+        self.assertIn(b'Daemon upgrade rejected; live tabs retained', output)
+        self.assertIsNone(parent.poll())
+        self.assertTrue(Path(f'/proc/{shell_pid}/fd/0').exists())
+        send(peer, 3, tab, b'setup-rejected', version=2)
+        self.assert_screen(peer, 2, tab, 'setup-rejected')
+        marker.unlink()
+        self.replace()
+        replacement = self.completed(parent, env)
+        self.assertEqual([row[0] for row in self.catalog(replacement)], [tab])
+        send(replacement, 4, tab, number(40) + number(8), version=2)
+        send(replacement, 3, tab, b' after-retry', version=2)
+        self.assert_screen(replacement, 2, tab, 'after-retry')
+
     def test_bootstrap_survives_coordinator_process_group_cleanup(self):
         old = Path(self.directory.name) / 'previous'
         shutil.copy2(BINARIES[2], old)
@@ -142,7 +247,7 @@ class UpgradeTest(HandoffFixture, unittest.TestCase):
         import sys
         if sys_path not in sys.path:
             sys.path.insert(0, sys_path)
-        from tools.daemon_upgrade import upgrade
+        from tools import daemon_upgrade
         baseline = os.environ.get('WORMINAL_TEST_HANDOFF_BASELINE')
         old = Path(self.directory.name) / 'previous'
         shutil.copy2(baseline or BINARIES[2], old)
@@ -151,9 +256,23 @@ class UpgradeTest(HandoffFixture, unittest.TestCase):
         tab, pid = self.launch(peer, 2, 'retained')
         send(peer, 5, removed, version=2)
         expected = self.catalog(peer)
-        with patch.dict(os.environ, env):
-            replacement_pid = upgrade(self.binary)
-        self.addCleanup(os.waitpid, replacement_pid, 0)
+        original_ready = daemon_upgrade.wait_ready
+
+        def verified_ready(scope, expected_pid, rows):
+            original_ready(scope, expected_pid, rows)
+            if scope != env['WORMINAL_SHARED_SOCKET_SCOPE']:
+                deadline = time.monotonic() + 1
+                while True:
+                    state = Path(f'/proc/{parent.pid}/stat').read_text().rsplit(') ', 1)[1][0]
+                    if state in ('T', 't'): break
+                    if time.monotonic() >= deadline:
+                        self.fail('legacy donor was not paused before acknowledging ownership')
+                    time.sleep(.01)
+
+        with patch.dict(os.environ, env), \
+                patch.object(daemon_upgrade, 'receiver', self.track_receivers(daemon_upgrade.receiver)), \
+                patch.object(daemon_upgrade, 'wait_ready', verified_ready):
+            daemon_upgrade.upgrade(self.binary)
         self.assertEqual(parent.wait(timeout=3), -signal.SIGKILL)
         replacement = self.connect(env)
         self.assertEqual(self.catalog(replacement), expected)
@@ -171,3 +290,53 @@ class UpgradeTest(HandoffFixture, unittest.TestCase):
         send(replacement, 4, tab, number(40) + number(8), version=2)
         send(replacement, 3, tab, b'bootstrap-complete', version=2)
         self.assert_screen(replacement, 2, tab, 'bootstrap-complete')
+
+    def test_invalid_legacy_mapping_retains_donor_and_its_shell(self):
+        sys_path = str(ROOT)
+        if sys_path not in sys.path: sys.path.insert(0, sys_path)
+        from tools import daemon_upgrade
+        peer, env, parent = self.start(2, self.binary)
+        tab, shell_pid = self.launch(peer, 2, 'mapping-retained')
+        receiver = self.track_receivers(daemon_upgrade.receiver)
+        for index, ids in enumerate(([], [0], [tab, tab])):
+            scope = self.token + f'-invalid-{index}'
+            child, token = receiver(self.binary, scope, ids, env, parent.pid)
+            result = subprocess.run([str(BINARIES[2]), '--handoff', token], env=env,
+                                    capture_output=True, timeout=10)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(os.waitpid(child, 0)[1], 256)
+            self.assertTrue(Path(f'/proc/{shell_pid}/fd/0').exists())
+            marker = f'mapping-failure-{index}'
+            send(peer, 3, tab, b'\r\n' + marker.encode(), version=2)
+            self.assert_screen(peer, 2, tab, marker)
+
+    def test_stopping_receiver_rejects_before_ready_and_preserves_donor(self):
+        sys_path = str(ROOT)
+        if sys_path not in sys.path: sys.path.insert(0, sys_path)
+        from tools import daemon_upgrade
+        peer, env, parent = self.start(2, self.binary)
+        tab, shell_pid = self.launch(peer, 2, 'cancellation-retained')
+        receiver = self.track_receivers(daemon_upgrade.receiver)
+        child, token = receiver(self.binary, self.token + '-cancel', [tab], env)
+        deadline = time.monotonic() + 3
+        while True:
+            status = Path(f'/proc/{child}/status').read_text().splitlines()
+            caught = next(line.split()[1] for line in status if line.startswith('SigCgt:'))
+            registered = int(caught, 16) & (1 << (signal.SIGTERM - 1))
+            if os.environ.get('WORMINAL_TEST_RUST_DAEMON'):
+                for descriptor in Path(f'/proc/{child}/fdinfo').iterdir():
+                    try: info = descriptor.read_text()
+                    except FileNotFoundError: continue
+                    registered |= any(line.startswith('sigmask:') and
+                                      int(line.split()[1], 16) & (1 << (signal.SIGTERM - 1))
+                                      for line in info.splitlines())
+            if registered: break
+            if time.monotonic() >= deadline: self.fail('receiver did not register its stop signals')
+            time.sleep(.01)
+        os.kill(child, signal.SIGTERM)
+        result = subprocess.run([str(BINARIES[2]), '--handoff', token], env=env,
+                                capture_output=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(Path(f'/proc/{shell_pid}/fd/0').exists())
+        send(peer, 3, tab, b'cancelled-receiver', version=2)
+        self.assert_screen(peer, 2, tab, 'cancelled-receiver')

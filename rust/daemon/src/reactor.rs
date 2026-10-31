@@ -1,5 +1,6 @@
 //! Audited readiness and signal boundaries; application scheduling remains in the service.
 use std::{
+    cell::Cell,
     io, mem,
     os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd},
     ptr,
@@ -63,6 +64,7 @@ pub(crate) fn wait(interests: &[Interest], timeout_ns: Option<i64>) -> io::Resul
 pub(crate) struct Signals {
     descriptor: OwnedFd,
     original: libc::sigset_t,
+    stopping: Cell<bool>,
 }
 
 impl Signals {
@@ -86,6 +88,7 @@ impl Signals {
             Ok(Self {
                 descriptor: OwnedFd::from_raw_fd(fd),
                 original,
+                stopping: Cell::new(false),
             })
         }
     }
@@ -95,7 +98,7 @@ impl Signals {
     }
 
     pub(crate) fn shutdown_requested(&self) -> io::Result<bool> {
-        let mut shutdown = false;
+        let mut shutdown = self.stopping.get();
         for _ in 0..64 {
             let mut event = mem::MaybeUninit::<libc::signalfd_siginfo>::uninit();
             let bytes = unsafe {
@@ -127,7 +130,12 @@ impl Signals {
                 libc::SIGTERM | libc::SIGINT | libc::SIGHUP
             );
         }
+        self.stopping.set(shutdown);
         Ok(shutdown)
+    }
+
+    pub(crate) fn stopping(&self) -> bool {
+        self.stopping.get()
     }
 }
 

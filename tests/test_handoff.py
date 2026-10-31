@@ -43,9 +43,9 @@ class HandoffFixture:
                 service.kill()
                 service.communicate(timeout=3)
 
-    def start(self, version, binary=None):
+    def start(self, version, binary=None, environment=None):
         scope = f"handoff-{uuid.uuid4().hex}"
-        env = {**os.environ, "WORMINAL_SHARED_SOCKET_SCOPE": scope}
+        env = {**os.environ, **(environment or {}), "WORMINAL_SHARED_SOCKET_SCOPE": scope}
         service = subprocess.Popen([str(binary or BINARIES[version]), "--serve"], env=env,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         self.services.append((service, version, env))

@@ -23,7 +23,6 @@
 #include "workspace_socket.h"
 #include "browser_target.h"
 #include WORMINAL_THEME_HEADER
-
 #include "service_state.h"
 #include "frame_schedule.h"
 #include "service_diagnostics.h"
@@ -43,6 +42,7 @@ static volatile sig_atomic_t running = 1;
 static int restored_launch, upgrade_receiver;
 static int handin_listener = -1;
 
+int workspace_transfer_cancelled(void) { return !running; }
 static Tab *
 tab_for_session(TermSession *session)
 {

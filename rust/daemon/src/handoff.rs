@@ -1,6 +1,6 @@
 //! Native snapshot staging has no PTY authority. Commit consumes staged ownership without fallible setup.
 use crate::{
-    handoff_io::{self, Channel, CommitReceived, Mapping},
+    handoff_io::{self, Channel, CommitReceived, CommitSent, Mapping},
     process::{self, ChildReaper, PinnedProcess, PreparedPty},
     queue::Queue,
     state::{core, Printer, Tab, Terminal, INPUT_QUEUE},
@@ -8,7 +8,7 @@ use crate::{
 use std::{
     fs::File,
     io::{self, Write},
-    os::fd::{AsFd, BorrowedFd, OwnedFd},
+    os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd},
 };
 use worminal_engine::Engine;
 use worminal_protocol::{Buffer, Payload, MAX_PAYLOAD};
@@ -198,7 +198,7 @@ pub(crate) fn send(
     tabs: &mut Vec<Tab>,
     reaper: &ChildReaper,
     next_id: Option<u32>,
-) -> io::Result<()> {
+) -> io::Result<CommitSent> {
     if tabs.len() > HANDOFF_MAX_TABS as usize || (tabs.is_empty() && next_id.is_none()) {
         return Err(invalid());
     }
@@ -255,7 +255,18 @@ pub(crate) fn send(
             "Handoff committed; receiver acknowledgement missing: {error}"
         ));
     }
-    Ok(())
+    Ok(commit)
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum Incoming<'a> {
+    Append,
+    Upgrade,
+    Mapped {
+        ids: &'a [u32],
+        next_id: u32,
+        retiring_pid: i32,
+    },
 }
 
 pub(crate) fn receive(
@@ -263,9 +274,12 @@ pub(crate) fn receive(
     tabs: &mut Vec<Tab>,
     next_id: &mut u32,
     reaper: &ChildReaper,
-    upgrading: bool,
+    incoming: Incoming<'_>,
+    signals: &crate::reactor::Signals,
 ) -> io::Result<()> {
     process::ensure_receiver_session()?;
+    let upgrading = matches!(incoming, Incoming::Upgrade);
+    let preserving = !matches!(incoming, Incoming::Append);
     let mut descriptors =
         rights::receive_descriptors(channel.as_fd(), b'H', HANDOFF_MAX_FDS as usize)?.into_iter();
     let mapping = Mapping::new(descriptors.next().ok_or_else(invalid)?)?;
@@ -286,27 +300,49 @@ pub(crate) fn receive(
         || count > HANDOFF_MAX_TABS
         || (!upgrading && count == 0)
         || next_id.checked_add(count).is_none()
-        || (upgrading && !tabs.is_empty())
+        || (preserving && !tabs.is_empty())
     {
         return Err(invalid());
     }
-    let saved_next = if upgrading {
-        cursor.number()?
-    } else {
-        *next_id + count
+    let saved_next = match incoming {
+        Incoming::Upgrade => cursor.number()?,
+        Incoming::Append => *next_id + count,
+        Incoming::Mapped { ids, next_id, .. } => {
+            if ids.len() != count as usize {
+                return Err(invalid());
+            }
+            next_id
+        }
     };
     if saved_next == 0 {
         return Err(invalid());
     }
     let mut staged = Vec::with_capacity(count as usize);
+    let retiring = if let Incoming::Mapped { retiring_pid, .. } = incoming {
+        if retiring_pid != 0 {
+            if process::peer_pid(channel.as_raw_fd())? != retiring_pid {
+                return Err(invalid());
+            }
+            let pin = PinnedProcess::prepare(retiring_pid)?;
+            if pin.live_pid() != retiring_pid {
+                return Err(invalid());
+            }
+            pin.signal(0)?;
+            Some(pin)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     let mut previous = 0;
     for index in 0..count {
-        let id = if upgrading {
-            cursor.number()?
-        } else {
-            *next_id + index
+        let id = match incoming {
+            Incoming::Upgrade => cursor.number()?,
+            Incoming::Append => *next_id + index,
+            Incoming::Mapped { ids, .. } => ids[index as usize],
         };
-        if upgrading && (id <= previous || id >= saved_next) {
+        if preserving && (id <= previous || id >= saved_next) {
             return Err(invalid());
         }
         previous = id;
@@ -318,8 +354,22 @@ pub(crate) fn receive(
     // Reserve publication space before R. Adoption after C performs no allocation, validation, or OS setup.
     tabs.try_reserve(staged.len()).map_err(io::Error::other)?;
     reaper.reserve(staged.len())?;
+    // Reject a pending stop before R; accepting it afterward would kill the newly adopted shells.
+    if signals.shutdown_requested()? {
+        return Err(io::ErrorKind::Interrupted.into());
+    }
     channel.ready()?;
     let commit = channel.accept_commit()?;
+    // Legacy donors publish an empty catalog after A and destroy reconnecting views. C already
+    // transferred authority: pause the pinned donor before A; the coordinator verifies this
+    // receiver and retires that donor without running its old shutdown hooks.
+    if let Some(retiring) = retiring {
+        if let Err(error) = retiring.signal(libc::SIGSTOP) {
+            process::error(&format!(
+                "Committed receiver could not pause legacy donor: {error}"
+            ));
+        }
+    }
     for tab in staged {
         tabs.push(tab.commit(reaper.clone(), &commit));
     }

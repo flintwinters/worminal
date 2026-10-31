@@ -179,13 +179,14 @@ class Builder:
             self.target("build/browser.so")
             self.target("build/frontend.so")
             self.rust_launcher(target)
-        elif target in ("worminald", "worminald-preview", "build/frontend.so", "build/preview_test"):
+        elif target in ("worminald", "worminald-preview", "build/worminald-c-v2",
+                        "build/frontend.so", "build/preview_test"):
             if target == "build/preview_test":
                 generate_browser_resources()
             flags = ["-DWORMINAL_PREVIEW_PROTOCOL"]
             if target == "build/frontend.so":
                 flags += ["-fPIC", "-ffunction-sections", "-fdata-sections"]
-            server = target in ("worminald", "worminald-preview")
+            server = target in ("worminald", "worminald-preview", "build/worminald-c-v2")
             sources = SERVER if server else PREVIEW
             if target == "build/preview_test":
                 sources = ()

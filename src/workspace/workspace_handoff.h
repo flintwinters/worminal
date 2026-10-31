@@ -3,6 +3,7 @@
 #include "service_state.h"
 #include "handoff_format.h"
 int handoff_command(const char *, int);
+int workspace_transfer_cancelled(void);
 int handin_listen(const char *);
 int handin_accept(int, Tab **, Tab **, uint32_t *);
 int handoff_send(const char *, Tab *, void (*)(Tab *));

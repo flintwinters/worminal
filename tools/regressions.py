@@ -55,7 +55,7 @@ def rust_frame_counterfactual(directory):
             b"frames::tests::queue_rejection_preserves_damage_and_the_last_delivered_baseline --- FAILED")
 
 
-def rust_handoff_counterfactual(directory, name, filename, before, after, test):
+def rust_handoff_counterfactual(directory, name, filename, before, after, test, pattern="test_handoff.py"):
     slug = name.lower().replace(" ", "-")
     target, package = rust_fixture(directory, slug)
     mutant = target / "src" / filename
@@ -66,10 +66,10 @@ def rust_handoff_counterfactual(directory, name, filename, before, after, test):
     rust_build(directory, slug, ["cargo", "build", "--manifest-path", str(target / "Cargo.toml"),
                "--target-dir", str(ROOT / "build/cargo"), "--offline", "--quiet"])
     binary = ROOT / "build/cargo/debug" / package
-    command = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_handoff.py",
+    command = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", pattern,
                "-k", test, "-q"]
     return (name, command, {**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(binary),
-                           "WORMINAL_TEST_RUST_HANDOFF": "1"}, test.encode())
+                           "WORMINAL_TEST_RUST_HANDOFF": "1", "WORMINAL_TEST_RUST_DAEMON": "1"}, test.encode())
 
 
 def prove(match=None):
@@ -263,6 +263,22 @@ def prove(match=None):
     for name, filename, before, after, test in ownership_cases:
         if match is None or match.casefold() in name.casefold():
             cases.append(rust_handoff_counterfactual(directory, name, filename, before, after, test))
+    upgrade_cases = (
+        ("Rust automatic upgrade watch", "service.rs", "if self.try_upgrade() {", "if false {",
+         "test_empty_workspace_replaces_without_resurrecting_tabs"),
+        ("Rust donor checkpoint ownership", "service.rs", "if self.try_upgrade() {",
+         "if self.try_upgrade() { self.save();", "test_replacement_preserves_gapped_ids_browser_and_live_shells"),
+        ("Rust legacy donor pause", "handoff.rs", "retiring.signal(libc::SIGSTOP)", "retiring.signal(0)",
+         "test_bootstrap_legacy_handoff_preserves_ids_and_enables_checkpoints"),
+        ("Rust receiver cancellation", "handoff.rs", "if signals.shutdown_requested()? {", "if false {",
+         "test_stopping_receiver_rejects_before_ready_and_preserves_donor"),
+        ("Rust receiver setup before commit", "reactor.rs", "if fd < 0 {",
+         "let fd = if fd < 0 { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) } else { fd };\n"
+         "            if fd < 0 {", "test_receiver_setup_failure_retains_donor_before_commit"),
+    )
+    for name, filename, before, after, test in upgrade_cases:
+        if match is None or match.casefold() in name.casefold():
+            cases.append(rust_handoff_counterfactual(directory, name, filename, before, after, test, "test_upgrade.py"))
     selected = [case for case in cases if match is None or match.casefold() in case[0].casefold()]
     if not selected:
         raise ValueError(f"No regression proof matches: {match}")

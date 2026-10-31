@@ -325,31 +325,36 @@ def broker_check(env, url, log, daemon):
         # Replacing a daemon must reconnect the existing owner without reloading
         # its live browser DOM or replacing its shell. Only private test binaries change.
         address = f"\0worminal-workspace-v2-{os.getuid()}-{env['WORMINAL_SHARED_SOCKET_SCOPE']}"
-        with socket.socket(socket.AF_UNIX) as peer:
-            peer.settimeout(5); peer.connect(address)
-            old_pid = service_pid(peer)
-        pending = daemon.with_suffix(".pending")
-        shutil.copy2(ROOT / "worminald", pending)
-        pending.replace(daemon)
-        deadline = time.monotonic() + 5
-        while True:
-            try:
-                with socket.socket(socket.AF_UNIX) as peer:
-                    peer.settimeout(5); peer.connect(address)
-                    new_pid = service_pid(peer)
-            except (ConnectionError, AssertionError) as error:
-                # The donor may accept this probe just before handing off and
-                # closing its connections. Protocol errors must still fail.
-                if isinstance(error, AssertionError) and str(error) != "workspace closed its connection":
-                    raise
-                new_pid = old_pid
-            if new_pid != old_pid: break
-            if time.monotonic() > deadline: raise RuntimeError("Daemon did not upgrade automatically")
-            time.sleep(.01)
-        # The frontend's established reconnect timer is one second.
-        time.sleep(1.2)
-        key("type", "--clearmodifiers", "--delay", "0", "!")
-        window("Edited:shared-state!")
+        sources = [env.get("WORMINAL_TEST_PREVIEW_DAEMON", ROOT / "worminald")]
+        if other := env.get("WORMINAL_TEST_UPGRADE_PEER"):
+            sources.append(other)
+        expected_title = "Edited:shared-state"
+        for source in sources:
+            with socket.socket(socket.AF_UNIX) as peer:
+                peer.settimeout(5); peer.connect(address)
+                old_pid = service_pid(peer)
+            pending = daemon.with_suffix(".pending")
+            shutil.copy2(source, pending)
+            pending.replace(daemon)
+            deadline = time.monotonic() + 5
+            while True:
+                try:
+                    with socket.socket(socket.AF_UNIX) as peer:
+                        peer.settimeout(5); peer.connect(address)
+                        new_pid = service_pid(peer)
+                except (ConnectionError, AssertionError) as error:
+                    # A donor can accept this probe just before transferring its socket.
+                    if isinstance(error, AssertionError) and str(error) != "workspace closed its connection":
+                        raise
+                    new_pid = old_pid
+                if new_pid != old_pid: break
+                if time.monotonic() > deadline: raise RuntimeError("Daemon did not upgrade automatically")
+                time.sleep(.01)
+            # The established reconnect timer is one second; the same live input must retain its contents.
+            time.sleep(1.2)
+            key("type", "--clearmodifiers", "--delay", "0", "!")
+            expected_title += "!"
+            window(expected_title)
         key("key", "--clearmodifiers", "ctrl+t")
         window("about:blank")
         key("key", "--clearmodifiers", "ctrl+shift+t")

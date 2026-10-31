@@ -275,7 +275,8 @@ accept_tabs(int listener, Tab **tabs, Tab **last, uint32_t *next_id, int upgradi
 			expected += 2;
 		}
 	}
-	if (expected != nfds || lseek(fds[0], 0, SEEK_CUR) != st.st_size ||
+	/* An already stopped receiver must reject before R, while the donor can still roll back. */
+	if (expected != nfds || lseek(fds[0], 0, SEEK_CUR) != st.st_size || workspace_transfer_cancelled() ||
 	    !marker(peer, 'R', 1) || !marker(peer, 'C', 0)) goto done;
 	/* Legacy donors publish an empty catalog after A, closing their GTK windows.
 	 * C irrevocably transfers ownership. Stop the pinned donor while it still
