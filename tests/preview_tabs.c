@@ -132,7 +132,7 @@ check_catalog_selection_claim(void)
 	close(sockets[0]); close(sockets[1]);
 }
 
-/* Verify bright selection borders and actual title ink in both selection states. */
+/* Verify solid inverted selection and the unselected browser/terminal title colors. */
 static void
 check_tab_title_colors(App *app, Page *terminal, Page *browser)
 {
@@ -164,10 +164,13 @@ check_tab_title_colors(App *app, Page *terminal, Page *browser)
 		tabs_draw(app->tabstrip, cr, strip);
 		cairo_surface_flush(surface);
 		unsigned char *data = cairo_image_surface_get_data(surface);
-		int stride = cairo_image_surface_get_stride(surface), red[2] = {0}, white[2] = {0};
+		int stride = cairo_image_surface_get_stride(surface), red[2] = {0}, white[2] = {0}, dark[2] = {0};
 		uint32_t *top = (uint32_t *)(data + 2 * stride);
 		g_assert_cmphex(top[2 + selected * tabwidth + tabwidth / 2], ==, 0xffffffff);
 		g_assert_cmphex(top[2 + (1 - selected) * tabwidth + tabwidth / 2], ==, 0xff000000);
+		uint32_t *middle = (uint32_t *)(data + (2 + strip->ch / 2) * stride);
+		g_assert_cmphex(middle[2 + selected * tabwidth + strip->cw / 2], ==, 0xffffffff);
+		g_assert_cmphex(middle[2 + (1 - selected) * tabwidth + strip->cw / 2], ==, 0xff000000);
 		int baseline = 2 + (strip->ch - strip->height) / 2 + strip->ascent;
 		for (int y = 4; y < MIN(baseline, height); y++) {
 			uint32_t *row = (uint32_t *)(data + y * stride);
@@ -178,12 +181,16 @@ check_tab_title_colors(App *app, Page *terminal, Page *browser)
 				int r = (pixel >> 16) & 255, g = (pixel >> 8) & 255, b = pixel & 255;
 				if (r > g + 32 && r > b + 32) red[(x - 2) / tabwidth]++;
 				if (r > 200 && abs(r - g) < 2 && abs(r - b) < 2) white[(x - 2) / tabwidth]++;
+				if (r < 128 && g < 128 && b < 128) dark[(x - 2) / tabwidth]++;
 			}
 		}
-		g_assert_cmpint(red[0], ==, 0);
-		g_assert_cmpint(red[1], >, 0);
-		g_assert_cmpint(white[0], >, 0);
-		g_assert_cmpint(white[1], ==, 0);
+		g_assert_cmpint(dark[selected], >, 0);
+		g_assert_cmpint(red[selected], ==, 0);
+		if (selected == 0) {
+			g_assert_cmpint(red[1], >, 0); g_assert_cmpint(white[1], ==, 0);
+		} else {
+			g_assert_cmpint(white[0], >, 0); g_assert_cmpint(red[0], ==, 0);
+		}
 		cairo_destroy(cr); cairo_surface_destroy(surface);
 	}
 	g_list_free(app->pages);

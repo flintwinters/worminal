@@ -1,4 +1,4 @@
-/* One-cell strip: red browser titles, white terminal titles, and a bright active-tab outline. */
+/* One-cell strip: red browser titles, white terminal titles, and the original inverted selection. */
 #include "preview.h"
 
 typedef struct {
@@ -50,19 +50,12 @@ tabs_draw(GtkWidget *widget, cairo_t *cr, TabStrip *strip)
 		Page *page = item->data;
 		int width = tab_width(strip, page);
 		if (page == active) {
-			/* A bright outline makes selection clear while preserving title colors. */
-			GdkRGBA selection = active->colors[defaultfg];
-			selection.alpha *= .20;
-			gdk_cairo_set_source_rgba(cr, &selection);
+			gdk_cairo_set_source_rgba(cr, &active->colors[defaultfg]);
 			cairo_rectangle(cr, x, 2, MIN(width, right - x), strip->ch);
 			cairo_fill(cr);
-			gdk_cairo_set_source_rgba(cr, &active->colors[defaultfg]);
-			cairo_set_line_width(cr, 1);
-			cairo_rectangle(cr, x + .5, 2.5, MIN(width, right - x) - 1, strip->ch - 1);
-			cairo_stroke(cr);
 		}
-		/* ANSI red identifies browsers; terminals keep ANSI white in either state. */
-		int foreground = page->url ? 1 : 7;
+		/* Selected text is inverted; unselected browsers are red and terminals white. */
+		int foreground = page == active ? defaultbg : page->url ? 1 : 7;
 		gdk_cairo_set_source_rgba(cr, &active->colors[foreground]);
 		cairo_move_to(cr, x + strip->cw, baseline - pango_layout_get_baseline(strip->layout) / (double)PANGO_SCALE);
 		pango_cairo_show_layout(cr, strip->layout);
