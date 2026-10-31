@@ -563,7 +563,7 @@ client_message(Client *client, WirePacket *packet)
 #endif
 	case WIRE_FOCUS: {
 		if (!wire_get_u32(packet, &cols) || !wire_get_u32(packet, &rows) ||
-		    cols < 1 || cols > 400 || rows < 1 || rows > 200 || packet->pos != packet->len)
+		    cols < 1 || cols > WORKSPACE_MAX_COLS || rows < 1 || rows > WORKSPACE_MAX_ROWS || packet->pos != packet->len)
 			break;
 		int new_controller = tab->controller != client;
 		take_control(tab, client);

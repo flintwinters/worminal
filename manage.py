@@ -102,7 +102,8 @@ def run_native_checks():
         if code:
             return code
     from tools.engine_checks import check
-    return check()
+    code = check()
+    return code or run_rust_workspace_checks()
 
 
 def run_headless_checks():
@@ -143,6 +144,19 @@ def check_engine():
     """Check parser equivalence, sanitized engine boundaries, and the Rust owning wrapper."""
     from tools.engine_checks import check
     raise typer.Exit(check())
+
+
+def run_rust_workspace_checks():
+    builder = native_build.Builder()
+    for target in ("build/wire_reference", "build/recovery_reference"):
+        builder.target(target)
+    return run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-protocol", "-p", "worminal-workspace"])
+
+
+@app.command("check-rust-workspace")
+def check_rust_workspace():
+    """Check Rust framing, launch requests, recovery recipes and local transport against C."""
+    raise typer.Exit(run_rust_workspace_checks())
 
 
 @app.command("preserve-c-baseline")

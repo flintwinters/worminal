@@ -9,6 +9,7 @@
 #include <syslog.h>
 #include <unistd.h>
 #include "workspace_restore.h"
+#include "restore_format.h"
 
 /* Independent of the transport version; filenames isolate v1/v2 and scopes. */
 typedef struct RestoreTab RestoreTab;
@@ -16,9 +17,6 @@ struct RestoreTab {
 	char *directory, *url;
 	RestoreTab *next;
 };
-#define RESTORE_VERSION 1
-#define RESTORE_LIMIT (8u * 1024u * 1024u)
-#define RESTORE_TABS 4096
 static char state_path[PATH_MAX];
 static int disabled;
 static WireBuffer saved;
@@ -90,8 +88,8 @@ workspace_restore_read(void)
 		*tail = tab; tail = &tab->next;
 		size_t position = packet.pos;
 		tab->directory = wire_get_string(&packet); tab->url = wire_get_string(&packet);
-		if (!tab->directory || !tab->url || strlen(tab->directory) >= PATH_MAX ||
-		    strlen(tab->url) > 65536 ||
+		if (!tab->directory || !tab->url || strlen(tab->directory) >= RESTORE_DIRECTORY_LIMIT ||
+		    strlen(tab->url) > RESTORE_URL_LIMIT ||
 		    packet.pos - position != 8 + strlen(tab->directory) + strlen(tab->url) ||
 		    (*tab->directory && *tab->directory != '/') ||
 		    (!*tab->directory && !*tab->url)) goto invalid;

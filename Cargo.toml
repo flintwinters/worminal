@@ -1,12 +1,14 @@
 [workspace]
 resolver = "2"
-members = ["rust/platform", "rust/engine-sys", "rust/engine"]
+members = ["rust/platform", "rust/engine-sys", "rust/engine", "rust/protocol", "rust/workspace"]
 
 [workspace.package]
 edition = "2021"
 publish = false
 
 [workspace.dependencies]
+bindgen = { version = "0.72", default-features = false, features = ["runtime"] }
+libc = "0.2"
 gtk = "0.18"
 glib = "0.18"
 pango = "0.18"

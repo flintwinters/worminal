@@ -16,6 +16,10 @@
 #define WORKSPACE_DAEMON "worminald"
 #endif
 #define WIRE_MAX_BYTES (8u * 1024u * 1024u)
+#define WORKSPACE_MAX_COLS 400u
+#define WORKSPACE_MAX_ROWS 200u
+#define WORKSPACE_MAX_ARGS 1024u
+#define WORKSPACE_MAX_ENV 8192u
 /* Rune, attributes, foreground, background: independent of native Glyph padding. */
 #define WIRE_CELL_BYTES (4u * sizeof(uint32_t))
 
@@ -54,7 +58,7 @@ enum wire_type {
 
 /* Advertise before HELLO/ATTACH. Older daemons ignore the optional packet;
  * unadvertised clients must continue receiving the original row encoding. */
-enum { WIRE_FEATURE_COPY_ROWS = 1u << 0 };
+enum wire_feature { WIRE_FEATURE_COPY_ROWS = 1u << 0 };
 
 typedef struct {
 	unsigned char *data;

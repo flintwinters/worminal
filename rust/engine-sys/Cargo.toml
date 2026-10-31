@@ -6,4 +6,4 @@ publish.workspace = true
 links = "worminal_engine"
 
 [build-dependencies]
-bindgen = { version = "0.72", default-features = false, features = ["runtime"] }
+bindgen.workspace = true

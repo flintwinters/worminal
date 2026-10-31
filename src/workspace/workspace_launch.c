@@ -2,6 +2,7 @@
 #include <string.h>
 #include "st.h"
 #include "workspace_launch.h"
+#include "restore_format.h"
 
 void
 launch_free(Launch *launch)
@@ -25,8 +26,9 @@ launch_read(WirePacket *packet, Launch *launch)
 	memset(launch, 0, sizeof(*launch));
 	if (!wire_get_u32(packet, &launch->cols) || !wire_get_u32(packet, &launch->rows) ||
 	    !wire_get_u32(packet, &launch->allowalt) || !wire_get_u32(packet, &launch->argc) ||
-	    !wire_get_u32(packet, &launch->envc) || launch->cols < 1 || launch->cols > 400 ||
-	    launch->rows < 1 || launch->rows > 200 || launch->argc > 1024 || launch->envc > 8192)
+	    !wire_get_u32(packet, &launch->envc) || launch->cols < 1 || launch->cols > WORKSPACE_MAX_COLS ||
+	    launch->rows < 1 || launch->rows > WORKSPACE_MAX_ROWS ||
+	    launch->argc > WORKSPACE_MAX_ARGS || launch->envc > WORKSPACE_MAX_ENV)
 		return 0;
 	launch->title = wire_get_string(packet);
 	launch->cwd = wire_get_string(packet);
@@ -56,7 +58,8 @@ launch_pty(Launch *launch, const char *cwd)
 	/* An omitted environment means inherit the daemon (not an empty environment),
 	 * as required by SSH launches that must keep the remote account settings. */
 	extern char **environ;
-	char restore_flag[] = "WORMINAL_RESTORE=1";
+	char restore_flag[] = RESTORE_ENV_NAME "=1";
+	const char restore_prefix[] = RESTORE_ENV_NAME "=";
 	char **environment = launch->envc ? launch->env : environ, **restore_env = NULL;
 	if (launch->restored) {
 		size_t count = 0, used = 0;
@@ -64,7 +67,8 @@ launch_pty(Launch *launch, const char *cwd)
 		restore_env = calloc(count + 2, sizeof(char *));
 		if (!restore_env) abort();
 		for (size_t i = 0; i < count; i++)
-			if (strncmp(environment[i], "WORMINAL_RESTORE=", 17)) restore_env[used++] = environment[i];
+			if (strncmp(environment[i], restore_prefix, sizeof(restore_prefix) - 1))
+				restore_env[used++] = environment[i];
 		restore_env[used] = restore_flag;
 	}
 	ttysetlaunch(cwd, restore_env ? restore_env : launch->envc ? launch->env : NULL,

@@ -245,6 +245,14 @@ class Builder:
         elif target == "build/workspace_client_test":
             self.program(target, ["tests/workspace_client.c", "src/workspace/workspace_client.c"],
                          variant="workspace-client", libs=["-pthread"])
+        elif target == "build/wire_reference":
+            self.program(target, ["tests/wire_reference.c", "src/workspace/wire.c",
+                                  "src/workspace/workspace_socket.c"],
+                         variant="wire-reference", flags=["-DWORMINAL_PREVIEW_PROTOCOL"], libs=[])
+        elif target == "build/recovery_reference":
+            self.program(target, ["tests/recovery_reference.c", "src/workspace/workspace_restore.c",
+                                  "src/workspace/wire.c"],
+                         variant="recovery-reference", flags=["-DWORMINAL_PREVIEW_PROTOCOL"], libs=[])
         elif target == "build/view_state_test":
             # view_state.c includes x.c to exercise internal state; compile that translation unit once.
             sources = ["tests/view_state.c", "src/terminal/defaults.c", f"src/{ENGINE_DEFAULTS}",

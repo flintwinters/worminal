@@ -102,7 +102,9 @@ checks memory boundaries and Rust ownership, and records CPU/memory costs. Engin
 The locked GTK 3/Pango/Cairo/WebKitGTK 4.1 binding probe runs through `manage.py check-rust-platform` on private Xvfb.
 Cargo outputs belong in `build/cargo`. `manage.py preserve-c-baseline` exclusively captures built and installed
 artifacts in `.checks/c-baseline`; never replace that recovery baseline with later builds.
-Next: port the daemon, then launcher/frontend/browser modules; verify transfers and publish the Rust installation.
+Rust workspace components now cover v2 framing, validated launches, atomic recovery recipes and local sockets;
+`manage.py check-rust-workspace` compares their encoding and transport with the C implementations.
+Next: port daemon ownership and its event loop, then launcher/frontend/browser modules; verify transfers and publish.
 Compare parser CPU with the preserved baseline before expanding the boundary; measured costs remain higher.
 Audit upgrade lifecycle after the failed live bootstrap killed transferred sessions; the receiver
 session-isolation fix is verified privately and has not been published to the active installation.
