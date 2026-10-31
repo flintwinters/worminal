@@ -132,7 +132,7 @@ check_catalog_selection_claim(void)
 	close(sockets[0]); close(sockets[1]);
 }
 
-/* Inspect real glyph pixels, excluding the underline, for selected and inactive titles. */
+/* Verify bright selection borders and actual title ink in both selection states. */
 static void
 check_tab_title_colors(App *app, Page *terminal, Page *browser)
 {
@@ -165,10 +165,15 @@ check_tab_title_colors(App *app, Page *terminal, Page *browser)
 		cairo_surface_flush(surface);
 		unsigned char *data = cairo_image_surface_get_data(surface);
 		int stride = cairo_image_surface_get_stride(surface), red[2] = {0}, white[2] = {0};
+		uint32_t *top = (uint32_t *)(data + 2 * stride);
+		g_assert_cmphex(top[2 + selected * tabwidth + tabwidth / 2], ==, 0xffffffff);
+		g_assert_cmphex(top[2 + (1 - selected) * tabwidth + tabwidth / 2], ==, 0xff000000);
 		int baseline = 2 + (strip->ch - strip->height) / 2 + strip->ascent;
-		for (int y = 2; y < MIN(baseline, height); y++) {
+		for (int y = 4; y < MIN(baseline, height); y++) {
 			uint32_t *row = (uint32_t *)(data + y * stride);
 			for (int x = 2; x < 2 + 2 * tabwidth; x++) {
+				int within_tab = (x - 2) % tabwidth;
+				if (within_tab < strip->cw || within_tab >= tabwidth - strip->cw) continue;
 				uint32_t pixel = row[x];
 				int r = (pixel >> 16) & 255, g = (pixel >> 8) & 255, b = pixel & 255;
 				if (r > g + 32 && r > b + 32) red[(x - 2) / tabwidth]++;

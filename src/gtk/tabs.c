@@ -1,4 +1,4 @@
-/* One-cell strip: red browser titles, white terminal titles, and a tinted active background. */
+/* One-cell strip: red browser titles, white terminal titles, and a bright active-tab outline. */
 #include "preview.h"
 
 typedef struct {
@@ -50,12 +50,16 @@ tabs_draw(GtkWidget *widget, cairo_t *cr, TabStrip *strip)
 		Page *page = item->data;
 		int width = tab_width(strip, page);
 		if (page == active) {
-			/* A subtle tint marks selection without hiding white terminal text. */
+			/* A bright outline makes selection clear while preserving title colors. */
 			GdkRGBA selection = active->colors[defaultfg];
-			selection.alpha *= .12;
+			selection.alpha *= .20;
 			gdk_cairo_set_source_rgba(cr, &selection);
 			cairo_rectangle(cr, x, 2, MIN(width, right - x), strip->ch);
 			cairo_fill(cr);
+			gdk_cairo_set_source_rgba(cr, &active->colors[defaultfg]);
+			cairo_set_line_width(cr, 1);
+			cairo_rectangle(cr, x + .5, 2.5, MIN(width, right - x) - 1, strip->ch - 1);
+			cairo_stroke(cr);
 		}
 		/* ANSI red identifies browsers; terminals keep ANSI white in either state. */
 		int foreground = page->url ? 1 : 7;
