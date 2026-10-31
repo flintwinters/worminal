@@ -20,7 +20,8 @@ COMMON = ("terminal/defaults.c", "terminal/st.c", *SESSION_SUPPORT,
           "workspace/wire.c", "workspace/workspace_socket.c")
 CLIENT = (*COMMON, "workspace/workspace_client.c", "x11/x.c", "x11/url.c")
 SERVER = (*COMMON, "workspace/workspace_service.c", "workspace/workspace_handoff.c",
-          "workspace/workspace_restore.c", "workspace/workspace_launch.c", "workspace/browser_target.c")
+          "workspace/workspace_restore.c", "workspace/workspace_launch.c", "workspace/workspace_upgrade.c",
+          "workspace/browser_target.c")
 PREVIEW = (*COMMON, "workspace/workspace_client.c", "gtk/app.c", "gtk/terminal.c",
            "gtk/browser_loader.c", "gtk/tabs.c", "gtk/windows.c", "gtk/window_state.c")
 PREVIEW_PACKAGES = ("gtk+-3.0", "pangocairo", "fontconfig", "freetype2", "webkit2gtk-4.1")

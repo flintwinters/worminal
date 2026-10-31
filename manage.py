@@ -105,7 +105,8 @@ def run_headless_checks():
     if code:
         return code
     patterns = ("test_build.py", "test_perf_metrics.py", "test_cli.py", "test_workspace.py",
-                "test_preview_workspace.py", "test_theme.py", "test_privacy.py", "test_handoff.py", "test_restore.py")
+                "test_preview_workspace.py", "test_theme.py", "test_privacy.py", "test_handoff.py",
+                "test_restore.py", "test_upgrade.py")
     for pattern in patterns:
         code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                     "-p", pattern, "-q"])
@@ -232,6 +233,22 @@ def check_keys(legacy: bool = typer.Option(False, "--legacy", help="Check the ro
     raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                           "-p", "test_keys.py", "-q"],
                           env={**os.environ, "WORMINAL_FRONTEND": "worminal-x11" if legacy else "worminal"}))
+
+
+@app.command("check-upgrade")
+def check_upgrade():
+    """Verify automatic replacements, rollback, legacy bootstrap, and live tab identities privately."""
+    native_build.build_targets("worminald-x11", "worminald-preview")
+    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                         "-p", "test_upgrade.py", "-q"]))
+
+
+@app.command("upgrade-daemon")
+def upgrade_daemon(executable: Path = typer.Option(
+        Path("/usr/local/bin/worminald"), exists=True, dir_okay=False, help="Installed release daemon.")):
+    """Activate the installed v2 daemon while preserving a pre-automatic daemon's live tabs."""
+    from tools.daemon_upgrade import upgrade
+    upgrade(executable)
 
 
 @app.command("check-handoff")

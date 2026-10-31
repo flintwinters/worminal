@@ -119,6 +119,17 @@ def prove(match=None):
     builder.program(binary, ["tests/workspace_client.c", str(client)],
                     variant="fork-client-proof", libs=["-pthread"])
     cases.append(("SSH bypasses GUI fork hooks", [str(binary)], os.environ, b"fork_hooks == 0"))
+    # Without the executable watch, an atomic install must leave the old daemon running.
+    upgrade_source = directory / "no-upgrade.c"
+    upgrade_source.write_text((ROOT / "src/workspace/workspace_service.c").read_text().replace(
+        "int upgrade_watch = workspace_upgrade_watch();", "int upgrade_watch = -1;"))
+    upgrade_binary = directory / "no-upgrade-daemon"
+    builder.program(upgrade_binary, [*service_support, str(upgrade_source)],
+                    variant="upgrade-proof", flags=["-DWORMINAL_PREVIEW_PROTOCOL"])
+    cases.append(("automatic daemon upgrade",
+                  [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_upgrade.py",
+                   "-k", "empty_workspace", "-q"],
+                  {**os.environ, "WORMINAL_TEST_UPGRADE_CANDIDATE": str(upgrade_binary)}, b"TimeoutExpired"))
     selected = [case for case in cases if match is None or match.casefold() in case[0].casefold()]
     if not selected:
         raise ValueError(f"No regression proof matches: {match}")

@@ -16,7 +16,7 @@ import threading
 import time
 
 from x11 import isolated_display
-from workspace_protocol import send as wire_send, wait_kind as wire_wait
+from workspace_protocol import send as wire_send, wait_kind as wire_wait, service_pid
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -115,7 +115,9 @@ def audio(env):
 
 @contextmanager
 def service(env):
-    daemon = subprocess.Popen([str(ROOT / "worminald"), "--serve"], env=env,
+    private_daemon = Path(env["XDG_STATE_HOME"]).parent / ("daemon-" + env["WORMINAL_SHARED_SOCKET_SCOPE"])
+    shutil.copy2(ROOT / "worminald", private_daemon)
+    daemon = subprocess.Popen([str(private_daemon), "--serve"], env=env,
                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     try:
         address = f"\0worminal-workspace-v2-{os.getuid()}-{env['WORMINAL_SHARED_SOCKET_SCOPE']}"
@@ -129,7 +131,7 @@ def service(env):
                     if daemon.poll() is not None or time.monotonic() > deadline:
                         raise RuntimeError("Preview service did not start")
                     time.sleep(.01)
-        yield
+        yield private_daemon
     finally:
         subprocess.run([str(ROOT / "worminald"), "--stop"], env=env,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
@@ -249,7 +251,7 @@ def startup_check(env, log):
                     raise RuntimeError("Failed GUI startup created an orphan service tab")
 
 
-def broker_check(env, url, log):
+def broker_check(env, url, log, daemon):
     """Independent launches must share the GTK owner and the live DOM, not reload a URL."""
     executable = str(ROOT / "worminal")
     title = f"Broker terminal {os.getpid()}"
@@ -320,6 +322,25 @@ def broker_check(env, url, log):
             if name == "Edited:shared-state": break
             time.sleep(.01)
         else: raise RuntimeError("Browser state was not shared with the independently launched window")
+        # Replacing a daemon must reconnect the existing owner without reloading
+        # its live browser DOM or replacing its shell. Only private test binaries change.
+        address = f"\0worminal-workspace-v2-{os.getuid()}-{env['WORMINAL_SHARED_SOCKET_SCOPE']}"
+        with socket.socket(socket.AF_UNIX) as peer:
+            peer.settimeout(5); peer.connect(address)
+            old_pid = service_pid(peer)
+        pending = daemon.with_suffix(".pending")
+        shutil.copy2(ROOT / "worminald", pending)
+        pending.replace(daemon)
+        deadline = time.monotonic() + 5
+        while True:
+            with socket.socket(socket.AF_UNIX) as peer:
+                peer.settimeout(5); peer.connect(address)
+                new_pid = service_pid(peer)
+            if new_pid != old_pid: break
+            if time.monotonic() > deadline: raise RuntimeError("Daemon did not upgrade automatically")
+            time.sleep(.01)
+        # The frontend's established reconnect timer is one second.
+        time.sleep(1.2)
         key("type", "--clearmodifiers", "--delay", "0", "!")
         window("Edited:shared-state!")
         key("key", "--clearmodifiers", "ctrl+t")
@@ -364,7 +385,7 @@ def main():
                 trial_env["WORMINAL_PREVIEW_TEST_MASTER"] = "preview-test"
                 trial_env["WORMINAL_TEST_DAEMON"] = str(ROOT / "worminald")
             log_path = ROOT / f".checks/preview-{backend}-{'remote' if remote else 'local'}.log"
-            with service(trial_env), log_path.open("wb") as log:
+            with service(trial_env) as private_daemon, log_path.open("wb") as log:
                 startup_check(trial_env, log)
                 command = [str(ROOT / "build/preview_test")]
                 if os.environ.get("WORMINAL_PREVIEW_DEBUG"):
@@ -372,7 +393,7 @@ def main():
                 result = subprocess.run(["dbus-run-session", "--", *command],
                                         env=trial_env, stdout=log, stderr=log, timeout=90)
                 if not result.returncode and backend == "x11" and not remote:
-                    broker_check(trial_env, url, log)
+                    broker_check(trial_env, url, log, private_daemon)
             output = log_path.read_text(errors="replace")
             if result.returncode or not any(line.startswith("Preview ") for line in output.splitlines()):
                 print(output[-4000:], file=sys.stderr)

@@ -31,6 +31,7 @@
 #include "workspace_bridge.h"
 #include "workspace_restore.h"
 #include "workspace_launch.h"
+#include "workspace_upgrade.h"
 
 static Client *clients;
 static Tab *tabs, *lasttab;
@@ -39,7 +40,7 @@ static uint32_t closed_id, fallback_id;
 static int catalog_dirty;
 static WireBuffer published_catalog;
 static volatile sig_atomic_t running = 1;
-static int restored_launch;
+static int restored_launch, upgrade_receiver;
 static int handin_listener = -1;
 
 static Tab *
@@ -310,7 +311,6 @@ monotonic_ns(void)
 	return (int64_t)now.tv_sec * 1000000000 + now.tv_nsec;
 }
 
-
 static Tab *
 tab_start(Client *client, Launch *launch)
 {
@@ -364,7 +364,6 @@ tab_browser(const char *url)
 }
 #endif
 
-
 static void
 stop_service(int signal_number)
 {
@@ -416,6 +415,11 @@ client_message(Client *client, WirePacket *packet)
 	Tab *tab = tab_for_id(packet->tab);
 	uint32_t cols, rows, direction, amount;
 	Launch launch;
+	if (packet->type == WIRE_SERVICE_INFO) {
+		WireBuffer info = {0};
+		wire_put_u32(&info, getpid());
+		client_send(client, WIRE_SERVICE_INFO, 0, &info); wire_buffer_free(&info); return;
+	}
 	if (packet->type == WIRE_CAPABILITIES) {
 		uint32_t features;
 		if (!client->ready && !packet->tab && wire_get_u32(packet, &features) && packet->pos == packet->len)
@@ -622,7 +626,7 @@ client_message(Client *client, WirePacket *packet)
 static int
 serve(void)
 {
-	int listener = workspace_listen();
+	int listener = upgrade_receiver ? 3 : workspace_listen();
 	struct timespec last_frame = {0};
 	int64_t next_directory_ns = 0;
 	/* -o - follows the launching client's stdout across the service boundary. */
@@ -630,20 +634,25 @@ serve(void)
 	ttyrawhook = service_input;
 	if (listener < 0)
 		return service_failure("workspace listen");
-	struct sigaction stop = {.sa_handler = stop_service};
-	sigemptyset(&stop.sa_mask);
-	sigaction(SIGTERM, &stop, NULL);
-	sigaction(SIGINT, &stop, NULL);
-	sigaction(SIGHUP, &stop, NULL);
 	sigset_t blocked, previous_mask;
-	sigemptyset(&blocked);
-	sigaddset(&blocked, SIGTERM); sigaddset(&blocked, SIGINT); sigaddset(&blocked, SIGHUP);
+	service_stop_signals(stop_service, &blocked);
+	if (upgrade_receiver) {
+		if (!workspace_upgrade_receive(&tabs, &lasttab, &next_id, upgrade_receiver == 2))
+			return service_failure("upgrade receive");
+		catalog_dirty = 1;
+	} else {
 #ifdef WORMINAL_PREVIEW_PROTOCOL
-	restored_launch = workspace_restore_start(tab_start, tab_browser);
+		restored_launch = workspace_restore_start(tab_start, tab_browser);
 #else
-	restored_launch = workspace_restore_start(tab_start, NULL);
+		restored_launch = workspace_restore_start(tab_start, NULL);
 #endif
+	}
+	int upgrade_watch = workspace_upgrade_watch();
 	for (; running;) {
+		if (workspace_upgrade_check(upgrade_watch, listener, tabs, tab_close, next_id)) {
+			/* The replacement owns the PTYs. Do not publish or save an empty donor. */
+			close(listener); close(upgrade_watch); return 0;
+		}
 		fd_set readers, writers;
 		int maxfd = listener;
 		int pending = 0;
@@ -652,6 +661,7 @@ serve(void)
 		FD_ZERO(&readers);
 		FD_ZERO(&writers);
 		FD_SET(listener, &readers);
+		if (upgrade_watch >= 0) { FD_SET(upgrade_watch, &readers); maxfd = MAX(maxfd, upgrade_watch); }
 		if (handin_listener >= 0) {
 			FD_SET(handin_listener, &readers);
 			maxfd = MAX(maxfd, handin_listener);
@@ -805,6 +815,7 @@ serve(void)
 	tsessionhangupall();
 	wire_buffer_free(&published_catalog);
 	close(listener);
+	if (upgrade_watch >= 0) close(upgrade_watch);
 	return 0;
 }
 
@@ -866,6 +877,9 @@ main(int argc, char **argv)
 		return browser_command(argv[2]);
 	}
 #endif
+	if (argc == 2 && (!strcmp(argv[1], "--upgrade-receiver") || !strcmp(argv[1], "--handoff-receiver"))) {
+		upgrade_receiver = !strcmp(argv[1], "--handoff-receiver") ? 2 : 1; return service_diagnostics(serve);
+	}
 	if (argc == 2 && strcmp(argv[1], "--serve") == 0)
 		return service_diagnostics(serve);
 	if (argc == 2 && strcmp(argv[1], "--bridge") == 0)

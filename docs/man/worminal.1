@@ -61,6 +61,15 @@ to stop it and end its tabs.
 connects over SSH to a service on that host; the remote account needs
 .B worminald
 in its PATH. Further hosts can be reached with ordinary SSH inside a tab.
+.SH DAEMON UPGRADES
+The release v2 service watches its executable directory. Replacing its executable automatically starts a
+replacement daemon and transfers live tabs using the validated handoff transaction.
+The listening socket stays bound, and tab IDs, shell PIDs, PTYs, terminal state, scrollback, and queued input survive.
+Windows reconnect to the replacement. Client stdout streams have the same limitation as manual session transfer.
+No empty donor catalog or recovery file is published during the switch.
+If preparation fails, the existing daemon retains its tabs; another executable replacement retries the upgrade.
+The original v1 service remains available for explicit rollback and never upgrades automatically.
+Daemons that were already running before automatic upgrades need a one-time explicit handoff.
 .SH RESTART RECOVERY
 The service automatically saves ordered terminal working directories and browser URLs in
 $XDG_STATE_HOME/worminal (default ~/.local/state/worminal), separately for each protocol and workspace scope.

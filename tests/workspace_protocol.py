@@ -39,3 +39,39 @@ def wait_kind(connection, wanted, wanted_tab=None, version=1):
         if kind == wanted and (wanted_tab is None or tab == wanted_tab):
             return tab, payload
     raise AssertionError(f"workspace did not send packet {wanted}")
+
+
+def catalog_records(data, version=2):
+    def integer():
+        nonlocal data
+        value = struct.unpack("!I", data[:4])[0]
+        data = data[4:]
+        return value
+
+    def text():
+        nonlocal data
+        length = integer()
+        value, data = data[:length].decode(), data[length:]
+        return value
+
+    count = integer()
+    integer()
+    integer()
+    result = []
+    for _ in range(count):
+        tab = integer()
+        kind, url = (integer(), text()) if version == 2 else (0, "")
+        mode, cursor, title, directory = integer(), integer(), text(), text()
+        for _ in range(integer()):
+            text()
+        result.append((tab, kind, url, mode, cursor, title, directory))
+    if data:
+        raise AssertionError("extra catalog data")
+    return result
+
+
+def service_pid(connection, version=2):
+    # An inherited listening socket retains its creator's SO_PEERCRED PID.
+    # Ask the accepting daemon instead of mistaking that stale PID for its owner.
+    send(connection, 30, version=version)
+    return struct.unpack("!I", wait_kind(connection, 30, version=version)[1])[0]

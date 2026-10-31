@@ -402,12 +402,14 @@ catalog(App *app, WirePacket *packet)
 		 * page before the explicit activation below (or claim passive mirrors). */
 		gtk_notebook_set_current_page(GTK_NOTEBOOK(app->notebook), index);
 		app->syncing = FALSE;
-		/* A peer catalog update must preserve local focus, forms and navigation. */
+		/* A peer catalog update must preserve local focus, forms and navigation.
+		 * Browser ownership lives in GTK; reconnecting a passive mirror must
+		 * not move its peer's live WebKit view. */
 		if (chosen->id == passive_conversion) {
 			app->active = chosen;
 			gtk_window_set_title(GTK_WINDOW(app->window), chosen->title);
 			tabs_refresh(app);
-		} else if (chosen != app->active || !app->attached) activate(chosen);
+		} else if (chosen != app->active || (!app->attached && chosen->terminal)) activate(chosen);
 		else tabs_refresh(app);
 	} else {
 		app->syncing = FALSE;

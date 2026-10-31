@@ -88,7 +88,9 @@ Application synchronized redraws hold frames and their tab metadata until comple
 `manage.py check-preview*` and `preview-perf` validate GTK; `build-preview` retains compatibility binary names.
 Private Wayland checks use a project-local Weston runtime and matching virtual-seat ABI, without X11 fallback.
 
-Current jobs: prioritize remaining launch latency, while auditing input, rendering, output delivery, and view switching
+Current jobs: audit upgrade lifecycle after the failed live bootstrap killed transferred sessions; the receiver
+session-isolation fix is verified privately and has not been published to the active installation.
+Prioritize remaining launch latency, while auditing input, rendering, output delivery, and view switching
 until further gains require correctness, resource, or compatibility compromises; review remaining compatibility gaps.
 Investigate intermittent local workspace loss after idle time; no root cause is confirmed.
 Investigate reported desktop freezes during master connections; root cause is unconfirmed.
@@ -105,7 +107,14 @@ Keep `worminal-x11`/`worminald-x11` and live v1 sessions available for rollback;
 Both daemon builds share explicit `--handin`/`--handoff` ownership transfer via sealed native snapshots and SCM_RIGHTS.
 The receiver stages and validates state before commit; the donor then closes PTYs and forgets transferred tabs.
 `manage.py check-handoff` covers parser state, queued input, ownership, rollback, and all v1/v2 transfer combinations.
-Running daemons that predate the protocol cannot gain it through installation; preserve their live sessions.
+Release daemons watch their executable directory without polling. Atomic replacement stages a live transfer
+with preserved tab IDs and the same listening socket; only a validated commit lets the donor exit.
+GTK reconnects retain the owning browser view and its live DOM. Receivers establish an independent session
+before committing PTYs; coordinator exit/process-group cleanup must never terminate transferred sessions.
+Failed replacements retain the donor and retry on the next installation. Views reconnect; client stdout streams
+retain the manual handoff limitation. v1 remains manual. `manage.py check-upgrade` checks activation and rollback;
+`manage.py upgrade-daemon` bootstraps older handoff-capable v2 daemons without restarting their shells.
+Running daemons that predate handoff cannot gain it through installation; preserve their live sessions.
 Investigate remote Codex scrolling separately from tested wheel modes.
 
 `--new-browser-tab URL|FILE` requires a target and preserves explicit URLs. Bare hosts default to HTTPS;

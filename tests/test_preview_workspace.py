@@ -18,7 +18,8 @@ import time
 import unittest
 import uuid
 
-from workspace_protocol import number, string, send as wire_send, wait_kind as wire_wait, packet as wire_packet
+from workspace_protocol import (number, string, catalog_records, send as wire_send,
+                                wait_kind as wire_wait, packet as wire_packet)
 from perf_metrics import cpu_time, memory
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -27,33 +28,7 @@ send = partial(wire_send, version=2)
 wait_kind = partial(wire_wait, version=2)
 
 
-def records(data):
-    def integer():
-        nonlocal data
-        value = struct.unpack("!I", data[:4])[0]
-        data = data[4:]
-        return value
-
-    def text():
-        nonlocal data
-        length = integer()
-        value, data = data[:length].decode(), data[length:]
-        return value
-
-    count = integer()
-    integer()
-    integer()
-    result = []
-    for _ in range(count):
-        tab, kind, url = integer(), integer(), text()
-        mode, cursor, title, directory = integer(), integer(), text(), text()
-        for _ in range(integer()):
-            text()
-        result.append((tab, kind, url, mode, cursor, title, directory))
-    if data:
-        raise AssertionError("extra catalog data")
-    return result
-
+records = partial(catalog_records, version=2)
 
 @unittest.skipUnless(DAEMON.exists(), "run manage.py build-preview first")
 class PreviewWorkspaceTest(unittest.TestCase):

@@ -1,4 +1,4 @@
-/* Explicit same-user, local PTY ownership transfer. The donor pauses parsing
+/* Same-user, local PTY ownership transfer. The donor pauses parsing
  * during prepare/commit; the receiver never reads a PTY before commit. */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -10,6 +10,9 @@
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
+#include <signal.h>
+#include <syslog.h>
 #include <sys/un.h>
 #include <unistd.h>
 #include "workspace_handoff.h"
@@ -18,8 +21,7 @@
 #include "st_state.h"
 #include WORMINAL_THEME_HEADER
 
-#define MAX_TABS 100
-#define MAX_FDS (1 + 2 * MAX_TABS)
+#define MAX_FDS (1 + 2 * HANDOFF_MAX_TABS)
 #define SNAPSHOT_LIMIT (512u * 1024u * 1024u)
 #define SEALS (F_SEAL_WRITE | F_SEAL_GROW | F_SEAL_SHRINK | F_SEAL_SEAL)
 
@@ -192,20 +194,22 @@ fail:
 	return NULL;
 }
 
-int
-handoff_send(const char *name, Tab *tabs, void (*remove_tab)(Tab *))
+static int
+send_tabs(const char *name, Tab *tabs, void (*remove_tab)(Tab *), uint32_t next_id)
 {
 	int peer = -1, fd = -1, okay = 0, fds[MAX_FDS], nfds = 1;
-	uint32_t header[] = {0x57484f31, 1, 0};
-	for (Tab *t = tabs; t; t = t->next) if (++header[2] > MAX_TABS) goto done;
-	if (!header[2]) goto done;
+	uint32_t header[] = {0x57484f31, next_id ? 2u : 1u, 0};
+	for (Tab *t = tabs; t; t = t->next) if (++header[2] > HANDOFF_MAX_TABS) goto done;
+	if (!header[2] && !next_id) goto done;
 	peer = local_socket(name, 0);
 	if (peer < 0 || !authenticate(peer)) goto done;
 	fd = memfd_create("worminal-handoff", MFD_CLOEXEC | MFD_ALLOW_SEALING);
 	if (fd < 0 || !io(fd, header, sizeof(header), 1)) goto done;
 	fds[0] = fd;
+	if (next_id && !io(fd, &next_id, sizeof(next_id), 1)) goto done;
 	for (Tab *t = tabs; t; t = t->next) {
-		if (!export_tab(t, fd) || lseek(fd, 0, SEEK_CUR) > SNAPSHOT_LIMIT) goto done;
+		if ((next_id && !io(fd, &t->id, sizeof(t->id), 1)) ||
+		    !export_tab(t, fd) || lseek(fd, 0, SEEK_CUR) > SNAPSHOT_LIMIT) goto done;
 		if (t->session) {
 			fds[nfds++] = tsessionfd(t->session);
 			fds[nfds++] = t->session->output_fd < 0 ? STDOUT_FILENO : t->session->output_fd;
@@ -228,26 +232,40 @@ done:
 	return okay;
 }
 
-int
-handin_accept(int listener, Tab **tabs, Tab **last, uint32_t *next_id)
+static int
+accept_tabs(int listener, Tab **tabs, Tab **last, uint32_t *next_id, int upgrading,
+            const uint32_t *ids, uint32_t count, uint32_t mapped_next, pid_t retiring_pid)
 {
-	int peer = accept4(listener, NULL, NULL, SOCK_CLOEXEC), fds[MAX_FDS], nfds = 0, okay = 0;
+	int peer = accept4(listener, NULL, NULL, SOCK_CLOEXEC), fds[MAX_FDS], nfds = 0, okay = 0, donor = -1;
 	Tab *staged = NULL, *tail = NULL;
-	pid_t pids[MAX_TABS];
-	uint32_t header[3];
+	pid_t pids[HANDOFF_MAX_TABS];
+	uint32_t header[3], saved_next = mapped_next, previous_id = 0;
 	struct stat st;
 	int seals;
 	if (peer < 0 || !authenticate(peer) || !(nfds = bundle(peer, fds, 0, 0))) goto done;
+	if (retiring_pid) {
+		struct ucred credentials;
+		socklen_t size = sizeof(credentials);
+		if (getsockopt(peer, SOL_SOCKET, SO_PEERCRED, &credentials, &size) < 0 ||
+		    credentials.pid != retiring_pid || (donor = syscall(SYS_pidfd_open, retiring_pid, 0)) < 0 ||
+		    syscall(SYS_pidfd_send_signal, donor, 0, NULL, 0) < 0) goto done;
+	}
 	seals = fcntl(fds[0], F_GET_SEALS);
 	if (fstat(fds[0], &st) < 0 || !S_ISREG(st.st_mode) || st.st_size > SNAPSHOT_LIMIT ||
 	    seals < 0 || (seals & SEALS) != SEALS || lseek(fds[0], 0, SEEK_SET) < 0 ||
-	    !io(fds[0], header, sizeof(header), 0) || header[0] != 0x57484f31 || header[1] != 1 ||
-	    !header[2] || header[2] > MAX_TABS || *next_id > UINT32_MAX - header[2]) goto done;
+	    !io(fds[0], header, sizeof(header), 0) || header[0] != 0x57484f31 || header[1] != (upgrading ? 2u : 1u) ||
+	    (!header[2] && !upgrading) || header[2] > HANDOFF_MAX_TABS || *next_id > UINT32_MAX - header[2]) goto done;
+	if (ids && (*tabs || count != header[2] || !mapped_next)) goto done;
+	if (upgrading && (*tabs || !io(fds[0], &saved_next, sizeof(saved_next), 0) || !saved_next)) goto done;
 	int expected = 1;
 	for (uint32_t i = 0; i < header[2]; i++) {
+		uint32_t id = ids ? ids[i] : *next_id + i;
+		if (upgrading && !io(fds[0], &id, sizeof(id), 0)) goto done;
+		if ((upgrading || ids) && (id <= previous_id || id >= saved_next)) goto done;
+		previous_id = id;
 		Tab *t = import_tab(fds[0], &pids[i]);
 		if (!t) goto done;
-		t->id = *next_id + i;
+		t->id = id;
 		if (tail) tail->next = t; else staged = t;
 		tail = t;
 		if (t->session) {
@@ -260,6 +278,11 @@ handin_accept(int listener, Tab **tabs, Tab **last, uint32_t *next_id)
 	}
 	if (expected != nfds || lseek(fds[0], 0, SEEK_CUR) != st.st_size ||
 	    !marker(peer, 'R', 1) || !marker(peer, 'C', 0)) goto done;
+	/* Legacy donors publish an empty catalog after A, closing their GTK windows.
+	 * C irrevocably transfers ownership. Stop the pinned donor while it still
+	 * waits for A; the bootstrap retires it only after verifying this receiver. */
+	if (donor >= 0 && syscall(SYS_pidfd_send_signal, donor, SIGSTOP, NULL, 0) < 0 && errno != ESRCH)
+		syslog(LOG_ERR, "Committed upgrade could not pause legacy donor: %s", strerror(errno));
 	int index = 0, n = 1;
 	for (Tab *t = staged; t; t = t->next, index++)
 		if (t->session) {
@@ -267,14 +290,46 @@ handin_accept(int listener, Tab **tabs, Tab **last, uint32_t *next_id)
 			fds[n] = fds[n + 1] = -1; n += 2;
 		}
 	if (*last) (*last)->next = staged; else *tabs = staged;
-	*last = tail; *next_id += header[2]; staged = NULL;
+	*last = tail; *next_id = upgrading || ids ? saved_next : *next_id + header[2]; staged = NULL;
 	okay = 1;
 	marker(peer, 'A', 1);
 done:
 	while (staged) { Tab *next = staged->next; free_tab(staged); staged = next; }
 	for (int i = 0; i < nfds; i++) if (fds[i] >= 0) close(fds[i]);
 	if (peer >= 0) close(peer);
+	if (donor >= 0) close(donor);
 	return okay;
+}
+
+int
+handoff_send(const char *name, Tab *tabs, void (*remove_tab)(Tab *))
+{
+	return send_tabs(name, tabs, remove_tab, 0);
+}
+
+int
+handoff_upgrade_send(const char *name, Tab *tabs, void (*remove_tab)(Tab *), uint32_t next_id)
+{
+	return send_tabs(name, tabs, remove_tab, next_id);
+}
+
+int
+handin_accept(int listener, Tab **tabs, Tab **last, uint32_t *next_id)
+{
+	return accept_tabs(listener, tabs, last, next_id, 0, NULL, 0, 0, 0);
+}
+
+int
+handin_upgrade_accept(int listener, Tab **tabs, Tab **last, uint32_t *next_id)
+{
+	return accept_tabs(listener, tabs, last, next_id, 1, NULL, 0, 0, 0);
+}
+
+int
+handin_mapped_accept(int listener, Tab **tabs, Tab **last, uint32_t *next_id,
+                    const uint32_t *ids, uint32_t count, uint32_t saved_next, pid_t retiring_pid)
+{
+	return accept_tabs(listener, tabs, last, next_id, 0, ids, count, saved_next, retiring_pid);
 }
 
 int

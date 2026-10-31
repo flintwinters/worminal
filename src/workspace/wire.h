@@ -49,6 +49,7 @@ enum wire_type {
 	WIRE_HANDOFF,
 	WIRE_CAPABILITIES,
 	WIRE_COPY_ROWS,
+	WIRE_SERVICE_INFO,
 };
 
 /* Advertise before HELLO/ATTACH. Older daemons ignore the optional packet;

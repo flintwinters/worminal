@@ -2,8 +2,22 @@
 #ifndef WORMINAL_SERVICE_DIAGNOSTICS_H
 #define WORMINAL_SERVICE_DIAGNOSTICS_H
 #include <errno.h>
+#include <signal.h>
 #include <string.h>
 #include <syslog.h>
+
+static void
+service_stop_signals(void (*handler)(int), sigset_t *blocked)
+{
+	struct sigaction stop = {.sa_handler = handler};
+	sigemptyset(&stop.sa_mask);
+	sigemptyset(blocked);
+	int signals[] = {SIGTERM, SIGINT, SIGHUP};
+	for (size_t i = 0; i < sizeof(signals) / sizeof(signals[0]); i++) {
+		sigaction(signals[i], &stop, NULL);
+		sigaddset(blocked, signals[i]);
+	}
+}
 
 static int
 service_failure(const char *operation)

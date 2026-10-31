@@ -12,44 +12,17 @@ import time
 import unittest
 import uuid
 
-from workspace_protocol import number, string, send, wait_kind
+from workspace_protocol import number, string, send, wait_kind, catalog_records
 
 ROOT = Path(__file__).resolve().parent.parent
 BINARIES = {1: ROOT / "worminald-x11", 2: ROOT / "worminald-preview"}
 
 
 def catalog_rows(payload, version):
-    offset = 12
-    rows = []
-
-    def integer():
-        nonlocal offset
-        result, = struct.unpack_from("!I", payload, offset)
-        offset += 4
-        return result
-
-    def text():
-        nonlocal offset
-        size = integer()
-        result = payload[offset:offset + size].decode()
-        offset += size
-        return result
-
-    for _ in range(struct.unpack_from("!I", payload)[0]):
-        tab = integer()
-        if version == 2:
-            integer()
-            text()
-        integer()
-        integer()
-        title, cwd = text(), text()
-        for _ in range(integer()):
-            text()
-        rows.append((tab, title, cwd))
-    return rows
+    return [(r[0], r[5], r[6]) for r in catalog_records(payload, version)]
 
 
-class HandoffTest(unittest.TestCase):
+class HandoffFixture:
     def setUp(self):
         self.services = []
         self.peers = []
@@ -60,9 +33,8 @@ class HandoffTest(unittest.TestCase):
             peer.close()
         # Stop through the protocol so the service hangs up owned shells and closes PTYs.
         for service, version, env in reversed(self.services):
-            if service.poll() is None:
-                subprocess.run([str(BINARIES[version]), "--stop"], env=env, timeout=3,
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run([str(BINARIES[version]), "--stop"], env=env, timeout=3,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             try:
                 service.communicate(timeout=3)
             except subprocess.TimeoutExpired:
@@ -123,6 +95,8 @@ class HandoffTest(unittest.TestCase):
                 return
         self.fail(f"screen did not contain {expected!r}")
 
+
+class HandoffTest(HandoffFixture, unittest.TestCase):
     def test_live_round_trips_merge_without_replacing_shells(self):
         pairs = [(source, destination, None, None) for source, destination in ((1, 2), (2, 1), (1, 1), (2, 2))]
         baseline = os.environ.get("WORMINAL_TEST_HANDOFF_BASELINE")
