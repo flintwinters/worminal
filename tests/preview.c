@@ -813,7 +813,7 @@ main(int argc, char **argv)
 	expect_script(sibling->browser, "String(window.opener)", "null");
 	expect_script(sibling->browser, "String(sessionStorage.getItem('private-tab'))", "null");
 	int sibling_count = g_list_length(app->pages);
-	app_close(sibling);
+	press_browser_key(sibling, GDK_KEY_d, GDK_CONTROL_MASK);
 	WAIT(g_list_length(app->pages) == sibling_count - 1);
 	select_page(web);
 	check_tabs(app, terminal, web);
@@ -921,7 +921,7 @@ main(int argc, char **argv)
 	app_close(failed);
 	WAIT(g_list_length(app->pages) == before_tls);
 	uint32_t webid = web->id;
-	app_close(web);
+	press_browser_key(web, GDK_KEY_q, GDK_CONTROL_MASK);
 	WAIT(find_page(app, webid) == NULL && find_page(peer, webid) == NULL);
 	web = open_browser(app, url);
 	expect_script(web->browser, "localStorage.getItem('saved') + ':' + document.cookie", "yes:session=local");
@@ -960,6 +960,11 @@ main(int argc, char **argv)
 	GdkEventKey removed = {.type = GDK_KEY_PRESS, .keyval = GDK_KEY_b,
 	    .state = GDK_CONTROL_MASK | GDK_SHIFT_MASK};
 	g_assert_false(shortcut(converter->window, &removed, converter));
+	guint terminal_keys[] = {GDK_KEY_d, GDK_KEY_q};
+	for (size_t i = 0; i < G_N_ELEMENTS(terminal_keys); i++) {
+		GdkEventKey application_key = {.type = GDK_KEY_PRESS, .keyval = terminal_keys[i], .state = GDK_CONTROL_MASK};
+		g_assert_false(shortcut(converter->window, &application_key, converter));
+	}
 	WAIT(find_page(app, converted_id));
 	gtk_widget_destroy(converter->window);
 	select_page(find_page(app, converted_id));

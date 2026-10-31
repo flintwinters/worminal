@@ -544,13 +544,14 @@ shortcut(GtkWidget *window, GdkEventKey *event, App *app)
 	guint key = gdk_keyval_to_lower(event->keyval);
 	guint mods = event->state & (GDK_CONTROL_MASK | GDK_SHIFT_MASK | GDK_MOD1_MASK);
 	Page *page = app->active;
-	if (page->url && browser_shortcut(page, key, mods)) return TRUE;
 	/* Plain Ctrl+N belongs to terminal applications; window creation uses Shift. */
-	if (mods == GDK_CONTROL_MASK && (key == GDK_KEY_t || key == GDK_KEY_w)) {
+	gboolean browser_quit = page->url && (key == GDK_KEY_d || key == GDK_KEY_q);
+	if (mods == GDK_CONTROL_MASK && (key == GDK_KEY_t || key == GDK_KEY_w || browser_quit)) {
 		if (key == GDK_KEY_t) app_terminal(app, FALSE);
 		else app_close(page);
 		return TRUE;
 	}
+	if (page->url && browser_shortcut(page, key, mods)) return TRUE;
 	if ((mods == GDK_CONTROL_MASK || mods == (GDK_CONTROL_MASK | GDK_SHIFT_MASK)) &&
 	           (key == GDK_KEY_Tab || key == GDK_KEY_ISO_Left_Tab)) {
 		int count = gtk_notebook_get_n_pages(GTK_NOTEBOOK(app->notebook));
