@@ -20,6 +20,7 @@
 #define WORKSPACE_MAX_ROWS 200u
 #define WORKSPACE_MAX_ARGS 1024u
 #define WORKSPACE_MAX_ENV 8192u
+#define WORKSPACE_INITIAL_CURSOR 2u
 /* Rune, attributes, foreground, background: independent of native Glyph padding. */
 #define WIRE_CELL_BYTES (4u * sizeof(uint32_t))
 

@@ -107,7 +107,11 @@ Cargo outputs belong in `build/cargo`. `manage.py preserve-c-baseline` exclusive
 artifacts in `.checks/c-baseline`; never replace that recovery baseline with later builds.
 Rust workspace components now cover v2 framing, validated launches, atomic recovery recipes and local sockets;
 `manage.py check-rust-workspace` compares their encoding and transport with the C implementations.
-Next: port daemon ownership and its event loop, then launcher/frontend/browser modules; verify transfers and publish.
+Rust daemon foundations cover PTYs, pinned transferred processes, bounded queues and ordered terminal effects;
+`manage.py check-rust-process` exercises child ownership, UTF-8/effect ordering and real zsh recovery.
+The daemon crate has no runnable service yet. Next: integrate its event loop and handoff, then port GTK/browser policy.
+`manage.py check-install` stages /usr/local under .checks and verifies artifacts, native SSH input
+and resident module bytes.
 Compare parser CPU with the preserved baseline before expanding the boundary; measured costs remain higher.
 Audit upgrade lifecycle after the failed live bootstrap killed transferred sessions; the receiver
 session-isolation fix is verified privately and has not been published to the active installation.

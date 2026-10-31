@@ -143,8 +143,26 @@ impl Engine {
 
     /// Copies only damaged rows. No C allocation or row pointer escapes this call.
     pub fn changed_rows(&mut self, now: i64) -> Result<(Frame, Vec<(i32, Vec<Cell>)>), Error> {
+        self.read_rows(now, false)
+    }
+
+    pub fn all_rows(&mut self, now: i64) -> Result<(Frame, Vec<(i32, Vec<Cell>)>), Error> {
+        self.read_rows(now, true)
+    }
+
+    pub fn frame(&mut self, now: i64) -> Result<Frame, Error> {
         let mut frame = Frame::default();
         check(unsafe { sys::worminal_engine_frame(self.handle.as_ptr(), now, &mut frame) })?;
+        Ok(frame)
+    }
+
+    pub fn control(&mut self, operation: u32) -> Result<Vec<Event>, Error> {
+        check(unsafe { sys::worminal_engine_control(self.handle.as_ptr(), operation) })?;
+        self.events()
+    }
+
+    fn read_rows(&mut self, now: i64, full: bool) -> Result<(Frame, Vec<(i32, Vec<Cell>)>), Error> {
+        let frame = self.frame(now)?;
         let mut rows = Vec::new();
         if frame.redraw_deadline != 0 {
             return Ok((frame, rows));
@@ -164,7 +182,7 @@ impl Engine {
             if status != sys::WORMINAL_CAPACITY as i32 {
                 check(status)?;
             }
-            if dirty == 0 {
+            if dirty == 0 && !full {
                 continue;
             }
             let mut cells = vec![Cell::default(); required];
@@ -251,16 +269,28 @@ impl Engine {
     }
 
     pub fn import(bytes: &[u8]) -> Result<(Self, TransportState), Error> {
+        let (engine, transport, _) = Self::import_prefix(bytes)?;
+        Ok((engine, transport))
+    }
+
+    pub fn import_prefix(bytes: &[u8]) -> Result<(Self, TransportState, usize), Error> {
         let mut handle = std::ptr::null_mut();
         let mut transport = TransportState::default();
+        let mut consumed = 0;
         // Failed imports keep ownership in C and publish neither the handle nor partial transport state.
         check(unsafe {
-            sys::worminal_engine_import(bytes.as_ptr(), bytes.len(), &mut handle, &mut transport)
+            sys::worminal_engine_import_prefix(
+                bytes.as_ptr(),
+                bytes.len(),
+                &mut handle,
+                &mut transport,
+                &mut consumed,
+            )
         })?;
         let engine = Self {
             handle: NonNull::new(handle).expect("successful import returned null"),
         };
-        Ok((engine, transport))
+        Ok((engine, transport, consumed))
     }
 }
 

@@ -981,6 +981,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "worminal-config"
+version = "0.1.0"
+
+[[package]]
+name = "worminal-daemon"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "worminal-config",
+ "worminal-engine",
+ "worminal-protocol",
+ "worminal-workspace",
+]
+
+[[package]]
 name = "worminal-engine"
 version = "0.1.0"
 dependencies = [

@@ -61,6 +61,11 @@ enum win_mode {
 };
 
 typedef struct WorminalEngine WorminalEngine;
+enum worminal_default_color {
+	WORMINAL_DEFAULT_FOREGROUND = 258,
+	WORMINAL_DEFAULT_BACKGROUND = 259,
+	WORMINAL_DEFAULT_CURSOR = 256
+};
 #define WORMINAL_PENDING_BYTES 8192
 /* Compatibility fields are supplied by the application, never owned by the terminal engine. */
 typedef struct {
@@ -103,6 +108,7 @@ enum worminal_event_type {
 	WORMINAL_DIAGNOSTIC,
 	WORMINAL_WRITE
 };
+enum worminal_control { WORMINAL_TOGGLE_PRINTER = 0, WORMINAL_PRINT_SCREEN = 1 };
 
 int worminal_engine_create(int32_t, int32_t, WorminalEngine **);
 void worminal_engine_destroy(WorminalEngine *);
@@ -117,6 +123,7 @@ int worminal_engine_select(WorminalEngine *, int32_t, int32_t, int32_t, int32_t,
 int worminal_engine_clear_selection(WorminalEngine *);
 int worminal_engine_selected(WorminalEngine *, int32_t, int32_t, int32_t *);
 int worminal_engine_allow_alternate(WorminalEngine *, int32_t);
+int worminal_engine_control(WorminalEngine *, uint32_t);
 int worminal_engine_selection(WorminalEngine *, uint8_t *, size_t, size_t *);
 int worminal_engine_frame(WorminalEngine *, int64_t, WorminalFrame *);
 int worminal_engine_row(WorminalEngine *, int32_t, WorminalCell *, size_t, size_t *, int32_t *);
@@ -125,4 +132,5 @@ int worminal_engine_clean(WorminalEngine *);
 int worminal_engine_event(WorminalEngine *, WorminalEvent *, uint8_t *, size_t);
 int worminal_engine_export(WorminalEngine *, const WorminalTransportState *, uint8_t *, size_t, size_t *);
 int worminal_engine_import(const uint8_t *, size_t, WorminalEngine **, WorminalTransportState *);
+int worminal_engine_import_prefix(const uint8_t *, size_t, WorminalEngine **, WorminalTransportState *, size_t *);
 #endif

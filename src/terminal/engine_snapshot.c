@@ -161,12 +161,13 @@ worminal_engine_export(WorminalEngine *engine, const WorminalTransportState *tra
 }
 
 int
-worminal_engine_import(const uint8_t *data, size_t bytes, WorminalEngine **result,
-					   WorminalTransportState *transport)
+worminal_engine_import_prefix(const uint8_t *data, size_t bytes, WorminalEngine **result,
+					         WorminalTransportState *transport, size_t *consumed)
 {
 	if (!result) return WORMINAL_INVALID;
 	*result = NULL;
-	if (!data || !transport) return WORMINAL_INVALID;
+	if (!data || !transport || !consumed) return WORMINAL_INVALID;
+	*consumed = 0;
 	Stream stream = {.data = (uint8_t *)data, .size = bytes};
 	WorminalTransportState staged = {0};
 	EngineSnapshotIO io = {memory_transfer, &stream};
@@ -174,5 +175,14 @@ worminal_engine_import(const uint8_t *data, size_t bytes, WorminalEngine **resul
 	if (!engine) return WORMINAL_INVALID;
 	*transport = staged;
 	*result = engine;
+	*consumed = stream.used;
 	return WORMINAL_OK;
+}
+
+int
+worminal_engine_import(const uint8_t *data, size_t bytes, WorminalEngine **result,
+                       WorminalTransportState *transport)
+{
+	size_t consumed;
+	return worminal_engine_import_prefix(data, bytes, result, transport, &consumed);
 }

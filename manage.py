@@ -103,7 +103,7 @@ def run_native_checks():
             return code
     from tools.engine_checks import check
     code = check()
-    return code or run_rust_workspace_checks()
+    return code or run_rust_workspace_checks() or run_rust_process_checks()
 
 
 def run_headless_checks():
@@ -157,6 +157,18 @@ def run_rust_workspace_checks():
 def check_rust_workspace():
     """Check Rust framing, launch requests, recovery recipes and local transport against C."""
     raise typer.Exit(run_rust_workspace_checks())
+
+
+@app.command("check-rust-process")
+def check_rust_process():
+    """Check headless Rust PTYs, child identities and real zsh restoration on project-local fixtures."""
+    raise typer.Exit(run_rust_process_checks())
+
+
+def run_rust_process_checks():
+    native_build.generate_theme()
+    native_build.Builder().target("build/libworminal_engine.a")
+    return run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-daemon"])
 
 
 @app.command("preserve-c-baseline")
@@ -423,6 +435,13 @@ def check_build():
     """Check build freshness, installation, and cleanup without building the app."""
     raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                           "-p", "test_build.py", "-q"]))
+
+
+@app.command("check-install")
+def check_install():
+    """Stage /usr/local privately; verify hashes, native SSH input, browser and loaded module paths."""
+    native_build.build_targets("worminal-x11", "worminald-x11")
+    raise typer.Exit(run([sys.executable, "tests/installation.py"]))
 
 
 def explorer_command(command):

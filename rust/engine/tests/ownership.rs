@@ -105,3 +105,24 @@ fn selection_input_modes_and_alternate_permission() {
     feed(&mut engine, b"\x1b[?1049h", 5);
     assert_eq!(engine.changed_rows(5).unwrap().0.alternate, 1);
 }
+
+#[test]
+fn full_rows_and_embedded_snapshot_prefixes_are_explicit() {
+    let mut engine = Engine::new(8, 3).unwrap();
+    feed(&mut engine, b"abc", 1);
+    assert_eq!(engine.changed_rows(1).unwrap().1.len(), 3);
+    assert!(engine.changed_rows(1).unwrap().1.is_empty());
+    assert_eq!(engine.all_rows(1).unwrap().1.len(), 3);
+    let snapshot = engine.export(&TransportState::default()).unwrap();
+    let mut bundle = snapshot.clone();
+    bundle.extend_from_slice(b"next terminal metadata");
+    let (mut restored, _, consumed) = Engine::import_prefix(&bundle).unwrap();
+    assert_eq!(consumed, snapshot.len());
+    assert_eq!(restored.all_rows(2).unwrap().1[0].1[0].rune, u32::from('a'));
+    let printed = restored
+        .control(worminal_engine::WORMINAL_PRINT_SCREEN)
+        .unwrap();
+    assert_eq!(printed.len(), 1);
+    assert_eq!(printed[0].kind, worminal_engine::WORMINAL_PRINT);
+    assert_eq!(printed[0].data, b"abc\n\n\n");
+}

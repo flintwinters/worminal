@@ -32,6 +32,21 @@ fn c_string(payload: &mut Payload<'_>) -> io::Result<Vec<u8>> {
 }
 
 impl Launch {
+    pub fn restore(directory: Vec<u8>) -> Self {
+        Self {
+            columns: crate::recovery::format::RESTORE_COLUMNS,
+            rows: crate::recovery::format::RESTORE_ROWS,
+            allow_alternate: true,
+            title: Vec::new(),
+            directory,
+            line: Vec::new(),
+            output: Vec::new(),
+            window_id: Vec::new(),
+            arguments: Vec::new(),
+            environment: None,
+        }
+    }
+
     pub fn environment_for_restore(&self) -> Vec<(OsString, OsString)> {
         let marker = CStr::from_bytes_with_nul(crate::recovery::RESTORE_ENV_NAME).unwrap();
         let marker = OsString::from_vec(marker.to_bytes().to_vec());

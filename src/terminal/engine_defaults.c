@@ -7,4 +7,5 @@ char *vtiden = "\033[?6c";
 wchar_t *worddelimiters = L" ";
 /* Match the advertised terminfo tab width (it#8); application PTYs disable kernel tab expansion. */
 unsigned int tabspaces = 8;
-unsigned int defaultfg = 258, defaultbg = 259, defaultcs = 256;
+unsigned int defaultfg = WORMINAL_DEFAULT_FOREGROUND, defaultbg = WORMINAL_DEFAULT_BACKGROUND;
+unsigned int defaultcs = WORMINAL_DEFAULT_CURSOR;

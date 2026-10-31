@@ -325,7 +325,7 @@ tab_start(Client *client, Launch *launch)
 	tab->initial_title = xstrdup(tab->title);
 	tab->directory = xstrdup(cwd);
 	tab->restoring_directory = launch->restored;
-	tab->cursor = 2;
+	tab->cursor = WORKSPACE_INITIAL_CURSOR;
 	tab->controller = client;
 	if (strcmp(launch->output, "-") == 0)
 		tab->print_client = client;

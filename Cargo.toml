@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["rust/platform", "rust/engine-sys", "rust/engine", "rust/protocol", "rust/workspace", "rust/launcher"]
+members = ["rust/platform", "rust/engine-sys", "rust/engine", "rust/protocol", "rust/workspace",
+           "rust/launcher", "rust/config", "rust/daemon"]
 
 [workspace.package]
 edition = "2021"

@@ -3,6 +3,7 @@
 #include "st.h"
 #include "workspace_launch.h"
 #include "restore_format.h"
+#include "process_defaults.h"
 
 void
 launch_free(Launch *launch)
@@ -73,7 +74,7 @@ launch_pty(Launch *launch, const char *cwd)
 	}
 	ttysetlaunch(cwd, restore_env ? restore_env : launch->envc ? launch->env : NULL,
 	             *launch->windowid ? launch->windowid : NULL);
-	ttynew(*launch->line ? launch->line : NULL, "/bin/sh",
+	ttynew(*launch->line ? launch->line : NULL, PROCESS_SHELL,
 	       *launch->output ? launch->output : NULL,
 	       launch->argc ? launch->args : NULL);
 	ttysetlaunch(NULL, NULL, NULL);

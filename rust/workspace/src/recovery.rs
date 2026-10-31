@@ -8,7 +8,7 @@ use std::{
 use worminal_protocol::{Buffer, Payload, WIRE_VERSION};
 
 #[allow(non_camel_case_types, non_upper_case_globals)]
-mod format {
+pub(crate) mod format {
     include!(concat!(env!("OUT_DIR"), "/restore.rs"));
 }
 pub use format::RESTORE_ENV_NAME;

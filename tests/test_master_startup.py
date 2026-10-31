@@ -24,7 +24,7 @@ class MasterStartupTest(unittest.TestCase):
                      f"env WORMINAL_SHARED_SOCKET_SCOPE={env['WORMINAL_SHARED_SOCKET_SCOPE']} worminald --stop"],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
             env.update(GDK_BACKEND="x11", NO_AT_BRIDGE="1", GTK_USE_PORTAL="0",
-                       WORMINAL_TEST_DAEMON=str(ROOT / "worminald"),
+                       WORMINAL_TEST_DAEMON=env.get("WORMINAL_TEST_DAEMON", str(ROOT / "worminald")),
                        PATH=str(ROOT / "tests/fixtures/preview-master") + os.pathsep + env["PATH"])
             env.pop("DBUS_SESSION_BUS_ADDRESS", None)
             log_path = ROOT / ".checks/master-startup.log"

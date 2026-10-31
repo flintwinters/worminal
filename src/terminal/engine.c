@@ -163,6 +163,16 @@ worminal_engine_allow_alternate(WorminalEngine *engine, int32_t allowed)
 }
 
 int
+worminal_engine_control(WorminalEngine *engine, uint32_t operation)
+{
+	if (!engine || operation > WORMINAL_PRINT_SCREEN) return WORMINAL_INVALID;
+	if (engine->events) return WORMINAL_PENDING;
+	if (operation == WORMINAL_TOGGLE_PRINTER) te_toggleprinter(engine, NULL);
+	else te_printscreen(engine, NULL);
+	return WORMINAL_OK;
+}
+
+int
 worminal_engine_selection(WorminalEngine *engine, uint8_t *output, size_t capacity, size_t *bytes)
 {
 	if (!engine || !bytes || (!output && capacity)) return WORMINAL_INVALID;

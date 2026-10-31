@@ -167,7 +167,7 @@ workspace_restore_start(Tab *(*start)(Client *, Launch *), Tab *(*browser)(const
 			cwd = getenv("HOME");
 		if (!cwd || stat(cwd, &directory) < 0 || !S_ISDIR(directory.st_mode) || access(cwd, X_OK) < 0)
 			cwd = "/";
-		Launch launch = {.cols = 80, .rows = 24, .allowalt = 1, .restored = 1,
+		Launch launch = {.cols = RESTORE_COLUMNS, .rows = RESTORE_ROWS, .allowalt = 1, .restored = 1,
 		    .cwd = (char *)cwd, .title = "", .line = "", .output = "", .windowid = ""};
 		start(NULL, &launch);
 	}
