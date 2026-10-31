@@ -24,7 +24,7 @@ check_browser_media(App *app)
 		expect_script(b, "String(!!document.querySelector('audio,video'))", "true");
 		expect_script(b, "const media=document.querySelector('audio,video'); media.pause(); media.muted=false;"
 		    "media.tabIndex=0; media.focus(); String(media.controls)", "true");
-		gtk_window_present(GTK_WINDOW(app->window));
+		present_test_window(app->window);
 		WAIT(gtk_window_is_active(GTK_WINDOW(app->window)));
 		gtk_widget_grab_focus(browser_view(b));
 		media_image = NULL;

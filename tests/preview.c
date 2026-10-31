@@ -13,6 +13,7 @@ static void diagnostics(void);
 
 #define GTK_WAIT_DIAGNOSTICS diagnostics
 #include "gtk_wait.h"
+#include "preview_focus.c"
 
 static void
 diagnostics(void)
@@ -534,7 +535,7 @@ check_tabs(App *app, Page *terminal, Page *browser)
 static void
 select_page(Page *page)
 {
-	gtk_window_present(GTK_WINDOW(page->app->window));
+	present_test_window(page->app->window);
 	if (page->url) app_select(page);
 	else gtk_notebook_set_current_page(GTK_NOTEBOOK(page->app->notebook),
 	    gtk_notebook_page_num(GTK_NOTEBOOK(page->app->notebook), page->widget));
@@ -666,11 +667,11 @@ check_outline_focus(App *app)
 {
 	GtkWidget *other = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_widget_show(other);
-	gdk_window_focus(gtk_widget_get_window(other), GDK_CURRENT_TIME);
+	present_test_window(other);
 	WAIT(gtk_window_is_active(GTK_WINDOW(other)) &&
 	    !gtk_window_is_active(GTK_WINDOW(app->window)));
 	check_outline(app);
-	gdk_window_focus(gtk_widget_get_window(app->window), GDK_CURRENT_TIME);
+	present_test_window(app->window);
 	WAIT(gtk_window_is_active(GTK_WINDOW(app->window)));
 	check_outline(app);
 	gtk_widget_destroy(other);

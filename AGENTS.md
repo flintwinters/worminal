@@ -92,6 +92,7 @@ Negotiated row moves preserve scrolling as a move plus exposed rows; legacy clie
 Application synchronized redraws hold frames and their tab metadata until completion, with bounded timeout recovery.
 `manage.py check-preview*` and `preview-perf` validate GTK; `build-preview` retains compatibility binary names.
 Private Wayland checks use a project-local Weston runtime and matching virtual-seat ABI, without X11 fallback.
+The test compositor supplies explicit keyboard focus for synthetic events; product activation remains compositor policy.
 
 Current jobs: migrate release GTK/v2 application policy to Rust above an instance-based C terminal engine,
 preserving the C X11 rollback and live sessions. The shared instance-based C parser is extracted;

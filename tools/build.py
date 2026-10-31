@@ -191,6 +191,8 @@ class Builder:
                 sources = ()
                 flags += ["-O1", "-g"]
             libs = ["-lm", "-lrt", "-lutil", *words("LDFLAGS")]
+            if target == "build/preview_test":
+                libs += pkg_flags("--libs", ("wayland-client",))
             if target == "build/frontend.so":
                 libs += ["-shared", "-Wl,--gc-sections", "-Wl,--version-script=src/gtk/frontend.map"]
             old_flags = self.cflags
