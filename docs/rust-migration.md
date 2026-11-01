@@ -2,7 +2,7 @@
 
 The development release launcher and daemon are Rust. The default `worminal`
 still loads the C frontend; `worminal-rust` runs the Rust GTK application and
-lazy Rust WebKit module. The active `/usr/local` installation has not been replaced.
+lazy Rust frontend/WebKit modules. The active `/usr/local` installation has not been replaced.
 The installation and cutover gates below remain incomplete.
 
 ## Usable Rust application
@@ -33,13 +33,15 @@ write an installed C owner's live browser profile. Each profile has an exclusive
 owner lock. Browser module generations share one live data manager, while views
 pin their original code and independent navigation/session storage. The installed
 profile remains untouched; selecting it requires closing its existing browser
-owners during the final cutover. The lightweight Rust
-frontend module and final publication remain pending. This app uses the same v2
+owners during the final cutover. Switching the default release frontend and final
+publication remain pending. This app uses the same v2
 workspace and leaves v1 untouched.
 
 Internal maintenance: `manage.py build-rust-app` builds the native executable;
 `manage.py check-rust-app` checks real PTY input, tabs/windows, clipboard, resize,
 shell survival, idle repaint across daemon replacement and native Wayland.
+It also checks the container-free frontend ABI, listener ownership on rejection,
+GLib-only launcher dependencies and forwarding without loading the module again.
 `manage.py check-rust-browser` checks real browser navigation, owner forwarding,
 live DOM through daemon upgrades, module generations, shared session cookies,
 local-document security, explicit file reload, downloads and native Wayland frames.
@@ -72,7 +74,9 @@ production workspaces.
   `worminal-rust`. X11 activation is checked against private Muffin, including
   fresh server timestamps; its compiled counterfactual fails without the fix.
   Prepare that optional runtime through `manage.py setup-window-activation`.
-  The lazy frontend module remains pending.
+  The candidate lazily loads `frontend-rust-v1.so` through the generated ABI in
+  `src/gtk/rust_frontend_module.h`; the default launcher still selects the C frontend.
+  Only the owner loads GTK/Pango/Cairo, and only a browser claim loads WebKit.
 - Rust browser module, versioned loader and generation pinning are implemented.
   `src/gtk/rust_browser_module.h` owns the incompatible opaque ABI; both sides
   generate bindings. Browser chrome/scripts remain shared resources. Complete

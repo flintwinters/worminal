@@ -12,3 +12,7 @@ glib-sys.workspace = true
 
 [build-dependencies]
 bindgen.workspace = true
+
+[[bin]]
+name = "worminal-rust-launcher"
+path = "src/candidate.rs"

@@ -20,21 +20,10 @@ from x11 import isolated_display, close_window
 from preview import wayland_display
 from test_window_state import private_bus, WindowStateTest
 from test_window_activation import WindowActivationTests
+from rust_runtime import copy_runtime, window, stop_application
+from rust_module import RustModuleTest
 
 ROOT = Path(__file__).resolve().parent.parent
-
-
-def window(env, process):
-    deadline = time.monotonic() + 8
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            raise AssertionError(f"Rust app exited: {process.stderr.read().decode(errors='replace')}")
-        result = subprocess.run(['xdotool', 'search', '--onlyvisible', '--pid', str(process.pid)],
-                                env=env, capture_output=True, text=True, timeout=2)
-        if result.returncode == 0:
-            return result.stdout.splitlines()[0]
-        time.sleep(.02)
-    raise AssertionError('Rust window did not open')
 
 
 class RustApplicationTest(unittest.TestCase):
@@ -64,7 +53,7 @@ class RustApplicationTest(unittest.TestCase):
             env.update(GDK_BACKEND='x11', SHELL='/bin/sh')
             env.pop('WAYLAND_DISPLAY', None)
             base = Path(directory)
-            for name in ('worminal-rust', 'worminald'): shutil.copy2(ROOT / name, base / name)
+            copy_runtime(base)
             marker = "printf %b " + shlex.quote(r"\033[48;2;17;99;201m\033[H\033[2JAFTER_UPGRADE")
             command = "trap " + shlex.quote(marker) + " USR1; printf 'R:%s\\n' $$; while :; do sleep 1; done"
             app = subprocess.Popen([str(base / 'worminal-rust'), '-T', 'Rust upgrade', '-o', '-', '-e', '/bin/sh', '-c',
@@ -206,16 +195,14 @@ class RustApplicationTest(unittest.TestCase):
 
     @staticmethod
     def stop(process):
-        if process.poll() is None: process.terminate()
-        _, error = process.communicate(timeout=5)
-        if error:
-            with (ROOT / '.checks/rust-app-ui.log').open('ab') as log: log.write(error)
+        stop_application(process)
 
 
 def main():
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(RustApplicationTest)
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(WindowStateTest))
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(WindowActivationTests))
+    suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(RustModuleTest))
     for name in ('test_navigation_keys', 'test_alternate_scroll_sends_cursor_keys',
                  'test_clipboard_paste_bytes', 'test_ctrl_end_in_micro', 'test_master_navigation_keys',
                  'test_master_alternate_scroll_sends_cursor_keys', 'test_master_clipboard_paste_bytes'):

@@ -19,6 +19,9 @@ BROWSER_MODULE = f"browser-v{BROWSER_ABI}.so"
 RUST_BROWSER_MODULE = next(line.split('"')[1]
                           for line in (ROOT / "src/gtk/rust_browser_module.h").read_text().splitlines()
                           if line.startswith("#define WORMINAL_RUST_BROWSER_FILE "))
+RUST_FRONTEND_MODULE = next(line.split('"')[1]
+                           for line in (ROOT / "src/gtk/rust_frontend_module.h").read_text().splitlines()
+                           if line.startswith("#define WORMINAL_RUST_FRONTEND_FILE "))
 ENGINE_DEFAULTS = "terminal/engine_defaults.c"
 ENGINE = ("terminal/engine.c", ENGINE_DEFAULTS, "terminal/engine_parser.c",
           "terminal/engine_events.c", "terminal/engine_sync.c", "terminal/engine_snapshot.c",
@@ -134,16 +137,22 @@ class Builder:
         step(output, [*self.cc, *objects, *(self.libs if libs is None else libs)],
              [*objects, *link_dependencies])
 
-    def rust_artifact(self, package, binary=None):
+    def rust_artifact(self, package, binary=None, *, library=False):
         if package in ("worminal-daemon", "worminal-frontend"):
             self.target("build/libworminal_engine.a")
         invoke(["cargo", "build", "--locked", "--release", "--quiet", "-p", package,
-                *(["--bin", binary] if binary else [])])
-        artifact = "libworminal_browser.so" if package == "worminal-browser" else binary or package
+                *(["--lib"] if library else ["--bin", binary] if binary else [])])
+        artifact = f"lib{package.replace('-', '_')}.so" if library else binary or package
         return ROOT / "build/cargo/release" / artifact
 
     def rust_program(self, output, package, binary=None):
         source = self.rust_artifact(package, binary) if binary else self.rust_artifact(package)
+        self.publish_rust(output, source)
+
+    def rust_library(self, output, package):
+        self.publish_rust(output, self.rust_artifact(package, library=True))
+
+    def publish_rust(self, output, source):
         destination = ROOT / output
         if destination.exists() and destination.read_bytes() == source.read_bytes():
             return
@@ -159,15 +168,12 @@ class Builder:
     def target(self, target):
         if target == "worminal-rust":
             self.target("build/" + RUST_BROWSER_MODULE)
-            self.rust_program(target, "worminal-frontend", "worminal-rust")
+            self.target("build/" + RUST_FRONTEND_MODULE)
+            self.rust_program(target, "worminal-launcher", "worminal-rust-launcher")
+        elif target == "build/" + RUST_FRONTEND_MODULE:
+            self.rust_library(target, "worminal-frontend")
         elif target == "build/" + RUST_BROWSER_MODULE:
-            source = self.rust_artifact("worminal-browser")
-            destination = ROOT / target
-            if not destination.exists() or destination.read_bytes() != source.read_bytes():
-                temporary = destination.with_suffix(".pending")
-                shutil.copyfile(source, temporary)
-                temporary.chmod(0o755)
-                temporary.replace(destination)
+            self.rust_library(target, "worminal-browser")
         elif target == "build/libworminal_engine.a":
             objects = []
             for source in ENGINE:

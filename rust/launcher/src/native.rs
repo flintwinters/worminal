@@ -13,6 +13,11 @@ use std::{
 mod bindings {
     include!(concat!(env!("OUT_DIR"), "/frontend.rs"));
 }
+#[allow(non_camel_case_types, non_snake_case, non_upper_case_globals)]
+mod rust_bindings {
+    include!(concat!(env!("OUT_DIR"), "/rust_frontend.rs"));
+}
+use super::Frontend;
 
 unsafe fn glib_bytes(pointer: *mut libc::c_char) -> io::Result<Vec<u8>> {
     if pointer.is_null() {
@@ -57,18 +62,35 @@ fn loader_error() -> io::Error {
     io::Error::other(format!("Cannot load terminal frontend: {text}"))
 }
 
-pub fn enter(args: Vec<OsString>, listener: Option<UnixListener>) -> io::Result<()> {
+pub fn enter(
+    args: Vec<OsString>,
+    listener: Option<UnixListener>,
+    frontend: Frontend,
+) -> io::Result<()> {
     let executable = std::env::current_exe()?;
     let directory = executable
         .parent()
         .ok_or_else(|| io::Error::other("executable has no directory"))?;
-    let filename = CStr::from_bytes_with_nul(bindings::WORMINAL_FRONTEND_FILE).unwrap();
+    let (filename, symbol) = match frontend {
+        Frontend::Legacy => (
+            bindings::WORMINAL_FRONTEND_FILE.as_slice(),
+            bindings::WORMINAL_FRONTEND_SYMBOL.as_slice(),
+        ),
+        Frontend::Rust => (
+            rust_bindings::WORMINAL_RUST_FRONTEND_FILE.as_slice(),
+            rust_bindings::WORMINAL_RUST_FRONTEND_SYMBOL.as_slice(),
+        ),
+    };
+    let filename = CStr::from_bytes_with_nul(filename).unwrap();
     let filename = std::ffi::OsStr::from_bytes(filename.to_bytes());
     let installed = directory.join("../lib/worminal").join(filename);
+    let development = directory.join("build").join(filename);
     let path = if installed.exists() {
         installed
+    } else if directory.join(filename).is_file() && !development.is_file() {
+        directory.join(filename)
     } else {
-        directory.join("build").join(filename)
+        development
     };
     let path = CString::new(Path::new(&path).as_os_str().as_bytes()).map_err(io::Error::other)?;
     let entry = unsafe {
@@ -76,7 +98,7 @@ pub fn enter(args: Vec<OsString>, listener: Option<UnixListener>) -> io::Result<
         if handle.is_null() {
             return Err(loader_error());
         }
-        let symbol = libc::dlsym(handle, bindings::WORMINAL_FRONTEND_SYMBOL.as_ptr().cast());
+        let symbol = libc::dlsym(handle, symbol.as_ptr().cast());
         if symbol.is_null() {
             let error = loader_error();
             libc::dlclose(handle);
@@ -84,7 +106,7 @@ pub fn enter(args: Vec<OsString>, listener: Option<UnixListener>) -> io::Result<
         }
         // The authoritative C header defines this function pointer. Keep the module resident for
         // asynchronous C callbacks, matching g_module_make_resident in the retained C launcher.
-        std::mem::transmute::<*mut libc::c_void, bindings::WorminalFrontendEntry>(symbol).unwrap()
+        symbol
     };
     // C may rearrange argv, so provide mutable buffers rather than casting CString::as_ptr().
     let mut storage: Vec<Vec<u8>> = args
@@ -101,7 +123,19 @@ pub fn enter(args: Vec<OsString>, listener: Option<UnixListener>) -> io::Result<
         .collect();
     pointers.push(std::ptr::null_mut());
     let fd = listener.map(IntoRawFd::into_raw_fd).unwrap_or(-1);
-    let result = unsafe { entry(args.len() as libc::c_int, pointers.as_mut_ptr(), fd) };
+    let result = unsafe {
+        match frontend {
+            Frontend::Legacy => {
+                std::mem::transmute::<*mut libc::c_void, bindings::WorminalFrontendEntry>(entry)
+                    .unwrap()(args.len() as libc::c_int, pointers.as_mut_ptr(), fd)
+            }
+            Frontend::Rust => std::mem::transmute::<
+                *mut libc::c_void,
+                rust_bindings::WorminalRustFrontendEntry,
+            >(entry)
+            .unwrap()(args.len() as i32, pointers.as_ptr().cast(), fd),
+        }
+    };
     // Keep argv storage alive through any native exit callbacks. The frontend now owns its listener.
     std::process::exit(result)
 }

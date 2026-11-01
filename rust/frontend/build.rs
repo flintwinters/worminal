@@ -137,6 +137,16 @@ fn main() {
         println!("cargo:rustc-cfg=worminal_gdk_x11");
     }
     let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("../..");
+    let frontend = root.join("src/gtk/rust_frontend_module.h");
+    println!("cargo:rerun-if-changed={}", frontend.display());
+    bindgen::Builder::default()
+        .header(frontend.to_str().unwrap())
+        .allowlist_type("WorminalRustFrontendEntry")
+        .allowlist_var("WORMINAL_RUST_FRONTEND_.*")
+        .generate()
+        .expect("frontend module bindings")
+        .write_to_file(PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("frontend.rs"))
+        .expect("write frontend module bindings");
     let state = root.join("src/gtk/window_state_protocol.h");
     println!("cargo:rerun-if-changed={}", state.display());
     bindgen::Builder::default()

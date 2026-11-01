@@ -4,6 +4,9 @@ version = "0.1.0"
 edition.workspace = true
 publish.workspace = true
 
+[lib]
+crate-type = ["rlib", "cdylib"]
+
 [dependencies]
 worminal-engine = { path = "../engine" }
 worminal-engine-sys = { path = "../engine-sys" }

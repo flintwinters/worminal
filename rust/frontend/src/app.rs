@@ -828,6 +828,12 @@ impl App {
 }
 pub fn run() -> io::Result<()> {
     let arguments: Vec<_> = std::env::args_os().collect();
+    run_with_listener(arguments, None)
+}
+pub(crate) fn run_with_listener(
+    arguments: Vec<std::ffi::OsString>,
+    listener: Option<std::os::unix::net::UnixListener>,
+) -> io::Result<()> {
     worminal_workspace::browser_target::command(&arguments)?;
     let request = worminal_workspace::broker::Request::capture(arguments)?;
     let Some(config) = Config::parse(&request)? else {
@@ -836,8 +842,12 @@ pub fn run() -> io::Result<()> {
     if config.master.is_none() {
         ensure()?;
     }
-    let Some(listener) = broker::forward(&request)? else {
-        return Ok(());
+    let listener = match listener {
+        Some(listener) => listener,
+        None => match broker::forward(&request)? {
+            Some(listener) => listener,
+            None => return Ok(()),
+        },
     };
     glib::set_prgname(Some("worminal"));
     gtk::init().map_err(|error| io::Error::other(error.to_string()))?;

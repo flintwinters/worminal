@@ -119,7 +119,9 @@ Wayland;
 identity.
 Native activation uses fresh X11 server time; the private Muffin regression and compiled counterfactual check it.
 Use `manage.py setup-window-activation` to prepare Muffin locally without a system installation.
-Next: lazy frontend module integration and complete behavior/resource/cutover verification.
+The candidate launcher links GLib only and forwards before loading its Rust frontend module;
+`src/gtk/rust_frontend_module.h` owns its distinct ABI and transferred-listener contract.
+Next: release-default integration and complete behavior/resource/cutover verification.
 `docs/rust-migration.md` owns migration readiness, recovery/test commands and measured resource costs.
 Cargo outputs belong in build/cargo; preserve diagnostics and the exclusive C recovery baseline under .checks.
 Audit upgrade lifecycle after the failed live bootstrap killed transferred sessions; the receiver

@@ -22,6 +22,9 @@ pub(super) struct Config {
     pub(super) name: Option<String>,
     pub(super) zoom: f64,
 }
+fn argument(message: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, message)
+}
 impl Config {
     pub(super) fn parse(request: &worminal_workspace::broker::Request) -> io::Result<Option<Self>> {
         let mut config = Self {
@@ -86,7 +89,7 @@ impl Config {
                 ) => {
                     let value = args
                         .next()
-                        .ok_or_else(|| io::Error::other("option requires a value"))?;
+                        .ok_or_else(|| argument("option requires a value"))?;
                     match arg.to_str().unwrap() {
                         "-c" => config.class = Some(value.to_string_lossy().into_owned()),
                         "-n" => config.name = Some(value.to_string_lossy().into_owned()),
@@ -110,26 +113,22 @@ impl Config {
                             let text = value.to_string_lossy();
                             let (cols, rows) = text
                                 .split_once('x')
-                                .ok_or_else(|| io::Error::other("use COLSxROWS"))?;
-                            config.columns = cols
-                                .parse()
-                                .map_err(|_| io::Error::other("invalid columns"))?;
-                            config.rows =
-                                rows.parse().map_err(|_| io::Error::other("invalid rows"))?;
+                                .ok_or_else(|| argument("use COLSxROWS"))?;
+                            config.columns =
+                                cols.parse().map_err(|_| argument("invalid columns"))?;
+                            config.rows = rows.parse().map_err(|_| argument("invalid rows"))?;
                             if config.columns == 0
                                 || config.columns > WORKSPACE_MAX_COLS
                                 || config.rows == 0
                                 || config.rows > WORKSPACE_MAX_ROWS
                             {
-                                return Err(io::Error::other("invalid geometry"));
+                                return Err(argument("invalid geometry"));
                             }
                         }
                     }
                 }
                 Some(value) if value.starts_with('-') => {
-                    return Err(io::Error::other(format!(
-                        "unsupported option {value}; see --help"
-                    )))
+                    return Err(argument(format!("unsupported option {value}; see --help")))
                 }
                 _ => {
                     config.command.push(arg);

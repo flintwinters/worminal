@@ -16,6 +16,7 @@ from unittest.mock import patch
 from preview import broker_check, Fixture, fixture, profile, service, wayland_display
 from x11 import isolated_display, close_window
 from test_window_state import private_bus
+from rust_runtime import copy_runtime, RUST_BROWSER_MODULE
 
 ROOT = Path(__file__).resolve().parent.parent
 APP = str(ROOT / 'worminal-rust')
@@ -145,11 +146,8 @@ class RustBrowserTest(unittest.TestCase):
               tempfile.TemporaryDirectory(prefix='rust-browser-generations-', dir=ROOT / '.checks') as directory):
             env.update(GDK_BACKEND='x11'); env.pop('WAYLAND_DISPLAY', None)
             base = Path(directory)
-            executable = str(base / 'worminal-rust')
-            shutil.copy2(APP, executable)
-            (base / 'build').mkdir()
-            module = base / 'build/browser-rust-v1.so'
-            shutil.copy2(ROOT / 'build/browser-rust-v1.so', module)
+            executable = str(copy_runtime(base, browser=True))
+            module = base / 'build' / RUST_BROWSER_MODULE
             with application(env, '--browser', url, executable=executable) as app:
                 first = title(env, 'Fresh:new', app)
                 subprocess.run(['xdotool', 'windowfocus', '--sync', first], env=env, check=True)
@@ -163,7 +161,7 @@ class RustBrowserTest(unittest.TestCase):
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=8)
                 title(env, 'Shared:new', app)
                 mappings = Path(f'/proc/{app.pid}/maps').read_text().splitlines()
-                generations = {line.split()[4] for line in mappings if 'browser-rust-v1.so' in line}
+                generations = {line.split()[4] for line in mappings if RUST_BROWSER_MODULE in line}
                 self.assertEqual(len(generations), 2, 'new tabs did not load the newly published module inode')
                 subprocess.run(['xdotool', 'windowfocus', '--sync', first], env=env, check=True)
                 subprocess.run(['xdotool', 'type', '--clearmodifiers', '!'], env=env, check=True)
