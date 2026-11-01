@@ -11,12 +11,14 @@ import subprocess
 import termios
 import time
 import unittest
+from unittest.mock import patch
 
 os.environ['WORMINAL_FRONTEND'] = 'worminal-rust'
 from test_keys import NavigationKeysTest, read_bytes, read_through
 from workspace_protocol import send, wait_kind, catalog_records, service_pid
 from x11 import isolated_display, close_window
 from preview import wayland_display
+from test_window_state import private_bus, WindowStateTest
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -211,11 +213,14 @@ class RustApplicationTest(unittest.TestCase):
 
 def main():
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(RustApplicationTest)
+    suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(WindowStateTest))
     for name in ('test_navigation_keys', 'test_alternate_scroll_sends_cursor_keys',
                  'test_clipboard_paste_bytes', 'test_ctrl_end_in_micro', 'test_master_navigation_keys',
                  'test_master_alternate_scroll_sends_cursor_keys', 'test_master_clipboard_paste_bytes'):
         suite.addTest(NavigationKeysTest(name))
-    return 0 if unittest.TextTestRunner(verbosity=1).run(suite).wasSuccessful() else 1
+    with (private_bus(os.environ) as env,
+          patch.dict(os.environ, {'DBUS_SESSION_BUS_ADDRESS': env['DBUS_SESSION_BUS_ADDRESS']})):
+        return 0 if unittest.TextTestRunner(verbosity=1).run(suite).wasSuccessful() else 1
 
 
 if __name__ == '__main__':

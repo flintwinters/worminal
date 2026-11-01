@@ -3,7 +3,7 @@
 The development release launcher and daemon are Rust. The default `worminal`
 still loads the C frontend; `worminal-rust` runs the Rust GTK application and
 lazy Rust WebKit module. The active `/usr/local` installation has not been replaced.
-This checkpoint is not approval to cut over the complete application.
+The installation and cutover gates below remain incomplete.
 
 ## Usable Rust application
 
@@ -33,7 +33,7 @@ write an installed C owner's live browser profile. Each profile has an exclusive
 owner lock. Browser module generations share one live data manager, while views
 pin their original code and independent navigation/session storage. The installed
 profile remains untouched; selecting it requires closing its existing browser
-owners during the final cutover. D-Bus, activation parity, the lightweight Rust
+owners during the final cutover. Activation parity, the lightweight Rust
 frontend module and final publication remain pending. This app uses the same v2
 workspace and leaves v1 untouched.
 
@@ -68,8 +68,8 @@ production workspaces.
   clipping, cursor shapes, palette styles, selection and fractional grids.
   Selection remains in C and borrows Rust cells only during each call.
 - Rust GTK input, windows, clipboard, IME, local/SSH workspace clients and
-  owner forwarding are available in `worminal-rust`. D-Bus, activation parity
-  and the lazy frontend module integration remain pending.
+  owner forwarding and the public window-state D-Bus interface are available in
+  `worminal-rust`. Activation parity and the lazy frontend module remain pending.
 - Rust browser module, versioned loader and generation pinning are implemented.
   `src/gtk/rust_browser_module.h` owns the incompatible opaque ABI; both sides
   generate bindings. Browser chrome/scripts remain shared resources. Complete

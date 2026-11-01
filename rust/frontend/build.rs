@@ -124,6 +124,15 @@ impl Parser {
 }
 fn main() {
     let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("../..");
+    let state = root.join("src/gtk/window_state_protocol.h");
+    println!("cargo:rerun-if-changed={}", state.display());
+    bindgen::Builder::default()
+        .header(state.to_str().unwrap())
+        .allowlist_var("WORMINAL_STATE_.*")
+        .generate()
+        .expect("window-state protocol bindings")
+        .write_to_file(PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("window_state.rs"))
+        .expect("write window-state protocol");
     let version = root.join("src/version.h");
     println!("cargo:rerun-if-changed={}", version.display());
     let version = fs::read_to_string(version).unwrap();

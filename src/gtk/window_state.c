@@ -2,10 +2,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "preview.h"
-
-#define STATE_PATH "/org/worminal/Windows"
-#define STATE_INTERFACE "org.worminal.Windows1"
-#define WINDOWS_TYPE "a(ubbays)"
+#include "window_state_protocol.h"
 
 static GList *tracked;
 static guint next_id, owner;
@@ -16,7 +13,7 @@ static GVariant *
 window_snapshot(void)
 {
 	GVariantBuilder builder;
-	g_variant_builder_init(&builder, G_VARIANT_TYPE(WINDOWS_TYPE));
+	g_variant_builder_init(&builder, G_VARIANT_TYPE(WORMINAL_STATE_WINDOWS));
 	for (GList *item = tracked; item; item = item->next) {
 		App *app = item->data;
 		Page *page = app->active;
@@ -39,8 +36,8 @@ window_state_changed(App *app)
 	if (!bus) return;
 	GVariant *snapshot = window_snapshot();
 	if (!published || !g_variant_equal(published, snapshot)) {
-		g_dbus_connection_emit_signal(bus, NULL, STATE_PATH, STATE_INTERFACE,
-		    "Changed", g_variant_new("(@" WINDOWS_TYPE ")", g_variant_ref(snapshot)), NULL);
+		g_dbus_connection_emit_signal(bus, NULL, WORMINAL_STATE_PATH, WORMINAL_STATE_INTERFACE,
+		    WORMINAL_STATE_SIGNAL, g_variant_new("(@" WORMINAL_STATE_WINDOWS ")", g_variant_ref(snapshot)), NULL);
 		g_clear_pointer(&published, g_variant_unref);
 		published = g_variant_ref(snapshot);
 	}
@@ -55,7 +52,7 @@ get_windows(GDBusConnection *connection, const char *sender, const char *path,
 	(void)connection; (void)sender; (void)path; (void)interface;
 	(void)method; (void)parameters; (void)data;
 	g_dbus_method_invocation_return_value(invocation,
-	    g_variant_new("(@" WINDOWS_TYPE ")", window_snapshot()));
+	    g_variant_new("(@" WORMINAL_STATE_WINDOWS ")", window_snapshot()));
 }
 
 static void
@@ -63,12 +60,8 @@ bus_acquired(GDBusConnection *connection, const char *name, gpointer data)
 {
 	(void)name; (void)data;
 	static const GDBusInterfaceVTable vtable = {.method_call = get_windows};
-	const char *xml = "<node><interface name='" STATE_INTERFACE "'>"
-	    "<method name='GetWindows'><arg direction='out' type='" WINDOWS_TYPE "'/></method>"
-	    "<signal name='Changed'><arg type='" WINDOWS_TYPE "'/></signal>"
-	    "</interface></node>";
-	GDBusNodeInfo *info = g_dbus_node_info_new_for_xml(xml, NULL);
-	if (g_dbus_connection_register_object(connection, STATE_PATH, info->interfaces[0],
+	GDBusNodeInfo *info = g_dbus_node_info_new_for_xml(WORMINAL_STATE_XML, NULL);
+	if (g_dbus_connection_register_object(connection, WORMINAL_STATE_PATH, info->interfaces[0],
 	    &vtable, NULL, NULL, NULL)) {
 		bus = connection;
 		window_state_changed(NULL);
@@ -91,7 +84,7 @@ window_state_add(App *app)
 	tracked = g_list_append(tracked, app);
 	g_signal_connect_swapped(app->window, "notify::is-active", G_CALLBACK(window_state_changed), app);
 	if (!owner) {
-		char *name = g_strdup_printf("org.worminal.Instance.p%ld", (long)getpid());
+		char *name = g_strdup_printf(WORMINAL_STATE_PREFIX "%ld", (long)getpid());
 		owner = g_bus_own_name(G_BUS_TYPE_SESSION, name, G_BUS_NAME_OWNER_FLAGS_NONE,
 		    bus_acquired, NULL, bus_lost, NULL, NULL);
 		g_free(name);

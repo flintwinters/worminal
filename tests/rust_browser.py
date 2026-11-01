@@ -11,9 +11,11 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 from preview import broker_check, Fixture, fixture, profile, service, wayland_display
 from x11 import isolated_display
+from test_window_state import private_bus
 
 ROOT = Path(__file__).resolve().parent.parent
 APP = str(ROOT / 'worminal-rust')
@@ -215,4 +217,6 @@ class RustBrowserTest(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main(verbosity=1)
+    with (private_bus(os.environ) as env,
+          patch.dict(os.environ, {'DBUS_SESSION_BUS_ADDRESS': env['DBUS_SESSION_BUS_ADDRESS']})):
+        unittest.main(verbosity=1)

@@ -1033,6 +1033,7 @@ dependencies = [
 name = "worminal-frontend"
 version = "0.1.0"
 dependencies = [
+ "bindgen",
  "cairo-rs",
  "glib",
  "gtk",

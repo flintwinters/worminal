@@ -30,6 +30,8 @@ use config::Config;
 mod broker;
 #[path = "app_config.rs"]
 mod config;
+#[path = "app_window_state.rs"]
+mod window_state;
 
 fn scope() -> Vec<u8> {
     std::env::var_os("WORMINAL_SHARED_SOCKET_SCOPE")
@@ -176,7 +178,7 @@ struct Page {
     terminal: Option<Terminal>,
     palette: Rc<RefCell<Palette>>,
     title: String,
-    directory: String,
+    directory: PathBuf,
     browser: bool,
     url: String,
     view: Rc<RefCell<Option<crate::browser::Browser>>>,
@@ -188,7 +190,7 @@ struct Record {
     mode: u32,
     cursor: u32,
     title: String,
-    directory: String,
+    directory: PathBuf,
     colors: Vec<String>,
 }
 fn text(body: &mut Payload<'_>) -> io::Result<String> {
@@ -198,6 +200,7 @@ fn text(body: &mut Payload<'_>) -> io::Result<String> {
     )
 }
 struct App {
+    state_id: u32,
     window: gtk::Window,
     notebook: gtk::Notebook,
     status: gtk::Label,
@@ -240,6 +243,7 @@ impl App {
         container.pack_end(&status, false, false, 0);
         window.add(&container);
         let app = Rc::new(Self {
+            state_id: window_state::next_id()?,
             fonts: Rc::new(RefCell::new(Fonts::new(config.font.clone(), 0.0))),
             config,
             window,
@@ -278,6 +282,8 @@ impl App {
                 }
                 glib::Propagation::Proceed
             }));
+        app.window
+            .connect_is_active_notify(|_| window_state::changed());
         app.window.connect_delete_event(
             glib::clone!(@weak app => @default-return glib::Propagation::Proceed, move |_, _| {
                 app.release_browsers(); glib::Propagation::Proceed
@@ -290,9 +296,11 @@ impl App {
                 WINDOWS.with(|windows| { let mut windows = windows.borrow_mut();
                     windows.retain(|owner| !Rc::ptr_eq(owner, &app));
                     if windows.is_empty() { gtk::main_quit(); } });
+                window_state::changed();
             }));
         app.establish(!app.config.attach)?;
         WINDOWS.with(|windows| windows.borrow_mut().push(app.clone()));
+        window_state::changed();
         app.window.show_all();
         app.window.present();
         Ok(app)
@@ -375,6 +383,7 @@ impl App {
             }
         }
         self.message(Some(&format!("Disconnected: {error}. Reconnecting…")));
+        window_state::changed();
         if self.reconnect.borrow().is_none() {
             let weak = Rc::downgrade(self);
             *self.reconnect.borrow_mut() = Some(glib::timeout_add_local(
@@ -472,6 +481,7 @@ impl App {
         } else {
             self.claim_browser(id);
         }
+        window_state::changed();
     }
     fn fit_geometry(&self, terminal: &Terminal) {
         if !self.geometry_pending.get() || !self.window.is_mapped() {
@@ -572,7 +582,13 @@ impl App {
             let mode = body.u32()?;
             let cursor = body.u32()?;
             let title = text(&mut body)?;
-            let directory = text(&mut body)?;
+            let directory = {
+                // Filesystem paths stay as protocol bytes; only their painted labels use lossy Unicode.
+                // New-shell cwd and the public D-Bus byte array must retain the original filename.
+                use std::os::unix::ffi::OsStringExt;
+                let bytes = body.string()?.split(|byte| *byte == 0).next().unwrap();
+                PathBuf::from(std::ffi::OsString::from_vec(bytes.to_vec()))
+            };
             let colors = body.u32()?;
             if id == 0
                 || kind > 1
@@ -667,7 +683,7 @@ impl App {
                     terminal,
                     palette,
                     title: String::new(),
-                    directory: String::new(),
+                    directory: PathBuf::new(),
                     browser: record.browser,
                     url: record.url.clone(),
                     view: Rc::new(RefCell::new(None)),
@@ -698,10 +714,11 @@ impl App {
                     page.title.clone()
                 }
             } else {
-                PathBuf::from(&record.directory)
+                record
+                    .directory
                     .file_name()
                     .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| record.directory.clone())
+                    .unwrap_or_else(|| record.directory.to_string_lossy().into_owned())
             };
             page.label
                 .set_text(if label.is_empty() { "Terminal" } else { &label });
@@ -774,6 +791,7 @@ impl App {
                 }
             }
         }
+        window_state::changed();
         Ok(())
     }
     fn new_tab(self: &Rc<Self>) {
@@ -789,8 +807,8 @@ impl App {
             .iter()
             .find(|page| page.id == self.active.get())
         {
-            if !page.directory.is_empty() {
-                config.cwd = PathBuf::from(&page.directory);
+            if !page.directory.as_os_str().is_empty() {
+                config.cwd = page.directory.clone();
             }
         }
         match config.launch() {
@@ -818,6 +836,7 @@ pub fn run() -> io::Result<()> {
     };
     glib::set_prgname(Some("worminal"));
     gtk::init().map_err(|error| io::Error::other(error.to_string()))?;
+    let _window_state = window_state::start();
     App::open(config)?;
     let _broker = broker::serve(listener)?;
     gtk::main();

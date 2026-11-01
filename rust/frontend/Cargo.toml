@@ -17,6 +17,9 @@ cairo-rs = { workspace = true, features = ["png"] }
 glib.workspace = true
 libc.workspace = true
 
+[build-dependencies]
+bindgen.workspace = true
+
 [[bin]]
 name = "worminal-render-check"
 path = "../../tests/rust_render.rs"

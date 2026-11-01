@@ -94,49 +94,32 @@ Application synchronized redraws hold frames and their tab metadata until comple
 Private Wayland checks use a project-local Weston runtime and matching virtual-seat ABI, without X11 fallback.
 The test compositor supplies explicit keyboard focus for synthetic events; product activation remains compositor policy.
 
-Current jobs: migrate release GTK/v2 application policy to Rust above an instance-based C terminal engine,
-preserving the C X11 rollback and live sessions. The shared instance-based C parser is extracted;
-`src/terminal/engine.h` owns its ABI, ordered effects and caller-time redraw gate. Legacy programs adapt it.
-Development release launches enter Rust, forward to existing C GTK owners and load their frontend lazily;
-development release daemons are Rust; frontend/browser modules and the active installation remain C.
-Rust engine bindings are generated from that header;
-the safe wrapper owns handles and copies damaged rows. `manage.py check-engine` compares the preserved parser,
-checks memory boundaries and Rust ownership, and records CPU/memory costs. Engine checks also run in the routine suite.
-The locked GTK 3/Pango/Cairo/WebKitGTK 4.1 binding probe runs through `manage.py check-rust-platform` on private Xvfb.
-Cargo outputs belong in `build/cargo`. `manage.py preserve-c-baseline` exclusively captures built and installed
-artifacts in `.checks/c-baseline`; never replace that recovery baseline with later builds.
-Rust workspace components now cover v2 framing, validated launches, atomic recovery recipes and local sockets;
-`manage.py check-rust-workspace` compares their encoding and transport with the C implementations.
-Rust daemon foundations cover PTYs, pinned transferred processes, bounded queues and ordered terminal effects;
-`manage.py check-rust-process` exercises child ownership, UTF-8/effect ordering and real zsh recovery.
-Rust frame replication atomically queues complete deltas before advancing its viewport baseline;
-its queue-rejection regression has a compiled counterfactual proof.
-Release `worminald` and its preview alias publish the Rust daemon from build/cargo/release.
-`build/worminald-c-v2` retains the shared-engine C v2 service for compatibility checks and reverse rollback.
-`manage.py check-rust-daemon` checks v2 clients, recovery and independent SSH forwarding;
-`check-rust-daemon-wayland` runs the existing C GTK/WebKit frontend against it on private Wayland.
-Rust manual handoff stages sealed native snapshots and descriptor ownership before commit;
-`manage.py check-rust-handoff` checks both C ABIs, reverse transfers, queued input and failed/interrupted commits.
-The receive operation enforces session isolation; compiled counterfactuals guard staged and committed ownership.
-The candidate supports automatic replacements and legacy bootstrap; committed donors never save empty recipes.
-`manage.py check-rust-upgrade` checks rollback and shell identities; `check-rust-daemon-x11` also preserves live DOM
-through Rust upgrades and C rollback. `worminal-rust` is the usable local/SSH Rust GTK application slice:
-windows, tabs, input/IME, selection, clipboard, resizing and v2 attachment use Rust above the shared C engine.
-`manage.py build-rust-app` builds it; `check-rust-app` checks shells, windows, idle upgrade repaint and native Wayland.
-SSH uses posix_spawn with pinned child identity; its isolated regression rejects GUI-process fork hooks.
-The candidate now shares one Rust owner per display/workspace and lazily loads `rust/browser` through the
-generated opaque ABI in `src/gtk/rust_browser_module.h`. Views pin module generations and move without reload;
-all generations share one live profile manager. Candidate profiles use separate worminal-rust data/cache paths
-with an exclusive owner lock; installed profiles remain untouched until browser owners close at cutover.
-`manage.py check-rust-browser` checks browser navigation, local capabilities, downloads, module updates and Wayland.
-The default release GUI remains C. Next: D-Bus, activation, lazy frontend module integration and full parity/cutover.
-`rust/frontend` owns imported viewports and Pango/Cairo painting; shared key mappings generate from keymap.inc.
-Imported deltas publish at complete frames; C selection borrows Rust cells without retaining them or a parser grid.
-`manage.py check-rust-frontend` compares actual C/Rust GTK painting on private X11 and native Wayland.
-`docs/rust-migration.md` records remaining cutover gates and the measured daemon resource increase.
-`manage.py check-install` stages /usr/local under .checks and verifies artifacts, native SSH input
-and resident module bytes.
-Compare parser CPU with the preserved baseline before expanding the boundary; measured costs remain higher.
+Current jobs: finish the Rust GTK/v2 application above the shared C engine, preserving live sessions and C X11 rollback.
+The default `worminal` launcher and `worminald` are Rust; the default frontend and active installation remain C.
+`worminal-rust` is the usable Rust terminal/SSH/browser application, built through `manage.py build-rust-app`.
+`src/terminal/engine.h` owns terminal semantics and its generated FFI; safe Rust wrappers own handles and copied rows.
+Legacy adapters use the same parser. `manage.py check-engine` covers differential behavior, malformed state and
+sanitizers.
+Rust owns the workspace, PTYs, pinned process identities, bounded queues, persistence and staged handoffs.
+Transferred sessions become independent before commit; committed donors never save empty recovery recipes.
+`check-rust-handoff` and `check-rust-upgrade` check transfer, cancellation and reverse rollback against both C ABIs.
+`build/worminald-c-v2` retains the C v2 transfer peer. Compiled counterfactuals protect non-obvious
+publication/ownership gates.
+The candidate shares one GTK owner per display/workspace and lazily loads `rust/browser` through the generated
+opaque ABI in `src/gtk/rust_browser_module.h`. Views pin generations and move without reloading their DOM.
+Generations share one live profile manager. Candidate profiles use separate worminal-rust data/cache paths
+with an exclusive owner lock; installed profiles remain untouched until their browser owners close at cutover.
+`rust/frontend` owns imported viewports and Pango/Cairo painting; C selection borrows cells without retaining a parser
+grid.
+Key mappings generate from keymap.inc. Window-state D-Bus paths retain original filename bytes; both frontends
+share the authoritative contract in `src/gtk/window_state_protocol.h`.
+`check-rust-app` and `check-rust-browser` exercise real private windows, shells, browser capabilities, modules and
+Wayland;
+`check-rust-frontend` compares exact C/Rust painter pixels. SSH uses posix_spawn without GUI fork hooks and pins child
+identity.
+Next: activation, lazy frontend module integration and complete behavior/resource/cutover verification.
+`docs/rust-migration.md` owns migration readiness, recovery/test commands and measured resource costs.
+Cargo outputs belong in build/cargo; preserve diagnostics and the exclusive C recovery baseline under .checks.
 Audit upgrade lifecycle after the failed live bootstrap killed transferred sessions; the receiver
 session-isolation fix is verified privately and has not been published to the active installation.
 Audit input, rendering, output delivery, and view switching
