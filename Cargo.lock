@@ -981,6 +981,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "worminal-browser"
+version = "0.1.0"
+dependencies = [
+ "glib",
+ "gtk",
+ "libc",
+ "soup3",
+ "webkit2gtk",
+ "worminal-browser-api",
+ "worminal-workspace",
+]
+
+[[package]]
+name = "worminal-browser-api"
+version = "0.1.0"
+dependencies = [
+ "bindgen",
+]
+
+[[package]]
 name = "worminal-config"
 version = "0.1.0"
 
@@ -1018,6 +1038,7 @@ dependencies = [
  "gtk",
  "libc",
  "pango",
+ "worminal-browser-api",
  "worminal-config",
  "worminal-engine",
  "worminal-engine-sys",

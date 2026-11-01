@@ -194,9 +194,9 @@ def check_rust_frontend():
 
 @app.command("build-rust-app")
 def build_rust_app():
-    """Build the usable native Rust terminal application alongside the retained release frontend."""
+    """Build the native Rust terminal/browser application alongside the retained release frontend."""
     native_build.build_targets("worminal-rust")
-    typer.echo("Built ./worminal-rust; connects to the existing local v2 workspace. Installation unchanged.")
+    typer.echo("Built ./worminal-rust (terminal, SSH and browser); existing v2 workspace. Installation unchanged.")
 
 
 @app.command("check-rust-app")
@@ -204,6 +204,13 @@ def check_rust_app():
     """Check the actual Rust app: private shell input, clipboard, tabs and surviving-session reattachment."""
     native_build.build_targets("worminal-rust")
     raise typer.Exit(run([sys.executable, "tests/rust_app.py"]))
+
+
+@app.command("check-rust-browser")
+def check_rust_browser():
+    """Check real Rust browser views, lazy loading, owner forwarding and local-document security privately."""
+    native_build.build_targets("worminal-rust")
+    raise typer.Exit(run([sys.executable, "tests/rust_browser.py"]))
 
 
 @app.command("build-rust-daemon")

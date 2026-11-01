@@ -124,7 +124,12 @@ through Rust upgrades and C rollback. `worminal-rust` is the usable local/SSH Ru
 windows, tabs, input/IME, selection, clipboard, resizing and v2 attachment use Rust above the shared C engine.
 `manage.py build-rust-app` builds it; `check-rust-app` checks shells, windows, idle upgrade repaint and native Wayland.
 SSH uses posix_spawn with pinned child identity; its isolated regression rejects GUI-process fork hooks.
-The release GUI remains C. Next: finish browser, owner/module integration and D-Bus, then verify the full cutover.
+The candidate now shares one Rust owner per display/workspace and lazily loads `rust/browser` through the
+generated opaque ABI in `src/gtk/rust_browser_module.h`. Views pin module generations and move without reload;
+all generations share one live profile manager. Candidate profiles use separate worminal-rust data/cache paths
+with an exclusive owner lock; installed profiles remain untouched until browser owners close at cutover.
+`manage.py check-rust-browser` checks browser navigation, local capabilities, downloads, module updates and Wayland.
+The default release GUI remains C. Next: D-Bus, activation, lazy frontend module integration and full parity/cutover.
 `rust/frontend` owns imported viewports and Pango/Cairo painting; shared key mappings generate from keymap.inc.
 Imported deltas publish at complete frames; C selection borrows Rust cells without retaining them or a parser grid.
 `manage.py check-rust-frontend` compares actual C/Rust GTK painting on private X11 and native Wayland.

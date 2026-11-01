@@ -1,11 +1,34 @@
 //! Resolve targets in the caller's directory before the service receives them.
 use std::{
-    ffi::{CStr, OsStr},
+    ffi::{CStr, OsStr, OsString},
     fs, io,
     net::Ipv6Addr,
     os::unix::ffi::OsStrExt,
     path::Path,
 };
+
+/// Native CLI conversion replaces this process with the service client before GUI initialization.
+pub fn command(arguments: &[OsString]) -> io::Result<()> {
+    if arguments
+        .get(1)
+        .is_none_or(|argument| argument != "--new-browser-tab")
+    {
+        return Ok(());
+    }
+    if arguments.len() != 3 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "usage: worminal --new-browser-tab URL|FILE",
+        ));
+    }
+    use std::{os::unix::process::CommandExt, process::Command};
+    let daemon = CStr::from_bytes_with_nul(worminal_protocol::WORKSPACE_DAEMON).unwrap();
+    let daemon = std::env::current_exe()?.with_file_name(OsStr::from_bytes(daemon.to_bytes()));
+    Err(Command::new(daemon)
+        .arg("--new-browser-tab")
+        .arg(&arguments[2])
+        .exec())
+}
 
 fn authority(bytes: &[u8]) -> bool {
     let end = bytes
@@ -58,6 +81,9 @@ fn authority(bytes: &[u8]) -> bool {
 }
 
 pub fn resolve(text: Option<&OsStr>) -> io::Result<Vec<u8>> {
+    resolve_in(text, &std::env::current_dir()?)
+}
+pub fn resolve_in(text: Option<&OsStr>, directory: &Path) -> io::Result<Vec<u8>> {
     let Some(text) = text else {
         return Ok(
             CStr::from_bytes_with_nul(crate::recovery::format::WORKSPACE_BROWSER_HOME)
@@ -82,11 +108,12 @@ pub fn resolve(text: Option<&OsStr>) -> io::Result<Vec<u8>> {
             return Ok(bytes.to_vec());
         }
     }
-    let path = match fs::canonicalize(Path::new(text)) {
+    let local = directory.join(text);
+    let path = match fs::canonicalize(&local) {
         Ok(path) => path.as_os_str().as_bytes().to_vec(),
         Err(_) => {
             if web
-                && fs::symlink_metadata(text).is_err_and(|error| {
+                && fs::symlink_metadata(&local).is_err_and(|error| {
                     matches!(error.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR))
                 })
             {
@@ -97,7 +124,7 @@ pub fn resolve(text: Option<&OsStr>) -> io::Result<Vec<u8>> {
             if bytes.starts_with(b"/") {
                 bytes.to_vec()
             } else {
-                let mut path = std::env::current_dir()?.as_os_str().as_bytes().to_vec();
+                let mut path = directory.as_os_str().as_bytes().to_vec();
                 path.push(b'/');
                 path.extend_from_slice(bytes);
                 path

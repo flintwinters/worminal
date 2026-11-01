@@ -8,12 +8,9 @@ use gtk::{gdk, prelude::*};
 use std::{
     cell::{Cell, RefCell},
     collections::VecDeque,
-    ffi::{OsStr, OsString},
+    ffi::OsStr,
     io::{self, Read, Write},
-    os::{
-        fd::AsRawFd,
-        unix::{ffi::OsStrExt, net::UnixStream},
-    },
+    os::{fd::AsRawFd, unix::net::UnixStream},
     path::PathBuf,
     rc::Rc,
     thread,
@@ -22,148 +19,18 @@ use std::{
 use worminal_protocol::*;
 use worminal_workspace::socket;
 
+#[path = "app_browser.rs"]
+mod browser_views;
 #[path = "app_shortcuts.rs"]
 mod shortcuts;
 
 thread_local! { static WINDOWS: RefCell<Vec<Rc<App>>> = const { RefCell::new(Vec::new()) }; }
-#[derive(Clone)]
-struct Config {
-    columns: u32,
-    rows: u32,
-    title: String,
-    font: Option<String>,
-    cwd: PathBuf,
-    command: Vec<OsString>,
-    attach: bool,
-    alternate: bool,
-    fixed: bool,
-    output: OsString,
-    line: OsString,
-    master: Option<OsString>,
-}
-impl Config {
-    fn parse() -> io::Result<Option<Self>> {
-        let mut config = Self {
-            columns: 80,
-            rows: 24,
-            title: "Worminal Rust".into(),
-            font: None,
-            cwd: std::env::current_dir()?,
-            command: Vec::new(),
-            attach: false,
-            alternate: true,
-            fixed: false,
-            output: OsString::new(),
-            line: OsString::new(),
-            master: None,
-        };
-        let mut args = std::env::args_os().skip(1);
-        while let Some(arg) = args.next() {
-            match arg.to_str() {
-                Some("--help" | "-h") => {
-                    println!("worminal-rust: Rust GTK terminal\n\
-                        usage: worminal-rust [--master HOST] [--attach] [-aiv] [-f font] [-g COLSxROWS] \
-                        [-T title] [-o file] [-l line] [-e command ...]\n\nCtrl+Shift+T: tab  Ctrl+Shift+N: window  \
-                        Ctrl+Shift+W: close tab\nCtrl+Shift+C/V: clipboard  Alt+1..9: select tab\n\n\
-                        Browser views are still available through worminal.");
-                    return Ok(None);
-                }
-                Some("--version" | "-v") => {
-                    println!("worminal-rust {}", env!("WORMINAL_VERSION"));
-                    return Ok(None);
-                }
-                Some("--attach") => config.attach = true,
-                Some("-a") => config.alternate = false,
-                Some("-i") => config.fixed = true,
-                Some("-e" | "--") => {
-                    config.command.extend(args);
-                    break;
-                }
-                Some("--master" | "-T" | "-t" | "-f" | "-g" | "-o" | "-l") => {
-                    let value = args
-                        .next()
-                        .ok_or_else(|| io::Error::other("option requires a value"))?;
-                    match arg.to_str().unwrap() {
-                        "--master" => {
-                            config.master = Some(value);
-                            config.cwd = PathBuf::new();
-                        }
-                        "-T" | "-t" => config.title = value.to_string_lossy().into_owned(),
-                        "-f" => config.font = Some(value.to_string_lossy().into_owned()),
-                        "-o" => config.output = value,
-                        "-l" => config.line = value,
-                        _ => {
-                            let text = value.to_string_lossy();
-                            let (cols, rows) = text
-                                .split_once('x')
-                                .ok_or_else(|| io::Error::other("use COLSxROWS"))?;
-                            config.columns = cols
-                                .parse()
-                                .map_err(|_| io::Error::other("invalid columns"))?;
-                            config.rows =
-                                rows.parse().map_err(|_| io::Error::other("invalid rows"))?;
-                            if config.columns == 0
-                                || config.columns > WORKSPACE_MAX_COLS
-                                || config.rows == 0
-                                || config.rows > WORKSPACE_MAX_ROWS
-                            {
-                                return Err(io::Error::other("invalid geometry"));
-                            }
-                        }
-                    }
-                }
-                Some(value) if value.starts_with('-') => {
-                    return Err(io::Error::other(format!(
-                        "unsupported option {value}; see --help"
-                    )))
-                }
-                _ => {
-                    config.command.push(arg);
-                    config.command.extend(args);
-                    break;
-                }
-            }
-        }
-        Ok(Some(config))
-    }
-    fn launch(&self) -> io::Result<Vec<u8>> {
-        // Remote shells inherit the remote service's environment, never local PATH/HOME or restore markers.
-        let environment: Vec<_> = if self.master.is_none() {
-            std::env::vars_os().collect()
-        } else {
-            Vec::new()
-        };
-        let mut output = Buffer::default();
-        for value in [
-            self.columns,
-            self.rows,
-            u32::from(self.alternate),
-            self.command.len() as u32,
-            environment.len() as u32,
-        ] {
-            output.put_u32(value)?;
-        }
-        for value in [
-            self.title.as_bytes(),
-            self.cwd.as_os_str().as_bytes(),
-            self.line.as_bytes(),
-            self.output.as_bytes(),
-            b"",
-        ] {
-            output.put_string(value)?;
-        }
-        for arg in &self.command {
-            output.put_string(arg.as_bytes())?;
-        }
-        for (key, value) in environment {
-            let mut entry = key.into_encoded_bytes();
-            entry.push(b'=');
-            entry.extend_from_slice(value.as_bytes());
-            output.put_string(&entry)?;
-        }
-        Ok(output.into_bytes())
-    }
-}
+use config::Config;
+#[path = "app_broker.rs"]
+mod broker;
+#[path = "app_config.rs"]
+mod config;
+
 fn scope() -> Vec<u8> {
     std::env::var_os("WORMINAL_SHARED_SOCKET_SCOPE")
         .unwrap_or_default()
@@ -311,6 +178,8 @@ struct Page {
     title: String,
     directory: String,
     browser: bool,
+    url: String,
+    view: Rc<RefCell<Option<crate::browser::Browser>>>,
 }
 struct Record {
     id: u32,
@@ -327,12 +196,6 @@ fn text(body: &mut Payload<'_>) -> io::Result<String> {
         String::from_utf8_lossy(body.string()?.split(|byte| *byte == 0).next().unwrap())
             .into_owned(),
     )
-}
-fn print(bytes: &[u8]) -> io::Result<()> {
-    // Printer streams must be observable immediately, including stdout pipes without line endings.
-    let mut output = io::stdout().lock();
-    output.write_all(bytes)?;
-    output.flush()
 }
 struct App {
     window: gtk::Window,
@@ -355,6 +218,14 @@ struct App {
     pending_tabs: Cell<u32>,
 }
 impl App {
+    fn print(&self, bytes: &[u8]) -> io::Result<()> {
+        if let Some(stream) = &self.config.stream {
+            let mut output = &**stream;
+            output.write_all(bytes)?;
+            output.flush()?;
+        }
+        Ok(())
+    }
     fn open(config: Config) -> io::Result<Rc<Self>> {
         let window = gtk::Window::new(gtk::WindowType::Toplevel);
         window.set_title(&config.title);
@@ -399,6 +270,18 @@ impl App {
         app.window.connect_key_press_event(
             glib::clone!(@weak app => @default-return glib::Propagation::Proceed,
             move |_, event| app.shortcut(event).into()),
+        );
+        app.window.connect_focus_in_event(glib::clone!(@weak app => @default-return glib::Propagation::Proceed,
+            move |_, _| {
+                if app.pages.borrow().iter().any(|page| page.id == app.active.get() && page.browser) {
+                    app.claim_browser(app.active.get());
+                }
+                glib::Propagation::Proceed
+            }));
+        app.window.connect_delete_event(
+            glib::clone!(@weak app => @default-return glib::Propagation::Proceed, move |_, _| {
+                app.release_browsers(); glib::Propagation::Proceed
+            }),
         );
         app.window
             .connect_destroy(glib::clone!(@weak app => move |_| {
@@ -459,7 +342,9 @@ impl App {
             WIRE_CAPABILITIES,
             WIRE_FEATURE_COPY_ROWS.to_be_bytes().to_vec(),
         );
-        if launch {
+        if launch && self.config.browser_url.is_some() {
+            self.open_browser(self.config.browser_url.as_deref().unwrap());
+        } else if launch {
             self.send(0, WIRE_HELLO, self.config.launch()?);
         } else {
             self.send(0, WIRE_ATTACH, Vec::new());
@@ -584,6 +469,8 @@ impl App {
             );
             terminal.select();
             terminal.widget().grab_focus();
+        } else {
+            self.claim_browser(id);
         }
     }
     fn fit_geometry(&self, terminal: &Terminal) {
@@ -626,7 +513,7 @@ impl App {
                 }
             }
             Action::Print(bytes) => {
-                if let Err(error) = print(&bytes) {
+                if let Err(error) = self.print(&bytes) {
                     self.message(Some(&error.to_string()));
                 }
             }
@@ -650,7 +537,7 @@ impl App {
             }
             WIRE_BELL => self.window.error_bell(),
             WIRE_PRINT => {
-                print(&packet.body)?;
+                self.print(&packet.body)?;
             }
             WIRE_CLIPBOARD => {
                 if self
@@ -711,6 +598,7 @@ impl App {
         }
         body.finish()?;
         let initial_claim = self.initial_claim.replace(false);
+        let mut replaced_active = false;
         self.syncing.set(true);
         let obsolete: Vec<_> = self
             .pages
@@ -724,6 +612,7 @@ impl App {
             .cloned()
             .collect();
         for page in obsolete {
+            replaced_active |= page.id == self.active.get();
             self.pages
                 .borrow_mut()
                 .retain(|current| current.id != page.id);
@@ -762,8 +651,14 @@ impl App {
                 let widget: gtk::Widget = if let Some(terminal) = &terminal {
                     terminal.widget().clone().upcast()
                 } else {
-                    gtk::Label::new(Some("Browser view: use the existing worminal application."))
-                        .upcast()
+                    let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
+                    let claim = gtk::Button::with_label("Show browser here");
+                    let id = record.id;
+                    claim.connect_clicked(
+                        glib::clone!(@weak self as app => move |_| app.claim_browser(id)),
+                    );
+                    container.pack_start(&claim, true, true, 0);
+                    container.upcast()
                 };
                 let page = Page {
                     id: record.id,
@@ -774,6 +669,8 @@ impl App {
                     title: String::new(),
                     directory: String::new(),
                     browser: record.browser,
+                    url: record.url.clone(),
+                    view: Rc::new(RefCell::new(None)),
                 };
                 self.pages.borrow_mut().push(page.clone());
                 self.notebook.append_page(&page.widget, Some(&page.label));
@@ -791,8 +688,15 @@ impl App {
             if let Some(terminal) = &page.terminal {
                 terminal.configure(record.mode, record.cursor, palette_changed);
             }
+            if record.browser {
+                self.browser_metadata(record);
+            }
             let label = if record.browser {
-                record.title.clone()
+                if page.title.is_empty() {
+                    record.title.clone()
+                } else {
+                    page.title.clone()
+                }
             } else {
                 PathBuf::from(&record.directory)
                     .file_name()
@@ -814,7 +718,9 @@ impl App {
                 .iter_mut()
                 .find(|page| page.id == record.id)
             {
-                page.title = record.title.clone();
+                if !record.browser || page.title.is_empty() {
+                    page.title = record.title.clone();
+                }
                 page.directory = record.directory.clone();
             }
         }
@@ -837,8 +743,12 @@ impl App {
             .cloned();
         if let Some(page) = page {
             self.message(None);
-            // A replacement socket has no controller yet, even when the selected identity is unchanged.
-            let changed = self.active.get() != chosen || requested != 0 || initial_claim;
+            // Reclaim terminal controllers after reconnect, but preserve the existing local browser owner.
+            // A mirror must not pull its live DOM into another window just because its socket was replaced.
+            let changed = self.active.get() != chosen
+                || requested != 0
+                || replaced_active
+                || (initial_claim && (!page.browser || page.view.borrow().is_some()));
             self.syncing.set(true);
             self.notebook
                 .set_current_page(self.notebook.page_num(&page.widget));
@@ -872,6 +782,7 @@ impl App {
         config.title = "Worminal".into();
         config.output.clear();
         config.line.clear();
+        config.browser_url = None;
         if let Some(page) = self
             .pages
             .borrow()
@@ -893,15 +804,22 @@ impl App {
     }
 }
 pub fn run() -> io::Result<()> {
-    let Some(config) = Config::parse()? else {
+    let arguments: Vec<_> = std::env::args_os().collect();
+    worminal_workspace::browser_target::command(&arguments)?;
+    let request = worminal_workspace::broker::Request::capture(arguments)?;
+    let Some(config) = Config::parse(&request)? else {
         return Ok(());
     };
     if config.master.is_none() {
         ensure()?;
     }
+    let Some(listener) = broker::forward(&request)? else {
+        return Ok(());
+    };
     glib::set_prgname(Some("worminal"));
     gtk::init().map_err(|error| io::Error::other(error.to_string()))?;
     App::open(config)?;
+    let _broker = broker::serve(listener)?;
     gtk::main();
     Ok(())
 }

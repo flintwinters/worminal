@@ -1,4 +1,5 @@
 //! Application state and local transport shared by the Rust service and frontend.
+pub mod broker;
 pub mod browser_target;
 pub mod handoff;
 pub mod launch;

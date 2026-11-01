@@ -10,6 +10,7 @@ worminal-engine-sys = { path = "../engine-sys" }
 worminal-protocol = { path = "../protocol" }
 worminal-config = { path = "../config" }
 worminal-workspace = { path = "../workspace" }
+worminal-browser-api = { path = "../browser-api" }
 gtk.workspace = true
 pango.workspace = true
 cairo-rs = { workspace = true, features = ["png"] }

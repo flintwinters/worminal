@@ -1,5 +1,6 @@
 //! Rust-owned frontend state. The release module remains C until its replacement is complete.
 pub mod app;
+mod browser;
 pub mod fonts;
 mod graphics_ffi;
 pub mod input;

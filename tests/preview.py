@@ -46,8 +46,8 @@ class Fixture(BaseHTTPRequestHandler):
 
 
 @contextmanager
-def fixture(tls=False):
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Fixture)
+def fixture(tls=False, handler=Fixture):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     if tls:
         certificates = ROOT / ".checks/preview-tls"
         certificates.mkdir(exist_ok=True)
@@ -251,9 +251,9 @@ def startup_check(env, log):
                     raise RuntimeError("Failed GUI startup created an orphan service tab")
 
 
-def broker_check(env, url, log, daemon):
+def broker_check(env, url, log, daemon, *, rust=False):
     """Independent launches must share the GTK owner and the live DOM, not reload a URL."""
-    executable = str(ROOT / "worminal")
+    executable = str(ROOT / ("worminal-rust" if rust else "worminal"))
     title = f"Broker terminal {os.getpid()}"
     first = subprocess.Popen([executable, "-T", title, "-o", "-", "-e", "/bin/sh", "-c",
                               "stty raw -echo; printf BROKER_READY; exec cat"],
@@ -285,7 +285,7 @@ def broker_check(env, url, log, daemon):
     try:
         read(first.stdout, b"BROKER_READY")
         mappings = Path(f"/proc/{first.pid}/maps").read_text()
-        if "frontend.so" not in mappings:
+        if not rust and "frontend.so" not in mappings:
             raise RuntimeError("Window owner did not load the GTK frontend module")
         if "libwebkit2gtk" in mappings:
             raise RuntimeError("Terminal-only frontend loaded WebKit before opening a browser")

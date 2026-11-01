@@ -34,10 +34,6 @@ pub fn hash(key: &[u8]) -> io::Result<Vec<u8>> {
     }
 }
 
-pub fn current_directory() -> io::Result<Vec<u8>> {
-    unsafe { glib_bytes(glib_sys::g_get_current_dir()) }
-}
-
 pub fn timing(phase: &str) {
     if std::env::var_os("WORMINAL_TRACE_TIMING").is_some() {
         let now = unsafe { glib_sys::g_get_monotonic_time() } * 1000;

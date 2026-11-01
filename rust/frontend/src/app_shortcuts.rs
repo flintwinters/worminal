@@ -21,11 +21,31 @@ impl App {
             return true;
         }
         let value = event.keyval().to_lower();
+        if let Some(browser) = self.browser(self.active.get()) {
+            if browser.shortcut(event) {
+                return true;
+            }
+        }
         let state = event.state() & (Mod::CONTROL_MASK | Mod::SHIFT_MASK | Mod::MOD1_MASK);
         let control_shift = Mod::CONTROL_MASK | Mod::SHIFT_MASK;
         if state == Mod::CONTROL_MASK && [key::t, key::w].contains(&value) {
             if value == key::t {
-                self.new_tab();
+                if self
+                    .pages
+                    .borrow()
+                    .iter()
+                    .any(|page| page.id == self.active.get() && page.browser)
+                {
+                    let home = std::ffi::CStr::from_bytes_with_nul(
+                        worminal_workspace::WORKSPACE_BROWSER_HOME,
+                    )
+                    .unwrap()
+                    .to_str()
+                    .unwrap();
+                    self.open_browser(home);
+                } else {
+                    self.new_tab();
+                }
             } else {
                 self.send(self.active.get(), WIRE_CLOSE, Vec::new());
             }
@@ -60,6 +80,7 @@ impl App {
                     config.title = "Worminal Rust".into();
                     config.output.clear();
                     config.line.clear();
+                    config.browser_url = None;
                     if let Err(error) = Self::open(config) {
                         self.message(Some(&error.to_string()));
                     }
@@ -116,6 +137,11 @@ impl App {
             .collect();
         for terminal in terminals {
             terminal.zoom();
+        }
+        for page in self.pages.borrow().iter() {
+            if let Some(browser) = page.view.borrow().as_ref() {
+                browser.zoom(zoom);
+            }
         }
         true
     }

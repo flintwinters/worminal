@@ -16,6 +16,9 @@ VERSION = next(line.split('"')[1] for line in (ROOT / "src/version.h").read_text
 BROWSER_ABI = next(line.split()[2] for line in (ROOT / "src/gtk/browser_module.h").read_text().splitlines()
                    if line.startswith("#define WORMINAL_BROWSER_ABI "))
 BROWSER_MODULE = f"browser-v{BROWSER_ABI}.so"
+RUST_BROWSER_MODULE = next(line.split('"')[1]
+                          for line in (ROOT / "src/gtk/rust_browser_module.h").read_text().splitlines()
+                          if line.startswith("#define WORMINAL_RUST_BROWSER_FILE "))
 ENGINE_DEFAULTS = "terminal/engine_defaults.c"
 ENGINE = ("terminal/engine.c", ENGINE_DEFAULTS, "terminal/engine_parser.c",
           "terminal/engine_events.c", "terminal/engine_sync.c", "terminal/engine_snapshot.c",
@@ -136,7 +139,8 @@ class Builder:
             self.target("build/libworminal_engine.a")
         invoke(["cargo", "build", "--locked", "--release", "--quiet", "-p", package,
                 *(["--bin", binary] if binary else [])])
-        return ROOT / "build/cargo/release" / (binary or package)
+        artifact = "libworminal_browser.so" if package == "worminal-browser" else binary or package
+        return ROOT / "build/cargo/release" / artifact
 
     def rust_program(self, output, package, binary=None):
         source = self.rust_artifact(package, binary) if binary else self.rust_artifact(package)
@@ -154,7 +158,16 @@ class Builder:
 
     def target(self, target):
         if target == "worminal-rust":
+            self.target("build/" + RUST_BROWSER_MODULE)
             self.rust_program(target, "worminal-frontend", "worminal-rust")
+        elif target == "build/" + RUST_BROWSER_MODULE:
+            source = self.rust_artifact("worminal-browser")
+            destination = ROOT / target
+            if not destination.exists() or destination.read_bytes() != source.read_bytes():
+                temporary = destination.with_suffix(".pending")
+                shutil.copyfile(source, temporary)
+                temporary.chmod(0o755)
+                temporary.replace(destination)
         elif target == "build/libworminal_engine.a":
             objects = []
             for source in ENGINE:

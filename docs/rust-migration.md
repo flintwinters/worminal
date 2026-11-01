@@ -1,31 +1,48 @@
 # Rust migration readiness
 
-The development release launcher and daemon are Rust. GTK terminal and browser
-modules remain C. The active `/usr/local` installation has not been replaced.
+The development release launcher and daemon are Rust. The default `worminal`
+still loads the C frontend; `worminal-rust` runs the Rust GTK application and
+lazy Rust WebKit module. The active `/usr/local` installation has not been replaced.
 This checkpoint is not approval to cut over the complete application.
 
-## Usable Rust terminal slice
+## Usable Rust application
 
 Run `./worminal-rust` from the project directory. Use `./worminal-rust --attach`
 to view existing local v2 sessions without creating another shell, or
 `./worminal-rust -e COMMAND ...` to launch a command.
 Use `./worminal-rust --master user@host` for a remote workspace through SSH.
+Use `./worminal-rust --surf URL|FILE` (or `--browser`) for a browser window.
+The native `--new-browser-tab URL|FILE` command converts its calling terminal tab.
 
 The native Rust app supports terminal windows and tabs, keyboard/IME input,
 clipboard and selection, scrolling, zoom, resizing, and reconnecting to the
 workspace daemon. Closing a window leaves its shells running; closing a tab
-with Ctrl+W or Ctrl+Shift+W closes that terminal. Ctrl+T / Ctrl+Shift+T opens
-a tab, Ctrl+Shift+N opens a window, and Ctrl+Tab cycles tabs. Plain Ctrl+N
+with Ctrl+W or Ctrl+Shift+W closes that tab. Ctrl+T opens a tab of the current
+kind; Ctrl+Shift+T always opens a terminal. Ctrl+Shift+N opens a window, and Ctrl+Tab cycles tabs. Plain Ctrl+N
 is sent to the terminal application.
 
-Browser views are not wired into this executable yet. Existing browser
-records appear as placeholders; use `worminal` for those workflows. D-Bus and
-the lightweight owner/module integration are also pending. `/usr/local` remains
-unchanged. This slice uses the same local v2 workspace and leaves v1 untouched.
+Separate native launches join one Rust owner per display/workspace. Browser
+tabs retain their live DOM when moved between its windows and across daemon
+replacement. Ctrl+K opens the location entry; Ctrl+F finds text, Ctrl+R reloads,
+and Alt+Left/Right navigates history. Downloads use the native save dialog.
+Selected local HTML retains the established top-frame-only credential and
+bounded read APIs; independent documents and subframes receive no capability.
+
+The candidate uses `worminal-rust` under XDG data/cache directories so it cannot
+write an installed C owner's live browser profile. Each profile has an exclusive
+owner lock. Browser module generations share one live data manager, while views
+pin their original code and independent navigation/session storage. The installed
+profile remains untouched; selecting it requires closing its existing browser
+owners during the final cutover. D-Bus, activation parity, the lightweight Rust
+frontend module and final publication remain pending. This app uses the same v2
+workspace and leaves v1 untouched.
 
 Internal maintenance: `manage.py build-rust-app` builds the native executable;
 `manage.py check-rust-app` checks real PTY input, tabs/windows, clipboard, resize,
 shell survival, idle repaint across daemon replacement and native Wayland.
+`manage.py check-rust-browser` checks real browser navigation, owner forwarding,
+live DOM through daemon upgrades, module generations, shared session cookies,
+local-document security, explicit file reload, downloads and native Wayland frames.
 
 The original C `worminal-x11` and `worminald-x11` remain v1 rollback programs.
 `build/worminald-c-v2` builds the shared-engine C service for reverse transfers
@@ -50,12 +67,14 @@ production workspaces.
   with the C frontend on private X11 and Wayland, including Unicode fallback,
   clipping, cursor shapes, palette styles, selection and fractional grids.
   Selection remains in C and borrows Rust cells only during each call.
-- Rust GTK input, windows, clipboard, IME and local/SSH workspace clients are
-  available in `worminal-rust`. D-Bus, activation parity and the lazy
-  owner/module integration remain pending. The release frontend is still C.
-- Rust browser module, versioned loader, generation pinning and security:
-  not ported. Existing C ABI, resources, profiles and security regressions
-  remain authoritative.
+- Rust GTK input, windows, clipboard, IME, local/SSH workspace clients and
+  owner forwarding are available in `worminal-rust`. D-Bus, activation parity
+  and the lazy frontend module integration remain pending.
+- Rust browser module, versioned loader and generation pinning are implemented.
+  `src/gtk/rust_browser_module.h` owns the incompatible opaque ABI; both sides
+  generate bindings. Browser chrome/scripts remain shared resources. Complete
+  security/media/permission parity and final profile publication still need the
+  full regression audit; the default release frontend remains C.
 - Private staged installation: `manage.py check-install` verifies artifact
   bytes, modes, native CLI/SSH input, daemon executable path and resident
   frontend/browser bytes under `.checks/install-stage/usr/local`.
