@@ -585,6 +585,8 @@ terminal_key(Terminal *t, GdkEventKey *e)
 	}
 	if (e->state & GDK_CONTROL_MASK) {
 		gunichar c = gdk_keyval_to_unicode(e->keyval);
+		/* Ctrl+/ is the conventional alias for Ctrl+_ (US). */
+		if (c == '/') c = '_';
 		if ((c >= '@' && c <= '_') || (c >= 'a' && c <= 'z') || c == ' ') {
 			char byte = c == ' ' ? 0 : c & 31;
 			if (e->state & GDK_MOD1_MASK) input(t, "\033", 1);

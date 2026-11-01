@@ -278,6 +278,9 @@ class NavigationKeysTest(unittest.TestCase):
 
     def check_navigation_keys(self, connection):
         cases = (
+            ("slash", b"/"),
+            ("ctrl+slash", b"\x1f"),
+            ("ctrl+alt+slash", b"\033\x1f"),
             ("Delete", b"\033[3~"),
             ("ctrl+Delete", b"\033[3;5~"),
             ("shift+Delete", b"\033[3;2~"),
