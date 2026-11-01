@@ -9,6 +9,7 @@ fn main() {
         let header = root.join("src/gtk").join(header);
         println!("cargo:rerun-if-changed={}", header.display());
         bindgen::Builder::default()
+            .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
             .header(header.to_str().unwrap())
             .allowlist_type("Worminal.*FrontendEntry")
             .allowlist_var("WORMINAL_.*FRONTEND_.*")

@@ -1,26 +1,34 @@
-//! Audited initial daemon spawn. Only called before GTK creates threads; the daemon outlives its GUI launcher.
+//! Local daemons start after display validation through the shared GUI-safe spawn boundary.
 use std::{
+    ffi::CString,
+    fs::OpenOptions,
     io,
-    os::unix::process::CommandExt,
+    os::{fd::AsFd, unix::ffi::OsStrExt},
     path::Path,
-    process::{Child, Command, Stdio},
+    sync::mpsc::{self, Receiver},
+    thread,
 };
 
-pub fn daemon(path: &Path) -> io::Result<Child> {
-    let mut command = Command::new(path);
-    command
-        .arg("--serve")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setsid() < 0 {
-                Err(io::Error::last_os_error())
-            } else {
-                Ok(())
-            }
-        });
-    }
-    command.spawn()
+pub fn daemon(path: &Path) -> io::Result<Receiver<io::Result<i32>>> {
+    let null = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/null")?;
+    let arguments = [
+        CString::new(path.as_os_str().as_bytes())?,
+        CString::new("--serve").unwrap(),
+    ];
+    let pid = worminal_workspace::spawn::start(
+        &arguments,
+        &[(null.as_fd(), 0), (null.as_fd(), 1), (null.as_fd(), 2)],
+        true,
+    )?;
+    let (sender, receiver) = mpsc::sync_channel(1);
+    // Never kill a successful daemon spawn if waiter setup fails: it may already own restored shells.
+    thread::Builder::new()
+        .name("worminal-daemon-reap".into())
+        .spawn(move || {
+            let _ = sender.send(worminal_workspace::spawn::wait(pid));
+        })?;
+    Ok(receiver)
 }

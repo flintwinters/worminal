@@ -1,8 +1,15 @@
 //! Caller-specific launch configuration; forwarding never changes the GTK owner's environment.
-use std::{ffi::OsString, io, os::unix::ffi::OsStrExt, path::PathBuf, rc::Rc};
+use std::{
+    ffi::OsString,
+    io,
+    os::{fd::AsFd, unix::ffi::OsStrExt},
+    path::PathBuf,
+    rc::Rc,
+};
 use worminal_protocol::*;
 #[derive(Clone)]
 pub(super) struct Config {
+    pub(super) candidate: bool,
     pub(super) columns: u32,
     pub(super) rows: u32,
     pub(super) title: String,
@@ -17,7 +24,7 @@ pub(super) struct Config {
     pub(super) master: Option<OsString>,
     pub(super) browser_url: Option<String>,
     pub(super) environment: Vec<(OsString, OsString)>,
-    pub(super) stream: Option<Rc<std::fs::File>>,
+    pub(super) stream: Rc<std::fs::File>,
     pub(super) class: Option<String>,
     pub(super) name: Option<String>,
     pub(super) zoom: f64,
@@ -26,11 +33,26 @@ fn argument(message: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> io:
     io::Error::new(io::ErrorKind::InvalidInput, message)
 }
 impl Config {
-    pub(super) fn parse(request: &worminal_workspace::broker::Request) -> io::Result<Option<Self>> {
+    pub(super) fn parse(
+        request: &worminal_workspace::broker::Request,
+        candidate: bool,
+    ) -> io::Result<Option<Self>> {
+        let product = if candidate {
+            "worminal-rust"
+        } else {
+            "worminal"
+        };
+        let version = env!("WORMINAL_VERSION");
         let mut config = Self {
+            candidate,
             columns: 80,
             rows: 24,
-            title: "Worminal Rust".into(),
+            title: if candidate {
+                "Worminal Rust"
+            } else {
+                "Worminal"
+            }
+            .into(),
             font: None,
             cwd: request.directory.clone(),
             command: Vec::new(),
@@ -41,7 +63,9 @@ impl Config {
             line: OsString::new(),
             master: None,
             browser_url: None,
-            stream: Some(Rc::new(request.output.try_clone()?)),
+            stream: Rc::new(std::fs::File::from(
+                io::stdout().as_fd().try_clone_to_owned()?,
+            )),
             class: None,
             name: None,
             zoom: 0.0,
@@ -64,16 +88,18 @@ impl Config {
         while let Some(arg) = args.next() {
             match arg.to_str() {
                 Some("--help" | "-h") => {
-                    println!("worminal-rust: Rust GTK terminal\n\
-                        usage: worminal-rust [--master HOST] [--attach] [-aiv] [-f font] [-g COLSxROWS] \
+                    println!("{product} {version}\n\n\
+                        usage: {product} [--master HOST] [--attach] [-aiv] [-f font] [-g COLSxROWS] \
                         [-c class] [-n name] [-T title] [-o file] [-l line] [-e command ...]\n\n\
                         Ctrl+Shift+T: tab  Ctrl+Shift+N: window  \
                         Ctrl+Shift+W: close tab\nCtrl+Shift+C/V: clipboard  Alt+1..9: select tab\n\n\
-                        --browser URL|FILE: open a browser tab in this window");
+                        --surf URL|FILE: open a browser window (--browser is an alias)\n\
+                        --new-browser-tab URL|FILE: replace this terminal with a browser\n\
+                        -h | --help: show help\n-v | --version: show version");
                     return Ok(None);
                 }
                 Some("--version" | "-v") => {
-                    println!("worminal-rust {}", env!("WORMINAL_VERSION"));
+                    println!("{product} {version}");
                     return Ok(None);
                 }
                 Some("--attach") => config.attach = true,
@@ -137,10 +163,11 @@ impl Config {
                 }
             }
         }
-        // Browser launches have no printer stream. Retaining the forwarded pipe would prevent
-        // the short-lived caller's stdout reader from seeing EOF after a successful launch.
-        if config.browser_url.is_some() {
-            config.stream = None;
+        // Only -o - transfers the caller's stream. Ordinary forwarded launches use the owner's
+        // stdout, including future Ctrl+Print, so their caller's output reader can observe EOF.
+        // Keeping a default terminal's transferred pipe open deadlocks communicate()/shell pipelines.
+        if config.output == "-" {
+            config.stream = Rc::new(request.output.try_clone()?);
         }
         Ok(Some(config))
     }

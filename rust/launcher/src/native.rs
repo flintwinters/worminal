@@ -66,6 +66,7 @@ pub fn enter(
     args: Vec<OsString>,
     listener: Option<UnixListener>,
     frontend: Frontend,
+    candidate: bool,
 ) -> io::Result<()> {
     let executable = std::env::current_exe()?;
     let directory = executable
@@ -133,7 +134,16 @@ pub fn enter(
                 *mut libc::c_void,
                 rust_bindings::WorminalRustFrontendEntry,
             >(entry)
-            .unwrap()(args.len() as i32, pointers.as_ptr().cast(), fd),
+            .unwrap()(
+                args.len() as i32,
+                pointers.as_ptr().cast(),
+                fd,
+                if candidate {
+                    rust_bindings::WORMINAL_RUST_FRONTEND_CANDIDATE
+                } else {
+                    0
+                },
+            ),
         }
     };
     // Keep argv storage alive through any native exit callbacks. The frontend now owns its listener.

@@ -6,6 +6,7 @@ pub mod launch;
 pub mod recovery;
 pub mod rights;
 pub mod socket;
+pub mod spawn;
 pub mod ssh;
 pub use recovery::format::{PROCESS_SHELL, PROCESS_STTY, PROCESS_TERM_NAME};
 pub use recovery::format::{WORKSPACE_BROWSER_HOME, WORKSPACE_BROWSER_SCHEME};

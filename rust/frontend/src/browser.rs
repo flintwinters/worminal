@@ -37,6 +37,21 @@ thread_local! {
     // Code remains resident for framework callbacks after the last view/context is released.
     static MODULES: RefCell<Vec<Rc<Module>>> = const { RefCell::new(Vec::new()) };
     static PROFILE: RefCell<Option<Profile>> = const { RefCell::new(None) };
+    static PROFILE_NAME: RefCell<&'static [u8]> = const { RefCell::new(WORMINAL_BROWSER_PROFILE_CANDIDATE) };
+}
+pub(crate) fn configure_profile(candidate: bool) -> io::Result<()> {
+    let name = if candidate {
+        WORMINAL_BROWSER_PROFILE_CANDIDATE.as_slice()
+    } else {
+        WORMINAL_BROWSER_PROFILE_STABLE.as_slice()
+    };
+    PROFILE_NAME.with(|slot| {
+        if *slot.borrow() != name && PROFILE.with(|profile| profile.borrow().is_some()) {
+            return Err(io::Error::other("cannot change a live browser profile"));
+        }
+        *slot.borrow_mut() = name;
+        Ok(())
+    })
 }
 type Callback = Rc<dyn Fn(u32, &str)>;
 struct Inner {
@@ -116,6 +131,7 @@ fn module() -> io::Result<Rc<Module>> {
             || api.navigate.is_none()
             || api.shortcut.is_none()
             || api.zoom.is_none()
+            || api.background.is_none()
             || api.destroy.is_none()
             || api.retire.is_none()
         {
@@ -146,10 +162,15 @@ fn profile(module: &Module) -> io::Result<glib::Object> {
         if let Some(profile) = slot.borrow().as_ref() {
             return Ok(profile.object.clone());
         }
-        // The candidate must not contend with an installed C owner's live WebKit profile.
-        // Publication will select the legacy path only after those browser owners close.
-        let data = glib::user_data_dir().join("worminal-rust");
-        let cache = glib::user_cache_dir().join("worminal-rust");
+        // Launch policy fixes the profile once per owner; forwarded callers cannot change it.
+        let name = PROFILE_NAME.with(|slot| {
+            CStr::from_bytes_with_nul(*slot.borrow())
+                .unwrap()
+                .to_str()
+                .unwrap()
+        });
+        let data = glib::user_data_dir().join(name);
+        let cache = glib::user_cache_dir().join(name);
         for directory in [&data, &cache] {
             std::fs::DirBuilder::new()
                 .recursive(true)
@@ -162,7 +183,14 @@ fn profile(module: &Module) -> io::Result<glib::Object> {
             .read(true)
             .write(true)
             .mode(0o600)
-            .open(data.join("owner.lock"))?;
+            .open(
+                data.join(
+                    CStr::from_bytes_with_nul(WORMINAL_BROWSER_PROFILE_LOCK)
+                        .unwrap()
+                        .to_str()
+                        .unwrap(),
+                ),
+            )?;
         if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
             return Err(io::Error::other(
                 "Rust browser profile is already open in another owner",
@@ -253,6 +281,17 @@ impl Browser {
     pub fn zoom(&self, zoom: f64) {
         unsafe {
             self.0.module.api.zoom.unwrap()(self.0.handle, zoom);
+        }
+    }
+    pub fn background(&self, color: gtk::gdk::RGBA) {
+        unsafe {
+            self.0.module.api.background.unwrap()(
+                self.0.handle,
+                color.red(),
+                color.green(),
+                color.blue(),
+                color.alpha(),
+            );
         }
     }
 }

@@ -22,6 +22,9 @@ RUST_BROWSER_MODULE = next(line.split('"')[1]
 RUST_FRONTEND_MODULE = next(line.split('"')[1]
                            for line in (ROOT / "src/gtk/rust_frontend_module.h").read_text().splitlines()
                            if line.startswith("#define WORMINAL_RUST_FRONTEND_FILE "))
+RUST_FRONTEND_SYMBOL = next(line.split('"')[1]
+                           for line in (ROOT / "src/gtk/rust_frontend_module.h").read_text().splitlines()
+                           if line.startswith("#define WORMINAL_RUST_FRONTEND_SYMBOL "))
 ENGINE_DEFAULTS = "terminal/engine_defaults.c"
 ENGINE = ("terminal/engine.c", ENGINE_DEFAULTS, "terminal/engine_parser.c",
           "terminal/engine_events.c", "terminal/engine_sync.c", "terminal/engine_snapshot.c",
@@ -190,6 +193,8 @@ class Builder:
         elif target == "build/browser_cpu.so":
             self.program(target, ["tests/browser_cpu.c"], variant="browser-cpu", flags=["-fPIC"],
                          libs=["-shared", "-lrt"])
+        elif target == "build/gui-peer.so":
+            self.program(target, ["tests/gui_peer.c"], variant="gui-peer", flags=["-fPIC"], libs=["-shared", "-ldl"])
         elif target == "build/browser.so":
             generate_browser_resources()
             old_flags = self.cflags
@@ -206,9 +211,13 @@ class Builder:
             self.program(target, [f"src/{source}" for source in sources],
                          flags=['-DWORKSPACE_DAEMON="worminald-x11"'])
         elif target in ("worminal", "worminal-preview"):
+            self.target("build/" + RUST_BROWSER_MODULE)
+            self.target("build/" + RUST_FRONTEND_MODULE)
+            self.rust_program(target, "worminal-launcher")
+        elif target == "build/worminal-gtk-c":
             self.target("build/browser.so")
             self.target("build/frontend.so")
-            self.rust_program(target, "worminal-launcher")
+            self.rust_program(target, "worminal-launcher", "worminal-c-launcher")
         elif target in ("worminald", "worminald-preview"):
             self.rust_program(target, "worminal-daemon")
         elif target in ("build/worminald-c-v2", "build/frontend.so", "build/preview_test"):
@@ -356,8 +365,8 @@ def installation_files(prefix=None):
         raise ValueError("PREFIX and MANPREFIX must be absolute paths")
     staging = Path(os.environ.get("DESTDIR", "/"))
     # Publish modules before a launcher that may immediately need them.
-    files = [("build/browser.so", prefix / "lib/worminal" / BROWSER_MODULE, 0o755),
-             ("build/frontend.so", prefix / "lib/worminal/frontend.so", 0o755)]
+    files = [("build/" + RUST_BROWSER_MODULE, prefix / "lib/worminal" / RUST_BROWSER_MODULE, 0o755),
+             ("build/" + RUST_FRONTEND_MODULE, prefix / "lib/worminal" / RUST_FRONTEND_MODULE, 0o755)]
     files += [(name, prefix / "bin" / name, 0o755)
               for name in ("worminal", "worminald", "worminal-x11", "worminald-x11")]
     files += [("docs/man/worminal.1", manprefix / "man1/worminal.1", 0o644),

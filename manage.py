@@ -93,7 +93,13 @@ def run_checks(match=None):
         return code
     code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-q",
                 *(["-k", match] if match else [])])
-    return code or (0 if match else preview_checks("x11"))
+    if code or match:
+        return code
+    code = preview_checks("x11")
+    if not code:
+        native_build.build_targets("worminal-rust", "build/worminald-c-v2", "build/gui-peer.so")
+        code = run([sys.executable, "tests/rust_app.py"])
+    return code or run([sys.executable, "tests/rust_browser.py"])
 
 
 def run_native_checks():
@@ -202,7 +208,7 @@ def build_rust_app():
 @app.command("check-rust-app")
 def check_rust_app():
     """Check the actual Rust app: private shell input, clipboard, tabs and surviving-session reattachment."""
-    native_build.build_targets("worminal-rust")
+    native_build.build_targets("worminal-rust", "build/worminald-c-v2", "build/gui-peer.so")
     raise typer.Exit(run([sys.executable, "tests/rust_app.py"]))
 
 
@@ -314,7 +320,7 @@ def build_x11():
 
 
 def preview_checks(backend):
-    native_build.build_targets("worminal-preview", "worminald-preview", "build/preview_test")
+    native_build.build_targets("worminal-preview", "worminald-preview", "build/preview_test", "build/worminal-gtk-c")
     return run([sys.executable, "tests/preview.py", backend])
 
 

@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 
-from preview import profile
+from preview import fixture, profile
 from workspace_protocol import service_pid
 from x11 import close_window, isolated_display
 
@@ -59,29 +59,33 @@ def main():
     subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                     "-p", "test_master_startup.py", "-q"], env=env, check=True, timeout=60)
     title = "Staged browser verification"
-    with isolated_display() as display, profile(display) as env:
+    with isolated_display() as display, profile(display) as env, fixture() as url:
         env.update(GDK_BACKEND="x11", GTK_USE_PORTAL="0")
         env.pop("WAYLAND_DISPLAY", None)
         env.pop("DBUS_SESSION_BUS_ADDRESS", None)
         with (ROOT / ".checks/install-browser.log").open("wb") as log:
-            owner = subprocess.Popen([str(executable), "-T", title, "--surf", "about:blank"],
+            owner = subprocess.Popen([str(executable), "-T", title, "--surf", url],
                                      env=env, stdout=log, stderr=log, start_new_session=True)
             try:
-                frontend = prefix / "lib/worminal/frontend.so"
-                browser_digest = digest(prefix / "lib/worminal" / build.BROWSER_MODULE)
+                frontend = prefix / "lib/worminal" / build.RUST_FRONTEND_MODULE
+                browser = prefix / "lib/worminal" / build.RUST_BROWSER_MODULE
+                browser_digest = digest(browser)
                 deadline = time.monotonic() + 15
                 while time.monotonic() < deadline:
                     if owner.poll() is not None:
                         raise AssertionError("Staged browser exited; see .checks/install-browser.log")
                     maps = Path(f"/proc/{owner.pid}/maps").read_text()
-                    # Browser generations load sealed snapshots, retaining their code across replacement.
-                    # Verify both the mapped digest and the actual bytes behind that resident descriptor.
+                    # The Rust loader pins each opened inode across atomic replacement. Verify actual
+                    # resident descriptor bytes and mapped identity, not merely a pathname in /proc/maps.
                     browser_loaded = False
-                    if f"/memfd:{browser_digest}" in maps:
+                    if str(browser) in maps:
                         for descriptor in Path(f"/proc/{owner.pid}/fd").iterdir():
                             try:
-                                if (f"/memfd:{browser_digest}" in os.readlink(descriptor)
-                                        and digest(descriptor) == browser_digest):
+                                info, expected = descriptor.stat(), browser.stat()
+                                if (info.st_dev == expected.st_dev and info.st_ino == expected.st_ino
+                                        and digest(descriptor) == browser_digest
+                                        and any(str(info.st_ino) == line.split()[4] and str(browser) in line
+                                                for line in maps.splitlines())):
                                     browser_loaded = True
                                     break
                             except FileNotFoundError:
@@ -89,7 +93,14 @@ def main():
                     visible = subprocess.run(["xdotool", "search", "--onlyvisible", "--pid", str(owner.pid)],
                                              env=env, capture_output=True, timeout=2)
                     if str(frontend) in maps and browser_loaded and visible.returncode == 0:
-                        break
+                        # Mapping the lazy module precedes profile/view creation. Wait for the real
+                        # WebKit document, otherwise a loaded-library check can accept an unusable browser.
+                        windows = [value.decode() for value in visible.stdout.splitlines()]
+                        ready = [window for window in windows if subprocess.check_output(
+                            ['xdotool', 'getwindowname', window], env=env, text=True).strip() == 'Fixture']
+                        if ready:
+                            browser_window = ready[0]
+                            break
                     time.sleep(.02)
                 else:
                     (ROOT / ".checks/install-browser-maps.log").write_text(maps)
@@ -102,7 +113,19 @@ def main():
                 daemon = prefix / "bin/worminald"
                 if Path(f"/proc/{daemon_pid}/exe").resolve() != daemon:
                     raise AssertionError("Staged launcher started a daemon from another installation")
-                close_window(env, title)
+                if not (Path(env['XDG_DATA_HOME']) / 'worminal-preview').is_dir():
+                    raise AssertionError("Release browser did not retain the established profile directory")
+                if (Path(env['XDG_DATA_HOME']) / 'worminal-rust').exists():
+                    raise AssertionError("Release browser used the candidate profile")
+                subprocess.run(['xdotool', 'windowfocus', '--sync', browser_window,
+                                'type', '--clearmodifiers', 'staged'], env=env, check=True, timeout=5)
+                deadline = time.monotonic() + 5
+                while subprocess.check_output(['xdotool', 'getwindowname', browser_window],
+                                              env=env, text=True).strip() != 'Edited:staged':
+                    if time.monotonic() >= deadline:
+                        raise AssertionError('Staged browser did not accept keyboard input')
+                    time.sleep(.02)
+                close_window(env, 'Edited:staged')
                 if owner.wait(timeout=10) != 0:
                     raise AssertionError("Staged browser did not close gracefully")
             finally:

@@ -28,7 +28,14 @@ impl App {
         }
         let state = event.state() & (Mod::CONTROL_MASK | Mod::SHIFT_MASK | Mod::MOD1_MASK);
         let control_shift = Mod::CONTROL_MASK | Mod::SHIFT_MASK;
-        if state == Mod::CONTROL_MASK && [key::t, key::w].contains(&value) {
+        let browser = self
+            .pages
+            .borrow()
+            .iter()
+            .any(|page| page.id == self.active.get() && page.browser);
+        if state == Mod::CONTROL_MASK
+            && ([key::t, key::w].contains(&value) || (browser && [key::d, key::q].contains(&value)))
+        {
             if value == key::t {
                 if self
                     .pages
@@ -76,7 +83,12 @@ impl App {
                     let mut config = self.config.clone();
                     config.command.clear();
                     config.attach = false;
-                    config.title = "Worminal Rust".into();
+                    config.title = if config.candidate {
+                        "Worminal Rust"
+                    } else {
+                        "Worminal"
+                    }
+                    .into();
                     config.output.clear();
                     config.line.clear();
                     config.browser_url = None;
@@ -101,6 +113,8 @@ impl App {
                                 gdk::SELECTION_CLIPBOARD
                             });
                         }
+                    } else {
+                        return false;
                     }
                     return true;
                 }

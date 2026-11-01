@@ -140,6 +140,7 @@ fn main() {
     let frontend = root.join("src/gtk/rust_frontend_module.h");
     println!("cargo:rerun-if-changed={}", frontend.display());
     bindgen::Builder::default()
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .header(frontend.to_str().unwrap())
         .allowlist_type("WorminalRustFrontendEntry")
         .allowlist_var("WORMINAL_RUST_FRONTEND_.*")
@@ -150,6 +151,7 @@ fn main() {
     let state = root.join("src/gtk/window_state_protocol.h");
     println!("cargo:rerun-if-changed={}", state.display());
     bindgen::Builder::default()
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .header(state.to_str().unwrap())
         .allowlist_var("WORMINAL_STATE_.*")
         .generate()

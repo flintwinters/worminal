@@ -69,4 +69,48 @@ fn ssh_preserves_bridge_arguments_and_bidirectional_bytes_without_gui_fork_hooks
     );
     drop(stream);
     drop(child);
+    // The local service uses the same boundary after GTK starts; it must have an independent
+    // session/process group without invoking the GUI's registered fork hooks.
+    use std::{ffi::CString, os::fd::AsFd, os::unix::net::UnixStream};
+    let (mut parent, remote) = UnixStream::pair().unwrap();
+    parent
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let arguments = [
+        "/usr/bin/python3",
+        "-I",
+        "-c",
+        "import os; print(os.getpid(),os.getsid(0),os.getpgrp())",
+    ]
+    .into_iter()
+    .map(|value| CString::new(value).unwrap())
+    .collect::<Vec<_>>();
+    let pid = worminal_workspace::spawn::start(
+        &arguments,
+        &[
+            (remote.as_fd(), 0),
+            (remote.as_fd(), 1),
+            (remote.as_fd(), 2),
+        ],
+        true,
+    )
+    .unwrap();
+    drop(remote);
+    let mut identity = String::new();
+    parent.read_to_string(&mut identity).unwrap();
+    let ids: Vec<i32> = identity
+        .split_whitespace()
+        .map(|value| value.parse().unwrap())
+        .collect();
+    assert_eq!(ids, [pid, pid, pid]);
+    assert_eq!(worminal_workspace::spawn::wait(pid).unwrap(), 0);
+    assert_eq!(
+        FORKS.load(Ordering::Relaxed),
+        0,
+        "daemon startup invoked GUI fork hooks"
+    );
+    assert_eq!(
+        worminal_workspace::spawn::wait(-1).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidInput
+    );
 }

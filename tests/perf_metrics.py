@@ -1,7 +1,17 @@
 """Shared process-tree memory and CPU measurements for project benchmarks."""
 
 import os
+import socket
 from pathlib import Path
+
+
+def workspace_processes(env):
+    """Include the private workspace independently of how its launcher parents the daemon."""
+    from workspace_protocol import service_pid
+    with socket.socket(socket.AF_UNIX) as peer:
+        peer.settimeout(3)
+        peer.connect(f"\0worminal-workspace-v2-{os.getuid()}-{env['WORMINAL_SHARED_SOCKET_SCOPE']}")
+        return descendants(service_pid(peer))
 
 
 def descendants(pid):

@@ -17,7 +17,7 @@ os.environ['WORMINAL_FRONTEND'] = 'worminal-rust'
 from test_keys import NavigationKeysTest, read_bytes, read_through
 from workspace_protocol import send, wait_kind, catalog_records, service_pid
 from x11 import isolated_display, close_window
-from preview import wayland_display
+from preview import profile, service, wayland_display
 from test_window_state import private_bus, WindowStateTest
 from test_window_activation import WindowActivationTests
 from rust_runtime import copy_runtime, window, stop_application
@@ -27,6 +27,25 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class RustApplicationTest(unittest.TestCase):
+    def test_rust_view_uses_retained_c_v2_service_without_restarting_its_shell(self):
+        with isolated_display() as display, profile(display) as env:
+            env.update(GDK_BACKEND='x11', WORMINAL_TEST_PREVIEW_DAEMON=str(ROOT / 'build/worminald-c-v2'))
+            env.pop('WAYLAND_DISPLAY', None)
+            with service(env):
+                app = subprocess.Popen([str(ROOT / 'worminal-rust'), '-T', 'C service attachment', '-o', '-',
+                    '-e', '/bin/sh', '-c', "stty raw -echo; printf 'C:%s\\n' $$; exec cat"], env=env,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self.addCleanup(lambda: self.stop(app))
+                shell = int(read_through(app.stdout, b'\n')[2:].strip())
+                tty = os.readlink(f'/proc/{shell}/fd/0')
+                wid = window(env, app)
+                subprocess.run(['xdotool', 'windowfocus', '--sync', wid, 'type', '--clearmodifiers', 'peer'],
+                               env=env, check=True)
+                self.assertEqual(read_bytes(app.stdout, 4), b'peer')
+                close_window(env, 'C service attachment')
+                self.assertEqual(app.wait(timeout=5), 0)
+                self.assertEqual(os.readlink(f'/proc/{shell}/fd/0'), tty)
+
     def test_empty_attach_can_open_its_first_terminal(self):
         with isolated_display() as env:
             env.update(GDK_BACKEND='x11', SHELL='/bin/sh')
@@ -171,7 +190,19 @@ class RustApplicationTest(unittest.TestCase):
                     records = catalog_records(wait_kind(observer, 7, version=2)[1])
                     if len(records) == 2: break
                     self.assertLess(time.monotonic(), deadline)
+                # The observer's catalog can arrive before GTK handles its own CREATED/catalog.
+                # Select the first tab only after the GUI has actually selected the newly created one.
+                deadline = time.monotonic() + 5
+                while subprocess.check_output(['xdotool', 'getwindowname', wid], env=env,
+                                              text=True).strip() != 'Worminal':
+                    self.assertLess(time.monotonic(), deadline, 'GUI did not select its new tab')
+                    time.sleep(.01)
                 subprocess.run(['xdotool', 'key', '--clearmodifiers', 'alt+1'], env=env, check=True)
+                deadline = time.monotonic() + 5
+                while subprocess.check_output(['xdotool', 'getwindowname', wid], env=env,
+                                              text=True).strip() != 'Rust vertical':
+                    self.assertLess(time.monotonic(), deadline, 'tab shortcut did not return to the original shell')
+                    time.sleep(.01)
                 subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+shift+n'], env=env, check=True)
                 deadline = time.monotonic() + 5
                 while len(catalog_records(wait_kind(observer, 7, version=2)[1])) != 3:

@@ -28,7 +28,8 @@ Build as the regular user to retain that user's Alacritty configuration, then pu
 Compare installed artifacts with the verified build and check the running executable and module paths.
 Running owners retain loaded modules until all their windows close; verify loaded code before claiming a fix is active.
 `src/terminal` owns terminal state,
-`src/gtk` paints release views, `src/x11` preserves the original renderer, and `src/workspace` connects the service.
+`rust/frontend` paints release views, `src/gtk` retains shared resources and the C compatibility frontend,
+`src/x11` preserves the original renderer, and `src/workspace` retains C protocol adapters.
 Both frontends share paste filtering: bracketed text preserves line endings, while ordinary paste
 normalizes CRLF/LF to Enter.
 GTK redraws changed rows and cursor damage, including overlapping glyph ink;
@@ -105,7 +106,7 @@ Transferred sessions become independent before commit; committed donors never sa
 `check-rust-handoff` and `check-rust-upgrade` check transfer, cancellation and reverse rollback against both C ABIs.
 `build/worminald-c-v2` retains the C v2 transfer peer. Compiled counterfactuals protect non-obvious
 publication/ownership gates.
-The candidate shares one GTK owner per display/workspace and lazily loads `rust/browser` through the generated
+The Rust application shares one GTK owner per display/workspace and lazily loads `rust/browser` through the generated
 opaque ABI in `src/gtk/rust_browser_module.h`. Views pin generations and move without reloading their DOM.
 Generations share one live profile manager. Candidate profiles use separate worminal-rust data/cache paths
 with an exclusive owner lock; installed profiles remain untouched until their browser owners close at cutover.
@@ -119,11 +120,14 @@ Wayland;
 identity.
 Native activation uses fresh X11 server time; the private Muffin regression and compiled counterfactual check it.
 Use `manage.py setup-window-activation` to prepare Muffin locally without a system installation.
-The candidate launcher links GLib only and forwards before loading its Rust frontend module;
+The release and candidate launchers link GLib only and forwards before loading its Rust frontend module;
 `src/gtk/rust_frontend_module.h` owns its distinct ABI and transferred-listener contract.
 The Rust Cairo strip shares terminal fonts/colors; drawing and hit testing use the same visible suffix.
 Catalog publication preserves ordered pages, and local browser labels decode the filename without query routes.
-Next: release-default integration and complete behavior/resource/cutover verification.
+Development release defaults to Rust; installed owners are unchanged. Complete behavior/resource/cutover
+verification before publication. Stable and candidate profiles are selected once per owner by the frontend ABI.
+Local daemon and SSH startup use shared posix_spawn operations after display validation.
+The GUI broker authenticates same-user peers before accepting descriptors or launch data.
 `docs/rust-migration.md` owns migration readiness, recovery/test commands and measured resource costs.
 Cargo outputs belong in build/cargo; preserve diagnostics and the exclusive C recovery baseline under .checks.
 Audit upgrade lifecycle after the failed live bootstrap killed transferred sessions; the receiver

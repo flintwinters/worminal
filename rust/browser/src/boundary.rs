@@ -104,6 +104,13 @@ unsafe extern "C" fn destroy(pointer: *mut c_void) {
         crate::release_context();
     });
 }
+unsafe extern "C" fn background(pointer: *mut c_void, r: f64, g: f64, b: f64, a: f64) {
+    guard(|| {
+        unsafe { view(pointer) }
+            .view
+            .set_background_color(&gtk::gdk::RGBA::new(r, g, b, a))
+    });
+}
 unsafe extern "C" fn retire(value: u32) {
     guard(|| crate::retire(value));
 }
@@ -117,6 +124,7 @@ pub extern "C" fn worminal_rust_browser_module(abi: u32) -> *const WorminalRustB
         navigate: Some(navigate),
         shortcut: Some(shortcut),
         zoom: Some(zoom),
+        background: Some(background),
         destroy: Some(destroy),
         retire: Some(retire),
     };

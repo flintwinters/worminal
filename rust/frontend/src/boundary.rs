@@ -20,10 +20,11 @@ mod bindings {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn worminal_rust_frontend_v1(
+pub unsafe extern "C" fn worminal_rust_frontend_v2(
     argc: i32,
     argv: *const *const c_char,
     listener: i32,
+    flags: u32,
 ) -> i32 {
     let result = catch_unwind(AssertUnwindSafe(|| -> io::Result<()> {
         // The trusted launcher transfers a valid listening descriptor, or -1 for local CLI handling.
@@ -47,7 +48,10 @@ pub unsafe extern "C" fn worminal_rust_frontend_v1(
                 unsafe { CStr::from_ptr(pointer) }.to_bytes().to_vec(),
             ));
         }
-        crate::app::run_with_listener(arguments, listener)
+        if flags & !bindings::WORMINAL_RUST_FRONTEND_CANDIDATE != 0 {
+            return Err(io::Error::other("unsupported frontend flags"));
+        }
+        crate::app::run_with_listener(arguments, listener, flags != 0)
     }));
     match result {
         Ok(Ok(())) => 0,
@@ -66,4 +70,4 @@ pub unsafe extern "C" fn worminal_rust_frontend_v1(
     }
 }
 // The generated declaration enforces the authoritative header's exact entrypoint signature.
-const _: bindings::WorminalRustFrontendEntry = Some(worminal_rust_frontend_v1);
+const _: bindings::WorminalRustFrontendEntry = Some(worminal_rust_frontend_v2);

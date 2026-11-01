@@ -26,14 +26,22 @@ class BuildTests(unittest.TestCase):
         with patch.object(build, "pkg_flags", return_value=[]), patch.object(build, "generate_browser_resources"), \
                 patch.object(build, "step"):
             builder = build.Builder()
-            with patch.object(builder, "program") as program, patch.object(builder, "rust_program") as rust:
+            with (patch.object(builder, "program") as program, patch.object(builder, "rust_program") as rust,
+                  patch.object(builder, "rust_library") as library):
                 for name in ("worminal", "worminald", "worminal-preview", "worminald-preview"):
                     builder.target(name)
                     if name in ("worminal", "worminal-preview"):
                         rust.assert_called_with(name, "worminal-launcher")
                     else:
                         rust.assert_called_with(name, "worminal-daemon")
-                        self.assertEqual(program.call_args.args[0], "build/frontend.so")
+                program.assert_not_called()
+                self.assertIn(unittest.mock.call("build/" + build.RUST_FRONTEND_MODULE, "worminal-frontend"),
+                              library.call_args_list)
+                self.assertIn(unittest.mock.call("build/" + build.RUST_BROWSER_MODULE, "worminal-browser"),
+                              library.call_args_list)
+                builder.target("build/worminal-gtk-c")
+                rust.assert_called_with("build/worminal-gtk-c", "worminal-launcher", "worminal-c-launcher")
+                self.assertEqual(program.call_args.args[0], "build/frontend.so")
                 builder.target("build/worminald-c-v2")
                 self.assertIn("src/workspace/workspace_service.c", program.call_args.args[1])
                 self.assertIn("-DWORMINAL_PREVIEW_PROTOCOL", program.call_args.kwargs["flags"])
@@ -184,7 +192,7 @@ class BuildTests(unittest.TestCase):
 
     def test_staged_install_uninstall_and_modes(self):
         for source in ("worminal", "worminald", "worminal-x11", "worminald-x11",
-                       "build/browser.so", "build/frontend.so",
+                       "build/" + build.RUST_BROWSER_MODULE, "build/" + build.RUST_FRONTEND_MODULE,
                        "docs/man/worminal.1",
                        "assets/worminal.desktop", "assets/worminal.svg"):
             path = self.root / source
@@ -196,7 +204,7 @@ class BuildTests(unittest.TestCase):
         previous = stage / "previous-client"
         previous.write_text("previous client")
         (installed / "bin/worminal").symlink_to(previous)
-        module = installed / "lib/worminal" / build.BROWSER_MODULE
+        module = installed / "lib/worminal" / build.RUST_BROWSER_MODULE
         module.parent.mkdir(parents=True)
         module.write_text("running module")
         legacy = installed / "lib/worminal/browser.so"
@@ -214,7 +222,8 @@ class BuildTests(unittest.TestCase):
             build.install("/opt/worminal", skip_build=True)
             compile_build.assert_not_called()
             files = build.installation_files("/opt/worminal")
-            self.assertLess(next(i for i, (source, _, _) in enumerate(files) if source.name == "frontend.so"),
+            self.assertLess(next(i for i, (source, _, _) in enumerate(files)
+                                 if source.name == build.RUST_FRONTEND_MODULE),
                             next(i for i, (source, _, _) in enumerate(files) if source.name == "worminal"))
             for _, destination, mode in files:
                 self.assertTrue(destination.is_relative_to(stage))
@@ -252,7 +261,7 @@ class BuildTests(unittest.TestCase):
     def test_default_install_uses_user_prefix(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(Path, "home", return_value=self.root):
             files = build.installation_files()
-        self.assertEqual(files[0][1], self.root / ".local/lib/worminal" / build.BROWSER_MODULE)
+        self.assertEqual(files[0][1], self.root / ".local/lib/worminal" / build.RUST_BROWSER_MODULE)
         self.assertIn(self.root / ".local/bin/worminal", [destination for _, destination, _ in files])
 
     def weston_runtime(self, major):

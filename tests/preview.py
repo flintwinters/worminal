@@ -253,7 +253,15 @@ def startup_check(env, log):
 
 def broker_check(env, url, log, daemon, *, rust=False):
     """Independent launches must share the GTK owner and the live DOM, not reload a URL."""
-    executable = str(ROOT / ("worminal-rust" if rust else "worminal"))
+    executable = str(ROOT / ("worminal-rust" if rust else "build/worminal-gtk-c"))
+    if not rust:
+        # The retained C peer has its historical relative module layout; keep its complete runtime private.
+        base = Path(env["XDG_STATE_HOME"]).parent / "c-runtime"
+        (base / "build").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(executable, base / "worminal")
+        for name in ("frontend.so", "browser.so"): shutil.copy2(ROOT / "build" / name, base / "build" / name)
+        executable = str(base / "worminal")
+    forwarder = str(ROOT / "worminal") if not rust else executable
     title = f"Broker terminal {os.getpid()}"
     first = subprocess.Popen([executable, "-T", title, "-o", "-", "-e", "/bin/sh", "-c",
                               "stty raw -echo; printf BROKER_READY; exec cat"],
@@ -290,11 +298,11 @@ def broker_check(env, url, log, daemon, *, rust=False):
         if "libwebkit2gtk" in mappings:
             raise RuntimeError("Terminal-only frontend loaded WebKit before opening a browser")
         terminal_window = window(title)
-        invalid = subprocess.run([executable, "--invalid"], env=env,
+        invalid = subprocess.run([forwarder, "--invalid"], env=env,
                                  stdout=subprocess.PIPE, stderr=log, timeout=5)
         if invalid.returncode == 0 or first.poll() is not None:
             raise RuntimeError("Invalid forwarded arguments terminated the shared frontend")
-        result = subprocess.run([executable, "--surf", url + "/page"], env=env,
+        result = subprocess.run([forwarder, "--surf", url + "/page"], env=env,
                                 stdout=subprocess.PIPE, stderr=log, timeout=10)
         if result.returncode: raise RuntimeError("Second launch did not join the frontend")
         browser_window = window("Fixture")
@@ -360,7 +368,7 @@ def broker_check(env, url, log, daemon, *, rust=False):
         key("key", "--clearmodifiers", "ctrl+shift+t")
         window("Worminal")
         forwarded_env = {**env, "WORMINAL_BROKER_TEST": "caller-value"}
-        forwarded = subprocess.Popen([executable, "-T", "Forwarded terminal", "-o", "-", "-e", "/bin/sh", "-c",
+        forwarded = subprocess.Popen([forwarder, "-T", "Forwarded terminal", "-o", "-", "-e", "/bin/sh", "-c",
                                       "printf 'FORWARDED:%s:%s' \"$WORMINAL_BROKER_TEST\" \"$PWD\"; exec cat"],
                                      cwd=ROOT / "tests", env=forwarded_env, stdout=subprocess.PIPE, stderr=log)
         try:

@@ -13,10 +13,11 @@ from Xlib import X, XK, display
 from rich.console import Console
 from rich.table import Table
 
-from perf_metrics import descendants, memory, startup_usage
+from perf_metrics import descendants, memory, startup_usage, workspace_processes
 from browser_profile import collect as collect_cpu
 from preview import profile
-from visible_latency import image_bytes, capture_failure, find_window, ready, snapshot, stop, summarize, wait_for
+from visible_latency import (image_bytes, capture_failure, find_window, ready, snapshot, snapshot_revision,
+                             stop, summarize, wait_for)
 from window_perf import keypress, window_for_pid
 from x11 import isolated_display
 
@@ -152,7 +153,7 @@ def sample(executable, target, log, cold_open=False, trace_startup=False, stored
                     keypress(connection, XK.XK_a)
                     wait_for(lambda: ready(window, 0x789abc))
                     values[phase + "_input"] = (time.monotonic_ns() - started) / 1e6
-                resources[phase] = memory(descendants(owner.pid))
+                resources[phase] = memory(descendants(owner.pid) | workspace_processes(env))
                 if startup:
                     resources[phase]["startup"] = startup
                 if profile_cpu:
@@ -162,6 +163,10 @@ def sample(executable, target, log, cold_open=False, trace_startup=False, stored
             if owner:
                 children = descendants(owner.pid) - {owner.pid}
                 stop(owner)
+                # The Rust owner directly spawns its independent service. Stop the private workspace
+                # before waiting for descendants; surviving services/shells are product behavior.
+                subprocess.run([str(executable.with_name('worminald')), '--stop'], env=env,
+                               stdout=log, stderr=log, check=True, timeout=5)
                 def helpers_exited():
                     for pid in children:
                         try:
@@ -238,10 +243,10 @@ def main():
                        "Visible waits for expected page pixels; HTTP and file URLs verify "
                        "real-key JavaScript response. "
                        "Explorer loads its independently compiled local HTML document. Warm filesystem caches. "
-                       "Memory includes frontend descendants, excludes service/shells. "
+                       "Memory includes frontend/helpers and the private workspace service/shells. "
                        "Excludes desktop compositing and physical display latency."}
     if args.compare:
-        report["baseline_revision"] = (args.compare / "revision").read_text().strip()
+        report["baseline_revision"] = snapshot_revision(args.compare)
     if args.profile_cpu:
         report["notes"] += " CPU sampling is diagnostic; sampler setup adds overhead to elapsed timings."
     path = checks / "browser-perf.json"

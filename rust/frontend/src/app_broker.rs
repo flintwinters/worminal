@@ -1,4 +1,4 @@
-//! One candidate GTK owner per display/workspace. Pending launches are bounded and never block GTK.
+//! One GTK owner per display/workspace. Pending launches are bounded and never block GTK.
 use super::{App, Config};
 use glib::{source::unix_fd_add_local, ControlFlow, IOCondition, SourceId};
 use std::{
@@ -70,7 +70,7 @@ impl Drop for Server {
         }
     }
 }
-pub(super) fn serve(listener: UnixListener) -> io::Result<Rc<Server>> {
+pub(super) fn serve(listener: UnixListener, candidate: bool) -> io::Result<Rc<Server>> {
     listener.set_nonblocking(true)?;
     let server = Rc::new(Server {
         listener,
@@ -84,6 +84,9 @@ pub(super) fn serve(listener: UnixListener) -> io::Result<Rc<Server>> {
         glib::clone!(@weak server => @default-return ControlFlow::Break, move |_, _| {
             for _ in 0..8 {
                 let Ok((socket, _)) = server.listener.accept() else { break; };
+                // The public abstract name is discoverable; match the legacy owner's same-user gate
+                // before accepting SCM_RIGHTS or allowing a caller to choose a local browser document.
+                if worminal_workspace::socket::peer_pid(socket.as_raw_fd()).is_err() { continue; }
                 if server.peers.borrow().len() >= 32 { continue; }
                 if socket.set_nonblocking(true).is_err() { continue; }
                 let id = server.next.get(); server.next.set(id.wrapping_add(1));
@@ -99,7 +102,7 @@ pub(super) fn serve(listener: UnixListener) -> io::Result<Rc<Server>> {
                                 => return ControlFlow::Continue,
                             result => {
                                 let result = result.and_then(|request| {
-                                    match Config::parse(&request.expect("complete launch"))? {
+                                    match Config::parse(&request.expect("complete launch"), candidate)? {
                                         Some(config) => App::open(config).map(|_| ()), None => Ok(()),
                                     }
                                 });

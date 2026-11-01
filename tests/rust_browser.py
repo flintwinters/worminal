@@ -3,6 +3,7 @@ from contextlib import contextmanager
 import json
 import hashlib
 import os
+import shlex
 from pathlib import Path
 import shutil
 import socket
@@ -48,6 +49,37 @@ def title(env, expected, process):
 
 
 class RustBrowserTest(unittest.TestCase):
+    def test_browser_conversion_preserves_terminal_background(self):
+        from Xlib import X, display
+        from test_keys import read_bytes
+        with (isolated_display() as private, profile(private) as env,
+              tempfile.TemporaryDirectory(prefix='rust-browser-palette-', dir=ROOT / '.checks') as directory):
+            env.update(GDK_BACKEND='x11'); env.pop('WAYLAND_DISPLAY', None)
+            document = Path(directory) / 'blank.html'
+            document.write_text('<!doctype html><title>Palette browser</title>')
+            # Wait for real input so conversion cannot overtake parsing the PTY's palette change.
+            command = ("printf '\\033]11;#1163c9\\007READY'; read ignored; exec " +
+                       shlex.join([APP, '--new-browser-tab', str(document)]))
+            with application(env, '-T', 'Palette terminal', '-o', '-', '-e', '/bin/sh', '-c', command) as app:
+                ready = b'\x1b]11;#1163c9\x07READY'
+                self.assertEqual(read_bytes(app.stdout, len(ready)), ready)
+                wid = title(env, 'Palette terminal', app)
+                subprocess.run(['xdotool', 'windowfocus', '--sync', wid, 'key', 'Return'], env=env, check=True)
+                wid = title(env, 'Palette browser', app)
+                server = display.Display(env['DISPLAY'])
+                try:
+                    window = server.create_resource_object('window', int(wid))
+                    deadline = time.monotonic() + 5
+                    while True:
+                        geometry = window.get_geometry()
+                        pixel = window.get_image(geometry.width // 2, geometry.height // 2,
+                                                 1, 1, X.ZPixmap, 0xffffffff).data
+                        if tuple(pixel[:3][::-1]) == (17, 99, 201): break
+                        self.assertLess(time.monotonic(), deadline, 'browser lost the tab palette background')
+                        time.sleep(.02)
+                finally:
+                    server.close()
+
     def test_closing_a_browser_owner_preserves_its_dom_in_a_surviving_window(self):
         from test_keys import read_bytes
         with isolated_display() as display, profile(display) as env, fixture() as url:

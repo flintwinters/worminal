@@ -7,7 +7,7 @@ import time
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from tools.build import RUST_BROWSER_MODULE, RUST_FRONTEND_MODULE
+from tools.build import RUST_BROWSER_MODULE, RUST_FRONTEND_MODULE, RUST_FRONTEND_SYMBOL
 
 
 def copy_runtime(directory, *, browser=False):

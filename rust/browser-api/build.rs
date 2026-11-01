@@ -4,6 +4,7 @@ fn main() {
         .join("../../src/gtk/rust_browser_module.h");
     println!("cargo:rerun-if-changed={}", header.display());
     bindgen::Builder::default()
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .header(header.to_str().unwrap())
         .allowlist_type("Worminal.*")
         .allowlist_var("WORMINAL_.*")

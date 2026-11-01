@@ -6,6 +6,7 @@
 #include <gio/gunixinputstream.h>
 #include "preview.h"
 #include "browser_module.h"
+#include "browser_profile.h"
 #include "browser_target.h"
 #include "build/browser_resources.h"
 
@@ -509,8 +510,8 @@ browser_profile(void)
 	/* The data manager owns the cookie manager, including session cookies.
 	 * Sharing disk paths alone does not share the live profile across contexts.
 	 * https://webkitgtk.org/reference/webkit2gtk/stable/class.WebContext.html */
-	char *data = g_build_filename(g_get_user_data_dir(), "worminal-preview", NULL);
-	char *cache = g_build_filename(g_get_user_cache_dir(), "worminal-preview", NULL);
+	char *data = g_build_filename(g_get_user_data_dir(), WORMINAL_BROWSER_PROFILE_STABLE, NULL);
+	char *cache = g_build_filename(g_get_user_cache_dir(), WORMINAL_BROWSER_PROFILE_STABLE, NULL);
 	g_mkdir_with_parents(data, 0700);
 	g_mkdir_with_parents(cache, 0700);
 	manager = webkit_website_data_manager_new("base-data-directory", data, "base-cache-directory", cache, NULL);

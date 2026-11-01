@@ -58,24 +58,23 @@ fn ensure() -> io::Result<()> {
         return Ok(());
     }
     let daemon = std::env::current_exe()?.with_file_name("worminald");
-    // Called before GTK initializes any threads. Subsequent windows/reconnects only connect to the live service.
-    let mut child = crate::startup::daemon(&daemon)?;
+    // posix_spawn is safe after GTK initialization; subsequent windows/reconnects only connect.
+    let child = crate::startup::daemon(&daemon)?;
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
         if connect().is_ok() {
-            thread::spawn(move || {
-                let _ = child.wait();
-            });
             return Ok(());
         }
-        if child.try_wait()?.is_some() {
-            return connect().map(|_| ());
+        match child.try_recv() {
+            Ok(result) => {
+                result?;
+                return connect().map(|_| ());
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => return connect().map(|_| ()),
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
         }
         if Instant::now() >= deadline {
             // A slow service may already own restored shells. Leave it running instead of killing unknown live state.
-            thread::spawn(move || {
-                let _ = child.wait();
-            });
             return Err(io::Error::other("daemon startup timed out"));
         }
         thread::sleep(Duration::from_millis(10));
@@ -225,14 +224,16 @@ struct App {
 }
 impl App {
     fn print(&self, bytes: &[u8]) -> io::Result<()> {
-        if let Some(stream) = &self.config.stream {
-            let mut output = &**stream;
-            output.write_all(bytes)?;
-            output.flush()?;
-        }
-        Ok(())
+        let mut output = &*self.config.stream;
+        output.write_all(bytes)?;
+        output.flush()
     }
     fn open(config: Config) -> io::Result<Rc<Self>> {
+        // New launches may arrive in an existing GTK owner after service loss. The shared
+        // posix_spawn boundary can recover the service here without GUI-process fork hooks.
+        if config.master.is_none() {
+            ensure()?;
+        }
         if let Some(class) = &config.class {
             gdk::set_program_class(class);
         }
@@ -310,11 +311,15 @@ impl App {
                 app.closing.set(true); app.clear_connection();
                 if let Some(source) = app.reconnect.borrow_mut().take() { source.remove(); }
                 WINDOWS.with(|windows| { let mut windows = windows.borrow_mut();
+                    let previous = windows.len();
                     windows.retain(|owner| !Rc::ptr_eq(owner, &app));
-                    if windows.is_empty() { gtk::main_quit(); } });
+                    if windows.len() != previous && windows.is_empty() { gtk::main_quit(); } });
                 window_state::changed();
             }));
-        app.establish(!app.config.attach)?;
+        if let Err(error) = app.establish(!app.config.attach) {
+            app.window.close();
+            return Err(error);
+        }
         WINDOWS.with(|windows| windows.borrow_mut().push(app.clone()));
         window_state::changed();
         crate::graphics_ffi::show_window(&app.window);
@@ -721,6 +726,11 @@ impl App {
                 terminal.configure(record.mode, record.cursor, palette_changed);
             }
             if record.browser {
+                if palette_changed {
+                    if let Some(view) = page.view.borrow().as_ref() {
+                        view.background(page.palette.borrow().color(259));
+                    }
+                }
                 self.browser_metadata(record);
             }
             page.widget.set_tooltip_text(if record.browser {
@@ -841,20 +851,19 @@ impl App {
 }
 pub fn run() -> io::Result<()> {
     let arguments: Vec<_> = std::env::args_os().collect();
-    run_with_listener(arguments, None)
+    run_with_listener(arguments, None, true)
 }
 pub(crate) fn run_with_listener(
     arguments: Vec<std::ffi::OsString>,
     listener: Option<std::os::unix::net::UnixListener>,
+    candidate: bool,
 ) -> io::Result<()> {
     worminal_workspace::browser_target::command(&arguments)?;
     let request = worminal_workspace::broker::Request::capture(arguments)?;
-    let Some(config) = Config::parse(&request)? else {
+    let Some(config) = Config::parse(&request, candidate)? else {
         return Ok(());
     };
-    if config.master.is_none() {
-        ensure()?;
-    }
+    crate::browser::configure_profile(candidate)?;
     let listener = match listener {
         Some(listener) => listener,
         None => match broker::forward(&request)? {
@@ -863,10 +872,10 @@ pub(crate) fn run_with_listener(
         },
     };
     glib::set_prgname(Some("worminal"));
-    gtk::init().map_err(|error| io::Error::other(error.to_string()))?;
+    gtk::init().map_err(|error| io::Error::other(format!("cannot open display: {error}")))?;
     let _window_state = window_state::start();
     App::open(config)?;
-    let _broker = broker::serve(listener)?;
+    let _broker = broker::serve(listener, candidate)?;
     gtk::main();
     Ok(())
 }

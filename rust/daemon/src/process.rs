@@ -198,24 +198,7 @@ fn open_pty(columns: u16, rows: u16) -> io::Result<(File, File)> {
 }
 
 pub fn peer_pid(fd: RawFd) -> io::Result<libc::pid_t> {
-    unsafe {
-        let mut credentials: libc::ucred = mem::zeroed();
-        let mut size = mem::size_of_val(&credentials) as libc::socklen_t;
-        checked(libc::getsockopt(
-            fd,
-            libc::SOL_SOCKET,
-            libc::SO_PEERCRED,
-            ptr::from_mut(&mut credentials).cast(),
-            &mut size,
-        ))?;
-        if size as usize != mem::size_of_val(&credentials) || credentials.uid != uid() {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "workspace peer is not the same user",
-            ));
-        }
-        Ok(credentials.pid)
-    }
+    worminal_workspace::socket::peer_pid(fd)
 }
 
 pub fn session_of(pid: libc::pid_t) -> io::Result<libc::pid_t> {

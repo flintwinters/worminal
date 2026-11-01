@@ -118,6 +118,7 @@ impl App {
                     *page.view.borrow_mut() = Some(view.clone());
                     view.widget().show_all();
                     view.zoom(self.fonts.borrow().zoom());
+                    view.background(page.palette.borrow().color(259));
                     // New views start blank; moved views retain their current document and page state.
                     if is_new {
                         view.navigate(&page.url);

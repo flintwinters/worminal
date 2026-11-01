@@ -4,6 +4,31 @@ use std::{
     os::linux::net::SocketAddrExt,
     os::unix::net::{SocketAddr, UnixListener, UnixStream},
 };
+
+/// Abstract socket names have no filesystem permissions. Authenticate before reading descriptors or launch data.
+pub fn peer_pid(fd: std::os::fd::RawFd) -> io::Result<libc::pid_t> {
+    unsafe {
+        let mut peer: libc::ucred = std::mem::zeroed();
+        let mut size = std::mem::size_of_val(&peer) as libc::socklen_t;
+        if libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            std::ptr::from_mut(&mut peer).cast(),
+            &mut size,
+        ) < 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        if size as usize != std::mem::size_of_val(&peer) || peer.uid != libc::getuid() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "local peer is not the same user",
+            ));
+        }
+        Ok(peer.pid)
+    }
+}
 use worminal_protocol::WORKSPACE_ENDPOINT;
 
 fn address(uid: u32, scope: &[u8]) -> io::Result<SocketAddr> {

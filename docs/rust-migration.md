@@ -1,8 +1,8 @@
 # Rust migration readiness
 
-The development release launcher and daemon are Rust. The default `worminal`
-still loads the C frontend; `worminal-rust` runs the Rust GTK application and
-lazy Rust frontend/WebKit modules. The active `/usr/local` installation has not been replaced.
+The development release launcher, daemon and GTK/WebKit modules are Rust above
+the shared C terminal engine. `worminal-rust` retains a separate candidate GUI
+namespace and browser profile. The active `/usr/local` installation has not been replaced.
 The installation and cutover gates below remain incomplete.
 
 ## Usable Rust application
@@ -36,8 +36,8 @@ write an installed C owner's live browser profile. Each profile has an exclusive
 owner lock. Browser module generations share one live data manager, while views
 pin their original code and independent navigation/session storage. The installed
 profile remains untouched; selecting it requires closing its existing browser
-owners during the final cutover. Switching the default release frontend and final
-publication remain pending. This app uses the same v2
+owners during the final cutover. The default development executable now selects
+the stable profile; final publication remains pending. This app uses the same v2
 workspace and leaves v1 untouched.
 
 Internal maintenance: `manage.py build-rust-app` builds the native executable;
@@ -79,19 +79,21 @@ production workspaces.
   `worminal-rust`. X11 activation is checked against private Muffin, including
   fresh server timestamps; its compiled counterfactual fails without the fix.
   Prepare that optional runtime through `manage.py setup-window-activation`.
-  The candidate lazily loads `frontend-rust-v1.so` through the generated ABI in
-  `src/gtk/rust_frontend_module.h`; the default launcher still selects the C frontend.
+  The candidate lazily loads `frontend-rust-v2.so` through the generated ABI in
+  `src/gtk/rust_frontend_module.h`; the default launcher selects the Rust frontend.
+  Immutable module flags select stable versus candidate profiles. The C GTK peer
+  remains available as `build/worminal-gtk-c` for compatibility checks.
   Only the owner loads GTK/Pango/Cairo, and only a browser claim loads WebKit.
 - Rust browser module, versioned loader and generation pinning are implemented.
   `src/gtk/rust_browser_module.h` owns the incompatible opaque ABI; both sides
   generate bindings. Browser chrome/scripts remain shared resources. Complete
   security/media/permission parity and final profile publication still need the
-  full regression audit; the default release frontend remains C.
+  full regression audit. Browser ABI 2 carries palette background changes.
 - Private staged installation: `manage.py check-install` verifies artifact
   bytes, modes, native CLI/SSH input, daemon executable path and resident
   frontend/browser bytes under `.checks/install-stage/usr/local`.
-- Final production publication and live-session cutover: pending the GUI
-  ports, complete regression/resource audit, verified recovery artifacts,
+- Final production publication and live-session cutover: pending the complete
+  regression/resource audit, verified recovery artifacts,
   live inventory and privately verified upgrade/reverse-transfer paths for
   the final artifacts.
 
@@ -118,3 +120,25 @@ The engine check separately records parser CPU/RSS in `.checks/engine-resources.
 Current engine checks still show higher parser CPU than the pre-extraction baseline.
 Repeat comparisons with the final frontend/browser ports before cutover;
 launch latency is not a migration optimization requirement.
+
+The Rust-default checkpoint passed `manage.py check` (141 existing tests, one
+intentional v1 browser skip, both C GTK compatibility runs, 19 Rust application
+tests and 7 Rust browser tests). The subsequent browser run passed all 8 tests,
+including exact pixels for a converted tab's custom background. `check-install`
+passed against the staged installation; production publication remains pending.
+Logs are `.checks/rust-release-{full-check,app,browser,install}.log`.
+
+Two alternating private HTTP trials with `browser-perf --kind http --trials 2
+--compare .checks/c-baseline/build` measured the following median PSS, including
+the frontend, WebKit helpers and workspace service/shells regardless of parenting:
+
+| State | Preserved C | Rust |
+| --- | ---: | ---: |
+| First browser | 192,965 KiB | 203,402 KiB |
+| Additional browser | 251,782 KiB | 265,637 KiB |
+
+This fixture shows roughly 5.4–5.5% higher PSS; two trials do not establish a
+general memory bound or equal CPU use. Raw samples and exact process counts are
+in `.checks/rust-release-browser-perf.json`. The preserved recovery manifest's
+18 artifacts still match their hashes. Broader browser parity and production
+inventory/cutover verification remain separate gates.

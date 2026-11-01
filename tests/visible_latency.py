@@ -256,9 +256,18 @@ def seed_tabs(env, connection, count, log, master=None, labels=None):
                 raise RuntimeError("Saved-tab fixture did not retain the requested number of PTYs")
 
 
+def snapshot_revision(directory):
+    revision = directory / 'revision'
+    if revision.exists():
+        return revision.read_text().strip()
+    # The migration recovery capture stores the same provenance beside its build directory.
+    return json.loads((directory.parent / 'manifest.json').read_text())['revision']
+
+
 def snapshot(directory):
     directory.mkdir(parents=True, exist_ok=False)
-    for name in ("worminal", "worminald", "build/frontend.so", "build/browser.so"):
+    from rust_runtime import RUST_FRONTEND_MODULE, RUST_BROWSER_MODULE
+    for name in ("worminal", "worminald", f"build/{RUST_FRONTEND_MODULE}", f"build/{RUST_BROWSER_MODULE}"):
         destination = directory / name
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / name, destination)
@@ -387,7 +396,7 @@ def main():
     if args.compare:
         report["variants"] = {label: {"samples_ms": values, "summary_ms": summaries[label]}
                               for label, values in samples.items()}
-        report["baseline_revision"] = (args.compare / "revision").read_text().strip()
+        report["baseline_revision"] = snapshot_revision(args.compare)
         differences = {name: [a - b for a, b in zip(values, samples["baseline"][name])]
                        for name, values in samples["candidate"].items()
                        if name != "typing" and name in samples["baseline"]}

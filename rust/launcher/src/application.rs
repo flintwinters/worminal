@@ -70,7 +70,7 @@ fn run(frontend: Frontend, candidate: bool) -> io::Result<()> {
             Forward::Owner(listener) => Some(listener),
         }
     };
-    native::enter(args, listener, frontend)
+    native::enter(args, listener, frontend, candidate)
 }
 
 pub fn main(frontend: Frontend, candidate: bool) -> ExitCode {
