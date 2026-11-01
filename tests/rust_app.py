@@ -19,6 +19,7 @@ from workspace_protocol import send, wait_kind, catalog_records, service_pid
 from x11 import isolated_display, close_window
 from preview import wayland_display
 from test_window_state import private_bus, WindowStateTest
+from test_window_activation import WindowActivationTests
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -214,6 +215,7 @@ class RustApplicationTest(unittest.TestCase):
 def main():
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(RustApplicationTest)
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(WindowStateTest))
+    suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(WindowActivationTests))
     for name in ('test_navigation_keys', 'test_alternate_scroll_sends_cursor_keys',
                  'test_clipboard_paste_bytes', 'test_ctrl_end_in_micro', 'test_master_navigation_keys',
                  'test_master_alternate_scroll_sends_cursor_keys', 'test_master_clipboard_paste_bytes'):

@@ -1,7 +1,9 @@
 """Exercise launch activation with a desktop's focus-stealing prevention enabled."""
 from pathlib import Path
+import os
 import shutil
 import subprocess
+import sys
 import time
 import unittest
 
@@ -9,6 +11,10 @@ from preview import profile, service
 from x11 import isolated_display
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from tools import muffin
+
+FRONTEND = ROOT / os.environ.get("WORMINAL_FRONTEND", "worminal")
 
 
 def wait_for(check, description):
@@ -20,7 +26,7 @@ def wait_for(check, description):
     raise AssertionError(description)
 
 
-@unittest.skipUnless(all(shutil.which(tool) for tool in ("muffin", "dbus-run-session", "Xvfb", "xdotool")),
+@unittest.skipUnless(muffin.available() and all(shutil.which(tool) for tool in ("dbus-run-session", "Xvfb", "xdotool")),
                      "Muffin, D-Bus, Xvfb and xdotool are required")
 class WindowActivationTests(unittest.TestCase):
     def test_forwarded_and_shortcut_launches_activate_new_windows(self):
@@ -31,7 +37,7 @@ class WindowActivationTests(unittest.TestCase):
             env.pop("DBUS_SESSION_BUS_ADDRESS", None)
             with (ROOT / ".checks/window-activation.log").open("wb") as log:
                 manager = subprocess.Popen(
-                    ["dbus-run-session", "--", "muffin", "--sm-disable", "--x11"],
+                    ["dbus-run-session", "--", *muffin.command(env)],
                     env=env, stdout=log, stderr=log)
                 owner = None
 
@@ -42,23 +48,45 @@ class WindowActivationTests(unittest.TestCase):
                     found = output("xdotool", "search", "--onlyvisible", "--name", f"^{title}$")
                     return found.splitlines()[0] if found else None
 
+                def user_time(identity):
+                    from Xlib import X, display as xdisplay
+                    connection = xdisplay.Display(env["DISPLAY"])
+                    try:
+                        window = connection.create_resource_object("window", int(identity))
+                        separate = window.get_full_property(connection.intern_atom("_NET_WM_USER_TIME_WINDOW"),
+                                                            X.AnyPropertyType)
+                        if separate is not None:
+                            window = connection.create_resource_object("window", int(separate.value[0]))
+                        value = window.get_full_property(connection.intern_atom("_NET_WM_USER_TIME"),
+                                                         X.AnyPropertyType)
+                        return int(value.value[0]) if value is not None else 0
+                    finally:
+                        connection.close()
+
                 try:
                     wait_for(lambda: "window id #" in output("xprop", "-root", "_NET_SUPPORTING_WM_CHECK"),
                              "Muffin did not start; see .checks/window-activation.log")
-                    owner = subprocess.Popen([str(ROOT / "worminal"), "-T", "Activation first",
+                    owner = subprocess.Popen([str(FRONTEND), "-c", "WorminalActivation", "-n", "activation-fixture",
+                                              "-T", "Activation first",
                                               "-e", "/bin/cat"], env=env, stdout=log, stderr=log)
                     wait_for(lambda: window("Activation first"), "First window did not map")
                     first = window("Activation first")
+                    self.assertIn("WorminalActivation", output("xprop", "-id", first, "WM_CLASS"))
                     subprocess.run(["xdotool", "windowactivate", "--sync", first,
                                     "key", "a"], env=env, check=True)
                     # Give the owner a real input timestamp before forwarding a launch.
                     time.sleep(.1)
-                    subprocess.run([str(ROOT / "worminal"), "-T", "Activation second",
+                    previous_time = user_time(first)
+                    subprocess.run([str(FRONTEND), "-T", "Activation second",
                                     "-o", "-", "-e", "/bin/sh", "-c",
                                     "stty raw -echo; printf ACTIVATION_READY; exec cat"],
                                    env=env, stdout=log, stderr=log, check=True, timeout=10)
                     wait_for(lambda: window("Activation second"), "Second window did not map")
                     second = window("Activation second")
+                    # Some Muffin versions permit zero/stale activation anyway. Independently require
+                    # the fresh map timestamp that stricter desktop focus policies need; wrap at 32 bits.
+                    wait_for(lambda: 0 < (user_time(second) - previous_time) % (1 << 32) < (1 << 31),
+                             "Explicit launch did not refresh its server timestamp")
                     wait_for(lambda: output("xdotool", "getwindowfocus") == second,
                              "Forwarded launch did not focus its new window")
                     log_path = ROOT / ".checks/window-activation.log"

@@ -230,7 +230,13 @@ impl App {
         Ok(())
     }
     fn open(config: Config) -> io::Result<Rc<Self>> {
+        if let Some(class) = &config.class {
+            gdk::set_program_class(class);
+        }
         let window = gtk::Window::new(gtk::WindowType::Toplevel);
+        if let Some(name) = &config.name {
+            window.set_widget_name(name);
+        }
         window.set_title(&config.title);
         window.set_default_size(1000, 600);
         window.set_resizable(!config.fixed);
@@ -244,7 +250,7 @@ impl App {
         window.add(&container);
         let app = Rc::new(Self {
             state_id: window_state::next_id()?,
-            fonts: Rc::new(RefCell::new(Fonts::new(config.font.clone(), 0.0))),
+            fonts: Rc::new(RefCell::new(Fonts::new(config.font.clone(), config.zoom))),
             config,
             window,
             notebook,
@@ -301,8 +307,7 @@ impl App {
         app.establish(!app.config.attach)?;
         WINDOWS.with(|windows| windows.borrow_mut().push(app.clone()));
         window_state::changed();
-        app.window.show_all();
-        app.window.present();
+        crate::graphics_ffi::show_window(&app.window);
         Ok(app)
     }
     fn message(&self, message: Option<&str>) {

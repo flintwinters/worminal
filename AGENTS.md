@@ -117,7 +117,9 @@ share the authoritative contract in `src/gtk/window_state_protocol.h`.
 Wayland;
 `check-rust-frontend` compares exact C/Rust painter pixels. SSH uses posix_spawn without GUI fork hooks and pins child
 identity.
-Next: activation, lazy frontend module integration and complete behavior/resource/cutover verification.
+Native activation uses fresh X11 server time; the private Muffin regression and compiled counterfactual check it.
+Use `manage.py setup-window-activation` to prepare Muffin locally without a system installation.
+Next: lazy frontend module integration and complete behavior/resource/cutover verification.
 `docs/rust-migration.md` owns migration readiness, recovery/test commands and measured resource costs.
 Cargo outputs belong in build/cargo; preserve diagnostics and the exclusive C recovery baseline under .checks.
 Audit upgrade lifecycle after the failed live bootstrap killed transferred sessions; the receiver

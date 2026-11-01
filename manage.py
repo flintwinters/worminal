@@ -532,6 +532,13 @@ def check_window_activation():
                          "-p", "test_window_activation.py", "-v"]))
 
 
+@app.command("setup-window-activation")
+def setup_window_activation():
+    """Prepare a project-local Muffin runtime for private activation checks, without system installation."""
+    from tools.muffin import setup
+    setup()
+
+
 @app.command()
 def lint():
     """Check file limits and run Clang static analysis (requires clang-tidy)."""

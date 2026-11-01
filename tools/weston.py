@@ -3,7 +3,7 @@
 from pathlib import Path
 import re
 import subprocess
-import tempfile
+from tools.debian_runtime import unpack
 
 ROOT = Path(__file__).resolve().parent.parent
 LOCAL = ROOT / ".checks/weston"
@@ -19,13 +19,9 @@ def setup():
     major = int(library[1].split("-")[1])
     if major not in SUPPORTED_ABIS:
         raise ValueError(f"The test seat supports Weston ABIs {SUPPORTED_ABIS}; found {major}")
-    command = ["apt-get", "download", "weston", library[1], library[1].rsplit("-", 1)[0] + "-dev"]
     # Never mix stale packages or public struct layouts from different ABIs.
     root = LOCAL / library[1]
-    with tempfile.TemporaryDirectory(prefix="download-", dir=LOCAL) as packages:
-        subprocess.run(command, cwd=packages, check=True)
-        for package in sorted(Path(packages).glob("*.deb")):
-            subprocess.run(["dpkg-deb", "-x", str(package), str(root)], check=True)
+    unpack(["weston", library[1], library[1].rsplit("-", 1)[0] + "-dev"], root)
     active = LOCAL / "active-library.pending"
     active.write_text(library[1] + "\n")
     active.replace(LOCAL / "active-library")

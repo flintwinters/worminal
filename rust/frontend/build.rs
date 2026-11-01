@@ -123,6 +123,19 @@ impl Parser {
     }
 }
 fn main() {
+    println!("cargo:rustc-check-cfg=cfg(worminal_gdk_x11)");
+    let targets = std::process::Command::new("pkg-config")
+        .args(["--variable=targets", "gtk+-3.0"])
+        .output()
+        .expect("GTK backend configuration");
+    assert!(targets.status.success(), "GTK backend configuration");
+    if targets
+        .stdout
+        .split(u8::is_ascii_whitespace)
+        .any(|target| target == b"x11")
+    {
+        println!("cargo:rustc-cfg=worminal_gdk_x11");
+    }
     let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("../..");
     let state = root.join("src/gtk/window_state_protocol.h");
     println!("cargo:rerun-if-changed={}", state.display());

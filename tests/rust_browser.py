@@ -14,7 +14,7 @@ import unittest
 from unittest.mock import patch
 
 from preview import broker_check, Fixture, fixture, profile, service, wayland_display
-from x11 import isolated_display
+from x11 import isolated_display, close_window
 from test_window_state import private_bus
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -47,6 +47,26 @@ def title(env, expected, process):
 
 
 class RustBrowserTest(unittest.TestCase):
+    def test_closing_a_browser_owner_preserves_its_dom_in_a_surviving_window(self):
+        from test_keys import read_bytes
+        with isolated_display() as display, profile(display) as env, fixture() as url:
+            env.update(GDK_BACKEND='x11'); env.pop('WAYLAND_DISPLAY', None)
+            with application(env, '-T', 'Keeper', '-o', '-', '-e', '/bin/sh', '-c', 'printf READY; exec cat') as app:
+                self.assertEqual(read_bytes(app.stdout, 5), b'READY')
+                keeper = title(env, 'Keeper', app)
+                subprocess.run([APP, '--surf', url], env=env, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, check=True, timeout=5)
+                browser = title(env, 'Fixture', app)
+                subprocess.run(['xdotool', 'windowfocus', '--sync', browser], env=env, check=True)
+                subprocess.run(['xdotool', 'type', '--clearmodifiers', 'live'], env=env, check=True)
+                title(env, 'Edited:live', app)
+                close_window(env, 'Edited:live')
+                subprocess.run(['xdotool', 'windowfocus', '--sync', keeper], env=env, check=True)
+                subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+9'], env=env, check=True)
+                title(env, 'Edited:live', app)
+                subprocess.run(['xdotool', 'type', '--clearmodifiers', '!'], env=env, check=True)
+                title(env, 'Edited:live!', app)
+
     def test_incomplete_launch_does_not_block_a_following_window(self):
         with isolated_display() as display, profile(display) as env, fixture() as url:
             env.update(GDK_BACKEND='x11'); env.pop('WAYLAND_DISPLAY', None)

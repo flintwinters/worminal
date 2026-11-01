@@ -81,6 +81,7 @@ impl App {
                     config.output.clear();
                     config.line.clear();
                     config.browser_url = None;
+                    config.zoom = self.fonts.borrow().zoom();
                     if let Err(error) = Self::open(config) {
                         self.message(Some(&error.to_string()));
                     }

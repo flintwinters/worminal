@@ -18,6 +18,9 @@ pub(super) struct Config {
     pub(super) browser_url: Option<String>,
     pub(super) environment: Vec<(OsString, OsString)>,
     pub(super) stream: Option<Rc<std::fs::File>>,
+    pub(super) class: Option<String>,
+    pub(super) name: Option<String>,
+    pub(super) zoom: f64,
 }
 impl Config {
     pub(super) fn parse(request: &worminal_workspace::broker::Request) -> io::Result<Option<Self>> {
@@ -36,6 +39,9 @@ impl Config {
             master: None,
             browser_url: None,
             stream: Some(Rc::new(request.output.try_clone()?)),
+            class: None,
+            name: None,
+            zoom: 0.0,
             environment: request
                 .environment
                 .iter()
@@ -57,7 +63,8 @@ impl Config {
                 Some("--help" | "-h") => {
                     println!("worminal-rust: Rust GTK terminal\n\
                         usage: worminal-rust [--master HOST] [--attach] [-aiv] [-f font] [-g COLSxROWS] \
-                        [-T title] [-o file] [-l line] [-e command ...]\n\nCtrl+Shift+T: tab  Ctrl+Shift+N: window  \
+                        [-c class] [-n name] [-T title] [-o file] [-l line] [-e command ...]\n\n\
+                        Ctrl+Shift+T: tab  Ctrl+Shift+N: window  \
                         Ctrl+Shift+W: close tab\nCtrl+Shift+C/V: clipboard  Alt+1..9: select tab\n\n\
                         --browser URL|FILE: open a browser tab in this window");
                     return Ok(None);
@@ -74,12 +81,15 @@ impl Config {
                     break;
                 }
                 Some(
-                    "--browser" | "--surf" | "--master" | "-T" | "-t" | "-f" | "-g" | "-o" | "-l",
+                    "--browser" | "--surf" | "--master" | "-c" | "-n" | "-T" | "-t" | "-f" | "-g"
+                    | "-o" | "-l",
                 ) => {
                     let value = args
                         .next()
                         .ok_or_else(|| io::Error::other("option requires a value"))?;
                     match arg.to_str().unwrap() {
+                        "-c" => config.class = Some(value.to_string_lossy().into_owned()),
+                        "-n" => config.name = Some(value.to_string_lossy().into_owned()),
                         "--browser" | "--surf" => {
                             let url = worminal_workspace::browser_target::resolve_in(
                                 Some(&value),

@@ -27,16 +27,22 @@ def rust_fixture(directory, name, component="daemon", *, tests=False):
     text = f'[workspace]\n[package]\nname={json.dumps(package)}\n'
     text += f'version={json.dumps(manifest["package"]["version"])}\n'
     text += f'edition={json.dumps(workspace["workspace"]["package"]["edition"])}\n'
-    text += f'[lib]\nname="worminal_{component.replace("-", "_")}"\n[dependencies]\n'
-    for name, dependency in manifest["dependencies"].items():
-        if "path" in dependency:
-            dependency = {**dependency, "path": str((source / dependency["path"]).resolve())}
-        else:
-            shared = workspace["workspace"]["dependencies"][name]
-            dependency = {**({"version": shared} if isinstance(shared, str) else shared),
-                          **{key: value for key, value in dependency.items() if key != "workspace"}}
-        fields = ", ".join(f"{key}={json.dumps(value)}" for key, value in dependency.items())
-        text += f'{name} = {{{fields}}}\n'
+    text += f'[lib]\nname="worminal_{component.replace("-", "_")}"\n'
+    for section in ("dependencies", "build-dependencies", "dev-dependencies"):
+        if section not in manifest:
+            continue
+        text += f'[{section}]\n'
+        for name, dependency in manifest[section].items():
+            if isinstance(dependency, str):
+                dependency = {"version": dependency}
+            elif "path" in dependency:
+                dependency = {**dependency, "path": str((source / dependency["path"]).resolve())}
+            elif dependency.get("workspace"):
+                shared = workspace["workspace"]["dependencies"][name]
+                dependency = {**({"version": shared} if isinstance(shared, str) else shared),
+                              **{key: value for key, value in dependency.items() if key != "workspace"}}
+            fields = ", ".join(f"{key}={json.dumps(value)}" for key, value in dependency.items())
+            text += f'{name} = {{{fields}}}\n'
     (target / "Cargo.toml").write_text(text)
     if tests:
         shutil.copytree(source / "tests", target / "tests", dirs_exist_ok=True)
@@ -78,6 +84,22 @@ def rust_viewport_counterfactual(directory):
                "--target-dir", str(ROOT / "build/cargo"), "--offline", "--quiet", "--test", "viewport", test]
     rust_build(directory, "rust-viewport", [*command, "--no-run"])
     return "Rust viewport publication", command, os.environ, test.encode()
+
+
+def rust_activation_counterfactual(directory):
+    target, package = rust_fixture(directory, "rust-activation", "frontend")
+    mutant = target / "src/graphics_ffi.rs"
+    source = mutant.read_text()
+    operation = "if window.display().type_().is_a(x11) {"
+    if source.count(operation) != 1:
+        raise ValueError("Rust activation counterfactual no longer removes fresh X11 timestamps")
+    mutant.write_text(source.replace(operation, "if false {"))
+    rust_build(directory, "rust-activation", ["cargo", "build", "--manifest-path", str(target / "Cargo.toml"),
+               "--target-dir", str(ROOT / "build/cargo"), "--offline", "--quiet", "--release", "--bin", package])
+    command = [sys.executable, "-m", "unittest", "discover", "-s", "tests",
+               "-p", "test_window_activation.py", "-q"]
+    env = {**os.environ, "WORMINAL_FRONTEND": str(ROOT / "build/cargo/release" / package)}
+    return "Rust activation timestamp", command, env, b"Explicit launch did not refresh its server timestamp"
 
 
 def rust_handoff_counterfactual(directory, name, filename, before, after, test, pattern="test_handoff.py"):
@@ -287,6 +309,8 @@ def prove(match=None):
         cases.append(rust_frame_counterfactual(directory))
     if match is None or match.casefold() in "Rust viewport publication".casefold():
         cases.append(rust_viewport_counterfactual(directory))
+    if match is None or match.casefold() in "Rust activation timestamp".casefold():
+        cases.append(rust_activation_counterfactual(directory))
     ownership_cases = (
         ("Rust commit ownership", "handoff.rs", "let commit = channel.commit()?;",
          "let commit = channel.commit()?; channel.acknowledgement()?;",

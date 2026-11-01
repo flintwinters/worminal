@@ -2,6 +2,37 @@
 use glib::translate::ToGlibPtr;
 use std::ffi::{c_char, c_double, c_int, c_void, CStr, CString};
 
+#[cfg(worminal_gdk_x11)]
+#[link(name = "gdk-3")]
+extern "C" {
+    fn gdk_x11_display_get_type() -> glib::ffi::GType;
+    fn gdk_x11_get_server_time(window: *mut gtk::gdk::ffi::GdkWindow) -> u32;
+    fn gdk_x11_window_set_user_time(window: *mut gtk::gdk::ffi::GdkWindow, time: u32);
+}
+
+pub(crate) fn show_window(window: &gtk::Window) {
+    use gtk::prelude::*;
+    #[allow(unused_mut)]
+    let mut time = gtk::gdk::ffi::GDK_CURRENT_TIME as u32;
+    #[cfg(worminal_gdk_x11)]
+    {
+        let x11: glib::Type = unsafe { glib::translate::from_glib(gdk_x11_display_get_type()) };
+        if window.display().type_().is_a(x11) {
+            // Stamp mapping and presentation for focus policies that reject an owner's stale input time.
+            // The private Muffin regression also checks the property: permissive policies can mask this bug.
+            window.realize();
+            if let Some(surface) = window.window() {
+                unsafe {
+                    time = gdk_x11_get_server_time(surface.to_glib_none().0);
+                    gdk_x11_window_set_user_time(surface.to_glib_none().0, time);
+                }
+            }
+        }
+    }
+    window.show_all();
+    window.present_with_time(time);
+}
+
 #[link(name = "fontconfig")]
 extern "C" {
     fn FcNameParse(name: *const u8) -> *mut c_void;

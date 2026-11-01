@@ -827,8 +827,8 @@ show_app(App *app)
 	guint32 activation_time = GDK_CURRENT_TIME;
 #ifdef GDK_WINDOWING_X11
 	if (GDK_IS_X11_DISPLAY(gtk_widget_get_display(app->window))) {
-		/* Existing owners retain old input times. Muffin rejects timestamp-zero
-		 * activation, so stamp both the initial map and presentation freshly. */
+		/* Existing owners retain old input times. Focus policies can reject stale
+		 * or timestamp-zero activation; stamp both mapping and presentation freshly. */
 		gtk_widget_realize(app->window);
 		GdkWindow *window = gtk_widget_get_window(app->window);
 		activation_time = gdk_x11_get_server_time(window);
