@@ -1,0 +1,19 @@
+[package]
+name = "worminal-frontend"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+worminal-engine = { path = "../engine" }
+worminal-engine-sys = { path = "../engine-sys" }
+worminal-protocol = { path = "../protocol" }
+worminal-config = { path = "../config" }
+gtk.workspace = true
+pango.workspace = true
+cairo-rs = { workspace = true, features = ["png"] }
+glib.workspace = true
+
+[[bin]]
+name = "worminal-render-check"
+path = "../../tests/rust_render.rs"

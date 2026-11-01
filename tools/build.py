@@ -17,7 +17,8 @@ BROWSER_ABI = next(line.split()[2] for line in (ROOT / "src/gtk/browser_module.h
 BROWSER_MODULE = f"browser-v{BROWSER_ABI}.so"
 ENGINE_DEFAULTS = "terminal/engine_defaults.c"
 ENGINE = ("terminal/engine.c", ENGINE_DEFAULTS, "terminal/engine_parser.c",
-          "terminal/engine_events.c", "terminal/engine_sync.c", "terminal/engine_snapshot.c")
+          "terminal/engine_events.c", "terminal/engine_sync.c", "terminal/engine_snapshot.c",
+          "terminal/engine_view_selection.c")
 SESSION_SUPPORT = ("terminal/session_view.c", "terminal/session_transfer.c", "terminal/render_sync.c",
                    "terminal/engine_adapter.c", *ENGINE)
 COMMON = ("terminal/defaults.c", "terminal/st.c", *SESSION_SUPPORT,
@@ -155,6 +156,7 @@ class Builder:
             for source in ENGINE:
                 obj = f"build/obj/engine/{Path(source).with_suffix('.o')}"
                 step(obj, [*self.cc, *CPPFLAGS, *words("CPPFLAGS"), *words("CFLAGS", "-O3"),
+                           "-ffunction-sections", "-fdata-sections",
                            "-c", f"src/{source}"], [f"src/{source}"], depfile=True)
                 objects.append(obj)
             step(target, [*words("AR", "ar"), "rcs", "{output}", *objects], objects)
@@ -239,6 +241,7 @@ class Builder:
                            *pkg_flags("--cflags", TERMINAL_PACKAGES)]
             try:
                 self.program(target, ["tests/render_probe.c", "src/workspace/wire.c"], variant="render-probe",
+                             flags=["-DWORMINAL_PREVIEW_PROTOCOL"],
                              libs=[*pkg_flags("--libs", TERMINAL_PACKAGES), *words("LDFLAGS")])
             finally:
                 self.cflags = old_flags

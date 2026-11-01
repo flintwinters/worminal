@@ -9,7 +9,7 @@ pub type TransportState = sys::WorminalTransportState;
 #[derive(Debug, PartialEq, Eq)]
 pub struct Error(pub i32);
 
-fn check(status: i32) -> Result<(), Error> {
+pub(crate) fn check(status: i32) -> Result<(), Error> {
     if status == sys::WORMINAL_OK as i32 {
         Ok(())
     } else {

@@ -1,5 +1,23 @@
 /* See LICENSE. Shared parser; every stateful operation receives its terminal explicitly. */
 
+static Glyph
+selection_cell(TermEngine *session, int x, int y)
+{
+	if (session->selection_only) {
+		WorminalCell cell = session->selection_cells[(size_t)y * term.col + x];
+		return (Glyph){.u = cell.rune, .mode = cell.attributes, .fg = cell.foreground, .bg = cell.background};
+	}
+	return te_tline(session, y)[x];
+}
+
+static void
+selection_dirty(TermEngine *session, int first, int last)
+{
+	/* Borrowed selection contexts have no damage grid. Keep their special handling
+	 * in selection operations, outside the parser's per-character damage path. */
+	if (!session->selection_only) te_tsetdirt(session, first, last);
+}
+
 void
 te_selinit(TermEngine *session)
 {
@@ -12,12 +30,10 @@ static int
 te_tlinelen(TermEngine *session, int y)
 {
 	int i = term.col;
-	Line line = te_tline(session, y);
-
-	if (line[i - 1].mode & ATTR_WRAP)
+	if (selection_cell(session, i - 1, y).mode & ATTR_WRAP)
 		return i;
 
-	while (i > 0 && line[i - 1].u == ' ')
+	while (i > 0 && selection_cell(session, i - 1, y).u == ' ')
 		--i;
 
 	return i;
@@ -37,7 +53,7 @@ te_selstart(TermEngine *session, int col, int row, int snap)
 
 	if (sel.snap != 0)
 		sel.mode = SEL_READY;
-	te_tsetdirt(session, sel.nb.y, sel.ne.y);
+	selection_dirty(session, sel.nb.y, sel.ne.y);
 }
 
 void
@@ -64,7 +80,7 @@ te_selextend(TermEngine *session, int col, int row, int type, int done)
 	sel.type = type;
 
 	if (oldey != sel.oe.y || oldex != sel.oe.x || oldtype != sel.type || sel.mode == SEL_EMPTY)
-		te_tsetdirt(session, MIN(sel.nb.y, oldsby), MAX(sel.ne.y, oldsey));
+		selection_dirty(session, MIN(sel.nb.y, oldsby), MAX(sel.ne.y, oldsey));
 
 	sel.mode = done ? SEL_IDLE : SEL_READY;
 }
@@ -118,7 +134,7 @@ te_selsnap(TermEngine *session, int *x, int *y, int direction)
 {
 	int newx, newy, xt, yt;
 	int delim, prevdelim;
-	const Glyph *gp, *prevgp;
+	Glyph gp, prevgp;
 
 	switch (sel.snap) {
 	case SNAP_WORD:
@@ -126,8 +142,8 @@ te_selsnap(TermEngine *session, int *x, int *y, int direction)
 		 * Snap around if the word wraps around at the end or
 		 * beginning of a line.
 		 */
-		prevgp = &te_tline(session, *y)[*x];
-		prevdelim = ISDELIM(prevgp->u);
+		prevgp = selection_cell(session, *x, *y);
+		prevdelim = ISDELIM(prevgp.u);
 		for (;;) {
 			newx = *x + direction;
 			newy = *y;
@@ -141,17 +157,17 @@ te_selsnap(TermEngine *session, int *x, int *y, int direction)
 					yt = *y, xt = *x;
 				else
 					yt = newy, xt = newx;
-				if (!(te_tline(session, yt)[xt].mode & ATTR_WRAP))
+				if (!(selection_cell(session, xt, yt).mode & ATTR_WRAP))
 					break;
 			}
 
 			if (newx >= te_tlinelen(session, newy))
 				break;
 
-			gp = &te_tline(session, newy)[newx];
-			delim = ISDELIM(gp->u);
-			if (!(gp->mode & ATTR_WDUMMY) && (delim != prevdelim
-					|| (delim && gp->u != prevgp->u)))
+			gp = selection_cell(session, newx, newy);
+			delim = ISDELIM(gp.u);
+			if (!(gp.mode & ATTR_WDUMMY) && (delim != prevdelim
+					|| (delim && gp.u != prevgp.u)))
 				break;
 
 			*x = newx;
@@ -169,14 +185,14 @@ te_selsnap(TermEngine *session, int *x, int *y, int direction)
 		*x = (direction < 0) ? 0 : term.col - 1;
 		if (direction < 0) {
 			for (; *y > 0; *y += direction) {
-				if (!(te_tline(session, *y-1)[term.col-1].mode
+				if (!(selection_cell(session, term.col-1, *y-1).mode
 						& ATTR_WRAP)) {
 					break;
 				}
 			}
 		} else if (direction > 0) {
 			for (; *y < term.row-1; *y += direction) {
-				if (!(te_tline(session, *y)[term.col-1].mode
+				if (!(selection_cell(session, term.col-1, *y).mode
 						& ATTR_WRAP)) {
 					break;
 				}
@@ -190,8 +206,7 @@ char *
 te_getsel(TermEngine *session)
 {
 	char *str, *ptr;
-	int y, bufsize, lastx, linelen;
-	const Glyph *gp, *last;
+	int y, bufsize, lastx, linelen, first, last;
 
 	if (sel.ob.x == -1)
 		return NULL;
@@ -207,28 +222,31 @@ te_getsel(TermEngine *session)
 		}
 
 		if (sel.type == SEL_RECTANGULAR) {
-			gp = &te_tline(session, y)[sel.nb.x];
+			first = sel.nb.x;
 			lastx = sel.ne.x;
 		} else {
-			gp = &te_tline(session, y)[sel.nb.y == y ? sel.nb.x : 0];
+			first = sel.nb.y == y ? sel.nb.x : 0;
 			lastx = (sel.ne.y == y) ? sel.ne.x : term.col-1;
 		}
-		last = &te_tline(session, y)[MIN(lastx, linelen-1)];
-		while (last >= gp && last->u == ' ')
+		last = MIN(lastx, linelen-1);
+		while (last >= first && selection_cell(session, last, y).u == ' ')
 			--last;
 
-		for ( ; gp <= last; ++gp) {
-			if (gp->mode & ATTR_WDUMMY)
+		for (int x = first; x <= last; ++x) {
+			Glyph cell = selection_cell(session, x, y);
+			if (cell.mode & ATTR_WDUMMY)
 				continue;
 
-			ptr += utf8encode(gp->u, ptr);
+			ptr += utf8encode(cell.u, ptr);
 		}
 
 		/* Clipboard text uses LF for hard line breaks and joins soft wraps.
 		 * Paste handling preserves text in bracketed mode; ordinary paste
 		 * converts line endings to Enter keystrokes (see paste.h). */
+		/* Trimming an all-space selected prefix can leave last == -1. No glyph
+		 * exists there; treating it as a hard break also avoids a read before row 0. */
 		if ((y < sel.ne.y || lastx >= linelen) &&
-		    (!(last->mode & ATTR_WRAP) || sel.type == SEL_RECTANGULAR))
+		    (last < 0 || !(selection_cell(session, last, y).mode & ATTR_WRAP) || sel.type == SEL_RECTANGULAR))
 			*ptr++ = '\n';
 	}
 	*ptr = 0;
@@ -242,7 +260,7 @@ te_selclear(TermEngine *session)
 		return;
 	sel.mode = SEL_IDLE;
 	sel.ob.x = -1;
-	te_tsetdirt(session, sel.nb.y, sel.ne.y);
+	selection_dirty(session, sel.nb.y, sel.ne.y);
 }
 
 int

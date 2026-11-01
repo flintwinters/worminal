@@ -61,12 +61,14 @@ enum win_mode {
 };
 
 typedef struct WorminalEngine WorminalEngine;
+typedef struct WorminalSelection WorminalSelection;
 enum worminal_default_color {
 	WORMINAL_DEFAULT_FOREGROUND = 258,
 	WORMINAL_DEFAULT_BACKGROUND = 259,
 	WORMINAL_DEFAULT_CURSOR = 256
 };
 #define WORMINAL_PENDING_BYTES 8192
+#define WORMINAL_TRUECOLOR_FLAG (1u << 24)
 /* Compatibility fields are supplied by the application, never owned by the terminal engine. */
 typedef struct {
 	int32_t pending_bytes, remote_scroll, output_kind;
@@ -79,6 +81,7 @@ typedef struct {
 	int32_t columns, rows, cursor_x, cursor_y, scroll, alternate;
 	int64_t redraw_deadline;
 } WorminalFrame;
+typedef struct { int32_t first, end; } WorminalSelectionRange;
 typedef struct {
 	uint32_t type;
 	int32_t argument;
@@ -133,4 +136,15 @@ int worminal_engine_event(WorminalEngine *, WorminalEvent *, uint8_t *, size_t);
 int worminal_engine_export(WorminalEngine *, const WorminalTransportState *, uint8_t *, size_t, size_t *);
 int worminal_engine_import(const uint8_t *, size_t, WorminalEngine **, WorminalTransportState *);
 int worminal_engine_import_prefix(const uint8_t *, size_t, WorminalEngine **, WorminalTransportState *, size_t *);
+/* Imported views own cells in the caller. Selection borrows them only during each call;
+ * it cannot parse bytes, allocate a terminal grid, reflow, or retain a cell pointer. */
+int worminal_selection_create(WorminalSelection **);
+void worminal_selection_destroy(WorminalSelection *);
+int worminal_selection_configure(WorminalSelection *, const WorminalFrame *);
+int worminal_selection_clear(WorminalSelection *);
+int worminal_selection_select(WorminalSelection *, const WorminalCell *, size_t,
+                             int32_t, int32_t, int32_t, int32_t, int32_t, int32_t);
+int worminal_selection_text(WorminalSelection *, const WorminalCell *, size_t, uint8_t *, size_t, size_t *);
+/* One half-open column interval per viewport row, empty when first == end. */
+int worminal_selection_ranges(WorminalSelection *, WorminalSelectionRange *, size_t, size_t *);
 #endif

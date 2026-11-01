@@ -175,6 +175,56 @@ snapshot_validation(void)
 	worminal_engine_destroy(engine);
 }
 
+static void
+borrowed_selection(void)
+{
+	WorminalSelection *selection;
+	assert(worminal_selection_create(NULL) == WORMINAL_INVALID);
+	assert(worminal_selection_create(&selection) == WORMINAL_OK);
+	WorminalFrame frame = {.columns = 6, .rows = 2};
+	assert(worminal_selection_configure(selection, &frame) == WORMINAL_OK);
+	WorminalCell cells[12];
+	for (size_t i = 0; i < 12; i++) cells[i] = (WorminalCell){.rune = ' '};
+	cells[3].rune = 'X'; cells[6].rune = 'Z';
+	assert(worminal_selection_select(selection, cells, 11, 0, 0, 1, 0, SEL_REGULAR, 0) == WORMINAL_INVALID);
+	assert(worminal_selection_select(selection, cells, 12, 6, 0, 1, 0, SEL_REGULAR, 0) == WORMINAL_INVALID);
+	assert(worminal_selection_select(selection, cells, 12, 0, 0, 1, 0, SEL_REGULAR, 0) == WORMINAL_OK);
+	assert(worminal_selection_select(selection, cells, 12, 0, 1, 0, 0, SEL_RECTANGULAR, 0) == WORMINAL_OK);
+	assert(worminal_selection_select(selection, cells, 12, 0, 1, 0, 0, SEL_RECTANGULAR, 1) == WORMINAL_OK);
+	uint8_t text[4] = {0x5a};
+	size_t used;
+	assert(worminal_selection_text(selection, cells, 12, text, 1, &used) == WORMINAL_CAPACITY && used == 2);
+	assert(text[0] == 0x5a);
+	/* An all-space rectangular prefix must not dereference the glyph before row 0. */
+	assert(worminal_selection_text(selection, cells, 12, text, sizeof(text), &used) == WORMINAL_OK);
+	assert(used == 2 && !memcmp(text, "\nZ", 2));
+	cells[6].rune = 'Y';
+	assert(worminal_selection_text(selection, cells, 12, text, sizeof(text), &used) == WORMINAL_OK);
+	assert(used == 2 && !memcmp(text, "\nY", 2));
+	WorminalSelectionRange ranges[2] = {{.first = 99}};
+	assert(worminal_selection_ranges(selection, ranges, 1, &used) == WORMINAL_CAPACITY && used == 2);
+	assert(ranges[0].first == 99);
+	assert(worminal_selection_ranges(selection, ranges, 2, &used) == WORMINAL_OK);
+	assert(ranges[0].first == 0 && ranges[0].end == 1 && ranges[1].end == 1);
+	frame.columns = 0;
+	assert(worminal_selection_configure(selection, &frame) == WORMINAL_INVALID);
+	frame.columns = 5;
+	assert(worminal_selection_configure(selection, &frame) == WORMINAL_OK);
+	assert(worminal_selection_ranges(selection, ranges, 2, &used) == WORMINAL_OK);
+	assert(ranges[0].end == 0 && ranges[1].end == 0);
+	worminal_selection_destroy(selection);
+	worminal_selection_destroy(NULL);
+	WorminalEngine *owner;
+	assert(worminal_engine_create(6, 2, &owner) == WORMINAL_OK);
+	feed(owner, "   X\r\nZ", 1);
+	assert(worminal_engine_select(owner, 0, 0, 1, 0, SEL_REGULAR, 0) == WORMINAL_OK);
+	assert(worminal_engine_select(owner, 0, 1, 0, 0, SEL_RECTANGULAR, 0) == WORMINAL_OK);
+	assert(worminal_engine_select(owner, 0, 1, 0, 0, SEL_RECTANGULAR, 1) == WORMINAL_OK);
+	assert(worminal_engine_selection(owner, text, sizeof(text), &used) == WORMINAL_OK);
+	assert(used == 2 && !memcmp(text, "\nZ", 2));
+	worminal_engine_destroy(owner);
+}
+
 int
 main(void)
 {
@@ -183,5 +233,6 @@ main(void)
 	input_modes();
 	malformed_input();
 	snapshot_validation();
+	borrowed_selection();
 	return 0;
 }

@@ -5,8 +5,8 @@
 #include "engine_parser.h"
 #include WORMINAL_THEME_HEADER
 
-static int
-dimensions(int32_t columns, int32_t rows)
+int
+te_dimensions(int32_t columns, int32_t rows)
 {
 	return columns > 0 && columns <= 4096 && rows > 0 && rows <= 4096 &&
 	       (size_t)columns * rows <= 16000000;
@@ -17,7 +17,7 @@ worminal_engine_create(int32_t columns, int32_t rows, WorminalEngine **result)
 {
 	if (!result) return WORMINAL_INVALID;
 	*result = NULL;
-	if (!dimensions(columns, rows)) return WORMINAL_INVALID;
+	if (!te_dimensions(columns, rows)) return WORMINAL_INVALID;
 	TermEngine *created = te_alloc(sizeof(*created));
 	memset(created, 0, sizeof(*created));
 	created->altscreen_allowed = 1;
@@ -111,7 +111,7 @@ worminal_engine_input(WorminalEngine *engine, const uint8_t *input, size_t bytes
 int
 worminal_engine_resize(WorminalEngine *engine, int32_t columns, int32_t rows)
 {
-	if (!engine || !dimensions(columns, rows)) return WORMINAL_INVALID;
+	if (!engine || !te_dimensions(columns, rows)) return WORMINAL_INVALID;
 	te_tresize(engine, columns, rows);
 	return WORMINAL_OK;
 }

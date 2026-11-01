@@ -22,8 +22,13 @@ production workspaces.
 - GTK/WebKit behavior with the Rust daemon: `manage.py check-rust-daemon-x11`
   and `check-rust-daemon-wayland` use private displays. X11 also retains live
   browser DOM through upgrades and C rollback. These use C GUI modules.
-- Rust GTK rendering, input, windows, clipboard, IME, D-Bus, activation and
-  workspace client: not ported. Existing C behavior is the reference.
+- Rust imported viewports and Pango/Cairo painting are implemented in
+  `rust/frontend`; `manage.py check-rust-frontend` compares exact pixels
+  with the C frontend on private X11 and Wayland, including Unicode fallback,
+  clipping, cursor shapes, palette styles, selection and fractional grids.
+  Selection remains in C and borrows Rust cells only during each call.
+- Rust GTK input, windows, clipboard, IME, D-Bus, activation, workspace client
+  and module integration remain pending. The release frontend is still C.
 - Rust browser module, versioned loader, generation pinning and security:
   not ported. Existing C ABI, resources, profiles and security regressions
   remain authoritative.
@@ -51,7 +56,10 @@ compared the preserved C daemon with the Rust release daemon on the same
 The Rust daemon increased measured PSS by 691 KiB. CPU counters have 10 ms
 resolution; this short fixture does not establish equal CPU use. These are
 daemon-only measurements, not whole-application or browser resource results.
-Raw samples remain in `.checks/frame-output-latency-{baseline,candidate}.json`.
+Recorded comparison output is in `.checks/rust-default-resources.log`;
+`frame-perf` writes its latest raw samples to
+`.checks/frame-output-latency-{baseline,candidate}.json`.
 The engine check separately records parser CPU/RSS in `.checks/engine-resources.json`.
+Current engine checks still show higher parser CPU than the pre-extraction baseline.
 Repeat comparisons with the final frontend/browser ports before cutover;
 launch latency is not a migration optimization requirement.

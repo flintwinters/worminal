@@ -103,7 +103,7 @@ def run_native_checks():
             return code
     from tools.engine_checks import check
     code = check()
-    return code or run_rust_workspace_checks() or run_rust_process_checks()
+    return code or run_rust_workspace_checks() or run_rust_process_checks() or run_rust_frontend_tests()
 
 
 def run_headless_checks():
@@ -174,6 +174,22 @@ def run_rust_process_checks():
 def build_rust_daemon():
     native_build.generate_theme()
     return native_build.Builder().rust_artifact("worminal-daemon")
+
+
+def run_rust_frontend_tests():
+    return run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-frontend", "--lib", "--tests"])
+
+
+@app.command("check-rust-frontend")
+def check_rust_frontend():
+    """Check imported Rust viewports and exact C/Rust painter pixels on private X11 and native Wayland."""
+    native_build.build_targets("build/render_probe")
+    code = run_rust_frontend_tests()
+    if not code:
+        native_build.invoke(["cargo", "build", "--locked", "--release", "--quiet", "-p", "worminal-frontend",
+                             "--bin", "worminal-render-check"])
+        code = run([sys.executable, "tests/rust_frontend.py"])
+    raise typer.Exit(code)
 
 
 @app.command("build-rust-daemon")

@@ -1010,6 +1010,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "worminal-frontend"
+version = "0.1.0"
+dependencies = [
+ "cairo-rs",
+ "glib",
+ "gtk",
+ "pango",
+ "worminal-config",
+ "worminal-engine",
+ "worminal-engine-sys",
+ "worminal-protocol",
+]
+
+[[package]]
 name = "worminal-launcher"
 version = "0.1.0"
 dependencies = [

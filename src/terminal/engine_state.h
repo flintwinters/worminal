@@ -75,6 +75,9 @@ struct WorminalEngine {
 	int render_sync_expired;
 	TCursor saved[2];
 	EngineEventNode *events, *events_tail;
+	/* Only stack-scoped selection contexts borrow caller cells; parser instances keep these zero. */
+	const WorminalCell *selection_cells;
+	int selection_only;
 };
 typedef struct WorminalEngine TermEngine;
 void *te_alloc(size_t);
@@ -87,4 +90,5 @@ void te_freegrid(TermEngine *);
 void te_freeevents(TermEngine *);
 void te_diagnostic(TermEngine *, const char *, ...);
 void te_emit(TermEngine *, uint32_t, int32_t, uint32_t, const void *, size_t);
+int te_dimensions(int32_t, int32_t);
 #endif

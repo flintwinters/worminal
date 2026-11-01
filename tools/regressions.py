@@ -13,8 +13,8 @@ from tools import build
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def rust_fixture(directory, name):
-    source = ROOT / "rust/daemon"
+def rust_fixture(directory, name, component="daemon", *, tests=False):
+    source = ROOT / "rust" / component
     target = directory / name
     shutil.copytree(source / "src", target / "src", dirs_exist_ok=True)
     manifest = tomllib.loads((source / "Cargo.toml").read_text())
@@ -23,13 +23,19 @@ def rust_fixture(directory, name):
     text = f'[workspace]\n[package]\nname={json.dumps(package)}\n'
     text += f'version={json.dumps(manifest["package"]["version"])}\n'
     text += f'edition={json.dumps(workspace["workspace"]["package"]["edition"])}\n'
-    text += '[lib]\nname="worminal_daemon"\n[dependencies]\n'
+    text += f'[lib]\nname="worminal_{component.replace("-", "_")}"\n[dependencies]\n'
     for name, dependency in manifest["dependencies"].items():
         if "path" in dependency:
-            text += f'{name} = {{path={json.dumps(str((source / dependency["path"]).resolve()))}}}\n'
+            dependency = {**dependency, "path": str((source / dependency["path"]).resolve())}
         else:
-            text += f'{name} = {json.dumps(workspace["workspace"]["dependencies"][name])}\n'
+            shared = workspace["workspace"]["dependencies"][name]
+            dependency = {**({"version": shared} if isinstance(shared, str) else shared),
+                          **{key: value for key, value in dependency.items() if key != "workspace"}}
+        fields = ", ".join(f"{key}={json.dumps(value)}" for key, value in dependency.items())
+        text += f'{name} = {{{fields}}}\n'
     (target / "Cargo.toml").write_text(text)
+    if tests:
+        shutil.copytree(source / "tests", target / "tests", dirs_exist_ok=True)
     return target, package
 
 
@@ -53,6 +59,21 @@ def rust_frame_counterfactual(directory):
     rust_build(directory, "rust-frame", [*command, "--no-run"])
     return ("Rust frame queue publication", command, os.environ,
             b"frames::tests::queue_rejection_preserves_damage_and_the_last_delivered_baseline --- FAILED")
+
+
+def rust_viewport_counterfactual(directory):
+    target, _ = rust_fixture(directory, "rust-viewport-publication", "frontend", tests=True)
+    mutant = target / "src/viewport.rs"
+    source = mutant.read_text()
+    operation = "self.pending = Some(Pending {"
+    if source.count(operation) != 1:
+        raise ValueError("Rust viewport counterfactual no longer removes frame publication ordering")
+    mutant.write_text(source.replace(operation, "self.frame.columns = columns as i32;\n                " + operation))
+    test = "frames_publish_only_on_finish_and_malformed_or_interrupted_deltas_preserve_the_visible_frame"
+    command = ["cargo", "test", "--manifest-path", str(target / "Cargo.toml"),
+               "--target-dir", str(ROOT / "build/cargo"), "--offline", "--quiet", "--test", "viewport", test]
+    rust_build(directory, "rust-viewport", [*command, "--no-run"])
+    return "Rust viewport publication", command, os.environ, test.encode()
 
 
 def rust_handoff_counterfactual(directory, name, filename, before, after, test, pattern="test_handoff.py"):
@@ -172,7 +193,7 @@ def prove(match=None):
     parser_case("pending-wrap", stale_cursor, b"term.line[3 / width][3 % width].u == 'd'",
                 "src/terminal/engine_reflow.inc")
 
-    def engine_case(name, path, original, replacement, expected):
+    def engine_case(name, path, original, replacement, expected, *, sanitize=False):
         source = (ROOT / path).read_text()
         mutant = source.replace(original, replacement)
         if mutant == source:
@@ -180,9 +201,17 @@ def prove(match=None):
         stem = name.replace(" ", "-")
         unit = directory / f"{stem}.c"
         unit.write_text(mutant)
+        if path.endswith(".inc"):
+            include = unit
+            unit = directory / f"{stem}-parser.c"
+            unit.write_text((ROOT / "src/terminal/engine_parser.c").read_text().replace(
+                f'"{Path(path).name}"', f'"{include}"'))
+            path = "src/terminal/engine_parser.c"
         sources = [str(unit) if f"src/{item}" == path else f"src/{item}" for item in build.ENGINE]
         binary = ROOT / "build/regressions" / stem
-        builder.program(binary, ["tests/engine.c", *sources], variant=f"{stem}-proof", libs=["-lm"])
+        flags = ["-O1", "-g", "-fsanitize=address,undefined"] if sanitize else []
+        builder.program(binary, ["tests/engine.c", *sources], variant=f"{stem}-proof",
+                        flags=flags, libs=["-lm", *flags])
         cases.append((name, [str(binary)], os.environ, expected))
 
     engine_case("engine effect ordering", "src/terminal/engine.c",
@@ -197,6 +226,10 @@ def prove(match=None):
     engine_case("engine selection validation", "src/terminal/engine_snapshot.c",
                 " || !valid_selection(&h)", "",
                 b"worminal_engine_import(data, bytes, &copy, &imported) == WORMINAL_INVALID")
+    engine_case("engine trimmed selection bounds", "src/terminal/engine_selection.inc",
+                "last < 0 || ", "", b"AddressSanitizer:", sanitize=True)
+    engine_case("engine borrowed selection ownership", "src/terminal/engine_selection.inc",
+                "if (!session->selection_only) te_tsetdirt", "te_tsetdirt", b"AddressSanitizer:", sanitize=True)
     # Restore fork/exec at the SSH launch boundary: registered GUI hooks must be detected.
     client = directory / "fork-client.c"
     source = (ROOT / "src/workspace/workspace_client.c").read_text()
@@ -248,6 +281,8 @@ def prove(match=None):
                   b"updated != original"))
     if match is None or match.casefold() in "Rust frame queue publication".casefold():
         cases.append(rust_frame_counterfactual(directory))
+    if match is None or match.casefold() in "Rust viewport publication".casefold():
+        cases.append(rust_viewport_counterfactual(directory))
     ownership_cases = (
         ("Rust commit ownership", "handoff.rs", "let commit = channel.commit()?;",
          "let commit = channel.commit()?; channel.acknowledgement()?;",

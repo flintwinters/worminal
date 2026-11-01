@@ -30,8 +30,8 @@
 #define WORMINAL_THEME_HEADER "build/theme.h"
 #endif
 
-#define TRUECOLOR(r,g,b)	(1 << 24 | (r) << 16 | (g) << 8 | (b))
-#define IS_TRUECOL(x)		(1 << 24 & (x))
+#define TRUECOLOR(r,g,b)	(WORMINAL_TRUECOLOR_FLAG | (r) << 16 | (g) << 8 | (b))
+#define IS_TRUECOL(x)		(WORMINAL_TRUECOLOR_FLAG & (x))
 
 typedef unsigned char uchar;
 typedef unsigned int uint;
