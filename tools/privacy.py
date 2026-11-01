@@ -7,6 +7,16 @@ from rich.console import Console
 from tools.git_index import tracked_files
 
 
+DEFAULT_NAME = "flintwinters"
+DEFAULT_EMAIL = "flintwinters.0@gmail.com"
+# Exact public addresses explicitly approved for repository content and identities.
+EMAIL_WHITELIST = frozenset({DEFAULT_EMAIL})
+
+
+def approved_identity(name, email):
+    return (name == "Worminal contributor" and email == "anonymous") or email.casefold() in EMAIL_WHITELIST
+
+
 PATTERNS = {
     "private key": r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----",
     "service credential": r"\b(?:AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|"
@@ -27,7 +37,8 @@ def findings(data):
     """Return categories and line numbers without retaining matched values."""
     text = data.decode("utf-8", errors="replace")
     return [(name, text.count("\n", 0, match.start()) + 1)
-            for name, pattern in RULES.items() for match in pattern.finditer(text)]
+            for name, pattern in RULES.items() for match in pattern.finditer(text)
+            if name != "email address" or match.group().casefold() not in EMAIL_WHITELIST]
 
 
 def git(*args):
@@ -57,8 +68,10 @@ def check_privacy(root, history=False, staged=False, identities=False, message_f
         report(path.relative_to(root).as_posix(), data)
     if identities:
         for variable in ("GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"):
-            if not git("var", variable).startswith(b"Worminal contributor <anonymous> "):
-                console.print(f"{variable}: use the anonymous project identity (manage.py privacy-setup).")
+            identity = git("var", variable).decode("utf-8", errors="replace")
+            match = re.fullmatch(r"(.+) <([^<>]+)> \d+ [+-]\d{4}\s*", identity)
+            if not match or not approved_identity(*match.group(1, 2)):
+                console.print(f"{variable}: use an approved project identity (manage.py privacy-setup).")
                 count += 1
     if message_file:
         report("commit message", message_file.read_bytes())
@@ -74,8 +87,9 @@ def check_privacy(root, history=False, staged=False, identities=False, message_f
             oid = entry.decode()
             report(f"commit {oid[:12]}", git("show", "-s", "--format=%an <%ae>%n%cn <%ce>%n%B", oid))
             identity = git("show", "-s", "--format=%an%n%ae%n%cn%n%ce", oid).splitlines()
-            if identity != [b"Worminal contributor", b"anonymous"] * 2:
-                console.print(f"commit {oid[:12]}: non-anonymous identity", markup=False)
+            values = [value.decode("utf-8", errors="replace") for value in identity]
+            if len(values) != 4 or not all(approved_identity(*values[i:i + 2]) for i in (0, 2)):
+                console.print(f"commit {oid[:12]}: unapproved identity", markup=False)
                 count += 1
     console.print(f"Privacy check: {count} finding(s).", markup=False)
     return bool(count)

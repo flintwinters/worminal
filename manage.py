@@ -16,7 +16,7 @@ except ModuleNotFoundError as error:
 from tools import build as native_build
 from tools.theme import explorer_font
 from tools.icon import generate_icon
-from tools.privacy import check_privacy
+from tools.privacy import DEFAULT_EMAIL, DEFAULT_NAME, check_privacy
 from tools.git_index import tracked_files
 
 
@@ -200,7 +200,7 @@ def check(match: str = typer.Option(None, help="Run matching Python checks; full
 @app.command("check-privacy")
 def privacy(history: bool = typer.Option(False, "--history", help="Also scan reachable Git history."),
             staged: bool = typer.Option(False, "--staged", help="Scan index content instead of working files."),
-            identities: bool = typer.Option(False, "--identities", help="Require anonymous commit identities."),
+            identities: bool = typer.Option(False, "--identities", help="Require approved commit identities."),
             message_file: Path = typer.Option(None, "--message-file", help="Also scan a commit message."),
             repository: Path = typer.Option(ROOT, "--repository", help="Repository or initialized submodule to scan.")):
     """Scan tracked content for common private data; redact matched values."""
@@ -212,13 +212,13 @@ def privacy(history: bool = typer.Option(False, "--history", help="Also scan rea
 
 @app.command("privacy-setup")
 def privacy_setup():
-    """Install tracked privacy hooks and set an anonymous repository-local identity."""
-    for name, value in (("core.hooksPath", ".githooks"), ("user.name", "Worminal contributor"),
-                        ("user.email", "anonymous")):
+    """Install tracked privacy hooks and set the approved repository-local identity."""
+    for name, value in (("core.hooksPath", ".githooks"), ("user.name", DEFAULT_NAME),
+                        ("user.email", DEFAULT_EMAIL)):
         code = run(["git", "config", "--local", name, value])
         if code:
             raise typer.Exit(code)
-    typer.echo("Privacy hooks and anonymous identity installed for this checkout.")
+    typer.echo("Privacy hooks and approved identity installed for this checkout.")
 
 
 @app.command("check-keys")

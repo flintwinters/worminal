@@ -382,7 +382,7 @@ window icon; this needs Inkscape and Pillow.
 
 ### Contributing
 
-After cloning, enable the repository's privacy hooks and anonymous commit identity:
+After cloning, enable the repository's privacy hooks and approved commit identity:
 
 ```sh
 python3 manage.py privacy-setup
@@ -398,7 +398,7 @@ The October 2026 audit of explorer revision `db3c883` found no matches across it
 Its pinned public Hyperlinter dependency retains upstream author identities and fixture email addresses;
 its scanned history had no credential, private-key, private-network, or home-path findings.
 Publish explorer commits to its public repository before publishing a Worminal commit that references them.
-Create merge commits locally with the anonymous identity: server-generated merges can fail the history check.
+Use the approved identity set by `privacy-setup`; exact public email exceptions live in `tools/privacy.py`.
 
 ## Origins and license
 
