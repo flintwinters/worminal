@@ -4,6 +4,28 @@ The development release launcher and daemon are Rust. GTK terminal and browser
 modules remain C. The active `/usr/local` installation has not been replaced.
 This checkpoint is not approval to cut over the complete application.
 
+## Usable Rust terminal slice
+
+Run `./worminal-rust` from the project directory. Use `./worminal-rust --attach`
+to view existing local v2 sessions without creating another shell, or
+`./worminal-rust -e COMMAND ...` to launch a command.
+
+The native Rust app supports terminal windows and tabs, keyboard/IME input,
+clipboard and selection, scrolling, zoom, resizing, and reconnecting to the
+workspace daemon. Closing a window leaves its shells running; closing a tab
+with Ctrl+W or Ctrl+Shift+W closes that terminal. Ctrl+T / Ctrl+Shift+T opens
+a tab, Ctrl+Shift+N opens a window, and Ctrl+Tab cycles tabs. Plain Ctrl+N
+is sent to the terminal application.
+
+Browser views and SSH are not wired into this executable yet. Existing browser
+records appear as placeholders; use `worminal` for those workflows. D-Bus and
+the lightweight owner/module integration are also pending. `/usr/local` remains
+unchanged. This slice uses the same local v2 workspace and leaves v1 untouched.
+
+Internal maintenance: `manage.py build-rust-app` builds the native executable;
+`manage.py check-rust-app` checks real PTY input, tabs/windows, clipboard, resize,
+shell survival, idle repaint across daemon replacement and native Wayland.
+
 The original C `worminal-x11` and `worminald-x11` remain v1 rollback programs.
 `build/worminald-c-v2` builds the shared-engine C service for reverse transfers
 and compatibility checks. Neither build selection nor private tests migrate
@@ -27,8 +49,9 @@ production workspaces.
   with the C frontend on private X11 and Wayland, including Unicode fallback,
   clipping, cursor shapes, palette styles, selection and fractional grids.
   Selection remains in C and borrows Rust cells only during each call.
-- Rust GTK input, windows, clipboard, IME, D-Bus, activation, workspace client
-  and module integration remain pending. The release frontend is still C.
+- Rust GTK input, windows, clipboard, IME and the local workspace client are
+  available in `worminal-rust`. D-Bus, activation parity, SSH and the lazy
+  owner/module integration remain pending. The release frontend is still C.
 - Rust browser module, versioned loader, generation pinning and security:
   not ported. Existing C ABI, resources, profiles and security regressions
   remain authoritative.

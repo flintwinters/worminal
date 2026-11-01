@@ -18,7 +18,7 @@ fn main() {
     println!("cargo:rustc-link-lib=m");
     bindgen::Builder::default()
         .header(header.to_str().unwrap())
-        .allowlist_function("worminal_(engine|selection)_.*")
+        .allowlist_function("worminal_(engine|selection|paste)_.*")
         .allowlist_type("Worminal.*|worminal_.*|glyph_attribute|selection_.*|win_mode")
         .allowlist_var("(WORMINAL|ATTR|SEL|SNAP|MODE)_.*")
         .prepend_enum_name(false)

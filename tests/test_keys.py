@@ -14,7 +14,7 @@ from x11 import isolated_display
 
 ROOT = Path(__file__).resolve().parent.parent
 FRONTEND = os.environ.get("WORMINAL_FRONTEND", "worminal-x11")
-PREVIEW = FRONTEND in ("worminal", "worminal-preview")
+PREVIEW = FRONTEND in ("worminal", "worminal-preview", "worminal-rust")
 DAEMON = "worminald" if PREVIEW else "worminald-x11"
 
 

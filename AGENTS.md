@@ -120,8 +120,11 @@ Rust manual handoff stages sealed native snapshots and descriptor ownership befo
 The receive operation enforces session isolation; compiled counterfactuals guard staged and committed ownership.
 The candidate supports automatic replacements and legacy bootstrap; committed donors never save empty recipes.
 `manage.py check-rust-upgrade` checks rollback and shell identities; `check-rust-daemon-x11` also preserves live DOM
-through Rust upgrades and C rollback. Next: port GTK/browser policy, verify the complete migration and cut over.
-`rust/frontend` owns imported viewports and Pango/Cairo painting, pending module/window/input integration.
+through Rust upgrades and C rollback. `worminal-rust` is the usable local Rust GTK application slice:
+windows, tabs, input/IME, selection, clipboard, resizing and v2 attachment use Rust above the shared C engine.
+`manage.py build-rust-app` builds it; `check-rust-app` checks shells, windows, idle upgrade repaint and native Wayland.
+The release GUI remains C. Next: finish browser/SSH, owner/module integration and D-Bus, then verify the full cutover.
+`rust/frontend` owns imported viewports and Pango/Cairo painting; shared key mappings generate from keymap.inc.
 Imported deltas publish at complete frames; C selection borrows Rust cells without retaining them or a parser grid.
 `manage.py check-rust-frontend` compares actual C/Rust GTK painting on private X11 and native Wayland.
 `docs/rust-migration.md` records remaining cutover gates and the measured daemon resource increase.

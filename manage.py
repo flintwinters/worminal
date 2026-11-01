@@ -192,6 +192,20 @@ def check_rust_frontend():
     raise typer.Exit(code)
 
 
+@app.command("build-rust-app")
+def build_rust_app():
+    """Build the usable native Rust terminal application alongside the retained release frontend."""
+    native_build.build_targets("worminal-rust")
+    typer.echo("Built ./worminal-rust; connects to the existing local v2 workspace. Installation unchanged.")
+
+
+@app.command("check-rust-app")
+def check_rust_app():
+    """Check the actual Rust app: private shell input, clipboard, tabs and surviving-session reattachment."""
+    native_build.build_targets("worminal-rust")
+    raise typer.Exit(run([sys.executable, "tests/rust_app.py"]))
+
+
 @app.command("build-rust-daemon")
 def build_rust_daemon_command():
     """Build the Rust service artifact without publishing or replacing installed daemons."""

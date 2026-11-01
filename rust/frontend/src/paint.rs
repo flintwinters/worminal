@@ -85,6 +85,9 @@ pub struct Font {
     pub metrics: Metrics,
 }
 impl Font {
+    pub fn apply(&self, layout: &pango::Layout) {
+        layout.set_font_description(Some(&self.description));
+    }
     pub fn resolve(layout: &pango::Layout, pattern: Option<&str>, zoom: f64) -> Self {
         let context = layout.context();
         graphics_ffi::resolution(&context, 96.0);

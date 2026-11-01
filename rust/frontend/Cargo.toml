@@ -9,11 +9,17 @@ worminal-engine = { path = "../engine" }
 worminal-engine-sys = { path = "../engine-sys" }
 worminal-protocol = { path = "../protocol" }
 worminal-config = { path = "../config" }
+worminal-workspace = { path = "../workspace" }
 gtk.workspace = true
 pango.workspace = true
 cairo-rs = { workspace = true, features = ["png"] }
 glib.workspace = true
+libc.workspace = true
 
 [[bin]]
 name = "worminal-render-check"
 path = "../../tests/rust_render.rs"
+
+[[bin]]
+name = "worminal-rust"
+path = "src/main.rs"

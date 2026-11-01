@@ -1,5 +1,8 @@
 worminal
 worminald
+worminal-rust
+/worminal-rust.command.json
+/worminal-rust.pending
 *.o
 __pycache__/
 build/

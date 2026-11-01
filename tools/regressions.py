@@ -17,6 +17,10 @@ def rust_fixture(directory, name, component="daemon", *, tests=False):
     source = ROOT / "rust" / component
     target = directory / name
     shutil.copytree(source / "src", target / "src", dirs_exist_ok=True)
+    if (source / "build.rs").exists():
+        build_script = (source / "build.rs").read_text().replace('env::var_os("CARGO_MANIFEST_DIR")',
+            f'Some(std::ffi::OsString::from({json.dumps(str(source))}))')
+        (target / "build.rs").write_text(build_script)
     manifest = tomllib.loads((source / "Cargo.toml").read_text())
     workspace = tomllib.loads((ROOT / "Cargo.toml").read_text())
     package = f"worminal-{name}-proof"

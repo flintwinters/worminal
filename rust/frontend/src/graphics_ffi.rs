@@ -76,6 +76,9 @@ pub fn font_pattern(value: &str) -> Option<FontPattern> {
 pub fn resolution(context: &pango::Context, dpi: f64) {
     unsafe { pango_cairo_context_set_resolution(context.to_glib_none().0, dpi) }
 }
+pub fn process_updates(window: &gtk::gdk::Window) {
+    unsafe { gtk::gdk::ffi::gdk_window_process_updates(window.to_glib_none().0, 1) }
+}
 pub fn show_layout(context: &cairo::Context, layout: &pango::Layout) {
     unsafe { pango_cairo_show_layout(context.to_raw_none(), layout.to_glib_none().0) }
 }

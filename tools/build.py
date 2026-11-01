@@ -11,14 +11,15 @@ from tools.theme import generate_theme
 
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "0.9.3"
+VERSION = next(line.split('"')[1] for line in (ROOT / "src/version.h").read_text().splitlines()
+               if line.startswith("#define WORMINAL_VERSION "))
 BROWSER_ABI = next(line.split()[2] for line in (ROOT / "src/gtk/browser_module.h").read_text().splitlines()
                    if line.startswith("#define WORMINAL_BROWSER_ABI "))
 BROWSER_MODULE = f"browser-v{BROWSER_ABI}.so"
 ENGINE_DEFAULTS = "terminal/engine_defaults.c"
 ENGINE = ("terminal/engine.c", ENGINE_DEFAULTS, "terminal/engine_parser.c",
           "terminal/engine_events.c", "terminal/engine_sync.c", "terminal/engine_snapshot.c",
-          "terminal/engine_view_selection.c")
+          "terminal/engine_view_selection.c", "terminal/engine_paste.c")
 SESSION_SUPPORT = ("terminal/session_view.c", "terminal/session_transfer.c", "terminal/render_sync.c",
                    "terminal/engine_adapter.c", *ENGINE)
 COMMON = ("terminal/defaults.c", "terminal/st.c", *SESSION_SUPPORT,
@@ -130,14 +131,15 @@ class Builder:
         step(output, [*self.cc, *objects, *(self.libs if libs is None else libs)],
              [*objects, *link_dependencies])
 
-    def rust_artifact(self, package):
-        if package == "worminal-daemon":
+    def rust_artifact(self, package, binary=None):
+        if package in ("worminal-daemon", "worminal-frontend"):
             self.target("build/libworminal_engine.a")
-        invoke(["cargo", "build", "--locked", "--release", "--quiet", "-p", package])
-        return ROOT / "build/cargo/release" / package
+        invoke(["cargo", "build", "--locked", "--release", "--quiet", "-p", package,
+                *(["--bin", binary] if binary else [])])
+        return ROOT / "build/cargo/release" / (binary or package)
 
-    def rust_program(self, output, package):
-        source = self.rust_artifact(package)
+    def rust_program(self, output, package, binary=None):
+        source = self.rust_artifact(package, binary) if binary else self.rust_artifact(package)
         destination = ROOT / output
         if destination.exists() and destination.read_bytes() == source.read_bytes():
             return
@@ -151,7 +153,9 @@ class Builder:
             temporary.unlink(missing_ok=True)
 
     def target(self, target):
-        if target == "build/libworminal_engine.a":
+        if target == "worminal-rust":
+            self.rust_program(target, "worminal-frontend", "worminal-rust")
+        elif target == "build/libworminal_engine.a":
             objects = []
             for source in ENGINE:
                 obj = f"build/obj/engine/{Path(source).with_suffix('.o')}"
@@ -317,7 +321,8 @@ def clean():
     # Own only build outputs: preserve .checks logs and captures used to diagnose failures.
     if (ROOT / "build").exists():
         shutil.rmtree(ROOT / "build")
-    for name in ("worminal", "worminald", "worminal-x11", "worminald-x11", "worminal-preview", "worminald-preview"):
+    for name in ("worminal", "worminald", "worminal-x11", "worminald-x11", "worminal-preview", "worminald-preview",
+                 "worminal-rust"):
         for suffix in ("", ".command.json", ".pending"):
             (ROOT / (name + suffix)).unlink(missing_ok=True)
     # Pre-Python builds left these objects outside the owned build directory.

@@ -1016,11 +1016,13 @@ dependencies = [
  "cairo-rs",
  "glib",
  "gtk",
+ "libc",
  "pango",
  "worminal-config",
  "worminal-engine",
  "worminal-engine-sys",
  "worminal-protocol",
+ "worminal-workspace",
 ]
 
 [[package]]
