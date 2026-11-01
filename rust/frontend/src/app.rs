@@ -8,7 +8,7 @@ use gtk::{gdk, prelude::*};
 use std::{
     cell::{Cell, RefCell},
     collections::VecDeque,
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     io::{self, Read, Write},
     os::{
         fd::AsRawFd,
@@ -39,6 +39,7 @@ struct Config {
     fixed: bool,
     output: OsString,
     line: OsString,
+    master: Option<OsString>,
 }
 impl Config {
     fn parse() -> io::Result<Option<Self>> {
@@ -54,16 +55,17 @@ impl Config {
             fixed: false,
             output: OsString::new(),
             line: OsString::new(),
+            master: None,
         };
         let mut args = std::env::args_os().skip(1);
         while let Some(arg) = args.next() {
             match arg.to_str() {
                 Some("--help" | "-h") => {
                     println!("worminal-rust: Rust GTK terminal\n\
-                        usage: worminal-rust [--attach] [-aiv] [-f font] [-g COLSxROWS] \
+                        usage: worminal-rust [--master HOST] [--attach] [-aiv] [-f font] [-g COLSxROWS] \
                         [-T title] [-o file] [-l line] [-e command ...]\n\nCtrl+Shift+T: tab  Ctrl+Shift+N: window  \
                         Ctrl+Shift+W: close tab\nCtrl+Shift+C/V: clipboard  Alt+1..9: select tab\n\n\
-                        Browser views and SSH are still available through worminal.");
+                        Browser views are still available through worminal.");
                     return Ok(None);
                 }
                 Some("--version" | "-v") => {
@@ -77,11 +79,15 @@ impl Config {
                     config.command.extend(args);
                     break;
                 }
-                Some("-T" | "-t" | "-f" | "-g" | "-o" | "-l") => {
+                Some("--master" | "-T" | "-t" | "-f" | "-g" | "-o" | "-l") => {
                     let value = args
                         .next()
                         .ok_or_else(|| io::Error::other("option requires a value"))?;
                     match arg.to_str().unwrap() {
+                        "--master" => {
+                            config.master = Some(value);
+                            config.cwd = PathBuf::new();
+                        }
                         "-T" | "-t" => config.title = value.to_string_lossy().into_owned(),
                         "-f" => config.font = Some(value.to_string_lossy().into_owned()),
                         "-o" => config.output = value,
@@ -121,7 +127,12 @@ impl Config {
         Ok(Some(config))
     }
     fn launch(&self) -> io::Result<Vec<u8>> {
-        let environment: Vec<_> = std::env::vars_os().collect();
+        // Remote shells inherit the remote service's environment, never local PATH/HOME or restore markers.
+        let environment: Vec<_> = if self.master.is_none() {
+            std::env::vars_os().collect()
+        } else {
+            Vec::new()
+        };
         let mut output = Buffer::default();
         for value in [
             self.columns,
@@ -201,17 +212,24 @@ fn ensure() -> io::Result<()> {
 }
 struct Connection {
     socket: UnixStream,
+    _ssh: Option<worminal_workspace::ssh::Child>,
     decoder: Decoder,
     output: VecDeque<Vec<u8>>,
     offset: usize,
     bytes: usize,
 }
 impl Connection {
-    fn new() -> io::Result<Self> {
-        let socket = connect()?;
+    fn new(master: Option<&OsStr>) -> io::Result<Self> {
+        let (socket, ssh) = if let Some(master) = master {
+            let (socket, child) = worminal_workspace::ssh::connect(master)?;
+            (socket, Some(child))
+        } else {
+            (connect()?, None)
+        };
         socket.set_nonblocking(true)?;
         Ok(Self {
             socket,
+            _ssh: ssh,
             decoder: Decoder::default(),
             output: VecDeque::new(),
             offset: 0,
@@ -401,7 +419,7 @@ impl App {
         self.status.set_visible(message.is_some());
     }
     fn establish(self: &Rc<Self>, launch: bool) -> io::Result<()> {
-        let connection = Connection::new()?;
+        let connection = Connection::new(self.config.master.as_deref())?;
         let fd = connection.socket.as_raw_fd();
         *self.connection.borrow_mut() = Some(connection);
         self.initial_claim.set(true);
@@ -878,7 +896,9 @@ pub fn run() -> io::Result<()> {
     let Some(config) = Config::parse()? else {
         return Ok(());
     };
-    ensure()?;
+    if config.master.is_none() {
+        ensure()?;
+    }
     glib::set_prgname(Some("worminal"));
     gtk::init().map_err(|error| io::Error::other(error.to_string()))?;
     App::open(config)?;

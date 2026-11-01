@@ -212,7 +212,8 @@ class RustApplicationTest(unittest.TestCase):
 def main():
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(RustApplicationTest)
     for name in ('test_navigation_keys', 'test_alternate_scroll_sends_cursor_keys',
-                 'test_clipboard_paste_bytes', 'test_ctrl_end_in_micro'):
+                 'test_clipboard_paste_bytes', 'test_ctrl_end_in_micro', 'test_master_navigation_keys',
+                 'test_master_alternate_scroll_sends_cursor_keys', 'test_master_clipboard_paste_bytes'):
         suite.addTest(NavigationKeysTest(name))
     return 0 if unittest.TextTestRunner(verbosity=1).run(suite).wasSuccessful() else 1
 
