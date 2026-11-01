@@ -57,12 +57,11 @@ impl App {
             let count = self.notebook.n_pages();
             if count != 0 {
                 let current = self.notebook.current_page().unwrap_or(0);
-                self.notebook
-                    .set_current_page(Some(if state == control_shift {
-                        (current + count - 1) % count
-                    } else {
-                        (current + 1) % count
-                    }));
+                self.select_index(if state == control_shift {
+                    (current + count - 1) % count
+                } else {
+                    (current + 1) % count
+                });
             }
             return true;
         }
@@ -121,7 +120,7 @@ impl App {
                         '0' => 9,
                         _ => u32::from(c) - u32::from('1'),
                     };
-                    self.notebook.set_current_page(Some(index.min(count - 1)));
+                    self.select_index(index.min(count - 1));
                 }
                 return true;
             }
@@ -144,6 +143,7 @@ impl App {
                 browser.zoom(zoom);
             }
         }
+        self.refresh_tabs();
         true
     }
 }

@@ -121,6 +121,8 @@ Native activation uses fresh X11 server time; the private Muffin regression and 
 Use `manage.py setup-window-activation` to prepare Muffin locally without a system installation.
 The candidate launcher links GLib only and forwards before loading its Rust frontend module;
 `src/gtk/rust_frontend_module.h` owns its distinct ABI and transferred-listener contract.
+The Rust Cairo strip shares terminal fonts/colors; drawing and hit testing use the same visible suffix.
+Catalog publication preserves ordered pages, and local browser labels decode the filename without query routes.
 Next: release-default integration and complete behavior/resource/cutover verification.
 `docs/rust-migration.md` owns migration readiness, recovery/test commands and measured resource costs.
 Cargo outputs belong in build/cargo; preserve diagnostics and the exclusive C recovery baseline under .checks.

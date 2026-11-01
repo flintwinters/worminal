@@ -61,6 +61,17 @@ class RustBrowserTest(unittest.TestCase):
                 subprocess.run(['xdotool', 'windowfocus', '--sync', browser], env=env, check=True)
                 subprocess.run(['xdotool', 'type', '--clearmodifiers', 'live'], env=env, check=True)
                 title(env, 'Edited:live', app)
+                # Hit testing the real Cairo strip must switch pages through the windowless outline.
+                subprocess.run(['xdotool', 'mousemove', '--window', browser, '5', '4', 'click', '1'],
+                               env=env, check=True)
+                deadline = time.monotonic() + 5
+                def selected_title():
+                    return subprocess.check_output(['xdotool', 'getwindowname', browser], env=env, text=True).strip()
+                while selected_title() != 'Keeper':
+                    self.assertLess(time.monotonic(), deadline, 'Cairo tab click did not select the terminal')
+                    time.sleep(.02)
+                subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+9'], env=env, check=True)
+                title(env, 'Edited:live', app)
                 close_window(env, 'Edited:live')
                 subprocess.run(['xdotool', 'windowfocus', '--sync', keeper], env=env, check=True)
                 subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+9'], env=env, check=True)

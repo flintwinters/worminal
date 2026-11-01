@@ -21,6 +21,8 @@ use worminal_workspace::socket;
 
 #[path = "app_browser.rs"]
 mod browser_views;
+#[path = "app_chrome.rs"]
+mod chrome;
 #[path = "app_shortcuts.rs"]
 mod shortcuts;
 
@@ -203,6 +205,7 @@ struct App {
     state_id: u32,
     window: gtk::Window,
     notebook: gtk::Notebook,
+    tabstrip: crate::tabs::Tabs,
     status: gtk::Label,
     config: Config,
     fonts: Rc<RefCell<Fonts>>,
@@ -241,16 +244,21 @@ impl App {
         window.set_default_size(1000, 600);
         window.set_resizable(!config.fixed);
         let notebook = gtk::Notebook::new();
-        notebook.set_scrollable(true);
+        notebook.set_show_tabs(false);
+        notebook.set_show_border(false);
+        let fonts = Rc::new(RefCell::new(Fonts::new(config.font.clone(), config.zoom)));
+        let tabstrip = crate::tabs::Tabs::new(fonts.clone());
         let status = gtk::Label::new(None);
         status.set_no_show_all(true);
         let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        container.pack_start(tabstrip.widget(), false, false, 0);
         container.pack_start(&notebook, true, true, 0);
         container.pack_end(&status, false, false, 0);
-        window.add(&container);
+        chrome::outline(&window, &container);
         let app = Rc::new(Self {
             state_id: window_state::next_id()?,
-            fonts: Rc::new(RefCell::new(Fonts::new(config.font.clone(), config.zoom))),
+            fonts,
+            tabstrip,
             config,
             window,
             notebook,
@@ -269,6 +277,8 @@ impl App {
             initial_claim: Cell::new(true),
             pending_tabs: Cell::new(0),
         });
+        app.tabstrip
+            .connect_selected(glib::clone!(@weak app => move |id| app.select_id(id)));
         // GTK maps the new child in its default switch handler. Focus it afterwards.
         app.notebook.connect_local("switch-page", true, glib::clone!(@weak app => @default-return None, move |values| {
             if app.syncing.get() { return None; }
@@ -486,6 +496,7 @@ impl App {
         } else {
             self.claim_browser(id);
         }
+        self.refresh_tabs();
         window_state::changed();
     }
     fn fit_geometry(&self, terminal: &Terminal) {
@@ -712,21 +723,6 @@ impl App {
             if record.browser {
                 self.browser_metadata(record);
             }
-            let label = if record.browser {
-                if page.title.is_empty() {
-                    record.title.clone()
-                } else {
-                    page.title.clone()
-                }
-            } else {
-                record
-                    .directory
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| record.directory.to_string_lossy().into_owned())
-            };
-            page.label
-                .set_text(if label.is_empty() { "Terminal" } else { &label });
             page.widget.set_tooltip_text(if record.browser {
                 Some(&record.url)
             } else {
@@ -744,6 +740,22 @@ impl App {
                     page.title = record.title.clone();
                 }
                 page.directory = record.directory.clone();
+            }
+        }
+        {
+            let mut pages = self.pages.borrow_mut();
+            // The catalog owns tab order; update the collection before painting or hit testing it.
+            if !pages
+                .iter()
+                .map(|page| page.id)
+                .eq(records.iter().map(|record| record.id))
+            {
+                let order: std::collections::HashMap<_, _> = records
+                    .iter()
+                    .enumerate()
+                    .map(|(index, record)| (record.id, index))
+                    .collect();
+                pages.sort_by_key(|page| order[&page.id]);
             }
         }
         self.syncing.set(false);
@@ -796,6 +808,7 @@ impl App {
                 }
             }
         }
+        self.refresh_tabs();
         window_state::changed();
         Ok(())
     }

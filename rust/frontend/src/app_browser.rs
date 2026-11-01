@@ -177,11 +177,12 @@ fn event(master: &Option<OsString>, id: u32, kind: u32, value: &str) {
                 .find(|page| page.id == id && page.browser)
             {
                 page.title = value.to_string();
-                page.label.set_text(value);
+
                 if app.active.get() == id {
                     app.window.set_title(value);
                 }
             }
+            app.refresh_tabs();
         }
     } else if let Some(app) = owner {
         if kind == WORMINAL_BROWSER_OPEN {

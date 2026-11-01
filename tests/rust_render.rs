@@ -13,9 +13,64 @@ use worminal_frontend::{
 };
 use worminal_protocol::{Decoder, WORKSPACE_MAX_COLS, WORKSPACE_MAX_ROWS};
 
+fn tabs(args: &[String]) {
+    use std::rc::Rc;
+    use worminal_frontend::{
+        fonts::Fonts,
+        tabs::{Tab, Tabs},
+    };
+    use worminal_protocol::Payload;
+    assert_eq!(args.len(), 5);
+    let bytes = fs::read(&args[1]).unwrap();
+    let mut body = Payload::new(&bytes);
+    let count = body.u32().unwrap();
+    let active = body.u32().unwrap();
+    let zoom = f64::from(body.u32().unwrap());
+    let entries = (0..count)
+        .map(|_| Tab {
+            id: body.u32().unwrap(),
+            browser: body.u32().unwrap() != 0,
+            label: String::from_utf8(body.string().unwrap().to_vec()).unwrap(),
+        })
+        .collect();
+    body.finish().unwrap();
+    let width: i32 = args[3].parse().unwrap();
+    let height: i32 = args[4].parse().unwrap();
+    let window = gtk::Window::new(gtk::WindowType::Toplevel);
+    let tabs = Tabs::new(Rc::new(RefCell::new(Fonts::new(None, zoom))));
+    tabs.update(
+        entries,
+        active,
+        Some(Rc::new(RefCell::new(Palette::default()))),
+    );
+    window.add(tabs.widget());
+    window.set_default_size(width, height);
+    window.show_all();
+    let settle = Instant::now() + Duration::from_millis(200);
+    while Instant::now() < settle {
+        while glib::MainContext::default().pending() {
+            glib::MainContext::default().iteration(false);
+        }
+        thread::sleep(Duration::from_millis(1));
+    }
+    let surface = cairo::ImageSurface::create(cairo::Format::ARgb32, width, height).unwrap();
+    let cr = cairo::Context::new(&surface).unwrap();
+    for _ in 0..21 {
+        tabs.widget().draw(&cr);
+    }
+    surface
+        .write_to_png(&mut fs::File::create(&args[2]).unwrap())
+        .unwrap();
+    window.close();
+}
+
 fn main() {
     gtk::init().expect("use manage.py check-rust-frontend on private displays");
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|value| value == "--tabs") {
+        tabs(&args);
+        return;
+    }
     assert_eq!(args.len(), 13);
     let columns: u32 = args[2].parse().unwrap();
     let rows: u32 = args[3].parse().unwrap();

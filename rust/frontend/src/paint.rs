@@ -146,7 +146,7 @@ pub struct Painter {
     font: Font,
     ascii: Vec<Option<pango::Layout>>,
 }
-fn source(cr: &cairo::Context, color: &RGBA) {
+pub(crate) fn source(cr: &cairo::Context, color: &RGBA) {
     cr.set_source_rgba(color.red(), color.green(), color.blue(), color.alpha());
 }
 impl Painter {

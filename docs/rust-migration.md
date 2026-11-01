@@ -20,6 +20,9 @@ workspace daemon. Closing a window leaves its shells running; closing a tab
 with Ctrl+W or Ctrl+Shift+W closes that tab. Ctrl+T opens a tab of the current
 kind; Ctrl+Shift+T always opens a terminal. Ctrl+Shift+N opens a window, and Ctrl+Tab cycles tabs. Plain Ctrl+N
 is sent to the terminal application.
+The Cairo tab strip retains terminal font metrics, inverted selection and browser
+colors. It clips oversized tabs and keeps the selected suffix visible. Local
+browser tabs show decoded filenames; web tabs retain document titles.
 
 Separate native launches join one Rust owner per display/workspace. Browser
 tabs retain their live DOM when moved between its windows and across daemon
@@ -69,6 +72,8 @@ production workspaces.
   with the C frontend on private X11 and Wayland, including Unicode fallback,
   clipping, cursor shapes, palette styles, selection and fractional grids.
   Selection remains in C and borrows Rust cells only during each call.
+  The same check compares Cairo tab-strip pixels, including browser colors,
+  Unicode, zoom, hidden prefixes and oversized selection clipping.
 - Rust GTK input, windows, clipboard, IME, local/SSH workspace clients and
   owner forwarding and the public window-state D-Bus interface are available in
   `worminal-rust`. X11 activation is checked against private Muffin, including

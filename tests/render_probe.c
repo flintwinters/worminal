@@ -159,16 +159,36 @@ tabs_case(GModule *module, int count, const char *prefix, int frames,
 	g_assert_true(g_module_symbol(module, "tabs_new", (gpointer *)&create));
 	g_assert_true(g_module_symbol(module, "tabs_refresh", (gpointer *)&refresh));
 	App app = {.fd = -1, .cols = 80, .rows = 1};
+	gboolean export = g_getenv("WORMINAL_RENDER_FIXTURE") != NULL;
+	if (export) app.zoom = count % 2 ? 0 : 2;
 	Page *pages = g_new0(Page, count);
 	for (int i = 0; i < count; i++) {
 		pages[i].app = &app; pages[i].id = i + 1;
 		char *name = g_strdup_printf("project-%05d", i);
+		if (export) {
+			if (i == 2 || i % 4 == 1 || i % 4 == 3) {
+				g_free(name);
+				name = i == 2 ? g_strnfill(300, 'W') : g_strdup(i % 4 == 1 ? "local + 文🙂" : "document-λ");
+			}
+			if (i % 2) pages[i].url = "about:blank";
+		}
 		pages[i].label = gtk_label_new(name);
 		g_object_ref_sink(pages[i].label);
 		g_free(name);
 		app.pages = g_list_append(app.pages, &pages[i]);
 	}
 	app.active = &pages[count - 1];
+	if (export) {
+		WireBuffer data = {0};
+		wire_put_u32(&data, count); wire_put_u32(&data, app.active->id); wire_put_u32(&data, app.zoom);
+		for (int i = 0; i < count; i++) {
+			wire_put_u32(&data, pages[i].id); wire_put_u32(&data, pages[i].url != NULL);
+			wire_put_string(&data, gtk_label_get_text(GTK_LABEL(pages[i].label)));
+		}
+		char *path = g_strdup_printf("%s-tab_strip.wire", prefix);
+		g_assert_true(g_file_set_contents(path, (char *)data.data, data.len, NULL));
+		g_free(path); wire_buffer_free(&data);
+	}
 	for (size_t i = 0; i < G_N_ELEMENTS(app.active->colors); i++) palette(app.active, i, NULL);
 	app.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	app.tabstrip = create(&app);

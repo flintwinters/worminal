@@ -7,6 +7,7 @@ mod graphics_ffi;
 pub mod input;
 pub mod paint;
 mod startup;
+pub mod tabs;
 pub mod terminal;
 pub mod viewport;
 
