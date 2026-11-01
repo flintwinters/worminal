@@ -585,10 +585,19 @@ terminal_key(Terminal *t, GdkEventKey *e)
 	}
 	if (e->state & GDK_CONTROL_MASK) {
 		gunichar c = gdk_keyval_to_unicode(e->keyval);
-		/* Ctrl+/ is the conventional alias for Ctrl+_ (US). */
-		if (c == '/') c = '_';
-		if ((c >= '@' && c <= '_') || (c >= 'a' && c <= 'z') || c == ' ') {
-			char byte = c == ' ' ? 0 : c & 31;
+		/* Encode the complete traditional ASCII Control family before the IM.
+		 * GDK's locale string is unsuitable here: embedded NUL can lose its length.
+		 * Letters and both punctuation cases share the same five-bit encoding;
+		 * the numeric aliases cover NUL, ESC through US, and DEL.
+		 */
+		if (!c) return gtk_im_context_filter_keypress(t->im, e);
+		if ((c >= '@' && c <= '~') || c == ' ') c &= 31;
+		else if (c == '2') c = 0;
+		else if (c >= '3' && c <= '7') c -= '3' - 27;
+		else if (c == '8' || c == '?') c = 127;
+		else if (c == '/') c = 31;
+		if (c < 32 || c == 127) {
+			char byte = c;
 			if (e->state & GDK_MOD1_MASK) input(t, "\033", 1);
 			input(t, &byte, 1);
 			return TRUE;

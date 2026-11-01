@@ -25,6 +25,8 @@ Compare installed artifacts with the verified build and check the running execut
 Running owners retain loaded modules until all their windows close; verify loaded code before claiming a fix is active.
 `src/terminal` owns terminal state,
 `src/gtk` paints release views, `src/x11` preserves the original renderer, and `src/workspace` connects the service.
+GTK encodes the complete ASCII Control family before input methods; do not use locale event strings
+for terminal bytes, since NUL is significant. Ordinary text retains input-method composition.
 Both frontends share paste filtering: bracketed text preserves line endings, while ordinary paste
 normalizes CRLF/LF to Enter.
 GTK redraws changed rows and cursor damage, including overlapping glyph ink;
