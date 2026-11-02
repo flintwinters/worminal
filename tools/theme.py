@@ -248,11 +248,8 @@ def explorer_font():
     family_value = re.search(r"theme_font_family = (.*);", header)[1]
     family = None if family_value == "NULL" else json.loads(family_value)
     size = float(re.search(r"theme_font_size = (.*);", header)[1])
-    # Native fallback lives in config.h; keep the explorer tied to that authority.
-    fallback = re.search(r'static char \*font = "([^"]+)";',
-                         (ROOT / "src/config.h").read_text())[1].split(":")
-    result = {"family": family or fallback[0],
-              "size": size or float(next(item[5:] for item in fallback if item.startswith("size=")))}
+    # Match Font::resolve: absent families use Pango's default, and sizes clamp to 4pt.
+    result = {"family": family or "sans", "size": max(4, size)}
     offset = int(re.search(r"theme_font_offset_y = (.*);", header)[1])
     result["lineHeight"] = max(1, font_height(result["family"], result["size"]) + offset)
     return result

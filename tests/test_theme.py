@@ -46,6 +46,12 @@ class ThemeTest(unittest.TestCase):
             self.assertEqual(explorer_font()["lineHeight"], 1)
         self.assertGreater(font_height("monospace", 14), 14)
 
+    def test_explorer_font_without_configuration_needs_no_removed_c_source(self):
+        with patch("tools.theme.find_config", return_value=None), \
+                patch("tools.theme.font_height", return_value=6) as metrics:
+            self.assertEqual(explorer_font(), {"family": "sans", "size": 4, "lineHeight": 6})
+            metrics.assert_called_once_with("sans", 4)
+
     def test_default_alacritty_palette(self):
         header = theme_header({})
         self.assertIn('[0] = "#181818"', header)
