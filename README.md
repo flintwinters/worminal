@@ -128,8 +128,7 @@ The temporary files are removed after the tests.
 The working tree keeps source and generated output separate:
 
 ```text
-rust/                  Rust application workspace
-src/                   C engine, shared headers and browser resources
+src/                   Rust crates, C engine, shared headers and browser resources
 tests/                 Regression fixtures and benchmarks
 tools/                 Build helpers, hooks and development configuration
 build/bin/             Local native executables

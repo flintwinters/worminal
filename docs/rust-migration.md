@@ -9,13 +9,13 @@ starting another shell. The separate `worminal-rust` executable is for testing n
 - `src/terminal` parses terminal output and handles UTF-8, cells, modes, scrollback, reflow, selection and snapshots.
   `engine.h` defines its C API. Each terminal has its own instance. Rust manages the handles and copies screen rows
   for rendering. C does not manage processes, file descriptors or GUI objects.
-- `rust/daemon` and `rust/workspace` manage shells, PTYs, sockets, SSH, saved workspaces and daemon upgrades.
+- `src/daemon` and `src/workspace` manage shells, PTYs, sockets, SSH, saved workspaces and daemon upgrades.
   Shared protocol and snapshot definitions are in `src/workspace`.
-- `rust/frontend` handles windows, drawing, keyboard/mouse input, tabs and D-Bus. It receives screen rows from the
+- `src/frontend` handles windows, drawing, keyboard/mouse input, tabs and D-Bus. It receives screen rows from the
   daemon; it does not parse terminal output or recalculate scrollback.
-- `rust/browser` handles WebKit, permission prompts, downloads, local-file access and browser controls. Shared
+- `src/browser` handles WebKit, permission prompts, downloads, local-file access and browser controls. Shared
   scripts, HTML and module definitions are in `src/gtk`.
-- `rust/launcher` forwards requests to an existing GUI process before loading GTK. WebKit loads only when needed.
+- `src/launcher` forwards requests to an existing GUI process before loading GTK. WebKit loads only when needed.
 
 The launcher, frontend and browser communicate through versioned C APIs. They pass handles and callbacks rather
 than Rust containers. Each browser view keeps using the module that created it. New views can use updated code

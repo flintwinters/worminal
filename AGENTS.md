@@ -16,7 +16,8 @@ Each terminal has its own C instance. C handles parsing, cells, UTF-8, modes, sc
 deadlines and serialization. It does not manage processes, descriptors, GUI objects or application policy.
 The Rust wrapper manages C handles and screen buffers.
 `src/workspace` contains shared protocol/snapshot formats and limits; `src/gtk` contains module/D-Bus definitions
-and browser scripts/templates, not C applications. `rust` owns the launcher, daemon, frontend, browser and wrappers.
+and browser scripts/templates. The Rust crates under `src` contain the launcher, daemon, frontend, browser
+and wrappers.
 
 The per-user v2 daemon owns ordered tabs, PTYs and bounded scrollback. Views connect locally or through SSH
 `--master user@host`. A terminal has one live painting view and can outlive every window. Frontend replicas import

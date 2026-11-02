@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def rust_fixture(directory, name, component="daemon", *, tests=False):
-    source = ROOT / "rust" / component
+    source = ROOT / "src" / component
     target = directory / name
     shutil.copytree(source / "src", target / "src", dirs_exist_ok=True)
     if (source / "build.rs").exists():
