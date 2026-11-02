@@ -109,8 +109,9 @@ pub(crate) fn connect(browser: &Rc<Browser>) {
         });
     browser
         .view
-        .connect_web_process_terminated(glib::clone!(@weak browser => move |_, _| {
+        .connect_web_process_terminated(glib::clone!(@weak browser => move |_, reason| {
             browser.notice(Some("The page renderer stopped. Press Ctrl+R to reopen this page."));
+            eprintln!("worminal: renderer stopped in owner {} ({reason:?})", std::process::id());
         }));
 }
 fn error_page(view: &WebView, url: &str, message: &str) {
@@ -144,7 +145,7 @@ pub(crate) fn shortcut(browser: &Browser, value: u32, modifiers: u32) -> bool {
         }
     } else if mods == Mod::CONTROL_MASK && value == key::k {
         close(browser);
-        let uri = browser.view.uri().unwrap_or_default();
+        let uri = browser.url.borrow().clone();
         browser
             .location
             .set_text(if uri == "about:blank" { "" } else { &uri });
@@ -161,7 +162,14 @@ pub(crate) fn shortcut(browser: &Browser, value: u32, modifiers: u32) -> bool {
         || (mods.is_empty() && value == key::F5)
     {
         browser.notice(None);
-        browser.view.reload();
+        if browser.view.uri().is_none_or(|uri| uri.is_empty()) {
+            // A crashed renderer has no reloadable WebKit URI; changed() retains the recovery target.
+            // load_uri synchronously emits URI notifications: release the borrow before entering WebKit.
+            let url = browser.url.borrow().clone();
+            browser.view.load_uri(&url);
+        } else {
+            browser.view.reload();
+        }
     } else if mods.is_empty()
         && value == key::Escape
         && (gtk::prelude::WidgetExt::is_visible(&browser.find)

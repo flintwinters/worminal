@@ -87,8 +87,10 @@ production workspaces.
 - Rust browser module, versioned loader and generation pinning are implemented.
   `src/gtk/rust_browser_module.h` owns the incompatible opaque ABI; both sides
   generate bindings. Browser chrome/scripts remain shared resources. Complete
-  security/media/permission parity and final profile publication still need the
-  full regression audit. Browser ABI 2 carries palette background changes.
+  Native security/media/permission regressions cover the Rust application;
+  final profile publication remains pending. Browser ABI 2 carries palette
+  background changes. Renderer recovery retains the last nonempty URI because
+  WebKit clears its URI after process termination; normal reloads retain their semantics.
 - Private staged installation: `manage.py check-install` verifies artifact
   bytes, modes, native CLI/SSH input, daemon executable path and resident
   frontend/browser bytes under `.checks/install-stage/usr/local`.
@@ -121,11 +123,10 @@ Current engine checks still show higher parser CPU than the pre-extraction basel
 Repeat comparisons with the final frontend/browser ports before cutover;
 launch latency is not a migration optimization requirement.
 
-The Rust-default checkpoint passed `manage.py check` (141 existing tests, one
-intentional v1 browser skip, both C GTK compatibility runs, 19 Rust application
-tests and 7 Rust browser tests). The subsequent browser run passed all 8 tests,
-including exact pixels for a converted tab's custom background. `check-install`
-passed against the staged installation; production publication remains pending.
+The final Rust-default checkpoint passed `manage.py check` (141 existing tests,
+one intentional v1 browser skip, both C GTK compatibility runs, 19 Rust application
+tests and 13 Rust browser tests). `check-install` passed against the final staged
+installation; production publication remains pending.
 Logs are `.checks/rust-release-{full-check,app,browser,install}.log`.
 
 Two alternating private HTTP trials with `browser-perf --kind http --trials 2
@@ -140,5 +141,14 @@ the frontend, WebKit helpers and workspace service/shells regardless of parentin
 This fixture shows roughly 5.4–5.5% higher PSS; two trials do not establish a
 general memory bound or equal CPU use. Raw samples and exact process counts are
 in `.checks/rust-release-browser-perf.json`. The preserved recovery manifest's
-18 artifacts still match their hashes. Broader browser parity and production
-inventory/cutover verification remain separate gates.
+18 artifacts still match their hashes. The expanded native browser audit passed
+13 tests, including explicit crash/reload recovery, MP3/WAV/MP4 decoding into a
+private audio sink, autoplay blocking, permission allow/deny, TLS rejection and
+find/link/popup behavior. Its pre-fix renderer failure remains reproducible in
+`.checks/rust-browser-recovery-before.log`; the passing audit is recorded in
+`.checks/rust-browser-audit.log`. Production inventory/cutover remains pending.
+`manage.py prepare-cutover` preserves the currently installed binaries/modules
+and captures live owner/module paths, window records, ordered v2 tabs and PTY
+process identities under a private `.checks/cutover-*` directory. It does not
+change running processes. Refresh it immediately before publication; preserve
+browser profiles after their owners have closed, before opening replacement views.

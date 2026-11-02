@@ -24,6 +24,7 @@ pub(crate) struct Browser {
     find: gtk::SearchEntry,
     notice: gtk::Label,
     select_find: Cell<bool>,
+    url: RefCell<String>,
     callback: boundary::Callback,
 }
 impl Browser {
@@ -85,6 +86,7 @@ impl Browser {
             find,
             notice,
             select_find: Cell::new(false),
+            url: RefCell::new(url.to_string()),
             callback,
         });
         chrome::connect(&browser);
@@ -100,7 +102,12 @@ impl Browser {
         self.notice.set_visible(text.is_some());
     }
     fn changed(&self, navigate: bool) {
-        let uri = self.view.uri().unwrap_or_default();
+        // WebKit clears its URI when a renderer crashes. Preserve the last real navigation
+        // here so location chrome and explicit recovery never replace it with an empty target.
+        if let Some(uri) = self.view.uri().filter(|uri| !uri.is_empty()) {
+            *self.url.borrow_mut() = uri.to_string();
+        }
+        let uri = self.url.borrow().clone();
         if !self.location.has_focus() {
             self.location.set_text(&uri);
         }
@@ -108,6 +115,7 @@ impl Browser {
             .view
             .title()
             .filter(|title| !title.is_empty())
+            .map(|title| title.to_string())
             .unwrap_or_else(|| uri.clone());
         self.emit(worminal_browser_api::WORMINAL_BROWSER_TITLE, &title);
         if navigate {

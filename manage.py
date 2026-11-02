@@ -296,6 +296,13 @@ def preserve_c_baseline():
     typer.echo(preserve_baseline())
 
 
+@app.command("prepare-cutover")
+def prepare_cutover():
+    """Preserve installed code and capture live owners, windows and PTYs without changing processes."""
+    from tools.migration import prepare_cutover
+    prepare_cutover()
+
+
 @app.command("check-migration")
 def check_migration():
     """Verify migration baseline recovery infrastructure without touching the installation."""

@@ -35,6 +35,9 @@ class Fixture(BaseHTTPRequestHandler):
                 "<input autofocus oninput=\"document.title='Edited:'+this.value\">"
                 '<a href="/other" target="_blank">Popup</a> '
                 '<a href="/download" download>Download</a>').encode()
+        self.html(body)
+
+    def html(self, body):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))

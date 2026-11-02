@@ -4,6 +4,7 @@ import json
 import hashlib
 import os
 import shlex
+import signal
 from pathlib import Path
 import shutil
 import socket
@@ -14,18 +15,19 @@ import time
 import unittest
 from unittest.mock import patch
 
-from preview import broker_check, Fixture, fixture, profile, service, wayland_display
+from preview import audio, broker_check, Fixture, fixture, profile, service, wayland_display
 from x11 import isolated_display, close_window
 from test_window_state import private_bus
 from rust_runtime import copy_runtime, RUST_BROWSER_MODULE
 
 ROOT = Path(__file__).resolve().parent.parent
 APP = str(ROOT / 'worminal-rust')
+BROWSER_LOG = ROOT / '.checks/rust-browser-ui.log'
 
 
 @contextmanager
 def application(env, *args, executable=APP):
-    with (ROOT / '.checks/rust-browser-ui.log').open('ab') as log:
+    with BROWSER_LOG.open('ab') as log:
         process = subprocess.Popen([executable, *args], env=env, stdout=subprocess.PIPE, stderr=log)
         try:
             yield process
@@ -36,19 +38,151 @@ def application(env, *args, executable=APP):
 
 def title(env, expected, process):
     deadline = time.monotonic() + 12
+    names = []
     while time.monotonic() < deadline:
         if process.poll() is not None: raise AssertionError(f'Rust browser exited: {process.returncode}')
         windows = subprocess.run(['xdotool', 'search', '--onlyvisible', '--pid', str(process.pid)],
                                  env=env, capture_output=True, text=True)
         if windows.returncode == 0:
+            names = []
             for window in windows.stdout.splitlines():
                 name = subprocess.check_output(['xdotool', 'getwindowname', window], env=env, text=True).strip()
+                names.append(name)
                 if name == expected: return window
         time.sleep(.02)
-    raise AssertionError(f'Browser did not publish title {expected!r}')
+    raise AssertionError(f'Browser did not publish title {expected!r}; visible titles: {names!r}')
 
 
 class RustBrowserTest(unittest.TestCase):
+    def test_media_requires_a_gesture_and_decodes_into_private_audio(self):
+        for name, mime, width in (('sample.mp3', 'audio/mpeg', 0), ('sample.wav', 'audio/wav', 0),
+                                  ('sample.mp4', 'video/mp4', 96)):
+            class MediaFixture(Fixture):
+                def do_GET(self):
+                    if self.path == '/media':
+                        body = (ROOT / 'tests/fixtures/media' / name).read_bytes()
+                        self.send_response(200); self.send_header('Content-Type', mime)
+                        self.send_header('Content-Length', str(len(body))); self.end_headers()
+                        self.wfile.write(body); return
+                    self.html(b'<!doctype html><video id="m" src="/media"></video>'
+                              b'<button autofocus onclick="m.play()">Play</button><script>'
+                              b'm.ontimeupdate=()=>{if(m.currentTime>.1&&!m.error)'
+                              b'document.title="Playing:"+m.videoWidth};'
+                              b'm.play().then(()=>document.title="Unexpected autoplay",'
+                              b'()=>document.title="Autoplay blocked")</script>')
+            with (self.subTest(format=name), isolated_display() as private, profile(private) as base,
+                  audio(base) as env, fixture(handler=MediaFixture) as url):
+                env.update(GDK_BACKEND='x11'); env.pop('WAYLAND_DISPLAY', None)
+                with application(env, '--browser', url) as app:
+                    wid = title(env, 'Autoplay blocked', app)
+                    subprocess.run(['xdotool', 'windowfocus', '--sync', wid, 'key', '--clearmodifiers', 'Return'],
+                                   env=env, check=True)
+                    title(env, f'Playing:{width}', app)
+
+    def test_find_accepts_a_link_and_only_user_popups_open_tabs(self):
+        requests = set()
+        class FindFixture(Fixture):
+            def do_GET(self):
+                requests.add(self.path)
+                if self.path != '/': return super().do_GET()
+                body = (b'<!doctype html><title>Find popup</title><a href="/other" target="_blank">Popup</a>'
+                        b'<script>window.open("/unwanted");setInterval(()=>{let s=getSelection().toString();'
+                        b'if(s)document.title="Selected:"+s},20)</script>')
+                self.html(body)
+        with isolated_display() as private, profile(private) as env, fixture(handler=FindFixture) as url:
+            env.update(GDK_BACKEND='x11'); env.pop('WAYLAND_DISPLAY', None)
+            with application(env, '--browser', url) as app:
+                wid = title(env, 'Find popup', app)
+                subprocess.run(['xdotool', 'windowfocus', '--sync', wid, 'key', '--clearmodifiers', 'ctrl+f',
+                                'type', '--clearmodifiers', 'Popup'], env=env, check=True)
+                title(env, 'Selected:Popup', app)
+                self.assertNotIn('/unwanted', requests, 'non-user popup reached the server')
+                subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Escape', 'Return'], env=env, check=True)
+                title(env, 'Other', app)
+                subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+d'], env=env, check=True)
+                title(env, 'Selected:Popup', app)
+
+    def test_notification_permission_requires_an_explicit_native_answer(self):
+        class PermissionFixture(Fixture):
+            def do_GET(self):
+                body = (b'<!doctype html><title>Permission ready</title><button autofocus '
+                        b'onclick="Notification.requestPermission().then(p=>document.title=\'Permission:\'+p)">'
+                        b'Request permission</button>')
+                self.html(body)
+        for answer, expected in ((['Return'], 'denied'), (['Tab', 'Return'], 'granted')):
+            with (self.subTest(answer=expected), isolated_display() as private, profile(private) as env,
+                  fixture(handler=PermissionFixture) as url):
+                env.update(GDK_BACKEND='x11'); env.pop('WAYLAND_DISPLAY', None)
+                with application(env, '--browser', url) as app:
+                    wid = title(env, 'Permission ready', app)
+                    subprocess.run(['xdotool', 'windowfocus', '--sync', wid, 'key', '--clearmodifiers', 'Return'],
+                                   env=env, check=True)
+                    deadline = time.monotonic() + 5
+                    while True:
+                        windows = subprocess.check_output(
+                            ['xdotool', 'search', '--onlyvisible', '--pid', str(app.pid)],
+                            env=env, text=True).splitlines()
+                        dialogs = [window for window in windows if window != wid]
+                        if dialogs: break
+                        self.assertLess(time.monotonic(), deadline, 'permission request did not show a native dialog')
+                        time.sleep(.02)
+                    subprocess.run(
+                        ['xdotool', 'windowfocus', '--sync', dialogs[-1], 'key', '--clearmodifiers', *answer],
+                        env=env, check=True)
+                    title(env, 'Permission:' + expected, app)
+
+    def test_invalid_tls_never_delivers_the_document(self):
+        delivered = threading.Event()
+        class TLSFixture(Fixture):
+            def do_GET(self):
+                delivered.set(); super().do_GET()
+        with isolated_display() as private, profile(private) as env, fixture(tls=True, handler=TLSFixture) as url:
+            env.update(GDK_BACKEND='x11'); env.pop('WAYLAND_DISPLAY', None)
+            with application(env, '--browser', url) as app:
+                # Error chrome keeps the failed URL as its title; copy the actual rendered error document.
+                wid = title(env, url + '/', app)
+                deadline = time.monotonic() + 5
+                while True:
+                    subprocess.run(['xdotool', 'windowfocus', '--sync', wid, 'key', '--clearmodifiers',
+                                    'ctrl+a', 'ctrl+c'], env=env, check=True)
+                    copied = subprocess.run(['xclip', '-selection', 'clipboard', '-o'], env=env,
+                                            capture_output=True, timeout=3).stdout
+                    if b'Certificate validation failed' in copied: break
+                    self.assertLess(time.monotonic(), deadline, 'TLS failure did not paint the native error document')
+                    time.sleep(.02)
+                self.assertFalse(delivered.is_set(), 'invalid TLS document reached HTTP handling')
+
+    def test_renderer_failure_recovers_on_explicit_reload(self):
+        from perf_metrics import descendants
+        from visible_latency import wait_for
+        class RecoveryFixture(Fixture):
+            loads = 0
+            def do_GET(self):
+                if self.path != '/':
+                    self.send_error(404); return
+                type(self).loads += 1
+                self.html((f'<!doctype html><title>Renderer {self.loads}</title>'
+                           '<input autofocus oninput="document.title=\'Edited:\'+this.value">').encode())
+        with isolated_display() as private, profile(private) as env, fixture(handler=RecoveryFixture) as url:
+            env.update(GDK_BACKEND='x11'); env.pop('WAYLAND_DISPLAY', None)
+            with application(env, '--browser', url) as app:
+                wid = title(env, 'Renderer 1', app)
+                renderers = [pid for pid in descendants(app.pid)
+                             if Path(f'/proc/{pid}/comm').read_text().startswith('WebKitWebProces')]
+                self.assertEqual(len(renderers), 1)
+                offset = BROWSER_LOG.stat().st_size
+                identity = os.pidfd_open(renderers[0])
+                try: signal.pidfd_send_signal(identity, signal.SIGKILL)
+                finally: os.close(identity)
+                # The owner reports this after answering WebKit's termination signal and showing recovery chrome.
+                stopped = f'worminal: renderer stopped in owner {app.pid} '.encode()
+                wait_for(lambda: stopped in BROWSER_LOG.read_bytes()[offset:])
+                subprocess.run(['xdotool', 'windowfocus', '--sync', wid, 'key', '--clearmodifiers', 'ctrl+r'],
+                               env=env, check=True)
+                title(env, 'Renderer 2', app)
+                subprocess.run(['xdotool', 'type', '--clearmodifiers', 'recovered'], env=env, check=True)
+                title(env, 'Edited:recovered', app)
+
     def test_browser_conversion_preserves_terminal_background(self):
         from Xlib import X, display
         from test_keys import read_bytes
