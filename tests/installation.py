@@ -46,12 +46,12 @@ def main(installed=False):
         records.append({"path": str(target.relative_to(stage)), "sha256": digest(target)})
     prefix = stage / "usr/local"
     executable = prefix / "bin/worminal"
-    for name, option, status in (("worminal", "--version", 0), ("worminal-x11", "-v", 1)):
+    for name, option, status in (("worminal", "--version", 0),):
         result = subprocess.run([str(prefix / "bin" / name), option],
                                 capture_output=True, text=True, timeout=5)
         if result.returncode != status or build.VERSION not in result.stdout + result.stderr:
             raise AssertionError(f"Staged {name} version failed: {result.stderr}")
-    for name in ("worminald", "worminald-x11"):
+    for name in ("worminald",):
         result = subprocess.run([str(prefix / "bin" / name), "--invalid"],
                                 capture_output=True, text=True, timeout=5)
         if result.returncode != 2 or "--serve|--bridge|--stop" not in result.stderr:

@@ -31,7 +31,8 @@ def check():
     for binary in ("build/engine_test", "build/scrollback_test"):
         environment = {**os.environ, "ASAN_OPTIONS": f"detect_leaks={int(binary == 'build/engine_test')}"}
         subprocess.run([str(build.ROOT / binary)], cwd=build.ROOT, env=environment, check=True)
-    baseline = build.ROOT / ".checks/engine-baseline"
+    from tools.reference import module
+    baseline = module().ROOT / "oracle-baseline"
     original = ("st.c", "st.h", "st_state.h", "win.h", "defaults.c", "session_view.c", "session_view.h",
                 "session_transfer.c", "session_transfer.h", "render_sync.c", "render_sync.h")
     for name in original:

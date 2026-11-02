@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class RustApplicationTest(unittest.TestCase):
-    def test_rust_view_uses_retained_c_v2_service_without_restarting_its_shell(self):
+    def test_rust_view_uses_historical_c_v2_service_without_restarting_its_shell(self):
         with isolated_display() as display, profile(display) as env:
             env.update(GDK_BACKEND='x11', WORMINAL_TEST_PREVIEW_DAEMON=str(ROOT / 'build/worminald-c-v2'))
             env.pop('WAYLAND_DISPLAY', None)

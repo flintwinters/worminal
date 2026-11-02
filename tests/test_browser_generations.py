@@ -29,7 +29,8 @@ class BrowserGenerationTest(unittest.TestCase):
             # Use the build's ABI-named install destination, not a separate test naming decision.
             import sys
             sys.path.insert(0, str(ROOT))
-            from tools.build import BROWSER_MODULE
+            from tools.reference import module
+            BROWSER_MODULE = module().BROWSER_MODULE
             shutil.copy2(ROOT / 'build/browser.so', installed / BROWSER_MODULE)
             local_documents = [base / 'old.html', base / 'new.html']
             for document in local_documents:

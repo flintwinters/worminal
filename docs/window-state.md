@@ -77,7 +77,7 @@ The directory is that of the launched shell/process, not an arbitrary foreground
 The interface requires a session bus; without one, the terminal still operates normally.
 The legacy `worminal-x11` frontend does not publish this interface.
 
-Both GTK implementations share `src/gtk/window_state_protocol.h` as the authoritative wire contract.
+The Rust frontend generates its bindings from `src/gtk/window_state_protocol.h`, the authoritative wire contract.
 Run `python3 manage.py check-window-state` for the retained frontend, or `check-rust-app` for the Rust app;
 both exercise the same private-bus/private-display integration checks, including non-UTF-8 paths.
 `manage.py setup-window-activation` prepares a project-local Muffin runtime for the separate

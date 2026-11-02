@@ -120,9 +120,11 @@ def rust_handoff_counterfactual(directory, name, filename, before, after, test, 
 
 
 def prove(match=None):
+    from tools.reference import module
+    historical = module()
     directory = ROOT / ".checks/regressions"
     directory.mkdir(parents=True, exist_ok=True)
-    builder = build.Builder()
+    builder = historical.Builder()
     service_support = [f"src/{source}" for source in build.SERVER if source != "workspace/workspace_service.c"]
     # Restore the blocking service write path; the reused PTY regression must fail.
     service = directory / "service.c"

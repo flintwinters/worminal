@@ -11,13 +11,8 @@ use std::{
 
 #[allow(non_camel_case_types, non_snake_case, non_upper_case_globals)]
 mod bindings {
-    include!(concat!(env!("OUT_DIR"), "/frontend.rs"));
-}
-#[allow(non_camel_case_types, non_snake_case, non_upper_case_globals)]
-mod rust_bindings {
     include!(concat!(env!("OUT_DIR"), "/rust_frontend.rs"));
 }
-use super::Frontend;
 
 unsafe fn glib_bytes(pointer: *mut libc::c_char) -> io::Result<Vec<u8>> {
     if pointer.is_null() {
@@ -65,23 +60,14 @@ fn loader_error() -> io::Error {
 pub fn enter(
     args: Vec<OsString>,
     listener: Option<UnixListener>,
-    frontend: Frontend,
     candidate: bool,
 ) -> io::Result<()> {
     let executable = std::env::current_exe()?;
     let directory = executable
         .parent()
         .ok_or_else(|| io::Error::other("executable has no directory"))?;
-    let (filename, symbol) = match frontend {
-        Frontend::Legacy => (
-            bindings::WORMINAL_FRONTEND_FILE.as_slice(),
-            bindings::WORMINAL_FRONTEND_SYMBOL.as_slice(),
-        ),
-        Frontend::Rust => (
-            rust_bindings::WORMINAL_RUST_FRONTEND_FILE.as_slice(),
-            rust_bindings::WORMINAL_RUST_FRONTEND_SYMBOL.as_slice(),
-        ),
-    };
+    let filename = bindings::WORMINAL_RUST_FRONTEND_FILE.as_slice();
+    let symbol = bindings::WORMINAL_RUST_FRONTEND_SYMBOL.as_slice();
     let filename = CStr::from_bytes_with_nul(filename).unwrap();
     let filename = std::ffi::OsStr::from_bytes(filename.to_bytes());
     let installed = directory.join("../lib/worminal").join(filename);
@@ -106,45 +92,28 @@ pub fn enter(
             return Err(error);
         }
         // The authoritative C header defines this function pointer. Keep the module resident for
-        // asynchronous C callbacks, matching g_module_make_resident in the retained C launcher.
+        // asynchronous C callbacks, without exposing Rust allocation lifetimes.
         symbol
     };
-    // C may rearrange argv, so provide mutable buffers rather than casting CString::as_ptr().
-    let mut storage: Vec<Vec<u8>> = args
+    let storage: Vec<CString> = args
         .iter()
-        .map(|arg| {
-            let mut bytes = arg.as_bytes().to_vec();
-            bytes.push(0);
-            bytes
-        })
-        .collect();
-    let mut pointers: Vec<*mut libc::c_char> = storage
-        .iter_mut()
-        .map(|bytes| bytes.as_mut_ptr().cast())
-        .collect();
-    pointers.push(std::ptr::null_mut());
+        .map(|arg| CString::new(arg.as_bytes()).map_err(io::Error::other))
+        .collect::<io::Result<_>>()?;
+    let mut pointers: Vec<_> = storage.iter().map(|arg| arg.as_ptr()).collect();
+    pointers.push(std::ptr::null());
     let fd = listener.map(IntoRawFd::into_raw_fd).unwrap_or(-1);
     let result = unsafe {
-        match frontend {
-            Frontend::Legacy => {
-                std::mem::transmute::<*mut libc::c_void, bindings::WorminalFrontendEntry>(entry)
-                    .unwrap()(args.len() as libc::c_int, pointers.as_mut_ptr(), fd)
-            }
-            Frontend::Rust => std::mem::transmute::<
-                *mut libc::c_void,
-                rust_bindings::WorminalRustFrontendEntry,
-            >(entry)
+        std::mem::transmute::<*mut libc::c_void, bindings::WorminalRustFrontendEntry>(entry)
             .unwrap()(
-                args.len() as i32,
-                pointers.as_ptr().cast(),
-                fd,
-                if candidate {
-                    rust_bindings::WORMINAL_RUST_FRONTEND_CANDIDATE
-                } else {
-                    0
-                },
-            ),
-        }
+            args.len() as i32,
+            pointers.as_ptr(),
+            fd,
+            if candidate {
+                bindings::WORMINAL_RUST_FRONTEND_CANDIDATE
+            } else {
+                0
+            },
+        )
     };
     // Keep argv storage alive through any native exit callbacks. The frontend now owns its listener.
     std::process::exit(result)

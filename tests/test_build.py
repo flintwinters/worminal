@@ -22,39 +22,31 @@ class BuildTests(unittest.TestCase):
         self.root_patch.start()
         self.addCleanup(self.root_patch.stop)
 
-    def test_release_and_rollback_own_matching_protocols(self):
-        with patch.object(build, "pkg_flags", return_value=[]), patch.object(build, "generate_browser_resources"), \
-                patch.object(build, "step"):
+    def test_release_build_does_not_construct_historical_applications(self):
+        with patch.object(build, "pkg_flags", return_value=[]), patch.object(build, "step"):
             builder = build.Builder()
             with (patch.object(builder, "program") as program, patch.object(builder, "rust_program") as rust,
-                  patch.object(builder, "rust_library") as library):
+                  patch.object(builder, "rust_library") as library, patch('tools.reference.target') as historical):
                 for name in ("worminal", "worminald", "worminal-preview", "worminald-preview"):
                     builder.target(name)
-                    if name in ("worminal", "worminal-preview"):
-                        rust.assert_called_with(name, "worminal-launcher")
-                    else:
-                        rust.assert_called_with(name, "worminal-daemon")
+                    rust.assert_called_with(name, "worminal-launcher" if name in
+                                            ("worminal", "worminal-preview") else "worminal-daemon")
                 program.assert_not_called()
+                historical.assert_not_called()
                 self.assertIn(unittest.mock.call("build/" + build.RUST_FRONTEND_MODULE, "worminal-frontend"),
                               library.call_args_list)
                 self.assertIn(unittest.mock.call("build/" + build.RUST_BROWSER_MODULE, "worminal-browser"),
                               library.call_args_list)
-                builder.target("build/worminal-gtk-c")
-                rust.assert_called_with("build/worminal-gtk-c", "worminal-launcher", "worminal-c-launcher")
-                self.assertEqual(program.call_args.args[0], "build/frontend.so")
-                builder.target("build/worminald-c-v2")
-                self.assertIn("src/workspace/workspace_service.c", program.call_args.args[1])
-                self.assertIn("-DWORMINAL_PREVIEW_PROTOCOL", program.call_args.kwargs["flags"])
-                builder.target("build/frontend.so")
-                args, kwargs = program.call_args
-                self.assertIn("src/gtk/app.c", args[1])
-                self.assertIn("-fPIC", kwargs["flags"])
-                self.assertIn("-shared", kwargs["libs"])
-                for name in ("worminal-x11", "worminald-x11"):
+
+    def test_historical_c_targets_delegate_to_disposable_git_fixtures(self):
+        with patch.object(build, "pkg_flags", return_value=[]), patch('tools.reference.target') as historical:
+            builder = build.Builder()
+            with patch.object(builder, 'program') as program:
+                for name in ('worminal-x11', 'worminald-x11', 'build/worminald-c-v2',
+                             'build/frontend.so', 'build/browser.so', 'build/worminal-gtk-c'):
                     builder.target(name)
-                    args, kwargs = program.call_args
-                    self.assertNotIn("-DWORMINAL_PREVIEW_PROTOCOL", kwargs["flags"])
-                    self.assertIn('-DWORKSPACE_DAEMON="worminald-x11"', kwargs["flags"])
+                    historical.assert_called_with(name)
+                program.assert_not_called()
 
     def test_rust_publication_preserves_running_inodes_and_failed_builds(self):
         source = self.root / "build/cargo/release/worminal-daemon"
@@ -83,43 +75,6 @@ class BuildTests(unittest.TestCase):
             self.assertEqual(output.read_bytes(), b"new daemon")
             self.assertEqual(output.stat().st_ino, identity)
             self.assertFalse(output.with_name("worminald.pending").exists())
-
-    def test_native_browser_resources_are_independent_and_preserve_utf8(self):
-        source = self.root / "src/gtk/browser-find.js"
-        source.parent.mkdir(parents=True)
-        source.write_text('const label = "Find — text";')
-        template = source.with_name("browser-error.html")
-        template.write_text("Error: {{message}}")
-        source.with_name("browser-local.js").write_text("const target = '%s', key = '%s';")
-        with patch.object(build, "invoke") as invoked:
-            build.generate_browser_resources()
-            header = self.root / "build/browser_resources.h"
-            content = header.read_text()
-            script = content.split("static const char browser_find_script[] =\n", 1)[1].split(";", 1)[0]
-            encoded = bytes(int(value, 8) for value in re.findall(r"\\([0-7]{3})", script))
-            self.assertEqual(encoded, source.read_bytes())
-            timestamp = header.stat().st_mtime_ns
-            build.generate_browser_resources()
-            self.assertEqual(header.stat().st_mtime_ns, timestamp)
-            source.write_text("changed")
-            build.generate_browser_resources()
-            self.assertNotEqual(header.read_text(), content)
-            valid = header.read_bytes()
-            template.write_text("Missing slot")
-            with self.assertRaisesRegex(ValueError, "exactly one message slot"):
-                build.generate_browser_resources()
-            self.assertEqual(header.read_bytes(), valid)
-            invoked.assert_not_called()
-            self.assertFalse((self.root / "file-explorer").exists())
-
-    def test_browser_and_preview_proof_generate_only_native_resources(self):
-        with patch.object(build, "pkg_flags", return_value=[]), \
-                patch.object(build, "generate_browser_resources") as generate:
-            builder = build.Builder()
-            with patch.object(builder, "program"):
-                builder.target("build/browser.so")
-                builder.target("build/preview_test")
-            self.assertEqual(generate.call_count, 2)
 
     def test_manage_detaches_from_the_desktop_display(self):
         import manage
@@ -209,15 +164,24 @@ class BuildTests(unittest.TestCase):
         module.write_text("running module")
         legacy = installed / "lib/worminal/browser.so"
         legacy.write_text("legacy browser module")
+        old_rust = legacy.with_name('browser-rust-v1.so')
+        old_rust.write_text('live Rust generation')
+        old_c = legacy.with_name('browser-v123.so')
+        old_c.write_text('retired C ABI')
+        old_binary = installed / 'bin/worminal-x11'
+        old_binary.write_text('retired C executable')
         with patch.dict(os.environ, {"DESTDIR": str(stage), "MANPREFIX": "/manuals"}), \
                 patch.object(build, "build_targets") as compile_build:
             with module.open() as running_module:
                 build.install("/opt/worminal")
                 self.assertEqual(running_module.read(), "running module")
-            self.assertEqual(legacy.read_text(), "legacy browser module")
+            self.assertFalse(legacy.exists())
+            self.assertFalse(old_c.exists())
+            self.assertFalse(old_binary.exists())
+            self.assertEqual(old_rust.read_text(), 'live Rust generation')
             self.assertFalse((installed / "bin/worminal").is_symlink())
             self.assertEqual(previous.read_text(), "previous client")
-            compile_build.assert_called_once_with("worminal-x11", "worminald-x11")
+            compile_build.assert_called_once_with()
             compile_build.reset_mock()
             build.install("/opt/worminal", skip_build=True)
             compile_build.assert_not_called()
@@ -233,7 +197,7 @@ class BuildTests(unittest.TestCase):
             keep.touch()
             build.uninstall("/opt/worminal")
             self.assertTrue(keep.exists())
-            self.assertEqual(legacy.read_text(), "legacy browser module")
+            self.assertFalse(legacy.exists())
             self.assertTrue(all(not destination.exists() for _, destination, _ in files))
 
     def test_clean_preserves_diagnostics(self):

@@ -1,34 +1,26 @@
-"""Read-only recovery captures for the Rust migration; never publishes or changes live processes."""
+"""Read-only live-state inventories; rollback code comes from Git, never release copies."""
 
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
-import shutil
 import subprocess
 import uuid
 
 from tools.build import ROOT, installation_files
 
 
-def prepare_cutover():
-    """Capture recoverable installed artifacts and read-only live state before publication."""
+def inventory():
+    """Record installed hashes and live state without copying releases or changing processes."""
     from tools.daemon_upgrade import connect, catalog, identity, terminal_descriptors
-    directory = ROOT / '.checks' / ('cutover-' + uuid.uuid4().hex)
+    directory = ROOT / '.checks' / ('inventory-' + uuid.uuid4().hex)
     directory.mkdir(mode=0o700, parents=True)
     report = {'artifacts': [], 'owners': [], 'windows': {}, 'workspaces': {}}
-    installed = Path('/usr/local')
-    paths = [installed / 'bin' / name for name in ('worminal', 'worminald', 'worminal-x11', 'worminald-x11')]
-    paths += list((installed / 'lib/worminal').glob('*.so'))
-    for path in paths:
+    for _source, path, _mode in installation_files('/usr/local'):
         if not path.is_file(): continue
-        target = directory / path.relative_to('/')
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(path, target)
-        report['artifacts'].append({'path': str(path), 'copy': str(target.relative_to(directory)),
-                                    'mode': path.stat().st_mode & 0o777,
-                                    'sha256': hashlib.sha256(target.read_bytes()).hexdigest()})
+        report['artifacts'].append({'path': str(path), 'mode': path.stat().st_mode & 0o777,
+                                    'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
     scopes = {os.environ.get('WORMINAL_SHARED_SOCKET_SCOPE', '')}
     for process in Path('/proc').iterdir():
         if not process.name.isdecimal(): continue
@@ -85,51 +77,7 @@ def prepare_cutover():
                 capture_output=True, text=True, timeout=5)
             report['windows'][name] = json.loads(result.stdout) if not result.returncode else result.stderr.strip()
     (directory / 'inventory.json').write_text(json.dumps(report, indent=2) + '\n')
-    print(f"Cutover recovery/inventory saved: {directory.relative_to(ROOT)}")
-    print(f"Preserved {len(report['artifacts'])} artifacts; recorded {len(report['owners'])} GUI processes "
+    print(f"Live inventory saved: {directory.relative_to(ROOT)}")
+    print(f"Hashed {len(report['artifacts'])} artifacts; recorded {len(report['owners'])} GUI processes "
           f"and {len(report['workspaces'])} v2 workspace scopes. No processes changed.")
     return directory
-
-
-def verify_baseline():
-    directory = ROOT / ".checks/c-baseline"
-    manifest = json.loads((directory / "manifest.json").read_text())
-    verified = 0
-    for record in manifest["artifacts"]:
-        if record.get("missing"):
-            continue
-        artifact = directory / record["copy"]
-        if hashlib.sha256(artifact.read_bytes()).hexdigest() != record["sha256"]:
-            raise ValueError(f"Preserved C recovery artifact has changed: {record['copy']}")
-        verified += 1
-    if not verified:
-        raise ValueError("Preserved C recovery baseline contains no artifacts")
-    return verified
-
-
-def preserve_baseline():
-    destination = ROOT / ".checks/c-baseline"
-    # Exclusive creation prevents a later Rust build from silently replacing the C recovery artifacts.
-    destination.mkdir(parents=True, exist_ok=False)
-    records = []
-    try:
-        for source, installed, _mode in installation_files("/usr/local"):
-            for kind, artifact in (("build", source), ("installed", installed)):
-                if not artifact.is_file():
-                    records.append({"kind": kind, "path": str(artifact), "missing": True})
-                    continue
-                relative = artifact.relative_to(ROOT) if kind == "build" else artifact.relative_to("/")
-                target = destination / kind / relative
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(artifact, target)
-                digest = hashlib.sha256(target.read_bytes()).hexdigest()
-                records.append({"kind": kind, "path": str(artifact),
-                                "copy": str(target.relative_to(destination)), "sha256": digest})
-        revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-        (destination / "manifest.json").write_text(json.dumps(
-            {"revision": revision, "artifacts": records}, indent=2) + "\n")
-    except BaseException:
-        # Incomplete copies must not masquerade as a usable recovery baseline.
-        shutil.rmtree(destination)
-        raise
-    return destination

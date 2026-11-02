@@ -116,12 +116,15 @@ the new frontend. There is no configuration file to parse at launch.
 
 - [Command reference](docs/man/worminal.1): launch options, restart recovery, service shutdown, and session transfer.
 - [Window-state API](docs/window-state.md): working-directory and focus integration over session D-Bus.
-- [Architecture and migration](docs/rust-migration.md): service ownership, upgrade recovery, and measured resource costs.
+- [Architecture and migration](docs/rust-migration.md): service ownership, upgrade recovery,
+  and measured resource costs.
 - [Agent guidance](AGENTS.md): project constraints, architecture, and current investigations.
 
 `python3 manage.py --help` lists internal build, test, and measurement commands.
 `python3 manage.py check` runs the regression suite on private virtual displays;
 `latency-visible`, `interaction-perf`, and `browser-perf` measure visible behavior.
+Historical C comparisons reconstruct disposable test fixtures from Git and need the referenced history and Xft
+development headers. No legacy C application or recovery release is installed or retained.
 Generated outputs live in `build/`, and diagnostic captures in `.checks/`.
 Run `python3 manage.py privacy-setup` after cloning to enable the repository's privacy hooks.
 

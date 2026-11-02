@@ -1,11 +1,6 @@
 //! Lightweight native application entrypoint; graphics load only for a new local owner.
 #[path = "native.rs"]
 mod native;
-#[derive(Clone, Copy)]
-pub enum Frontend {
-    Legacy,
-    Rust,
-}
 use std::{
     ffi::OsString,
     io,
@@ -52,7 +47,7 @@ fn forward(args: &[OsString], candidate: bool) -> io::Result<Forward> {
     worminal_workspace::broker::forward(&address, &request)
 }
 
-fn run(frontend: Frontend, candidate: bool) -> io::Result<()> {
+fn run(candidate: bool) -> io::Result<()> {
     native::timing("main");
     let args: Vec<_> = std::env::args_os().collect();
     worminal_workspace::browser_target::command(&args)?;
@@ -70,11 +65,11 @@ fn run(frontend: Frontend, candidate: bool) -> io::Result<()> {
             Forward::Owner(listener) => Some(listener),
         }
     };
-    native::enter(args, listener, frontend, candidate)
+    native::enter(args, listener, candidate)
 }
 
-pub fn main(frontend: Frontend, candidate: bool) -> ExitCode {
-    match run(frontend, candidate) {
+pub fn main(candidate: bool) -> ExitCode {
+    match run(candidate) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("{error}");

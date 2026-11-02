@@ -2,10 +2,7 @@ use std::{env, path::PathBuf};
 
 fn main() {
     let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("../..");
-    for (header, output) in [
-        ("frontend_module.h", "frontend.rs"),
-        ("rust_frontend_module.h", "rust_frontend.rs"),
-    ] {
+    for (header, output) in [("rust_frontend_module.h", "rust_frontend.rs")] {
         let header = root.join("src/gtk").join(header);
         println!("cargo:rerun-if-changed={}", header.display());
         bindgen::Builder::default()

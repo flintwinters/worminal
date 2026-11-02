@@ -118,7 +118,7 @@ void *xmalloc(size_t);
 void *xrealloc(void *, size_t);
 char *xstrdup(const char *);
 
-/* config.h globals */
+/* Engine defaults and declarations used by historical comparison harnesses. */
 extern char *utmp;
 extern char *scroll;
 extern char *stty_args;

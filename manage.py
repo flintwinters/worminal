@@ -29,8 +29,7 @@ MAX_LINE_LENGTH = 120
 NATIVE_CHECKS = ("build/url_test", "build/frame_schedule_test",
                  "build/workspace_client_test")
 # These merged files exceed the limit; prevent further growth until they are split.
-LEGACY_FILE_LINES = {"src/x11/x.c": 3417,
-                     "tests/test_native.py": 1333}
+LEGACY_FILE_LINES = {"tests/test_native.py": 1333}
 
 
 # Checks own private virtual displays; none may draw on or inject into the developer's desktop.
@@ -59,6 +58,8 @@ def check_file_limits():
         if name == "Cargo.lock":
             continue
         path = ROOT / name
+        if not path.is_file() or path.is_symlink():
+            continue  # Deleted sources and disposable historical fixture links are not maintained source.
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
         except UnicodeDecodeError:
@@ -117,7 +118,7 @@ def run_headless_checks():
     code = run_native_checks()
     if code:
         return code
-    patterns = ("test_build.py", "test_migration.py", "test_perf_metrics.py", "test_cli.py", "test_workspace.py",
+    patterns = ("test_build.py", "test_reference.py", "test_perf_metrics.py", "test_cli.py", "test_workspace.py",
                 "test_preview_workspace.py", "test_theme.py", "test_privacy.py", "test_handoff.py",
                 "test_restore.py", "test_upgrade.py")
     for pattern in patterns:
@@ -200,7 +201,7 @@ def check_rust_frontend():
 
 @app.command("build-rust-app")
 def build_rust_app():
-    """Build the native Rust terminal/browser application alongside the retained release frontend."""
+    """Build the native Rust terminal/browser application with its lazy frontend and browser modules."""
     native_build.build_targets("worminal-rust")
     typer.echo("Built ./worminal-rust (terminal, SSH and browser); existing v2 workspace. Installation unchanged.")
 
@@ -262,8 +263,8 @@ def check_rust_daemon_x11():
 
 @app.command("check-rust-handoff")
 def check_rust_handoff():
-    """Transfer private live shells among Rust, v1 C and preserved v2 C daemons in both directions."""
-    native_build.build_targets("worminald-x11", "worminald-preview")
+    """Transfer private live shells among Rust, v1 C and Git-derived v2 C test daemons in both directions."""
+    native_build.build_targets("worminald-x11", "worminald-preview", "build/worminald-c-v2")
     candidate = build_rust_daemon()
     code = run_rust_process_checks() or run_rust_workspace_checks()
     if not code:
@@ -271,7 +272,7 @@ def check_rust_handoff():
                     "-p", "test_handoff.py", "-q"],
                    env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate),
                         "WORMINAL_TEST_RUST_DAEMON": "1",
-                        "WORMINAL_TEST_HANDOFF_BASELINE": str(ROOT / ".checks/c-baseline/build/worminald")})
+                        "WORMINAL_TEST_HANDOFF_BASELINE": str(ROOT / "build/worminald-c-v2")})
     raise typer.Exit(code)
 
 
@@ -285,45 +286,20 @@ def check_rust_upgrade():
                         env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate),
                              "WORMINAL_TEST_UPGRADE_PEER": str(ROOT / "build/worminald-c-v2"),
                              "WORMINAL_TEST_RUST_DAEMON": "1",
-                             "WORMINAL_TEST_HANDOFF_BASELINE": str(ROOT / ".checks/c-baseline/build/worminald")}))
+                             "WORMINAL_TEST_HANDOFF_BASELINE": str(ROOT / "build/worminald-c-v2")}))
 
 
-@app.command("preserve-c-baseline")
-def preserve_c_baseline():
-    """Preserve built and installed C artifacts before the Rust migration; never overwrite a baseline."""
-    from tools.migration import preserve_baseline
-    native_build.build_targets("worminal-x11", "worminald-x11")
-    typer.echo(preserve_baseline())
-
-
-@app.command("prepare-cutover")
-def prepare_cutover():
-    """Preserve installed code and capture live owners, windows and PTYs without changing processes."""
-    from tools.migration import prepare_cutover
-    prepare_cutover()
-
-
-@app.command("check-migration")
-def check_migration():
-    """Verify migration baseline recovery infrastructure without touching the installation."""
-    code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
-                "-p", "test_migration.py", "-q"])
-    if not code:
-        from tools.migration import verify_baseline
-        typer.echo(f"Preserved C recovery baseline: {verify_baseline()} artifact hashes verified.")
-    raise typer.Exit(code)
+@app.command("inventory")
+def inventory():
+    """Record installed hashes, live owners, windows and PTYs without copies or process changes."""
+    from tools.migration import inventory
+    inventory()
 
 
 @app.command("build-preview")
 def build_preview():
     """Build compatibility names for the GTK frontend and v2 service."""
     native_build.build_targets("worminal-preview", "worminald-preview")
-
-
-@app.command("build-x11")
-def build_x11():
-    """Build release binaries and the original X11 rollback pair."""
-    native_build.build_targets("worminal-x11", "worminald-x11")
 
 
 def preview_checks(backend):
@@ -368,7 +344,7 @@ def prove_preview_regressions(match: str = typer.Option(None, help="Only run mat
 
 @app.command("preview-perf")
 def preview_perf():
-    """Compare original and preview launch, shell/input latency, and helper-inclusive memory."""
+    """Compare Rust and historical C launch, shell/input latency and helper-inclusive memory."""
     native_build.build_targets("worminal-preview", "worminal-x11", "worminald-x11",
                                "worminald-preview", "build/key_injector")
     raise typer.Exit(run([sys.executable, "tests/frontend_perf.py"]))
@@ -429,7 +405,7 @@ def privacy_setup():
 
 
 @app.command("check-keys")
-def check_keys(legacy: bool = typer.Option(False, "--legacy", help="Check the rollback X11 frontend.")):
+def check_keys(legacy: bool = typer.Option(False, "--legacy", help="Check a disposable historical X11 fixture.")):
     """Check keys, mouse input, and clipboard bytes on private Xvfb displays."""
     native_build.build_targets(*(("worminal-x11", "worminald-x11") if legacy else ()))
     raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
@@ -575,7 +551,7 @@ def check_build():
 @app.command("check-install")
 def check_install(installed: bool = typer.Option(False, help='Verify published /usr/local artifacts without writing.')):
     """Stage /usr/local privately; verify hashes, native SSH input, browser and loaded module paths."""
-    native_build.build_targets("worminal-x11", "worminald-x11")
+    native_build.build_targets()
     raise typer.Exit(run([sys.executable, "tests/installation.py", *(['--installed'] if installed else [])]))
 
 
@@ -790,15 +766,6 @@ def window_perf():
     """Measure isolated tab repaint on the current X11 display (needs python-xlib)."""
     native_build.build_targets("worminal-x11", "worminald-x11")
     raise typer.Exit(run([sys.executable, "tests/window_perf.py"]))
-
-
-@app.command("run")
-def run_window():
-    """Run the already-built Worminal binary."""
-    if not (ROOT / "worminal").is_file():
-        typer.echo("Build Worminal first with: python3 manage.py build", err=True)
-        raise typer.Exit(1)
-    os.execv("./worminal", ["./worminal"])
 
 
 @proof_app.callback(invoke_without_command=True)

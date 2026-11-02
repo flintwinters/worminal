@@ -2,7 +2,6 @@
 import fcntl
 import os
 from pathlib import Path
-import shutil
 import socket
 import signal
 import subprocess
@@ -137,10 +136,6 @@ def upgrade(executable=Path('/usr/local/bin/worminald')):
     if Path(f'/proc/{original}/exe').samefile(executable):
         print('Installed daemon is already active.')
         return
-    directory = ROOT / '.checks' / ('daemon-upgrade-' + uuid.uuid4().hex)
-    directory.mkdir(mode=0o700, parents=True)
-    shutil.copyfile(f'/proc/{original}/exe', directory / 'previous-worminald')
-    (directory / 'previous-worminald').chmod(0o700)
     if not expected:
         stop_empty(scope, original, legacy=True)
         with open(os.devnull, 'r+b') as null:
@@ -207,5 +202,5 @@ def upgrade(executable=Path('/usr/local/bin/worminald')):
         # Never terminate a receiver after a possible commit. Its scope is a
         # recovery destination, even if verification or the second hop failed.
         print(f'Upgrade interrupted. Preserve staging workspace {staging_scope} (pid {staging}).', file=sys.stderr)
-        print(f'Previous executable preserved in {directory}.', file=sys.stderr)
+        print('Rollback code is available in Git; never restart live shells for recovery.', file=sys.stderr)
         raise

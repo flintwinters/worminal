@@ -16,7 +16,3 @@ bindgen.workspace = true
 [[bin]]
 name = "worminal-rust-launcher"
 path = "src/candidate.rs"
-
-[[bin]]
-name = "worminal-c-launcher"
-path = "src/legacy.rs"
