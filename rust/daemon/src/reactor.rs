@@ -1,4 +1,4 @@
-//! Audited readiness and signal boundaries; application scheduling remains in the service.
+//! Poll file descriptors and signals. The service decides what to run.
 use std::{
     cell::Cell,
     io, mem,

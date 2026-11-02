@@ -1,4 +1,4 @@
-//! Audited Linux ownership-transfer boundary. A sealed read-only mapping owns its backing descriptor.
+//! Map sealed snapshot files for daemon transfers. Keep the descriptor open for the mapping.
 use crate::process;
 use std::{
     fs::File,

@@ -1,4 +1,4 @@
-//! Audited SSH spawn boundary. posix_spawnp never runs GUI-process fork hooks.
+//! Start SSH with posix_spawnp so GTK fork hooks do not run.
 use std::{
     ffi::{CStr, CString, OsStr},
     io,

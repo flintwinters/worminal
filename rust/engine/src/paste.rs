@@ -1,4 +1,4 @@
-//! Audited in-place paste FFI; state is Rust-owned and C retains no buffers.
+//! Paste filtering in C. Rust keeps the buffer; C borrows it for the call.
 use crate::{ffi::check, Error};
 use std::ffi::CStr;
 use worminal_engine_sys as sys;

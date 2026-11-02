@@ -1,4 +1,4 @@
-//! Audited selection FFI: C borrows Rust cells for one call and retains only coordinates.
+//! Selection calls into C. C borrows the cells for one call and saves only the coordinates.
 use crate::ffi::check;
 use crate::{Cell, Error, Frame};
 use std::ptr::{self, NonNull};

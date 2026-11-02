@@ -74,7 +74,7 @@ fn snapshot() -> Variant {
             .collect()
     });
     let snapshot = rows.to_variant();
-    // Enforce the authoritative wire signature at the publication boundary, including an empty snapshot.
+    // Check the D-Bus result type even when the window list is empty.
     assert_eq!(snapshot.type_().as_str(), name(WORMINAL_STATE_WINDOWS));
     Variant::tuple_from_iter([snapshot])
 }

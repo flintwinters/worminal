@@ -1,4 +1,4 @@
-//! Audited Fontconfig/Pango-Cairo gaps in the locked GTK 3 bindings. Raw pointers never escape.
+//! Fontconfig/Pango/Cairo calls missing from the Rust GTK bindings. Raw pointers stay in this module.
 use glib::translate::ToGlibPtr;
 use std::ffi::{c_char, c_double, c_int, c_void, CStr, CString};
 

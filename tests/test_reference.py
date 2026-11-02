@@ -1,4 +1,4 @@
-"""Historical comparisons come from Git and cannot overwrite or outlive production source ownership."""
+"""Test extraction of old C code and cleanup of temporary test files."""
 import io
 from pathlib import Path
 import tarfile

@@ -1,4 +1,4 @@
-//! Audited executable-watch, inherited-descriptor, and posix_spawn boundaries for daemon replacement.
+//! Watch executable replacements, receive file descriptors and start replacement daemons.
 use crate::handoff_io::{self, CommitSent, Listener};
 use std::os::unix::fs::FileExt;
 use std::{

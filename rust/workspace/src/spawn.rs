@@ -1,4 +1,4 @@
-//! Audited posix_spawn boundary. No Rust child-side callbacks or GUI fork hooks run here.
+//! Start processes with posix_spawn, without Rust callbacks or GTK fork hooks in the child.
 use std::{
     ffi::CString,
     io,

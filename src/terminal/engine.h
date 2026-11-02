@@ -1,4 +1,4 @@
-/* Authoritative terminal-engine ABI. All buffers belong to the caller; no OS or GUI objects cross it. */
+/* Terminal engine C API. The caller owns buffers; no file descriptors, processes or GUI objects cross it. */
 #ifndef WORMINAL_ENGINE_H
 #define WORMINAL_ENGINE_H
 #include <stddef.h>

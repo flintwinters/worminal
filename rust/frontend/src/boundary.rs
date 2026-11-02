@@ -1,4 +1,4 @@
-//! Audited module entrypoint. Listener ownership enters before validation; panics never unwind to the launcher.
+//! Frontend C entrypoint. Take the listener before checking arguments, and catch Rust panics.
 use std::{
     ffi::{c_char, CStr, OsString},
     io,
@@ -69,5 +69,5 @@ pub unsafe extern "C" fn worminal_rust_frontend_v2(
         }
     }
 }
-// The generated declaration enforces the authoritative header's exact entrypoint signature.
+// Compile-time check against the C header's entrypoint type.
 const _: bindings::WorminalRustFrontendEntry = Some(worminal_rust_frontend_v2);

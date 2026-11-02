@@ -155,7 +155,7 @@ main(int argc, char **argv)
 	open_page(&pages[1], &apps[1], argv[4]);
 	g_assert_true(instance_api(pages[1].browser) == original);
 	close_page(&pages[1]);
-	/* A publication can land during the host's claim/create callback. Shortcut
+	/* The module can be replaced during the host's claim/create callback. Shortcut
 	 * dispatch must resolve the actual created instance, not an earlier module. */
 	prepare_page(&pages[1], &apps[1], argv[4]);
 	install_on_select = argv[2];

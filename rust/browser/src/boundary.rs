@@ -1,4 +1,4 @@
-//! Audited C ABI and descriptor ownership. No Rust panic unwinds into the host.
+//! Browser module C entrypoints. Catch Rust panics before returning to the caller.
 use crate::Browser;
 use glib::{prelude::*, translate::*};
 use gtk::{gio, prelude::*};

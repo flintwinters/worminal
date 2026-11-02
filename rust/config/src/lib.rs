@@ -1,2 +1,2 @@
-//! Compiled appearance and scrollback inputs, generated alongside the authoritative C configuration.
+//! Build-time appearance and scrollback settings.
 include!(concat!(env!("OUT_DIR"), "/theme.rs"));

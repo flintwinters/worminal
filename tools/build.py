@@ -264,7 +264,7 @@ def retired_installation_files(prefix=None):
 
 def install(prefix=None, *, skip_build=False):
     files = installation_files(prefix)
-    # Privileged publication must retain the regular user's compiled appearance.
+    # Build before sudo so the result uses the user's theme.
     if not skip_build:
         build_targets()
     for source, destination, mode in files:

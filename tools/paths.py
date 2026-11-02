@@ -1,4 +1,4 @@
-"""One layout for disposable builds and native runtime prefixes, matching /usr/local installation."""
+"""Local builds and installations use the same bin/lib directories."""
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -11,7 +11,7 @@ def runtime_binary(name, *, prefix=None):
     if path.is_absolute():
         return path
     if len(path.parts) > 1:
-        return ROOT / path  # Explicit repository-relative executable overrides remain supported.
+        return ROOT / path
     return (BUILD if prefix is None else Path(prefix)) / 'bin' / path
 
 

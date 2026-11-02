@@ -1,4 +1,4 @@
-//! Audited GLib and module-loading boundaries. No Rust containers cross the frontend ABI.
+//! GLib helpers and frontend module loading.
 use std::{
     ffi::{CStr, CString, OsString},
     io,
@@ -83,8 +83,8 @@ pub fn enter(
             libc::dlclose(handle);
             return Err(error);
         }
-        // The authoritative C header defines this function pointer. Keep the module resident for
-        // asynchronous C callbacks, without exposing Rust allocation lifetimes.
+        // Use the function type generated from the C header. Keep the library loaded for callbacks
+        // until the process exits.
         symbol
     };
     let storage: Vec<CString> = args

@@ -263,7 +263,7 @@ def broker_check(env, url, log, daemon, *, rust=False):
     """Independent launches must share the GTK owner and the live DOM, not reload a URL."""
     executable = str(runtime_binary("worminal-rust" if rust else "build/worminal-gtk-c"))
     if not rust:
-        # The Git-derived C peer has its historical relative module layout; keep its complete runtime private.
+        # The old C launcher expects modules in build/ next to its executable.
         base = Path(env["XDG_STATE_HOME"]).parent / "c-runtime"
         (base / "build").mkdir(parents=True, exist_ok=True)
         shutil.copy2(executable, base / "worminal")

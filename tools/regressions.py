@@ -1,4 +1,4 @@
-"""Prove critical fixes by compiling local counterfactuals, never editing working sources."""
+"""Build versions with fixes removed and check that the tests fail."""
 from tools.paths import CHECKS
 
 

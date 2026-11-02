@@ -123,8 +123,8 @@ the new frontend. There is no configuration file to parse at launch.
 `python3 manage.py --help` lists internal build, test, and measurement commands.
 `python3 manage.py check` runs the regression suite on private virtual displays;
 `latency-visible`, `interaction-perf`, and `browser-perf` measure visible behavior.
-Historical C comparisons reconstruct disposable test fixtures from Git and need the referenced history and Xft
-development headers. No legacy C application or recovery release is installed or retained.
+Some tests build old C versions from Git to compare behavior. They need Git history and Xft development headers.
+The temporary files are removed after the tests.
 The working tree keeps source and generated output separate:
 
 ```text
@@ -140,8 +140,8 @@ build/venv/            Optional Python development environment
 ```
 
 `python3 manage.py clean` removes compiled output while retaining diagnostics and the development environment.
-The management entrypoint suppresses Python bytecode caches. Native runtime prefixes have the same `bin`/`lib`
-layout locally and under `/usr/local`; no executable wrappers or binaries belong in the repository root.
+`manage.py` prevents Python bytecode caches. Local builds and `/usr/local` installs use the same `bin`/`lib`
+directories. Keep compiled programs out of the repository root.
 Run `python3 manage.py privacy-setup` after cloning to enable the repository's privacy hooks.
 
 Worminal derives from st 0.9.3. See [LICENSE](LICENSE) for copyright and license terms.

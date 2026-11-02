@@ -1,4 +1,4 @@
-/* Engine-owned defaults, also consumed by Git-derived historical comparison adapters. */
+/* Default terminal settings. */
 #include <wchar.h>
 #include "st.h"
 

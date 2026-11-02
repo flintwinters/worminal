@@ -1,4 +1,4 @@
-"""Disposable historical test fixtures reconstructed from Git, never installable recovery releases."""
+"""Build old C versions from Git for tests, then remove the temporary files."""
 import atexit
 import importlib.util
 import io
@@ -27,7 +27,7 @@ def cleanup():
         try:
             path.rmdir()
         except OSError:
-            pass  # Another source now owns this directory; never remove its contents.
+            pass  # Leave the directory if files have been added to it.
     _parents.clear()
     _module = None
     if _directory is not None:
@@ -63,8 +63,8 @@ def module():
     _directory = tempfile.TemporaryDirectory(prefix='.historical-', dir=ROOT / 'build')
     root = Path(_directory.name)
     extract(REVISION, root)
-    # Existing regression harnesses include private historical headers and adapters. Expose them only
-    # during this check process; current engine sources always take precedence over historical files.
+    # Some tests still include the old C headers and source files. Link in missing files for the test
+    # run, then remove the links in cleanup(). Never replace files already present in src/.
     for source in (root / 'src').rglob('*'):
         if not source.is_file():
             continue
@@ -113,7 +113,7 @@ def target(name):
     alias.unlink(missing_ok=True)
     alias.symlink_to(historical.ROOT / output)
     _links[alias] = historical.ROOT / output
-    # The painter dynamically resolves the reference frontend next to its probe.
+    # The rendering test loads the old frontend from build/frontend.so.
     if name == 'build/render_probe':
         frontend = ROOT / 'build/frontend.so'
         frontend.unlink(missing_ok=True)
@@ -122,7 +122,7 @@ def target(name):
 
 
 def remove_fixture_links(root=None):
-    """Recover interrupted checks without deleting a user's replacement source or executable."""
+    """Remove links left by interrupted tests without deleting other files."""
     root = ROOT if root is None else root
     candidates = [*root.glob('worminal*-x11'), *(root / 'build/bin').glob('*'), *(root / 'src').rglob('*')]
     for path in candidates:

@@ -1,4 +1,4 @@
-//! Audited FFI boundary. Handles never escape; every C buffer points into a live Rust allocation.
+//! Calls to the C engine. Handles stay inside the wrapper; buffers point to live Rust memory.
 use std::ptr::NonNull;
 use worminal_engine_sys as sys;
 

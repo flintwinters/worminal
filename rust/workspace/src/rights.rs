@@ -1,4 +1,4 @@
-//! Audited Unix descriptor boundary. Received descriptors acquire ownership before validation can fail.
+//! Receive Unix file descriptors and close them if validation fails.
 use std::{
     io, mem,
     os::{

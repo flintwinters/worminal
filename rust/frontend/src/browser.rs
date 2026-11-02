@@ -1,4 +1,4 @@
-//! Audited, resident C module boundary. Each view pins its creating generation.
+//! Load browser modules. Each view keeps the module that created it loaded.
 use glib::{prelude::*, translate::*};
 use std::{
     cell::RefCell,

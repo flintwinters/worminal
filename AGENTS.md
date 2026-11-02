@@ -5,16 +5,17 @@
 Worminal is a deliberately small terminal. Favor low memory use over interface features; measure before adding
 complexity. Preserve established terminal behavior and application shortcuts. Plain Ctrl+N belongs to terminal
 applications; Ctrl+Shift+N opens a window. Keep the upstream st attribution and license intact.
-Use existing modules, keep authoritative decisions in one place, and enforce non-obvious invariants in the operation
-that owns the state change. Preserve reproducible failures and verified rationale beside those operations.
+Use existing modules. Keep each shared rule or definition in one place. Enforce state rules where the state changes.
+For bugs with subtle causes, add a test that fails without the fix and explain the reason beside the code.
 
 ## Architecture
 
 The maintained application is Rust above a small C terminal engine, with GTK 3, Pango/Cairo and WebKitGTK 4.1 on
-native Wayland and X11. `src/terminal/engine.h` owns the opaque per-instance engine ABI; Rust bindings generate from
-it. C owns parsing, cells, UTF-8, modes, scrollback/reflow, selection, redraw deadlines and serialization. It owns no
-processes, descriptors, GUI objects or application policy. Safe Rust wrappers own handles and copied frame rows.
-`src/workspace` contains authoritative wire/snapshot/policy headers; `src/gtk` contains shared module/D-Bus headers
+native Wayland and X11. `src/terminal/engine.h` defines the C API; Rust bindings generate from it.
+Each terminal has its own C instance. C handles parsing, cells, UTF-8, modes, scrollback/reflow, selection, redraw
+deadlines and serialization. It does not manage processes, descriptors, GUI objects or application policy.
+The Rust wrapper manages C handles and screen buffers.
+`src/workspace` contains shared protocol/snapshot formats and limits; `src/gtk` contains module/D-Bus definitions
 and browser scripts/templates, not C applications. `rust` owns the launcher, daemon, frontend, browser and wrappers.
 
 The per-user v2 daemon owns ordered tabs, PTYs and bounded scrollback. Views connect locally or through SSH
@@ -45,8 +46,8 @@ remote workspaces share saved URLs only. GTK/frontend updates require closing th
 
 Painting preserves matching background runs, overlapping glyph/cursor damage, fractional-grid fallback and Unicode
 font fallback. Cache printable ASCII shaping only. Views defer unused buffers/layouts/input methods/timers.
-The Cairo tab strip uses terminal metrics/colors and authoritative catalog order. Browser file labels decode the
-filename; web tabs retain document titles. Window-state D-Bus directory arrays retain original filesystem bytes.
+The Cairo tab strip uses terminal metrics/colors and the tab order reported by the daemon. Browser file labels
+decode the filename; web tabs retain document titles. D-Bus directory arrays retain original filesystem bytes.
 `docs/window-state.md` defines that read-only public contract. X11 activation uses fresh server timestamps;
 Wayland activation remains compositor policy.
 
@@ -60,7 +61,7 @@ The independent TypeScript `file-explorer` workspace opens its HTML artifact thr
 Its changes take effect only on explicit reload/reopen; do not add live updates. Native builds do not embed it.
 Parent explorer build commands supply palette/font inputs; standalone builds retain their own defaults.
 
-## Building, checking and publication
+## Build, test and install
 
 `manage.py` is strictly internal build/test/install/maintenance tooling. Product workflows use native executables.
 Build as the regular user to compile their Alacritty appearance. Cargo output and generated files belong in
@@ -74,21 +75,21 @@ checks use project-local Weston with matching virtual-seat ABI and no X11 fallba
 Muffin/Weston through their setup commands. Performance checks measure private software presentation, not desktop
 compositing or physical display latency. Launch latency is not a migration acceptance target.
 
-Legacy C applications have been removed from maintained source and installation. Git history is the only code
-rollback source; do not preserve recovery releases or executable copies. `tools/reference.py` reconstructs the
-historical regression reference from Git in disposable build directories. Its sources and executable links exist
-only during checks and are removed at process exit; `manage.py clean` also removes interrupted fixture links.
-Historical C comparisons are test fixtures, never production binaries. Normal builds do not extract them.
-Retain behavior assertions and compiled counterfactuals when adapting checks. Installed profiles and diagnostic
-inventories are user/runtime data, not code rollback copies; never delete them as part of code retirement.
+The old C applications are no longer maintained or installed. Roll back code from Git; do not keep executable
+backups. Some tests still need the old C code. `tools/reference.py` gets it from Git, builds it under `build/`,
+and creates temporary source links for those tests. It removes the files and links when the test process exits.
+Normal builds do not use this code. `manage.py clean` removes links left by interrupted tests.
+Keep behavior checks when changing tests. Some tests check fixes by removing them and requiring a failure.
+Keep user profiles and diagnostic records when cleaning up code.
 
-The active installation is `/usr/local/bin/worminal`, with modules in `/usr/local/lib/worminal`. Publish a verified
-regular-user build through `sudo -n python3 manage.py install --prefix /usr/local --skip-build`; do not install fixes
-into ~/.local. `check-install` validates a staged installation; `check-install --installed` checks published bytes,
+The active installation is `/usr/local/bin/worminal`, with modules in `/usr/local/lib/worminal`. Install a tested
+regular-user build with `sudo -n python3 manage.py install --prefix /usr/local --skip-build`; do not install fixes
+into ~/.local. `check-install` validates a staged installation; `check-install --installed` checks installed files,
 modes, SSH/browser operation and actual module paths on private displays. Running owners retain mapped code;
-verify executable/module identities before claiming a change is active. Inventory commands record live state and
-hashes without copying releases. Keep destinations in environment configuration and preserve the contributor's
-configured Git identity. Privacy hooks guard staged content/history messages, not public commit attribution.
+check the running executable and loaded module files before claiming a change is active. Inventory commands record
+process IDs, tabs, windows and file hashes without copying executables. Keep destinations in environment configuration
+and preserve the contributor's configured Git identity. Privacy hooks check staged content and commit messages;
+public commit attribution is allowed.
 
 ## Current investigations
 

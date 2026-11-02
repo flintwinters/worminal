@@ -64,7 +64,7 @@ def check_file_limits():
             continue
         path = ROOT / name
         if not path.is_file() or path.is_symlink():
-            continue  # Deleted sources and disposable historical fixture links are not maintained source.
+            continue  # Skip deleted files and temporary links created by tests.
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
         except UnicodeDecodeError:
@@ -269,7 +269,7 @@ def check_rust_daemon_x11():
 
 @app.command("check-rust-handoff")
 def check_rust_handoff():
-    """Transfer private live shells among Rust, v1 C and Git-derived v2 C test daemons in both directions."""
+    """Test shell transfers between Rust and old C daemons built from Git."""
     native_build.build_targets("worminald-x11", "worminald-preview", "build/worminald-c-v2")
     candidate = build_rust_daemon()
     code = run_rust_process_checks() or run_rust_workspace_checks()
@@ -343,14 +343,14 @@ def setup_preview_wayland():
 
 @app.command("prove-preview-regressions")
 def prove_preview_regressions(match: str = typer.Option(None, help="Only run matching regression proofs.")):
-    """Compile project-local counterfactuals and require critical regression tests to fail."""
+    """Rebuild with fixes removed and check that the tests fail."""
     from tools.regressions import prove
     prove(match)
 
 
 @app.command("preview-perf")
 def preview_perf():
-    """Compare Rust and historical C launch, shell/input latency and helper-inclusive memory."""
+    """Compare launch time, input delay and memory use against the old C app."""
     native_build.build_targets("worminal-preview", "worminal-x11", "worminald-x11",
                                "worminald-preview", "build/key_injector")
     raise typer.Exit(run([sys.executable, "tests/frontend_perf.py"]))
@@ -411,7 +411,7 @@ def privacy_setup():
 
 
 @app.command("check-keys")
-def check_keys(legacy: bool = typer.Option(False, "--legacy", help="Check a disposable historical X11 fixture.")):
+def check_keys(legacy: bool = typer.Option(False, "--legacy", help="Test the old X11 app built from Git.")):
     """Check keys, mouse input, and clipboard bytes on private Xvfb displays."""
     native_build.build_targets(*(("worminal-x11", "worminald-x11") if legacy else ()))
     raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",

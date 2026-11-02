@@ -1,4 +1,4 @@
-//! Audited PTY, child identity, and signal boundary. No GTK or terminal-parser state lives here.
+//! PTY creation, child process tracking and signals.
 use std::{
     cell::RefCell,
     collections::BTreeMap,
