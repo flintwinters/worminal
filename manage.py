@@ -573,10 +573,10 @@ def check_build():
 
 
 @app.command("check-install")
-def check_install():
+def check_install(installed: bool = typer.Option(False, help='Verify published /usr/local artifacts without writing.')):
     """Stage /usr/local privately; verify hashes, native SSH input, browser and loaded module paths."""
     native_build.build_targets("worminal-x11", "worminald-x11")
-    raise typer.Exit(run([sys.executable, "tests/installation.py"]))
+    raise typer.Exit(run([sys.executable, "tests/installation.py", *(['--installed'] if installed else [])]))
 
 
 def explorer_command(command):

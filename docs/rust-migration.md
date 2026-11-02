@@ -2,12 +2,13 @@
 
 The development release launcher, daemon and GTK/WebKit modules are Rust above
 the shared C terminal engine. `worminal-rust` retains a separate candidate GUI
-namespace and browser profile. The active `/usr/local` installation has not been replaced.
-The installation and cutover gates below remain incomplete.
+namespace and browser profile. The active `/usr/local` installation now runs
+the Rust application and daemon. Publication and live-session cutover are verified.
 
 ## Usable Rust application
 
-Run `./worminal-rust` from the project directory. Use `./worminal-rust --attach`
+Run `/usr/local/bin/worminal` normally. The isolated development candidate remains
+`./worminal-rust` from the project directory. Use `worminal --attach`
 to view existing local v2 sessions without creating another shell, or
 `./worminal-rust -e COMMAND ...` to launch a command.
 Use `./worminal-rust --master user@host` for a remote workspace through SSH.
@@ -35,10 +36,9 @@ The candidate uses `worminal-rust` under XDG data/cache directories so it cannot
 write an installed C owner's live browser profile. Each profile has an exclusive
 owner lock. Browser module generations share one live data manager, while views
 pin their original code and independent navigation/session storage. The installed
-profile remains untouched; selecting it requires closing its existing browser
-owners during the final cutover. The default development executable now selects
-the stable profile; final publication remains pending. This app uses the same v2
-workspace and leaves v1 untouched.
+application uses the stable `worminal-preview` profile. Cutover retired the old
+GUI before starting the Rust owner, with stable data/cache profiles preserved
+in the recovery capture. This app uses the same v2 workspace and leaves v1 untouched.
 
 Internal maintenance: `manage.py build-rust-app` builds the native executable;
 `manage.py check-rust-app` checks real PTY input, tabs/windows, clipboard, resize,
@@ -86,18 +86,20 @@ production workspaces.
   Only the owner loads GTK/Pango/Cairo, and only a browser claim loads WebKit.
 - Rust browser module, versioned loader and generation pinning are implemented.
   `src/gtk/rust_browser_module.h` owns the incompatible opaque ABI; both sides
-  generate bindings. Browser chrome/scripts remain shared resources. Complete
+  generate bindings. Browser chrome/scripts remain shared resources.
   Native security/media/permission regressions cover the Rust application;
-  final profile publication remains pending. Browser ABI 2 carries palette
+  Browser ABI 2 carries palette
   background changes. Renderer recovery retains the last nonempty URI because
   WebKit clears its URI after process termination; normal reloads retain their semantics.
 - Private staged installation: `manage.py check-install` verifies artifact
   bytes, modes, native CLI/SSH input, daemon executable path and resident
   frontend/browser bytes under `.checks/install-stage/usr/local`.
-- Final production publication and live-session cutover: pending the complete
-  regression/resource audit, verified recovery artifacts,
-  live inventory and privately verified upgrade/reverse-transfer paths for
-  the final artifacts.
+- Production publication and live-session cutover are verified. The installed
+  Rust daemon owns the same three ordered tabs and PTYs. The Rust GUI recreated
+  three windows, with all nine original shell/application process identities
+  unchanged. Installed hashes/modes, executable paths and resident frontend
+  inode match the verified build. `check-install --installed` independently
+  checked the published SSH and browser paths on private displays.
 
 ## Measured resource cost
 
@@ -120,13 +122,13 @@ Recorded comparison output is in `.checks/rust-default-resources.log`;
 `.checks/frame-output-latency-{baseline,candidate}.json`.
 The engine check separately records parser CPU/RSS in `.checks/engine-resources.json`.
 Current engine checks still show higher parser CPU than the pre-extraction baseline.
-Repeat comparisons with the final frontend/browser ports before cutover;
-launch latency is not a migration optimization requirement.
+The final frontend/browser comparison follows below; launch latency is not a
+migration optimization requirement.
 
 The final Rust-default checkpoint passed `manage.py check` (141 existing tests,
 one intentional v1 browser skip, both C GTK compatibility runs, 19 Rust application
 tests and 13 Rust browser tests). `check-install` passed against the final staged
-installation; production publication remains pending.
+installation and the published `/usr/local` artifacts.
 Logs are `.checks/rust-release-{full-check,app,browser,install}.log`.
 
 Two alternating private HTTP trials with `browser-perf --kind http --trials 2
@@ -146,9 +148,17 @@ in `.checks/rust-release-browser-perf.json`. The preserved recovery manifest's
 private audio sink, autoplay blocking, permission allow/deny, TLS rejection and
 find/link/popup behavior. Its pre-fix renderer failure remains reproducible in
 `.checks/rust-browser-recovery-before.log`; the passing audit is recorded in
-`.checks/rust-browser-audit.log`. Production inventory/cutover remains pending.
+`.checks/rust-browser-audit.log`.
 `manage.py prepare-cutover` preserves the currently installed binaries/modules
 and captures live owner/module paths, window records, ordered v2 tabs and PTY
 process identities under a private `.checks/cutover-*` directory. It does not
 change running processes. Refresh it immediately before publication; preserve
 browser profiles after their owners have closed, before opening replacement views.
+
+Production evidence is in `.checks/rust-production-{verification,gui-cutover}.log`.
+The pre-publication recovery capture is
+`.checks/cutover-9b258c4b4bb24bb4a17405ef0baabdf9`; its `cutover-result.json`
+records unchanged tab order, PTYs and process identities before/after GUI replacement.
+It preserves the previous installed binaries/modules and stable browser profiles.
+Retain the healthy Rust daemon if recovering frontend artifacts; any daemon
+rollback must use the verified reverse-transfer path, never shell restart.

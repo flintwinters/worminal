@@ -95,9 +95,8 @@ Application synchronized redraws hold frames and their tab metadata until comple
 Private Wayland checks use a project-local Weston runtime and matching virtual-seat ABI, without X11 fallback.
 The test compositor supplies explicit keyboard focus for synthetic events; product activation remains compositor policy.
 
-Current jobs: finish the Rust GTK/v2 application above the shared C engine, preserving live sessions and C X11 rollback.
-The default `worminal` launcher and `worminald` are Rust; the default frontend and active installation remain C.
-`worminal-rust` is the usable Rust terminal/SSH/browser application, built through `manage.py build-rust-app`.
+GTK/v2 uses Rust above the shared C engine, preserving live sessions and C X11 rollback.
+`worminal-rust` isolates candidate GUI owners/profiles; build it through `manage.py build-rust-app`.
 `src/terminal/engine.h` owns terminal semantics and its generated FFI; safe Rust wrappers own handles and copied rows.
 Legacy adapters use the same parser. `manage.py check-engine` covers differential behavior, malformed state and
 sanitizers.
@@ -109,7 +108,7 @@ publication/ownership gates.
 The Rust application shares one GTK owner per display/workspace and lazily loads `rust/browser` through the generated
 opaque ABI in `src/gtk/rust_browser_module.h`. Views pin generations and move without reloading their DOM.
 Generations share one live profile manager. Candidate profiles use separate worminal-rust data/cache paths
-with an exclusive owner lock; installed profiles remain untouched until their browser owners close at cutover.
+with an exclusive owner lock. Never let old and new browser owners write the stable profile concurrently.
 `rust/frontend` owns imported viewports and Pango/Cairo painting; C selection borrows cells without retaining a parser
 grid.
 Key mappings generate from keymap.inc. Window-state D-Bus paths retain original filename bytes; both frontends
@@ -120,19 +119,19 @@ Wayland;
 identity.
 Native activation uses fresh X11 server time; the private Muffin regression and compiled counterfactual check it.
 Use `manage.py setup-window-activation` to prepare Muffin locally without a system installation.
-The release and candidate launchers link GLib only and forwards before loading its Rust frontend module;
+The release and candidate launchers link GLib only and forward before loading the Rust frontend module;
 `src/gtk/rust_frontend_module.h` owns its distinct ABI and transferred-listener contract.
 The Rust Cairo strip shares terminal fonts/colors; drawing and hit testing use the same visible suffix.
 Catalog publication preserves ordered pages, and local browser labels decode the filename without query routes.
-Development release defaults to Rust; installed owners are unchanged. Complete behavior/resource/cutover
-verification before publication. Stable and candidate profiles are selected once per owner by the frontend ABI.
+The installed GTK/v2 application and daemon are Rust above the C engine. Private X11/Wayland and published-artifact
+checks passed; cutover retained shell identities, PTYs and tab order. Stable and candidate profiles are selected
+once per owner by the frontend ABI. Retain recovery captures; never restart live shells to roll back.
 Local daemon and SSH startup use shared posix_spawn operations after display validation.
 The GUI broker authenticates same-user peers before accepting descriptors or launch data.
 `docs/rust-migration.md` owns migration readiness, recovery/test commands and measured resource costs.
 Cargo outputs belong in build/cargo; preserve diagnostics and the exclusive C recovery baseline under .checks.
-Audit upgrade lifecycle after the failed live bootstrap killed transferred sessions; the receiver
-session-isolation fix is verified privately and has not been published to the active installation.
-Audit input, rendering, output delivery, and view switching
+Receivers establish independent sessions before ownership commit; this fix is published and privately regression-tested.
+Current jobs: audit input, rendering, output delivery, and view switching
 until further gains require correctness, resource, or compatibility compromises; review remaining compatibility gaps.
 Investigate intermittent local workspace loss after idle time; no root cause is confirmed.
 Investigate reported desktop freezes during master connections; root cause is unconfirmed.

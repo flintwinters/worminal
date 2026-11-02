@@ -1,6 +1,7 @@
-"""Verify actual staged artifacts and native module resolution without publishing them."""
+"""Verify staged or published artifacts and native module resolution on private displays."""
 
 import hashlib
+import argparse
 import json
 import os
 from pathlib import Path
@@ -23,12 +24,13 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def main():
-    stage = ROOT / ".checks/install-stage"
+def main(installed=False):
+    stage = Path('/') if installed else ROOT / ".checks/install-stage"
     previous = os.environ.get("DESTDIR")
     os.environ["DESTDIR"] = str(stage)
     try:
-        build.install(Path("/usr/local"), skip_build=True)
+        if not installed:
+            build.install(Path("/usr/local"), skip_build=True)
         files = build.installation_files("/usr/local")
     finally:
         if previous is None:
@@ -141,10 +143,15 @@ def main():
                     owner.wait(timeout=5)
                 subprocess.run([str(prefix / "bin/worminald"), "--stop"], env=env,
                                stdout=log, stderr=log, timeout=5)
-    (ROOT / ".checks/install-verification.json").write_text(json.dumps(records, indent=2) + "\n")
-    print("Staged /usr/local: hashes, modes, native CLI, SSH input, daemon and lazy module paths passed.")
+    report = 'production-install-verification.json' if installed else 'install-verification.json'
+    (ROOT / '.checks' / report).write_text(json.dumps(records, indent=2) + "\n")
+    print(f"{'Published' if installed else 'Staged'} /usr/local: hashes, modes, native CLI, SSH input, "
+          "daemon and lazy module paths passed.")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--installed', action='store_true',
+                        help='Read published artifacts; never install or overwrite.')
+    raise SystemExit(main(parser.parse_args().installed))
