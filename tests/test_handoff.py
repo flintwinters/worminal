@@ -1,4 +1,6 @@
 """Local ownership transfers use real PTYs, isolated scopes, and both daemon ABIs."""
+from runtime import runtime_binary
+
 import array
 import hashlib
 import os
@@ -16,8 +18,8 @@ import uuid
 from workspace_protocol import number, string, send, wait_kind, catalog_records, rust_daemon
 
 ROOT = Path(__file__).resolve().parent.parent
-BINARIES = {1: ROOT / "worminald-x11",
-            2: ROOT / os.environ.get("WORMINAL_TEST_PREVIEW_DAEMON", "worminald-preview")}
+BINARIES = {1: runtime_binary("worminald-x11"),
+            2: runtime_binary(os.environ.get("WORMINAL_TEST_PREVIEW_DAEMON", "worminald-preview"))}
 
 
 def catalog_rows(payload, version):

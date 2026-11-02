@@ -41,7 +41,9 @@ checks require the referenced Git objects. The original st attribution/license r
 
 ## Verification
 
-`manage.py` is internal tooling; user workflows use native executables.
+`manage.py` is internal tooling; user workflows use native executables. Local builds use `build/bin` and
+`build/lib/worminal`, the same prefix layout as `/usr/local`. Diagnostics/private displays live in `build/checks`;
+compiler output stays in `build/cargo`. `clean` preserves diagnostics and `build/venv`, not compiled output.
 
 | Command | Coverage |
 | --- | --- |
@@ -66,19 +68,19 @@ permission allow/deny, invalid TLS, find/link/popup behavior and explicit render
 The migration's final full gate passed 141 existing tests (one inapplicable v1 browser test skipped), both C reference
 GUI runs, 19 Rust application tests and 13 Rust browser tests. Published artifacts passed private SSH/browser and
 hash/mode/module-path checks. Live cutover recreated three windows while retaining three ordered tabs, three PTYs
-and all nine original shell/application process identities. Logs remain under `.checks/rust-production-*.log`;
+and all nine original shell/application process identities. Logs remain under `build/checks/rust-production-*.log`;
 inventory/result JSON records are diagnostic evidence, not recovery releases.
 
 The C retirement gate repeats the behavior checks with Git-backed disposable references. Its diagnostics use
-`.checks/retire-c-*.log`. Retired code copies/binaries are removed; user profiles and diagnostic measurements remain.
+`build/checks/retire-c-*.log`. Code copies are removed; user profiles and diagnostic measurements remain.
 
 A 40-write daemon fixture delivered 81 complete frames for both implementations. Preserved measurement data showed
 C/Rust daemon PSS of 289/980 KiB and median output-to-frame latency of 1.93/1.89 ms. The short CPU sample had 10 ms
 counter resolution and did not establish equal CPU use. The extracted parser still showed higher CPU than the
-pre-extraction baseline; engine checks record current samples in `.checks/engine-resources.json`.
+pre-extraction baseline; engine checks record current samples in `build/checks/engine-resources.json`.
 
 Two alternating private HTTP browser trials measured median total PSS of 192,965/203,402 KiB for the first C/Rust
 browser and 251,782/265,637 KiB after an additional browser. This includes frontend/helpers and service/shells
 regardless of parenting: approximately 5.4–5.5% higher PSS in that fixture. Two trials do not establish a general
-bound or equal CPU use. Raw measurements remain in `.checks/rust-release-browser-perf.json`; executable snapshots
+bound or equal CPU use. Raw measurements remain in `build/checks/rust-release-browser-perf.json`; executable snapshots
 are not retained. Launch-latency improvement was not a migration requirement.

@@ -1,4 +1,8 @@
 """Deterministic combined-frontend checks; invoked only through manage.py."""
+from runtime import CHECKS
+
+from runtime import runtime_binary
+
 
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -52,7 +56,7 @@ class Fixture(BaseHTTPRequestHandler):
 def fixture(tls=False, handler=Fixture):
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     if tls:
-        certificates = ROOT / ".checks/preview-tls"
+        certificates = CHECKS / "preview-tls"
         certificates.mkdir(exist_ok=True)
         cert, key = certificates / "certificate.pem", certificates / "key.pem"
         subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
@@ -73,8 +77,8 @@ def fixture(tls=False, handler=Fixture):
 
 @contextmanager
 def profile(env):
-    checks = ROOT / ".checks"
-    checks.mkdir(exist_ok=True)
+    checks = CHECKS
+    checks.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="preview-", dir=checks) as directory:
         base = Path(directory)
         runtime = base / "runtime"
@@ -119,7 +123,7 @@ def audio(env):
 @contextmanager
 def service(env):
     private_daemon = Path(env["XDG_STATE_HOME"]).parent / ("daemon-" + env["WORMINAL_SHARED_SOCKET_SCOPE"])
-    shutil.copy2(env.get("WORMINAL_TEST_PREVIEW_DAEMON", ROOT / "worminald"), private_daemon)
+    shutil.copy2(env.get("WORMINAL_TEST_PREVIEW_DAEMON", runtime_binary("worminald")), private_daemon)
     daemon = subprocess.Popen([str(private_daemon), "--serve"], env=env,
                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     try:
@@ -136,7 +140,7 @@ def service(env):
                     time.sleep(.01)
         yield private_daemon
     finally:
-        subprocess.run([str(ROOT / "worminald"), "--stop"], env=env,
+        subprocess.run([str(runtime_binary("worminald")), "--stop"], env=env,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
         try:
             _, errors = daemon.communicate(timeout=3)
@@ -164,7 +168,7 @@ def wayland_display():
         env.pop("DBUS_SESSION_BUS_ADDRESS", None)
         env.update(GDK_BACKEND="wayland", WAYLAND_DISPLAY="worminal-test",
                    WORMINAL_SHARED_SOCKET_SCOPE=f"wayland-{os.getpid()}-{uuid.uuid4().hex}")
-        log_path = ROOT / ".checks/preview-weston.log"
+        log_path = CHECKS / "preview-weston.log"
         with log_path.open("wb") as log:
             compositor = subprocess.Popen([*weston_command, "--use-pixman",
                                            "--socket=worminal-test", "--idle-time=0"],
@@ -184,11 +188,12 @@ def wayland_display():
 @contextmanager
 def qtile_display():
     with isolated_display() as env:
-        log_path = ROOT / ".checks/preview-qtile.log"
+        log_path = CHECKS / "preview-qtile.log"
         with log_path.open("wb") as log:
             manager = subprocess.Popen(
                 ["qtile", "start", "--backend", "x11", "--no-spawn", "--config",
-                 str(ROOT / "tests/fixtures/preview_qtile.py"), "--socket", str(ROOT / ".checks/preview-qtile.sock"),
+                 str(ROOT / "tests/fixtures/preview_qtile.py"), "--socket",
+                 str(CHECKS / "preview-qtile.sock"),
                  "--log-path", str(log_path)], env=env, stdout=log, stderr=log)
             try:
                 deadline = time.monotonic() + 10
@@ -210,7 +215,7 @@ def startup_check(env, log):
     """Invalid displays and arguments must not start SSH or create a service tab."""
     failed = {**env, "DISPLAY": "worminal-invalid", "WAYLAND_DISPLAY": "worminal-invalid",
               "WORMINAL_TRACE_TIMING": "1", "WORMINAL_TEST_BRIDGE_DELAY": "30",
-              "WORMINAL_TEST_DAEMON": str(ROOT / "worminald"),
+              "WORMINAL_TEST_DAEMON": str(runtime_binary("worminald")),
               "PATH": str(ROOT / "tests/fixtures/preview-master") + os.pathsep + env["PATH"]}
     for arguments, expected, started in ((["-e", "/bin/cat"], 1, False),
                                          (["--invalid-startup-option"], 2, False)):
@@ -220,7 +225,7 @@ def startup_check(env, log):
                 trial.pop(key, None)
                 if key in env:
                     trial[key] = env[key]
-        process = subprocess.Popen([str(ROOT / "worminal"), "--master", "preview-test", *arguments],
+        process = subprocess.Popen([str(runtime_binary("worminal")), "--master", "preview-test", *arguments],
                                    env=trial, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
         try:
             _, errors = process.communicate(timeout=5)
@@ -256,7 +261,7 @@ def startup_check(env, log):
 
 def broker_check(env, url, log, daemon, *, rust=False):
     """Independent launches must share the GTK owner and the live DOM, not reload a URL."""
-    executable = str(ROOT / ("worminal-rust" if rust else "build/worminal-gtk-c"))
+    executable = str(runtime_binary("worminal-rust" if rust else "build/worminal-gtk-c"))
     if not rust:
         # The Git-derived C peer has its historical relative module layout; keep its complete runtime private.
         base = Path(env["XDG_STATE_HOME"]).parent / "c-runtime"
@@ -264,7 +269,7 @@ def broker_check(env, url, log, daemon, *, rust=False):
         shutil.copy2(executable, base / "worminal")
         for name in ("frontend.so", "browser.so"): shutil.copy2(ROOT / "build" / name, base / "build" / name)
         executable = str(base / "worminal")
-    forwarder = str(ROOT / "worminal") if not rust else executable
+    forwarder = str(runtime_binary("worminal")) if not rust else executable
     title = f"Broker terminal {os.getpid()}"
     first = subprocess.Popen([executable, "-T", title, "-o", "-", "-e", "/bin/sh", "-c",
                               "stty raw -echo; printf BROKER_READY; exec cat"],
@@ -336,7 +341,7 @@ def broker_check(env, url, log, daemon, *, rust=False):
         # Replacing a daemon must reconnect the existing owner without reloading
         # its live browser DOM or replacing its shell. Only private test binaries change.
         address = f"\0worminal-workspace-v2-{os.getuid()}-{env['WORMINAL_SHARED_SOCKET_SCOPE']}"
-        sources = [env.get("WORMINAL_TEST_PREVIEW_DAEMON", ROOT / "worminald")]
+        sources = [env.get("WORMINAL_TEST_PREVIEW_DAEMON", runtime_binary("worminald"))]
         if other := env.get("WORMINAL_TEST_UPGRADE_PEER"):
             sources.append(other)
         expected_title = "Edited:shared-state"
@@ -392,6 +397,7 @@ def main():
             # Preserve the compositor's socket directory, while isolating browser storage.
             env["XDG_RUNTIME_DIR"] = display_env["XDG_RUNTIME_DIR"]
         env["GDK_BACKEND"] = "wayland" if backend == "wayland" else "x11"
+        env["WORMINAL_TEST_EXECUTABLE"] = str(runtime_binary("worminal"))
         local_app = ROOT / "file-explorer/dist/index.html"
         if local_app.is_file():
             env["WORMINAL_PREVIEW_LOCAL_APP"] = local_app.as_uri()
@@ -408,8 +414,9 @@ def main():
             if remote:
                 trial_env["PATH"] = str(ROOT / "tests/fixtures/preview-master") + os.pathsep + env["PATH"]
                 trial_env["WORMINAL_PREVIEW_TEST_MASTER"] = "preview-test"
-                trial_env["WORMINAL_TEST_DAEMON"] = env.get("WORMINAL_TEST_PREVIEW_DAEMON", str(ROOT / "worminald"))
-            log_path = ROOT / f".checks/preview-{backend}-{'remote' if remote else 'local'}.log"
+                trial_env["WORMINAL_TEST_DAEMON"] = env.get(
+                    "WORMINAL_TEST_PREVIEW_DAEMON", str(runtime_binary("worminald")))
+            log_path = ROOT / f"build/checks/preview-{backend}-{'remote' if remote else 'local'}.log"
             with service(trial_env) as private_daemon, log_path.open("wb") as log:
                 startup_check(trial_env, log)
                 command = [str(ROOT / "build/preview_test")]

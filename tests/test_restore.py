@@ -1,4 +1,6 @@
 """Durable tab recipes through real daemon and zsh restarts, on isolated workspaces."""
+from runtime import CHECKS, runtime_binary
+
 import os
 from pathlib import Path
 import shlex
@@ -21,8 +23,8 @@ class RestoreTest(unittest.TestCase):
     version = 2
 
     def setUp(self):
-        (ROOT / '.checks').mkdir(exist_ok=True)
-        self.temporary = tempfile.TemporaryDirectory(prefix='restore-', dir=ROOT / '.checks')
+        (CHECKS).mkdir(exist_ok=True)
+        self.temporary = tempfile.TemporaryDirectory(prefix='restore-', dir=CHECKS)
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.scope = 'restore-' + uuid.uuid4().hex
@@ -56,7 +58,7 @@ class RestoreTest(unittest.TestCase):
         if self.version == 2:
             executable = os.environ.get('WORMINAL_TEST_PREVIEW_DAEMON', executable)
         self.latest = None
-        self.process = subprocess.Popen([str(ROOT / executable), '--serve'], env=self.env,
+        self.process = subprocess.Popen([str(runtime_binary(executable)), '--serve'], env=self.env,
                                         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         self.peer = self.connect()
 

@@ -1,4 +1,6 @@
 """Verify staged or published artifacts and native module resolution on private displays."""
+from runtime import CHECKS
+
 
 import hashlib
 import argparse
@@ -25,7 +27,7 @@ def digest(path):
 
 
 def main(installed=False):
-    stage = Path('/') if installed else ROOT / ".checks/install-stage"
+    stage = Path('/') if installed else CHECKS / "install-stage"
     previous = os.environ.get("DESTDIR")
     os.environ["DESTDIR"] = str(stage)
     try:
@@ -65,7 +67,7 @@ def main(installed=False):
         env.update(GDK_BACKEND="x11", GTK_USE_PORTAL="0")
         env.pop("WAYLAND_DISPLAY", None)
         env.pop("DBUS_SESSION_BUS_ADDRESS", None)
-        with (ROOT / ".checks/install-browser.log").open("wb") as log:
+        with (CHECKS / "install-browser.log").open("wb") as log:
             owner = subprocess.Popen([str(executable), "-T", title, "--surf", url],
                                      env=env, stdout=log, stderr=log, start_new_session=True)
             try:
@@ -75,7 +77,7 @@ def main(installed=False):
                 deadline = time.monotonic() + 15
                 while time.monotonic() < deadline:
                     if owner.poll() is not None:
-                        raise AssertionError("Staged browser exited; see .checks/install-browser.log")
+                        raise AssertionError("Staged browser exited; see build/checks/install-browser.log")
                     maps = Path(f"/proc/{owner.pid}/maps").read_text()
                     # The Rust loader pins each opened inode across atomic replacement. Verify actual
                     # resident descriptor bytes and mapped identity, not merely a pathname in /proc/maps.
@@ -105,7 +107,7 @@ def main(installed=False):
                             break
                     time.sleep(.02)
                 else:
-                    (ROOT / ".checks/install-browser-maps.log").write_text(maps)
+                    (CHECKS / "install-browser-maps.log").write_text(maps)
                     raise AssertionError("Staged browser did not map verified modules and a visible window")
                 with socket.socket(socket.AF_UNIX) as connection:
                     connection.settimeout(3)
@@ -144,7 +146,7 @@ def main(installed=False):
                 subprocess.run([str(prefix / "bin/worminald"), "--stop"], env=env,
                                stdout=log, stderr=log, timeout=5)
     report = 'production-install-verification.json' if installed else 'install-verification.json'
-    (ROOT / '.checks' / report).write_text(json.dumps(records, indent=2) + "\n")
+    (CHECKS / report).write_text(json.dumps(records, indent=2) + "\n")
     print(f"{'Published' if installed else 'Staged'} /usr/local: hashes, modes, native CLI, SSH input, "
           "daemon and lazy module paths passed.")
     return 0

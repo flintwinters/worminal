@@ -1,4 +1,6 @@
 """New tabs load updated real browser modules while older WebKit views keep their state."""
+from runtime import CHECKS
+
 import os
 from pathlib import Path
 import shutil
@@ -35,7 +37,7 @@ class BrowserGenerationTest(unittest.TestCase):
             local_documents = [base / 'old.html', base / 'new.html']
             for document in local_documents:
                 document.write_text('<!doctype html><title>Fixture</title><input><!-- local-generation -->')
-            log = ROOT / '.checks/browser-generations.log'
+            log = CHECKS / "browser-generations.log"
             with log.open('wb') as output:
                 command = [str(executable), str(ROOT / 'build/browser.so'), str(updated),
                            str(ROOT / 'build/incompatible_browser.so'), url + '/page',

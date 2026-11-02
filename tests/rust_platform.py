@@ -1,4 +1,6 @@
 """Exercise locked Rust UI bindings without using the desktop or real browser profiles."""
+from runtime import CHECKS
+
 
 from pathlib import Path
 import subprocess
@@ -10,8 +12,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def main():
-    checks = ROOT / ".checks"
-    checks.mkdir(exist_ok=True)
+    checks = CHECKS
+    checks.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="rust-platform-", dir=checks) as directory:
         with isolated_display() as env:
             for name in ("XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME"):

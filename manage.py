@@ -8,11 +8,15 @@ from pathlib import Path
 import subprocess
 import sys
 
+sys.dont_write_bytecode = True
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+
 try:
     import typer
 except ModuleNotFoundError as error:
     raise SystemExit("Install Typer to use manage.py: python3 -m pip install typer") from error
 
+from tools.paths import CHECKS, runtime_binary
 from tools import build as native_build
 from tools.theme import explorer_font
 from tools.icon import generate_icon
@@ -39,6 +43,7 @@ DESKTOP_VARIABLES = ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY")
 @app.callback()
 def root():
     os.chdir(ROOT)
+    (CHECKS).mkdir(parents=True, exist_ok=True)
     for name in DESKTOP_VARIABLES:
         os.environ.pop(name, None)
 
@@ -46,7 +51,7 @@ def root():
 def run(args, *, env=None):
     # Maintenance checks must never read or overwrite the user's recovery recipes.
     private_env = {**(os.environ if env is None else env),
-                   "XDG_STATE_HOME": str(ROOT / ".checks" / "state")}
+                   "XDG_STATE_HOME": str(CHECKS / "state")}
     return subprocess.run(args, env=private_env).returncode
 
 
@@ -86,7 +91,7 @@ def run_checks(match=None):
         "build/placement_wm", "build/compact-worminal",
         "build/overlap_probe",
         "build/border_probe", "build/icon_probe", "build/view_state_test",
-        "build/browser.so", "build/browser_generations_test", "build/incompatible_browser.so",
+        "build/frontend.so", "build/browser.so", "build/browser_generations_test", "build/incompatible_browser.so",
         "build/unresolved_browser.so", *NATIVE_CHECKS,
     )
     code = run_native_checks()
@@ -114,7 +119,8 @@ def run_native_checks():
 
 
 def run_headless_checks():
-    native_build.build_targets(*NATIVE_CHECKS, "worminald-x11", "worminald-preview")
+    native_build.build_targets(*NATIVE_CHECKS, "worminald-x11", "worminald-preview",
+                               "build/frontend.so", "build/browser.so")
     code = run_native_checks()
     if code:
         return code
@@ -203,7 +209,7 @@ def check_rust_frontend():
 def build_rust_app():
     """Build the native Rust terminal/browser application with its lazy frontend and browser modules."""
     native_build.build_targets("worminal-rust")
-    typer.echo("Built ./worminal-rust (terminal, SSH and browser); existing v2 workspace. Installation unchanged.")
+    typer.echo("Built build/bin/worminal-rust; native terminal/SSH/browser. Installation unchanged.")
 
 
 @app.command("check-rust-app")
@@ -330,7 +336,7 @@ def check_preview():
 
 @app.command("setup-preview-wayland")
 def setup_preview_wayland():
-    """Download/extract an optional Debian Weston runtime under .checks; no system installation."""
+    """Download/extract an optional Debian Weston runtime under build/checks; no system installation."""
     from tools.weston import setup
     setup()
 
@@ -398,7 +404,7 @@ def check_privacy_tests():
 @app.command("privacy-setup")
 def privacy_setup():
     """Install tracked privacy hooks without changing the configured Git identity."""
-    code = run(["git", "config", "--local", "core.hooksPath", ".githooks"])
+    code = run(["git", "config", "--local", "core.hooksPath", "tools/hooks"])
     if code:
         raise typer.Exit(code)
     typer.echo("Privacy hooks installed; configured Git identity preserved.")
@@ -496,7 +502,7 @@ def check_network(daemon: Path = typer.Option(None, help="Compatible v2 daemon b
     """Check redundant catalogs/rows, stationary scrolling, and complete-frame flushing."""
     if daemon is None:
         native_build.build_targets("worminald-preview")
-        daemon = ROOT / "worminald-preview"
+        daemon = runtime_binary("worminald-preview")
     raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                          "-p", "test_preview_workspace.py", "-k", "redundant_catalog",
                          "-k", "frame_transport", "-k", "redraw_rows", "-k", "scroll_at_boundary",
@@ -726,9 +732,9 @@ def frame_perf(compare: Path = typer.Option(None, help="Saved latency-visible ba
     code = run(["build/frame_schedule_test"])
     if code:
         raise typer.Exit(code)
-    variants = [("candidate", ROOT / "worminald-preview")]
+    variants = [("candidate", runtime_binary("worminald-preview"))]
     if compare:
-        daemon = compare.resolve() / "worminald"
+        daemon = runtime_binary("worminald", prefix=compare.resolve())
         if not daemon.is_file():
             raise typer.BadParameter("Comparison directory must contain worminald")
         variants.insert(0, ("baseline", daemon))

@@ -3,6 +3,7 @@
 import struct
 import os
 from pathlib import Path
+from runtime import runtime_binary
 
 
 def rust_daemon(executable):
@@ -11,7 +12,7 @@ def rust_daemon(executable):
     if explicit is not None:
         return explicit == "1"
     root = Path(__file__).resolve().parent.parent
-    return Path(executable).resolve() in {root / "worminald", root / "worminald-preview",
+    return Path(executable).resolve() in {runtime_binary("worminald"), runtime_binary("worminald-preview"),
                                          root / "build/cargo/release/worminal-daemon"}
 
 

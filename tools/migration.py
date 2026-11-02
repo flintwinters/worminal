@@ -1,4 +1,6 @@
 """Read-only live-state inventories; rollback code comes from Git, never release copies."""
+from tools.paths import CHECKS
+
 
 import hashlib
 import json
@@ -14,7 +16,7 @@ from tools.build import ROOT, installation_files
 def inventory():
     """Record installed hashes and live state without copying releases or changing processes."""
     from tools.daemon_upgrade import connect, catalog, identity, terminal_descriptors
-    directory = ROOT / '.checks' / ('inventory-' + uuid.uuid4().hex)
+    directory = CHECKS / ('inventory-' + uuid.uuid4().hex)
     directory.mkdir(mode=0o700, parents=True)
     report = {'artifacts': [], 'owners': [], 'windows': {}, 'workspaces': {}}
     for _source, path, _mode in installation_files('/usr/local'):

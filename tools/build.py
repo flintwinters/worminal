@@ -8,6 +8,7 @@ import shutil
 import subprocess
 
 from tools.theme import generate_theme
+from tools.paths import runtime_binary
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -120,7 +121,7 @@ class Builder:
         self.publish_rust(output, self.rust_artifact(package, library=True))
 
     def publish_rust(self, output, source):
-        destination = ROOT / output
+        destination = runtime_binary(output, prefix=ROOT / "build") if "/" not in output else ROOT / output
         if destination.exists() and destination.read_bytes() == source.read_bytes():
             return
         temporary = destination.with_name(destination.name + ".pending")
@@ -134,12 +135,12 @@ class Builder:
 
     def target(self, target):
         if target == "worminal-rust":
-            self.target("build/" + RUST_BROWSER_MODULE)
-            self.target("build/" + RUST_FRONTEND_MODULE)
+            self.target("build/lib/worminal/" + RUST_BROWSER_MODULE)
+            self.target("build/lib/worminal/" + RUST_FRONTEND_MODULE)
             self.rust_program(target, "worminal-launcher", "worminal-rust-launcher")
-        elif target == "build/" + RUST_FRONTEND_MODULE:
+        elif target == "build/lib/worminal/" + RUST_FRONTEND_MODULE:
             self.rust_library(target, "worminal-frontend")
-        elif target == "build/" + RUST_BROWSER_MODULE:
+        elif target == "build/lib/worminal/" + RUST_BROWSER_MODULE:
             self.rust_library(target, "worminal-browser")
         elif target == "build/libworminal_engine.a":
             objects = []
@@ -160,8 +161,8 @@ class Builder:
         elif target == "build/gui-peer.so":
             self.program(target, ["tests/gui_peer.c"], variant="gui-peer", flags=["-fPIC"], libs=["-shared", "-ldl"])
         elif target in ("worminal", "worminal-preview"):
-            self.target("build/" + RUST_BROWSER_MODULE)
-            self.target("build/" + RUST_FRONTEND_MODULE)
+            self.target("build/lib/worminal/" + RUST_BROWSER_MODULE)
+            self.target("build/lib/worminal/" + RUST_FRONTEND_MODULE)
             self.rust_program(target, "worminal-launcher")
         elif target in ("worminald", "worminald-preview"):
             self.rust_program(target, "worminal-daemon")
@@ -202,7 +203,7 @@ def build_targets(*targets):
 
 def analyze():
     build_targets()
-    tidy = [*words("CLANG_TIDY", "clang-tidy"), "-quiet"]
+    tidy = [*words("CLANG_TIDY", "clang-tidy"), "-quiet", "--config-file=tools/clang-tidy.yaml"]
     invoke([*tidy, *(f"src/{source}" for source in ENGINE), "--", *compile_flags()])
     invoke(["cargo", "check", "--locked", "--workspace", "--all-targets"])
 
@@ -212,9 +213,16 @@ def clean():
     if ROOT == reference.ROOT:
         reference.cleanup()
     reference.remove_fixture_links(ROOT)
-    # Own only build outputs: preserve .checks logs and captures used to diagnose failures.
-    if (ROOT / "build").exists():
-        shutil.rmtree(ROOT / "build")
+    # Preserve diagnostics and user-owned virtualenvs; compiled output and caches are disposable.
+    directory = ROOT / 'build'
+    if directory.exists():
+        for child in directory.iterdir():
+            if child.name in ('checks', 'venv'):
+                continue
+            if child.is_dir() and not child.is_symlink():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
     for name in ("worminal", "worminald", "worminal-x11", "worminald-x11", "worminal-preview", "worminald-preview",
                  "worminal-rust"):
         for suffix in ("", ".command.json", ".pending"):
@@ -231,9 +239,9 @@ def installation_files(prefix=None):
         raise ValueError("PREFIX and MANPREFIX must be absolute paths")
     staging = Path(os.environ.get("DESTDIR", "/"))
     # Publish modules before a launcher that may immediately need them.
-    files = [("build/" + RUST_BROWSER_MODULE, prefix / "lib/worminal" / RUST_BROWSER_MODULE, 0o755),
-             ("build/" + RUST_FRONTEND_MODULE, prefix / "lib/worminal" / RUST_FRONTEND_MODULE, 0o755)]
-    files += [(name, prefix / "bin" / name, 0o755)
+    files = [("build/lib/worminal/" + RUST_BROWSER_MODULE, prefix / "lib/worminal" / RUST_BROWSER_MODULE, 0o755),
+             ("build/lib/worminal/" + RUST_FRONTEND_MODULE, prefix / "lib/worminal" / RUST_FRONTEND_MODULE, 0o755)]
+    files += [("build/bin/" + name, prefix / "bin" / name, 0o755)
               for name in ("worminal", "worminald")]
     files += [("docs/man/worminal.1", manprefix / "man1/worminal.1", 0o644),
               ("assets/worminal.desktop", prefix / "share/applications/worminal.desktop", 0o644),

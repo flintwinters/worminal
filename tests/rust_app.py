@@ -1,4 +1,8 @@
 """Exercise the actual Rust application with private PTYs, windows, tabs and reattachment."""
+from runtime import CHECKS
+
+from runtime import runtime_binary
+
 import os
 import fcntl
 from pathlib import Path
@@ -20,7 +24,7 @@ from x11 import isolated_display, close_window
 from preview import profile, service, wayland_display
 from test_window_state import private_bus, WindowStateTest
 from test_window_activation import WindowActivationTests
-from rust_runtime import copy_runtime, window, stop_application
+from runtime import copy_runtime, window, stop_application
 from rust_module import RustModuleTest
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -32,7 +36,7 @@ class RustApplicationTest(unittest.TestCase):
             env.update(GDK_BACKEND='x11', WORMINAL_TEST_PREVIEW_DAEMON=str(ROOT / 'build/worminald-c-v2'))
             env.pop('WAYLAND_DISPLAY', None)
             with service(env):
-                app = subprocess.Popen([str(ROOT / 'worminal-rust'), '-T', 'C service attachment', '-o', '-',
+                app = subprocess.Popen([str(runtime_binary("worminal-rust")), '-T', 'C service attachment', '-o', '-',
                     '-e', '/bin/sh', '-c', "stty raw -echo; printf 'C:%s\\n' $$; exec cat"], env=env,
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 self.addCleanup(lambda: self.stop(app))
@@ -50,7 +54,7 @@ class RustApplicationTest(unittest.TestCase):
         with isolated_display() as env:
             env.update(GDK_BACKEND='x11', SHELL='/bin/sh')
             env.pop('WAYLAND_DISPLAY', None)
-            app = subprocess.Popen([str(ROOT / 'worminal-rust'), '--attach'], env=env,
+            app = subprocess.Popen([str(runtime_binary("worminal-rust")), '--attach'], env=env,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             self.addCleanup(lambda: self.stop(app))
             wid = window(env, app)
@@ -68,14 +72,15 @@ class RustApplicationTest(unittest.TestCase):
     def test_replacement_reclaims_idle_view_without_keyboard_input(self):
         from Xlib import X, display
         with (isolated_display() as env,
-              tempfile.TemporaryDirectory(prefix='rust-app-upgrade-', dir=ROOT / '.checks') as directory):
+              tempfile.TemporaryDirectory(prefix='rust-app-upgrade-', dir=CHECKS) as directory):
             env.update(GDK_BACKEND='x11', SHELL='/bin/sh')
             env.pop('WAYLAND_DISPLAY', None)
             base = Path(directory)
             copy_runtime(base)
             marker = "printf %b " + shlex.quote(r"\033[48;2;17;99;201m\033[H\033[2JAFTER_UPGRADE")
             command = "trap " + shlex.quote(marker) + " USR1; printf 'R:%s\\n' $$; while :; do sleep 1; done"
-            app = subprocess.Popen([str(base / 'worminal-rust'), '-T', 'Rust upgrade', '-o', '-', '-e', '/bin/sh', '-c',
+            app = subprocess.Popen([str(runtime_binary('worminal-rust', prefix=base)), '-T', 'Rust upgrade',
+                                    '-o', '-', '-e', '/bin/sh', '-c',
                                     command], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             self.addCleanup(lambda: self.stop(app))
             wid = window(env, app)
@@ -98,8 +103,8 @@ class RustApplicationTest(unittest.TestCase):
                     connection.connect(f"\0worminal-workspace-v2-{os.getuid()}-{env['WORMINAL_SHARED_SOCKET_SCOPE']}")
                     return connection
                 with peer() as connection: original = service_pid(connection)
-                shutil.copy2(ROOT / 'worminald', base / 'replacement')
-                (base / 'replacement').replace(base / 'worminald')
+                shutil.copy2(runtime_binary("worminald"), base / 'replacement')
+                (base / 'replacement').replace(runtime_binary('worminald', prefix=base))
                 deadline = time.monotonic() + 8
                 while True:
                     try:
@@ -124,9 +129,9 @@ class RustApplicationTest(unittest.TestCase):
         with wayland_display() as env:
             self.assertNotIn('DISPLAY', env)
             env['WORMINAL_TRACE_TIMING'] = '1'
-            path = ROOT / '.checks/rust-app-wayland.log'
+            path = CHECKS / "rust-app-wayland.log"
             with path.open('wb') as log:
-                app = subprocess.Popen([str(ROOT / 'worminal-rust'), '-T', 'Rust Wayland', '-o', '-',
+                app = subprocess.Popen([str(runtime_binary("worminal-rust")), '-T', 'Rust Wayland', '-o', '-',
                                         '-e', '/bin/sh', '-c',
                                         "trap 'printf WAYLAND_VISIBLE' USR1; printf 'R:%s\\n' $$; "
                                         "while :; do sleep 1; done"],
@@ -152,14 +157,14 @@ class RustApplicationTest(unittest.TestCase):
                 finally:
                     if app.poll() is None: app.terminate()
                     app.communicate(timeout=5)
-                    subprocess.run([str(ROOT / 'worminald'), '--stop'], env=env,
+                    subprocess.run([str(runtime_binary("worminald")), '--stop'], env=env,
                                    stdout=subprocess.DEVNULL, stderr=log, timeout=5)
 
     def test_tabs_ctrl_n_and_shell_survival_after_window_close(self):
         with isolated_display() as env:
             env.update(GDK_BACKEND='x11', SHELL='/bin/sh', G_DEBUG='fatal-criticals')
             env.pop('WAYLAND_DISPLAY', None)
-            executable = str(ROOT / 'worminal-rust')
+            executable = str(runtime_binary("worminal-rust"))
             app = subprocess.Popen([executable, '-T', 'Rust vertical', '-o', '-', '-e', '/bin/sh', '-c',
                                     "stty raw -echo; printf 'R:%s\\n' $$; exec cat"],
                                    env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)

@@ -1,4 +1,9 @@
 """Exercise lazy Rust WebKit modules through the actual native application on private displays."""
+from runtime import CHECKS
+
+from runtime import module_path
+from runtime import runtime_binary
+
 from contextlib import contextmanager
 import json
 import hashlib
@@ -18,11 +23,11 @@ from unittest.mock import patch
 from preview import audio, broker_check, Fixture, fixture, profile, service, wayland_display
 from x11 import isolated_display, close_window
 from test_window_state import private_bus
-from rust_runtime import copy_runtime, RUST_BROWSER_MODULE
+from runtime import copy_runtime, RUST_BROWSER_MODULE
 
 ROOT = Path(__file__).resolve().parent.parent
-APP = str(ROOT / 'worminal-rust')
-BROWSER_LOG = ROOT / '.checks/rust-browser-ui.log'
+APP = str(runtime_binary("worminal-rust"))
+BROWSER_LOG = CHECKS / "rust-browser-ui.log"
 
 
 @contextmanager
@@ -187,7 +192,7 @@ class RustBrowserTest(unittest.TestCase):
         from Xlib import X, display
         from test_keys import read_bytes
         with (isolated_display() as private, profile(private) as env,
-              tempfile.TemporaryDirectory(prefix='rust-browser-palette-', dir=ROOT / '.checks') as directory):
+              tempfile.TemporaryDirectory(prefix='rust-browser-palette-', dir=CHECKS) as directory):
             env.update(GDK_BACKEND='x11'); env.pop('WAYLAND_DISPLAY', None)
             document = Path(directory) / 'blank.html'
             document.write_text('<!doctype html><title>Palette browser</title>')
@@ -320,11 +325,11 @@ class RustBrowserTest(unittest.TestCase):
                 self.end_headers(); self.wfile.write(body)
         with (isolated_display() as display, profile(display) as env, fixture(handler=Handler) as url,
               service(env),
-              tempfile.TemporaryDirectory(prefix='rust-browser-generations-', dir=ROOT / '.checks') as directory):
+              tempfile.TemporaryDirectory(prefix='rust-browser-generations-', dir=CHECKS) as directory):
             env.update(GDK_BACKEND='x11'); env.pop('WAYLAND_DISPLAY', None)
             base = Path(directory)
             executable = str(copy_runtime(base, browser=True))
-            module = base / 'build' / RUST_BROWSER_MODULE
+            module = module_path(RUST_BROWSER_MODULE, prefix=base)
             with application(env, '--browser', url, executable=executable) as app:
                 first = title(env, 'Fresh:new', app)
                 subprocess.run(['xdotool', 'windowfocus', '--sync', first], env=env, check=True)
@@ -348,12 +353,12 @@ class RustBrowserTest(unittest.TestCase):
         with isolated_display() as display, profile(display) as env, fixture() as url, service(env) as daemon:
             env.update(GDK_BACKEND='x11')
             env.pop('WAYLAND_DISPLAY', None)
-            with (ROOT / '.checks/rust-browser-broker.log').open('wb') as log:
+            with (CHECKS / "rust-browser-broker.log").open('wb') as log:
                 broker_check(env, url, log, daemon, rust=True)
 
     def test_selected_local_document_capability_and_explicit_reload(self):
         with (isolated_display() as display, profile(display) as env,
-              tempfile.TemporaryDirectory(prefix='rust-browser-files-', dir=ROOT / '.checks') as directory):
+              tempfile.TemporaryDirectory(prefix='rust-browser-files-', dir=CHECKS) as directory):
             env.update(GDK_BACKEND='x11')
             env.pop('WAYLAND_DISPLAY', None)
             base = Path(directory)

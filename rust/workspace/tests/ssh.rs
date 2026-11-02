@@ -24,7 +24,7 @@ impl Drop for Fixture {
 #[test]
 fn ssh_preserves_bridge_arguments_and_bidirectional_bytes_without_gui_fork_hooks() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let fixture = Fixture(root.join(format!(".checks/rust-ssh-{}", std::process::id())));
+    let fixture = Fixture(root.join(format!("build/checks/rust-ssh-{}", std::process::id())));
     fs::create_dir_all(&fixture.0).unwrap();
     let program = fixture.0.join("ssh");
     fs::write(

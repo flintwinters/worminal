@@ -18,7 +18,7 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let project = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let root = project.join(".checks").join(format!(
+        let root = project.join("build/checks").join(format!(
             "rust-pty-{}-{}",
             std::process::id(),
             SEQUENCE.fetch_add(1, Ordering::Relaxed)

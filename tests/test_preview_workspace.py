@@ -1,4 +1,8 @@
 """Preview protocol records, version coexistence and PTY backpressure limits."""
+from runtime import CHECKS
+
+from runtime import runtime_binary
+
 
 from functools import partial
 from itertools import product
@@ -23,7 +27,7 @@ from workspace_protocol import (number, string, catalog_records, send as wire_se
 from perf_metrics import cpu_time, memory
 
 ROOT = Path(__file__).resolve().parent.parent
-DAEMON = ROOT / os.environ.get("WORMINAL_TEST_PREVIEW_DAEMON", "worminald-preview")
+DAEMON = runtime_binary(os.environ.get("WORMINAL_TEST_PREVIEW_DAEMON", "worminald-preview"))
 send = partial(wire_send, version=2)
 wait_kind = partial(wire_wait, version=2)
 
@@ -66,7 +70,7 @@ class PreviewWorkspaceTest(unittest.TestCase):
     def test_failed_exec_and_working_directory_leave_other_tabs_alive(self):
         healthy = self.launch("stty raw -echo; printf READY; exec cat")
         for directory, command in ((ROOT, "/worminal-missing-command"),
-                                   (ROOT / ".checks/worminal-missing-directory", "/bin/cat")):
+                                   (CHECKS / "worminal-missing-directory", "/bin/cat")):
             launch = b"".join((number(40), number(4), number(1), number(1), number(0),
                                string("failed"), string(str(directory)), string(""), string(""), string(""),
                                string(command)))
@@ -188,7 +192,7 @@ class PreviewWorkspaceTest(unittest.TestCase):
                  ("127.0.0.1:8080/path", "https://127.0.0.1:8080/path"),
                  ("[::1]:8080/path", "https://[::1]:8080/path"),
                  (str(ROOT), ROOT.as_uri()))
-        for executable, (url, expected) in product((DAEMON, ROOT / "worminal"), cases):
+        for executable, (url, expected) in product((DAEMON, runtime_binary("worminal")), cases):
             with self.subTest(executable=executable.name, url=url):
                 self.assert_browser_conversion(executable, url, expected)
 
@@ -218,8 +222,8 @@ class PreviewWorkspaceTest(unittest.TestCase):
             output += chunk
 
     def test_browser_command_encodes_paths_in_the_callers_working_directory(self):
-        checks = ROOT / ".checks"
-        checks.mkdir(exist_ok=True)
+        checks = CHECKS
+        checks.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="browser-path- #?% ü", dir=checks) as temporary:
             directory = Path(temporary)
             special = directory / "page #?% ü.html"
@@ -236,12 +240,12 @@ class PreviewWorkspaceTest(unittest.TestCase):
                      ("../missing.html", directory.as_uri() + "/../missing.html"),
                      ("youtube.com", (directory / "youtube.com").as_uri()),
                      ("broken.example", (directory / "broken.example").as_uri()))
-            for executable, (target, expected) in product((DAEMON, ROOT / "worminal"), cases):
+            for executable, (target, expected) in product((DAEMON, runtime_binary("worminal")), cases):
                 with self.subTest(executable=executable.name, target=target):
                     self.assert_browser_conversion(executable, target, expected, directory)
 
     def test_browser_command_outside_a_terminal_is_rejected(self):
-        for executable in (DAEMON, ROOT / "worminal"):
+        for executable in (DAEMON, runtime_binary("worminal")):
             with self.subTest(executable=executable.name):
                 env = {key: value for key, value in self.env.items()
                        if key not in ("DISPLAY", "WAYLAND_DISPLAY")}
@@ -337,8 +341,8 @@ class PreviewWorkspaceTest(unittest.TestCase):
     def test_frame_transport_flush_contains_completion(self):
         self.peer.close()
         self.stop()
-        checks = ROOT / ".checks"
-        checks.mkdir(exist_ok=True)
+        checks = CHECKS
+        checks.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="frame-transport-", dir=checks) as directory:
             library, log = Path(directory) / "transport.so", Path(directory) / "send.log"
             subprocess.run(["cc", "-shared", "-fPIC", "-Wall", "-Wextra", "-o", str(library),
@@ -586,8 +590,8 @@ class PreviewWorkspaceTest(unittest.TestCase):
         self.assertTrue(visible, 'render deferral blocked the parser reply or its final frame')
 
     def test_unchanged_frame_preserves_a_partially_sent_snapshot(self):
-        checks = ROOT / '.checks'
-        checks.mkdir(exist_ok=True)
+        checks = CHECKS
+        checks.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix='frame-queue-', dir=checks) as directory:
             marker = Path(directory) / 'raw-ready'
             code = ("import os,tty\nfrom pathlib import Path\ntty.setraw(0)\n"
@@ -691,7 +695,7 @@ class PreviewWorkspaceTest(unittest.TestCase):
                   "notes": "New tab first PTY print to complete matching frame; another tab writes every 4 ms. "
                            "Includes no GTK paint, keyboard input or physical display."}
         label = os.environ.get("WORMINAL_FRAME_PERF_NAME", "candidate")
-        path = ROOT / ".checks" / f"new-tab-output-latency-{label}.json"
+        path = CHECKS / f"new-tab-output-latency-{label}.json"
         path.parent.mkdir(exist_ok=True)
         path.write_text(json.dumps(result, indent=2) + "\n")
         print(f"{label} new-tab output to frame: median {result['median_ms']:.2f} ms, "
@@ -736,7 +740,7 @@ class PreviewWorkspaceTest(unittest.TestCase):
                   "daemon_memory": memory({self.daemon.pid}),
                   "median_ms": statistics.median(samples), "p95_ms": ordered[(95 * len(samples) + 99) // 100 - 1]}
         label = os.environ.get("WORMINAL_FRAME_PERF_NAME", "candidate")
-        directory = ROOT / ".checks"
+        directory = CHECKS
         directory.mkdir(exist_ok=True)
         path = directory / f"frame-output-latency-{label}.json"
         path.write_text(json.dumps(result, indent=2) + "\n")
@@ -764,8 +768,8 @@ class PreviewWorkspaceTest(unittest.TestCase):
 class ServiceDiagnosticsTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        checks = ROOT / ".checks"
-        checks.mkdir(exist_ok=True)
+        checks = CHECKS
+        checks.mkdir(parents=True, exist_ok=True)
         cls.directory = tempfile.TemporaryDirectory(prefix="service-fault-", dir=checks)
         cls.addClassCleanup(cls.directory.cleanup)
         cls.library = Path(cls.directory.name) / "fault.so"

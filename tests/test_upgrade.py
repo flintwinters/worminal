@@ -1,4 +1,6 @@
 """Automatic daemon replacement retains the endpoint, identities, PTYs, and recovery recipes."""
+from runtime import CHECKS
+
 import os
 import signal
 import select
@@ -20,8 +22,8 @@ from workspace_protocol import catalog_records, number, send, string, wait_kind,
 class UpgradeTest(HandoffFixture, unittest.TestCase):
     def setUp(self):
         super().setUp()
-        (ROOT / '.checks').mkdir(exist_ok=True)
-        self.directory = tempfile.TemporaryDirectory(prefix='upgrade-', dir=ROOT / '.checks')
+        (CHECKS).mkdir(exist_ok=True)
+        self.directory = tempfile.TemporaryDirectory(prefix='upgrade-', dir=CHECKS)
         self.addCleanup(self.directory.cleanup)
         self.binary = Path(self.directory.name) / 'worminald'
         candidate = os.environ.get("WORMINAL_TEST_UPGRADE_CANDIDATE", BINARIES[2])

@@ -1,4 +1,8 @@
 """Exercise launch activation with a desktop's focus-stealing prevention enabled."""
+from runtime import CHECKS
+
+from runtime import runtime_binary
+
 from pathlib import Path
 import os
 import shutil
@@ -14,7 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from tools import muffin
 
-FRONTEND = ROOT / os.environ.get("WORMINAL_FRONTEND", "worminal")
+FRONTEND = runtime_binary(os.environ.get("WORMINAL_FRONTEND", "worminal"))
 
 
 def wait_for(check, description):
@@ -35,7 +39,7 @@ class WindowActivationTests(unittest.TestCase):
             env["GSETTINGS_BACKEND"] = "memory"
             env["GDK_BACKEND"] = "x11"
             env.pop("DBUS_SESSION_BUS_ADDRESS", None)
-            with (ROOT / ".checks/window-activation.log").open("wb") as log:
+            with (CHECKS / "window-activation.log").open("wb") as log:
                 manager = subprocess.Popen(
                     ["dbus-run-session", "--", *muffin.command(env)],
                     env=env, stdout=log, stderr=log)
@@ -65,7 +69,7 @@ class WindowActivationTests(unittest.TestCase):
 
                 try:
                     wait_for(lambda: "window id #" in output("xprop", "-root", "_NET_SUPPORTING_WM_CHECK"),
-                             "Muffin did not start; see .checks/window-activation.log")
+                             "Muffin did not start; see build/checks/window-activation.log")
                     owner = subprocess.Popen([str(FRONTEND), "-c", "WorminalActivation", "-n", "activation-fixture",
                                               "-T", "Activation first",
                                               "-e", "/bin/cat"], env=env, stdout=log, stderr=log)
@@ -89,7 +93,7 @@ class WindowActivationTests(unittest.TestCase):
                              "Explicit launch did not refresh its server timestamp")
                     wait_for(lambda: output("xdotool", "getwindowfocus") == second,
                              "Forwarded launch did not focus its new window")
-                    log_path = ROOT / ".checks/window-activation.log"
+                    log_path = CHECKS / "window-activation.log"
                     wait_for(lambda: b"ACTIVATION_READY" in log_path.read_bytes(), "Raw terminal readiness")
                     before = output("xdotool", "search", "--onlyvisible", "--pid", str(owner.pid))
                     subprocess.run(["xdotool", "key", "ctrl+n", "type", "PASSTHROUGH"], env=env, check=True)

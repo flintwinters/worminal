@@ -1,4 +1,6 @@
 """Exercise the headless workspace through its framed local socket."""
+from runtime import runtime_binary
+
 
 import os
 from functools import partial
@@ -16,7 +18,7 @@ from workspace_protocol import number, string, send as wire_send, wait_kind as w
 
 
 ROOT = Path(__file__).resolve().parent.parent
-DAEMON = ROOT / os.environ.get("WORMINAL_TEST_WORKSPACE_DAEMON", "worminald-x11")
+DAEMON = runtime_binary(os.environ.get("WORMINAL_TEST_WORKSPACE_DAEMON", "worminald-x11"))
 VERSION = int(os.environ.get("WORMINAL_TEST_BRIDGE_VERSION", "1"))
 ENDPOINT = "worminal-workspace-v2" if VERSION == 2 else "worminal-workspace"
 send = partial(wire_send, version=VERSION)

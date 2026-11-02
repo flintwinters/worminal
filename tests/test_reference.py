@@ -11,8 +11,8 @@ from tools import reference
 
 class HistoricalReferenceTests(unittest.TestCase):
     def setUp(self):
-        (reference.ROOT / '.checks').mkdir(exist_ok=True)
-        self.directory = tempfile.TemporaryDirectory(prefix='reference-', dir=reference.ROOT / '.checks')
+        (reference.ROOT / 'build/checks').mkdir(exist_ok=True)
+        self.directory = tempfile.TemporaryDirectory(prefix='reference-', dir=reference.ROOT / 'build/checks')
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
 
@@ -47,7 +47,8 @@ class HistoricalReferenceTests(unittest.TestCase):
         owned, changed = self.root / 'owned', self.root / 'changed'
         owned.symlink_to(original); changed.symlink_to(replacement)
         with (patch.object(reference, '_links', {owned: original, changed: original}),
-              patch.object(reference, '_directory', None), patch.object(reference, '_module', None)):
+              patch.object(reference, '_directory', None), patch.object(reference, '_module', None),
+              patch.object(reference, '_parents', set())):
             reference.cleanup()
         self.assertFalse(owned.is_symlink())
         self.assertEqual(changed.readlink(), replacement)

@@ -3,6 +3,7 @@ import atexit
 import importlib.util
 import io
 from pathlib import Path
+from tools.paths import CHECKS, runtime_binary
 import shutil
 import subprocess
 import tarfile
@@ -13,6 +14,7 @@ REVISION = 'c1d4f8e'
 _module = None
 _directory = None
 _links = {}
+_parents = set()
 
 
 def cleanup():
@@ -21,6 +23,12 @@ def cleanup():
         if path.is_symlink() and path.readlink() == expected:
             path.unlink()
     _links.clear()
+    for path in sorted(_parents, key=lambda path: len(path.parts), reverse=True):
+        try:
+            path.rmdir()
+        except OSError:
+            pass  # Another source now owns this directory; never remove its contents.
+    _parents.clear()
     _module = None
     if _directory is not None:
         _directory.cleanup()
@@ -38,7 +46,13 @@ def extract(revision, destination):
             if entry.isfile():
                 target = destination / name
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(source.extractfile(entry).read())
+                data = source.extractfile(entry).read()
+                if target.suffix in ('.c', '.h', '.py'):
+                    data = data.replace(b'.checks', CHECKS.relative_to(ROOT).as_posix().encode())
+                if name.as_posix() == 'tests/preview.c':
+                    data = data.replace(b'g_build_filename(test_cwd, "worminal", NULL)',
+                                        b'g_strdup(g_getenv("WORMINAL_TEST_EXECUTABLE"))')
+                target.write_bytes(data)
 
 
 def module():
@@ -56,6 +70,10 @@ def module():
             continue
         target = ROOT / source.relative_to(root)
         if not target.exists():
+            parent = target.parent
+            while not parent.exists():
+                _parents.add(parent)
+                parent = parent.parent
             target.parent.mkdir(parents=True, exist_ok=True)
             if target.is_symlink():
                 target.unlink()
@@ -90,7 +108,7 @@ def target(name):
         if name == 'build/render_probe':
             builder.target('build/frontend.so')
         builder.target(name)
-    alias = ROOT / name
+    alias = runtime_binary(name) if "/" not in name else ROOT / name
     alias.parent.mkdir(parents=True, exist_ok=True)
     alias.unlink(missing_ok=True)
     alias.symlink_to(historical.ROOT / output)
@@ -106,7 +124,7 @@ def target(name):
 def remove_fixture_links(root=None):
     """Recover interrupted checks without deleting a user's replacement source or executable."""
     root = ROOT if root is None else root
-    candidates = [*root.glob('worminal*-x11'), *(root / 'src').rglob('*')]
+    candidates = [*root.glob('worminal*-x11'), *(root / 'build/bin').glob('*'), *(root / 'src').rglob('*')]
     for path in candidates:
         if not path.is_symlink():
             continue
@@ -114,6 +132,13 @@ def remove_fixture_links(root=None):
         if (target.is_relative_to(root / 'build')
                 and target.relative_to(root / 'build').parts[0].startswith('.historical-')):
             path.unlink()
+            parent = path.parent
+            while parent.is_relative_to(root / 'src') and parent != root / 'src':
+                try:
+                    parent.rmdir()
+                except OSError:
+                    break
+                parent = parent.parent
 
 
 atexit.register(cleanup)

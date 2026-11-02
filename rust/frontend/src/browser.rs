@@ -80,12 +80,7 @@ fn module_path() -> io::Result<PathBuf> {
             .unwrap()
             .to_bytes(),
     );
-    let installed = directory.join("../lib/worminal").join(name);
-    Ok(if installed.is_file() {
-        installed
-    } else {
-        directory.join("build").join(name)
-    })
+    Ok(directory.join("../lib/worminal").join(name))
 }
 fn loader_error() -> io::Error {
     let pointer = unsafe { libc::dlerror() };

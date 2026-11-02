@@ -18,8 +18,8 @@ from tools.git_index import tracked_files
 class PrivacyTests(unittest.TestCase):
     def test_cli_scans_requested_repository_instead_of_parent(self):
         root = Path(__file__).resolve().parent.parent
-        checks = root / ".checks"
-        checks.mkdir(exist_ok=True)
+        checks = root / "build/checks"
+        checks.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=checks) as directory:
             repository = Path(directory)
             subprocess.run(["git", "init", "-q", directory], check=True)
@@ -33,8 +33,8 @@ class PrivacyTests(unittest.TestCase):
 
     def test_setup_preserves_configured_identity(self):
         root = Path(__file__).resolve().parent.parent
-        checks = root / ".checks"
-        checks.mkdir(exist_ok=True)
+        checks = root / "build/checks"
+        checks.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=checks) as directory:
             def git(*args):
                 return subprocess.check_output(["git", "-C", directory, *args]).strip()
@@ -46,7 +46,7 @@ class PrivacyTests(unittest.TestCase):
                            env={**os.environ, "GIT_DIR": str(Path(directory) / ".git")})
             self.assertEqual(git("config", "user.name"), b"Configured Contributor")
             self.assertEqual(git("config", "user.email"), b"configured")
-            self.assertEqual(git("config", "core.hooksPath"), b".githooks")
+            self.assertEqual(git("config", "core.hooksPath"), b"tools/hooks")
 
     def test_forced_private_file_is_rejected_even_without_recognized_credentials(self):
         root = Path(__file__).resolve().parent.parent

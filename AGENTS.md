@@ -64,7 +64,11 @@ Parent explorer build commands supply palette/font inputs; standalone builds ret
 
 `manage.py` is strictly internal build/test/install/maintenance tooling. Product workflows use native executables.
 Build as the regular user to compile their Alacritty appearance. Cargo output and generated files belong in
-`build/`; diagnostics belong in `.checks/`. Never test under /tmp or inject test input into the desktop.
+`build/`; native executables use `build/bin` and modules use `build/lib/worminal`, matching installed prefixes.
+`tools/paths.py` owns runtime/diagnostic path decisions. Diagnostics belong in `build/checks`; optional Python
+virtualenvs use `build/venv`. `clean` preserves diagnostics/virtualenvs while removing compiled output.
+Hooks and analysis/dependency configuration live under `tools`; management suppresses Python bytecode caches.
+Never test under /tmp or inject test input into the desktop.
 `manage.py` drops desktop display variables. `manage.py check` runs the full private-display suite. Native Wayland
 checks use project-local Weston with matching virtual-seat ABI and no X11 fallback. Prepare optional private
 Muffin/Weston through their setup commands. Performance checks measure private software presentation, not desktop

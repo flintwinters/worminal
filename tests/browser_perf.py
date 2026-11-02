@@ -1,4 +1,8 @@
 """Measure real PTY browser conversion through release modules to X server pixels."""
+from runtime import CHECKS
+
+from runtime import runtime_binary
+
 import argparse
 from contextlib import ExitStack, contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -196,13 +200,13 @@ def main():
         parser.error("--profile-cpu requires --cold-open")
     if args.snapshot:
         snapshot(args.snapshot)
-    variants = {"candidate": ROOT / "worminal"}
+    variants = {"candidate": runtime_binary("worminal")}
     if args.compare:
-        variants["baseline"] = args.compare.resolve() / "worminal"
+        variants["baseline"] = runtime_binary("worminal", prefix=args.compare.resolve())
     samples = {name: {} for name in variants}
     resources = {name: [] for name in variants}
-    checks = ROOT / ".checks"
-    checks.mkdir(exist_ok=True)
+    checks = CHECKS
+    checks.mkdir(parents=True, exist_ok=True)
     with canvas() as url, file_canvas(checks) as file_url, ExitStack() as profiles:
         targets = [(kind, target) for kind, target in (("http", url), ("file", file_url), ("explorer", None))
                    if args.kind == "all" or args.kind == kind]

@@ -13,8 +13,8 @@ from tools import build, weston
 
 class BuildTests(unittest.TestCase):
     def setUp(self):
-        checks = build.ROOT / ".checks"
-        checks.mkdir(exist_ok=True)
+        checks = build.ROOT / "build/checks"
+        checks.mkdir(parents=True, exist_ok=True)
         self.directory = tempfile.TemporaryDirectory(prefix="build-", dir=checks)
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
@@ -33,9 +33,10 @@ class BuildTests(unittest.TestCase):
                                             ("worminal", "worminal-preview") else "worminal-daemon")
                 program.assert_not_called()
                 historical.assert_not_called()
-                self.assertIn(unittest.mock.call("build/" + build.RUST_FRONTEND_MODULE, "worminal-frontend"),
+                self.assertIn(unittest.mock.call("build/lib/worminal/" + build.RUST_FRONTEND_MODULE,
+                                                "worminal-frontend"),
                               library.call_args_list)
-                self.assertIn(unittest.mock.call("build/" + build.RUST_BROWSER_MODULE, "worminal-browser"),
+                self.assertIn(unittest.mock.call("build/lib/worminal/" + build.RUST_BROWSER_MODULE, "worminal-browser"),
                               library.call_args_list)
 
     def test_historical_c_targets_delegate_to_disposable_git_fixtures(self):
@@ -52,7 +53,8 @@ class BuildTests(unittest.TestCase):
         source = self.root / "build/cargo/release/worminal-daemon"
         source.parent.mkdir(parents=True)
         source.write_bytes(b"new daemon")
-        output = self.root / "worminald"
+        output = self.root / "build/bin/worminald"
+        output.parent.mkdir(parents=True, exist_ok=True)
         output.write_bytes(b"running daemon")
         with patch.object(build, "pkg_flags", return_value=[]):
             builder = build.Builder()
@@ -146,8 +148,9 @@ class BuildTests(unittest.TestCase):
             self.assertNotIn("-c", invoked.call_args.args[0])
 
     def test_staged_install_uninstall_and_modes(self):
-        for source in ("worminal", "worminald", "worminal-x11", "worminald-x11",
-                       "build/" + build.RUST_BROWSER_MODULE, "build/" + build.RUST_FRONTEND_MODULE,
+        for source in ("build/bin/worminal", "build/bin/worminald",
+                       "build/lib/worminal/" + build.RUST_BROWSER_MODULE,
+                       "build/lib/worminal/" + build.RUST_FRONTEND_MODULE,
                        "docs/man/worminal.1",
                        "assets/worminal.desktop", "assets/worminal.svg"):
             path = self.root / source
@@ -200,11 +203,13 @@ class BuildTests(unittest.TestCase):
             self.assertFalse(legacy.exists())
             self.assertTrue(all(not destination.exists() for _, destination, _ in files))
 
-    def test_clean_preserves_diagnostics(self):
+    def test_clean_preserves_diagnostics_and_development_environment(self):
         (self.root / "build").mkdir()
         (self.root / "build/object.o").touch()
-        (self.root / ".checks").mkdir()
-        (self.root / ".checks/failure.log").touch()
+        (self.root / "build/checks").mkdir(parents=True)
+        (self.root / "build/checks/failure.log").touch()
+        (self.root / 'build/venv').mkdir()
+        (self.root / 'build/venv/pyvenv.cfg').write_text('development environment')
         outputs = ("worminal", "worminald", "worminal-x11", "worminald-x11",
                    "worminal-preview", "worminald-preview")
         generated = [name + suffix for name in outputs for suffix in ("", ".command.json", ".pending")]
@@ -213,10 +218,11 @@ class BuildTests(unittest.TestCase):
             (self.root / name).touch()
         (self.root / "config.h").write_text("user configuration")
         build.clean()
-        self.assertFalse((self.root / "build").exists())
+        self.assertEqual({p.name for p in (self.root / "build").iterdir()}, {"checks", "venv"})
         self.assertTrue(all(not (self.root / name).exists() for name in generated))
         self.assertEqual((self.root / "config.h").read_text(), "user configuration")
-        self.assertTrue((self.root / ".checks/failure.log").exists())
+        self.assertTrue((self.root / "build/checks/failure.log").exists())
+        self.assertEqual((self.root / 'build/venv/pyvenv.cfg').read_text(), 'development environment')
 
     def test_relative_install_prefix_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "absolute"):

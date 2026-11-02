@@ -31,7 +31,7 @@ check_browser_media(App *app)
 		webkit_web_view_get_snapshot(b->view, WEBKIT_SNAPSHOT_REGION_VISIBLE, WEBKIT_SNAPSHOT_OPTIONS_NONE,
 		    NULL, media_snapshot, NULL);
 		WAIT(media_image);
-		cairo_surface_write_to_png(media_image, ".checks/media-player.png");
+		cairo_surface_write_to_png(media_image, "build/checks/media-player.png");
 		cairo_surface_destroy(media_image);
 		/* GTK WebKit's audio Play follows its 15-second-back button. Video accepts
 		 * the central play overlay; geometry is in CSS pixels before page zoom. */

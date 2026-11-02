@@ -1,4 +1,6 @@
 """Prepare an optional Debian Weston runtime entirely inside project test artifacts."""
+from tools.paths import CHECKS
+
 
 from pathlib import Path
 import re
@@ -6,7 +8,7 @@ import subprocess
 from tools.debian_runtime import unpack
 
 ROOT = Path(__file__).resolve().parent.parent
-LOCAL = ROOT / ".checks/weston"
+LOCAL = CHECKS / "weston"
 SUPPORTED_ABIS = (10, 16)
 
 

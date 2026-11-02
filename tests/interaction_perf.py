@@ -1,4 +1,8 @@
 """Measure GTK tab ownership, cached switching, and scroll pixels on private Xvfb."""
+from runtime import CHECKS
+
+from runtime import runtime_binary
+
 
 import argparse
 from contextlib import ExitStack
@@ -153,13 +157,13 @@ def main():
     args = parser.parse_args()
     if args.trials < 1 or args.samples < 1 or args.pace_ms < 0:
         parser.error("--trials and --samples must be positive; --pace-ms must be nonnegative")
-    variants = {"candidate": ROOT / "worminal"}
+    variants = {"candidate": runtime_binary("worminal")}
     if args.compare:
-        variants["baseline"] = args.compare.resolve() / "worminal"
+        variants["baseline"] = runtime_binary("worminal", prefix=args.compare.resolve())
         if not variants["baseline"].is_file():
             parser.error("--compare must name a latency-visible snapshot directory")
-    checks = ROOT / ".checks"
-    checks.mkdir(exist_ok=True)
+    checks = CHECKS
+    checks.mkdir(parents=True, exist_ok=True)
     samples = {label: {} for label in variants}
     resources = {label: [] for label in variants}
     with ExitStack() as stack:

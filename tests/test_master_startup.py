@@ -1,4 +1,8 @@
 """Exercise the shipped launcher/module boundary through an isolated SSH bridge."""
+from runtime import CHECKS
+
+from runtime import runtime_binary
+
 
 import os
 from pathlib import Path
@@ -16,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 class MasterStartupTest(unittest.TestCase):
     def test_master_launcher_accepts_keyboard_input(self):
-        executable = Path(os.environ.get("WORMINAL_TEST_EXECUTABLE", ROOT / "worminal"))
+        executable = Path(os.environ.get("WORMINAL_TEST_EXECUTABLE", runtime_binary("worminal")))
         with isolated_display() as env:
             if master := env.get("WORMINAL_TEST_REAL_MASTER"):
                 self.addCleanup(subprocess.run,
@@ -24,10 +28,10 @@ class MasterStartupTest(unittest.TestCase):
                      f"env WORMINAL_SHARED_SOCKET_SCOPE={env['WORMINAL_SHARED_SOCKET_SCOPE']} worminald --stop"],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
             env.update(GDK_BACKEND="x11", NO_AT_BRIDGE="1", GTK_USE_PORTAL="0",
-                       WORMINAL_TEST_DAEMON=env.get("WORMINAL_TEST_DAEMON", str(ROOT / "worminald")),
+                       WORMINAL_TEST_DAEMON=env.get("WORMINAL_TEST_DAEMON", str(runtime_binary("worminald"))),
                        PATH=str(ROOT / "tests/fixtures/preview-master") + os.pathsep + env["PATH"])
             env.pop("DBUS_SESSION_BUS_ADDRESS", None)
-            log_path = ROOT / ".checks/master-startup.log"
+            log_path = CHECKS / "master-startup.log"
             with log_path.open("wb") as log:
                 process = subprocess.Popen(
                     [str(executable), "--master", "preview-test", "-T", "Master startup check",

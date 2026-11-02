@@ -38,17 +38,17 @@ sudo apt install build-essential pkg-config python3-venv libclang-dev libgtk-3-d
 With Rust and Cargo installed, build from the repository root:
 
 ```sh
-python3 -m venv .venv
-. .venv/bin/activate
-python3 -m pip install -r requirements-dev.txt
+python3 -m venv build/venv
+. build/venv/bin/activate
+python3 -m pip install -r tools/requirements.txt
 python3 manage.py build
-./worminal
+./build/bin/worminal
 ```
 
 To install system-wide, build as your regular user so the build reads your theme, then install that build:
 
 ```sh
-sudo -n .venv/bin/python manage.py install --prefix /usr/local --skip-build
+sudo -n build/venv/bin/python manage.py install --prefix /usr/local --skip-build
 ```
 
 Python and `manage.py` are development tools. Launch the installed application with `worminal`.
@@ -125,7 +125,23 @@ the new frontend. There is no configuration file to parse at launch.
 `latency-visible`, `interaction-perf`, and `browser-perf` measure visible behavior.
 Historical C comparisons reconstruct disposable test fixtures from Git and need the referenced history and Xft
 development headers. No legacy C application or recovery release is installed or retained.
-Generated outputs live in `build/`, and diagnostic captures in `.checks/`.
+The working tree keeps source and generated output separate:
+
+```text
+rust/                  Rust application workspace
+src/                   C engine, shared headers and browser resources
+tests/                 Regression fixtures and benchmarks
+tools/                 Build helpers, hooks and development configuration
+build/bin/             Local native executables
+build/lib/worminal/     Local frontend/browser modules
+build/checks/          Diagnostics and private test runtimes
+build/cargo/           Rust compiler cache
+build/venv/            Optional Python development environment
+```
+
+`python3 manage.py clean` removes compiled output while retaining diagnostics and the development environment.
+The management entrypoint suppresses Python bytecode caches. Native runtime prefixes have the same `bin`/`lib`
+layout locally and under `/usr/local`; no executable wrappers or binaries belong in the repository root.
 Run `python3 manage.py privacy-setup` after cloning to enable the repository's privacy hooks.
 
 Worminal derives from st 0.9.3. See [LICENSE](LICENSE) for copyright and license terms.

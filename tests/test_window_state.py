@@ -1,4 +1,8 @@
 """Exercise the public session-bus contract against real windows and PTYs."""
+from runtime import CHECKS
+
+from runtime import runtime_binary
+
 from contextlib import contextmanager
 import json
 import os
@@ -14,7 +18,7 @@ from x11 import close_window, isolated_display
 from preview import profile
 
 ROOT = Path(__file__).resolve().parent.parent
-FRONTEND = ROOT / os.environ.get("WORMINAL_FRONTEND", "worminal")
+FRONTEND = runtime_binary(os.environ.get("WORMINAL_FRONTEND", "worminal"))
 INTERFACE = "org.worminal.Windows1"
 OBJECT = "/org/worminal/Windows"
 
@@ -34,7 +38,7 @@ def private_bus(env):
                      "session-bus and private-display tools are required")
 class WindowStateTest(unittest.TestCase):
     def test_non_utf8_directory_is_published_as_original_bytes(self):
-        with tempfile.TemporaryDirectory(prefix="window-state-bytes-", dir=ROOT / ".checks") as temporary, \
+        with tempfile.TemporaryDirectory(prefix="window-state-bytes-", dir=CHECKS) as temporary, \
                 isolated_display() as display, private_bus(display) as session, profile(session) as env:
             raw = os.fsencode(temporary) + b"/raw-\xff"
             os.mkdir(raw)
@@ -64,8 +68,8 @@ class WindowStateTest(unittest.TestCase):
         self.fail(f"Timed out waiting for {description}; last result: {last!r}")
 
     def test_directory_selection_focus_unavailability_and_signals(self):
-        checks = ROOT / ".checks"
-        checks.mkdir(exist_ok=True)
+        checks = CHECKS
+        checks.mkdir(parents=True, exist_ok=True)
         # Stop private services before removing directories their shells may still use.
         with tempfile.TemporaryDirectory(prefix="window-state-", dir=checks) as temporary, \
                 isolated_display() as display, private_bus(display) as session, profile(session) as env:
@@ -153,7 +157,7 @@ class WindowStateTest(unittest.TestCase):
                     self.wait_for(lambda: focused_window(True), "focus returning to first window")
                     close_window(env, second_title)
                     self.wait_for(lambda: directory(second), "closed window removed from snapshot")
-                    subprocess.run([str(ROOT / "worminald"), "--stop"], env=env, check=True, timeout=3)
+                    subprocess.run([str(runtime_binary("worminald")), "--stop"], env=env, check=True, timeout=3)
                     self.wait_for(lambda: directory("", False), "disconnected unavailability")
                     self.assertIn(INTERFACE + ".Changed", (base / "signals.log").read_text())
                     self.assertIsNone(app.poll(), (base / "frontend.log").read_text())

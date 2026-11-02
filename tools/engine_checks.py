@@ -60,7 +60,7 @@ def check():
     outputs = []
     for name in ("engine_oracle_baseline", "engine_oracle"):
         output = subprocess.check_output([str(build.ROOT / "build" / name)], cwd=build.ROOT)
-        (build.ROOT / ".checks" / f"{name}.txt").write_bytes(output)
+        (build.ROOT / "build/checks" / f"{name}.txt").write_bytes(output)
         outputs.append(output.decode().splitlines())
     if outputs[0] != outputs[1]:
         print("Parser behavior differs from the C baseline:")
@@ -77,7 +77,7 @@ def check():
                     "cpu_ns": statistics.median(sample["cpu_ns"] for sample in values),
                     "rss_kib": statistics.median(sample["rss_kib"] for sample in values)}
               for name, values in samples.items()}
-    (build.ROOT / ".checks/engine-resources.json").write_text(json.dumps(report, indent=2) + "\n")
+    (build.ROOT / "build/checks/engine-resources.json").write_text(json.dumps(report, indent=2) + "\n")
     before, after = report.values()
     print(f"Parser CPU {after['cpu_ns'] / before['cpu_ns']:.2f}x baseline; "
           f"peak RSS {before['rss_kib']} -> {after['rss_kib']} KiB", flush=True)

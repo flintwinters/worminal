@@ -70,15 +70,7 @@ pub fn enter(
     let symbol = bindings::WORMINAL_RUST_FRONTEND_SYMBOL.as_slice();
     let filename = CStr::from_bytes_with_nul(filename).unwrap();
     let filename = std::ffi::OsStr::from_bytes(filename.to_bytes());
-    let installed = directory.join("../lib/worminal").join(filename);
-    let development = directory.join("build").join(filename);
-    let path = if installed.exists() {
-        installed
-    } else if directory.join(filename).is_file() && !development.is_file() {
-        directory.join(filename)
-    } else {
-        development
-    };
+    let path = directory.join("../lib/worminal").join(filename);
     let path = CString::new(Path::new(&path).as_os_str().as_bytes()).map_err(io::Error::other)?;
     let entry = unsafe {
         let handle = libc::dlopen(path.as_ptr(), libc::RTLD_LAZY | libc::RTLD_LOCAL);

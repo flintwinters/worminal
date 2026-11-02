@@ -4,6 +4,10 @@ Private Xvfb measures software presentation, not compositor/display scanout or
 physical keyboard latency. The fixture uses a raw PTY, so every visible glyph
 must travel through keyboard dispatch, daemon input/output, and GTK rendering.
 """
+from runtime import CHECKS
+
+from runtime import runtime_binary
+
 
 import argparse
 from contextlib import ExitStack
@@ -79,7 +83,7 @@ def capture_failure(window):
         size = window.get_geometry()
         capture = window.get_image(0, 0, size.width, size.height, X.ZPixmap, 0xffffffff)
         Image.frombytes("RGB", (size.width, size.height), image_bytes(capture), "raw", "BGRX").save(
-            ROOT / ".checks/visible-latency-failure.png")
+            CHECKS / "visible-latency-failure.png")
     except Exception:
         pass  # Preserve the original failure even if its window has disappeared.
 
@@ -90,7 +94,7 @@ def launch(env, connection, title, log, color=0x112233, history=False, master=No
                *(["--history"] if history else [])]
     if env.get("WORMINAL_LATENCY_SHELL"):
         command = [env["WORMINAL_LATENCY_SHELL"], "-i", "-c", 'exec "$@"', "worminal-latency", *command]
-    process = subprocess.Popen([*prefix, env.get("WORMINAL_FRONTEND", str(ROOT / "worminal")),
+    process = subprocess.Popen([*prefix, env.get("WORMINAL_FRONTEND", str(runtime_binary("worminal"))),
                                 "-g", "80x24", "-T", title,
                                 *(["--master", master] if master else []), "-e", *command],
                                env=env, cwd=cwd, stdout=log, stderr=log)
@@ -266,11 +270,13 @@ def snapshot_revision(directory):
 
 def snapshot(directory):
     directory.mkdir(parents=True, exist_ok=False)
-    from rust_runtime import RUST_FRONTEND_MODULE, RUST_BROWSER_MODULE
-    for name in ("worminal", "worminald", f"build/{RUST_FRONTEND_MODULE}", f"build/{RUST_BROWSER_MODULE}"):
-        destination = directory / name
+    from runtime import RUST_FRONTEND_MODULE, RUST_BROWSER_MODULE
+    from runtime import module_path
+    for source in (runtime_binary('worminal'), runtime_binary('worminald'), module_path(RUST_FRONTEND_MODULE),
+                   module_path(RUST_BROWSER_MODULE)):
+        destination = directory / source.relative_to(ROOT / 'build')
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(ROOT / name, destination)
+        shutil.copy2(source, destination)
     (directory / "revision").write_text(subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True))
     Console().print(f"Saved baseline: {directory}")
@@ -305,14 +311,14 @@ def main():
     if args.snapshot:
         snapshot(args.snapshot.resolve())
         return
-    variants = {"candidate": ROOT / "worminal"}
+    variants = {"candidate": runtime_binary("worminal")}
     if args.compare:
-        baseline = args.compare.resolve() / "worminal"
+        baseline = runtime_binary("worminal", prefix=args.compare.resolve())
         if not baseline.is_file():
             parser.error("--compare must name a directory saved with --snapshot")
         variants["baseline"] = baseline
-    checks = ROOT / ".checks"
-    checks.mkdir(exist_ok=True)
+    checks = CHECKS
+    checks.mkdir(parents=True, exist_ok=True)
     samples = {label: {} for label in variants}
     resources = {label: [] for label in variants}
     load_start = os.getloadavg()

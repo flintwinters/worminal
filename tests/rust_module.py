@@ -1,4 +1,9 @@
 """Check the native frontend ABI and lazy launcher independently of application widgets."""
+from runtime import CHECKS
+
+from runtime import module_path
+from runtime import runtime_binary
+
 import ctypes
 import errno
 import os
@@ -10,15 +15,15 @@ import tempfile
 import unittest
 import uuid
 
-from rust_runtime import ROOT, RUST_FRONTEND_MODULE, RUST_FRONTEND_SYMBOL, copy_runtime
+from runtime import ROOT, RUST_FRONTEND_MODULE, RUST_FRONTEND_SYMBOL, copy_runtime
 from x11 import isolated_display
 
 
 class RustModuleTest(unittest.TestCase):
     def test_gui_broker_rejects_foreign_credentials(self):
-        from rust_runtime import window, stop_application
+        from runtime import window, stop_application
         with (isolated_display() as env,
-              tempfile.TemporaryDirectory(prefix='rust-peer-', dir=ROOT / '.checks') as directory):
+              tempfile.TemporaryDirectory(prefix='rust-peer-', dir=CHECKS) as directory):
             executable = copy_runtime(directory)
             env.update(GDK_BACKEND='x11', LD_PRELOAD=str(ROOT / 'build/gui-peer.so'))
             app = subprocess.Popen([str(executable), '--attach', '-T', 'Credential owner'], env=env,
@@ -36,29 +41,29 @@ class RustModuleTest(unittest.TestCase):
                 stop_application(app)
 
     def test_invalid_display_starts_neither_local_daemon_nor_ssh(self):
-        with tempfile.TemporaryDirectory(prefix='rust-invalid-display-', dir=ROOT / '.checks') as directory:
+        with tempfile.TemporaryDirectory(prefix='rust-invalid-display-', dir=CHECKS) as directory:
             executable = copy_runtime(directory)
             base = Path(directory)
             # Both helpers are inert sentinels: a failed display must never reach either launch operation.
             for name in ('worminald', 'ssh'):
-                program = base / name
+                program = runtime_binary(name, prefix=base)
                 program.write_text('#!/bin/sh\ntouch "${0}.started"\nexit 1\n'); program.chmod(0o755)
             env = {**os.environ, 'DISPLAY': 'worminal-invalid', 'WAYLAND_DISPLAY': 'worminal-invalid',
                    'GDK_BACKEND': 'x11', 'WORMINAL_SHARED_SOCKET_SCOPE': 'invalid-' + uuid.uuid4().hex,
-                   'PATH': str(base) + os.pathsep + os.environ['PATH']}
+                   'PATH': str(base / 'bin') + os.pathsep + os.environ['PATH']}
             for args in (['--attach'], ['--master', 'preview-test']):
                 result = subprocess.run([str(executable), *args], env=env, capture_output=True, timeout=5)
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertIn(b'cannot open display', result.stderr.lower())
-                self.assertFalse(list(base.glob('*.started')), 'failed display started a helper')
+                self.assertFalse(list((base / 'bin').glob('*.started')), 'failed display started a helper')
 
     def test_invalid_module_arguments_release_the_transferred_listener(self):
-        module = ctypes.CDLL(str(ROOT / 'build' / RUST_FRONTEND_MODULE))
+        module = ctypes.CDLL(str(module_path(RUST_FRONTEND_MODULE)))
         with self.assertRaises(AttributeError): getattr(module, 'worminal_frontend_v1')
         entry = getattr(module, RUST_FRONTEND_SYMBOL)
         entry.argtypes = [ctypes.c_int32, ctypes.POINTER(ctypes.c_char_p), ctypes.c_int32, ctypes.c_uint32]
         entry.restype = ctypes.c_int32
-        with tempfile.TemporaryDirectory(prefix='rust-module-abi-', dir=ROOT / '.checks') as directory:
+        with tempfile.TemporaryDirectory(prefix='rust-module-abi-', dir=CHECKS) as directory:
             for index, (argc, arguments, flags, expected) in enumerate(((0, None, 1, 1), (1, [None], 1, 1),
                     (2, [b'worminal-rust', b'--unsupported-module-option'], 1, 2),
                     (1, [b'worminal-rust'], 0x80000000, 1))):
@@ -71,19 +76,19 @@ class RustModuleTest(unittest.TestCase):
                 self.assertEqual(error.exception.errno, errno.EBADF)
 
     def test_graphics_load_only_in_owner_and_forwarding_does_not_need_the_module(self):
-        from rust_runtime import window, stop_application
-        dependencies = subprocess.check_output(['readelf', '-d', str(ROOT / 'worminal-rust')], text=True)
+        from runtime import window, stop_application
+        dependencies = subprocess.check_output(['readelf', '-d', str(runtime_binary("worminal-rust"))], text=True)
         for library in ('libgtk', 'libgdk', 'libpango', 'libcairo', 'libwebkit'):
             self.assertNotIn(library, dependencies, f'lightweight launcher links {library}')
         with (isolated_display() as env,
-              tempfile.TemporaryDirectory(prefix='rust-module-launch-', dir=ROOT / '.checks') as directory):
+              tempfile.TemporaryDirectory(prefix='rust-module-launch-', dir=CHECKS) as directory):
             env.update(GDK_BACKEND='x11', SHELL='/bin/sh'); env.pop('WAYLAND_DISPLAY', None)
             executable = copy_runtime(directory)
             app = subprocess.Popen([str(executable), '--attach', '-T', 'Module owner'], env=env,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             try:
                 window(env, app)
-                module = Path(directory) / 'build' / RUST_FRONTEND_MODULE
+                module = module_path(RUST_FRONTEND_MODULE, prefix=Path(directory))
                 maps = Path(f'/proc/{app.pid}/maps').read_text()
                 self.assertIn(str(module), maps)
                 self.assertNotIn('libwebkit2gtk', maps)

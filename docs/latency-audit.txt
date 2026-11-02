@@ -46,9 +46,9 @@ it long before usable shell output: additional median allowance use 33.90 ms,
 last complete frame 111.13 ms, last paint 111.49 ms, readiness 115.52 ms.
 There is no demonstrated useful-launch gain to justify the content heuristic
 and extra synchronous-paint opportunity. Frozen experiments:
-.checks/first-content-minimal-experiment.json,
-.checks/first-content-shell-rejected.json and corresponding .log. Rebuilt
-frontend.so is byte-identical to .checks/first-content-baseline/build/frontend.so.
+build/checks/first-content-minimal-experiment.json,
+build/checks/first-content-shell-rejected.json and corresponding .log. Rebuilt
+frontend.so is byte-identical to build/checks/first-content-baseline/build/frontend.so.
 
 First-ready frontend resource accounting
 -----------------------------------------
@@ -80,11 +80,11 @@ counters indicate a much smaller difference, while still omitting other
 threads. These observations do not prove identical startup CPU or whole-app
 resource costs. Fresh readiness remained 143.18/182.21 ms, paired -38.95 ms;
 this diagnostic run is supplementary to the previous resource-free trials.
-Frozen .checks/first-ready-resources-shell.json. Product artifacts and installed
+Frozen build/checks/first-ready-resources-shell.json. Product artifacts and installed
 rendering behavior remain unchanged; resource/presentation optimization is open.
 Three additional delayed-bridge pairs verify observed first-ready frontend and
 helper membership: every sample includes both processes. Frozen
-.checks/first-ready-resources-bridge.json. This is a fixture/accounting check,
+build/checks/first-ready-resources-bridge.json. This is a fixture/accounting check,
 not a separate speedup claim or a measurement of real SSH authentication.
 
 Direct cached ASCII glyph strings
@@ -106,7 +106,7 @@ https://docs.gtk.org/PangoCairo/func.show_glyph_string.html
 
 The initial overly broad check rejected all analysis flags and exercised zero
 of 380 cached runs; an apparent three-pair gain from that build was noise, not
-proof of a working optimization (.checks/glyph-string-ineligible-control.json).
+proof of a working optimization (build/checks/glyph-string-ineligible-control.json).
 The corrected guard checks the relevant centered-baseline flag instead of
 rejecting shaping metadata. Integration diagnostics verify 380/380 plain runs
 are eligible before and after zoom with the configured font. Raised/underlined
@@ -128,14 +128,14 @@ CPU in these workloads. The mixed case inserts lambda every seventeenth cell;
 it is not a broad Unicode-performance benchmark and the Unicode drawing path
 is unchanged. PSS medians are 46190/46222 KiB on X11 and 28542/28483 KiB on
 Wayland, without evidence of a material cache-memory increase. Frozen reports:
-.checks/ascii-glyph-string-{x11,wayland}-verified.json. Baseline modules are in
-.checks/glyph-string-baseline.
+build/checks/ascii-glyph-string-{x11,wayland}-verified.json. Baseline modules are in
+build/checks/glyph-string-baseline.
 
 Twenty paired real-shell/input trials measured fresh readiness 144.49/145.08 ms
 (paired +1.62 ms), additional readiness 123.55/117.04 ms (paired +1.95 ms), and
 typing median/p95 2.63/4.22 vs 2.66/4.11 ms. This establishes no new end-to-end
 launch or typing improvement; the verified gain is paint CPU. Settled frontend
-PSS was 12771/12796 KiB. Frozen .checks/ascii-glyph-string-shell-input.json.
+PSS was 12771/12796 KiB. Frozen build/checks/ascii-glyph-string-shell-input.json.
 The broader launch, resource, and presentation audit remains open.
 
 Installed dd10f68 with the existing Alacritty configuration through the atomic
@@ -179,8 +179,8 @@ another ASCII gain; that path is unchanged. PSS medians are 56136/56130 KiB on
 X11 and 37904/37836 KiB on Wayland. These include the denser scene's fallback
 font population and must not be compared to older sparse-only probe memory as
 if it were an application memory change. Frozen reports:
-.checks/unicode-single-line-{x11,wayland}-verified.json. Baseline modules:
-.checks/unicode-line-baseline.
+build/checks/unicode-single-line-{x11,wayland}-verified.json. Baseline modules:
+build/checks/unicode-line-baseline.
 
 Twenty paired real-zsh trials measured fresh readiness 141.77/142.95 ms (paired
 -2.25 ms), additional readiness 124.04/118.06 ms (paired +3.08 ms), typing
@@ -191,7 +191,7 @@ typing median/p95 2.65/4.13 versus 3.19/4.42 ms, and PSS 12817/12816 KiB.
 These establish no separate end-to-end input/launch gain or consistent typing
 regression; raw-fixture ASCII input does not exercise the new uncached path.
 The verified optimization is dense-Unicode drawing CPU. Frozen reports:
-.checks/unicode-single-line-{shell,raw}-input.json. The full latency audit stays
+build/checks/unicode-single-line-{shell,raw}-input.json. The full latency audit stays
 open, including whole-application resources and remaining presentation costs.
 
 Installed db9314f with the existing Alacritty configuration through atomic
@@ -207,7 +207,7 @@ cells. They allocated an unused alternate screen and passed incoming viewport
 width changes through owner-side reflow. A new regression with three wrapped
 rows proves this invents local history when the authoritative server has already
 reflowed the viewport. The original constructor fails the no-local-history
-assertion; the frozen counterexample is .checks/replica-parser-counterexample.log.
+assertion; the frozen counterexample is build/checks/replica-parser-counterexample.log.
 
 GTK now explicitly constructs a view-only TermSession with one cell grid. It
 pads/crops imported geometry without reflow or history, preserves valid selection
@@ -223,11 +223,11 @@ geometry changes, remote scroll metadata, snapshot refusal, context restoration
 and 100 repeated one-cell/large-grid transitions. Full headless, local/SSH X11
 and native Wayland integration suites pass. The existing counterfactual proof
 command also restores the old parser-backed constructor and requires this
-invariant to fail (.checks/replica-regression-proof.log). Shared native-test
+invariant to fail (build/checks/replica-regression-proof.log). Shared native-test
 support sources now have one authoritative build list. The parser monolith's
 line limit is preserved rather than raised.
 
-check-handoff --baseline .checks/replica-grid-baseline/worminald adds old-to-new
+check-handoff --baseline build/checks/replica-grid-baseline/worminald adds old-to-new
 and new-to-old v2 transfers to the existing four v1/v2 combinations. All pass,
 including unchanged child PIDs/PTY ownership, retained cells/input and donor
 shutdown. These are isolated test daemons; live services were not migrated.
@@ -241,7 +241,7 @@ report retained local history, alternate rows and glyph-storage bytes, with
 probe/module hashes. Storage excludes parser buffers, fonts, pointers and
 allocator overhead. This is not end-to-end window-manager/PTY resize latency.
 
-Ten alternating pairs against .checks/replica-grid-baseline give median CPU
+Ten alternating pairs against build/checks/replica-grid-baseline give median CPU
 milliseconds per resize cycle (candidate / baseline): X11 0.127/1.175; native
 Wayland 0.095/1.365. Final images match exactly. The candidate retains zero
 local history and alternate rows; the old implementation retains 1334 history
@@ -249,7 +249,7 @@ rows plus an unused alternate grid after this sequence. Retained glyph storage
 is 33792/1476288 bytes. Post-sequence PSS medians are 43916/45908 KiB on X11
 and 25244/28536 KiB on Wayland. These samples include allocator behavior and do
 not measure whole-application peak PSS. Frozen data:
-.checks/replica-grid-resize-{x11,wayland}-verified.json.
+build/checks/replica-grid-resize-{x11,wayland}-verified.json.
 
 The verified improvement is about 89--93% lower client import CPU in this
 resize sequence and less redundant retained state. The broader launch/input,
@@ -268,7 +268,7 @@ and all counterfactual checks pass. Product code is unchanged from 586768a.
 Three paired ordinary release-renderer trials match every ASCII/Unicode/clipped
 RGBA hash and geometry; sampled PSS is 55559/55647 KiB. No ordinary paint-speed
 claim is made from this short representation check. Frozen
-.checks/replica-grid-ordinary-paint.json.
+build/checks/replica-grid-ordinary-paint.json.
 
 Five interaction pairs measured candidate / baseline first claims 6.96/5.98 ms,
 cached switches 16.73/16.90 ms, wheel 16.39/16.47 ms and page scroll 16.52/16.48 ms.
@@ -276,14 +276,14 @@ Each side made 30 median steady interaction paints per trial and three claim
 paints; fixed wheel-burst paint medians were 14/15. Claim main-thread runtime
 was 4.61/3.77 ms, while coarse process ticks were 0/10 ms, which must not be
 interpreted as zero candidate CPU. This smoke comparison establishes no
-separate first-claim/scroll speedup. Frozen .checks/replica-grid-interactions.json.
+separate first-claim/scroll speedup. Frozen build/checks/replica-grid-interactions.json.
 
 Twenty paired controlled key/pixel trials measured fresh readiness
 98.60/99.08 ms (paired -1.02 ms), additional readiness 28.22/28.86 ms (paired
 -0.05 ms), typing median/p95 3.22/4.42 versus 3.00/4.18 ms and settled frontend
 PSS 12452/12464 KiB. These establish no new end-to-end launch/input improvement;
 the verified benefit is removing redundant state and import/reflow work after
-geometry changes. Frozen .checks/replica-grid-input-launch.json. File limits
+geometry changes. Frozen build/checks/replica-grid-input-launch.json. File limits
 pass; clang-tidy is unavailable. The checkpoint is ready for installation;
 whole-application resources and the broader latency objective remain open.
 
@@ -308,7 +308,7 @@ records remain after the seed owner exits. This closes the reused-color premise
 gap in seeding itself. Earlier measured-launch colors were already distinct.
 Three identical-build control pairs with 100 distinct labels pass, reporting
 fresh/additional paired differences -1.15/+2.78 ms. This is fixture validation,
-not an application speedup. Frozen .checks/tab-label-fixture-control.json.
+not an application speedup. Frozen build/checks/tab-label-fixture-control.json.
 
 Bound tab-strip text work to the visible suffix
 ---------------------------------------------
@@ -332,7 +332,7 @@ unique labels and the last tab active. Ten alternating pairs, 100 labels,
 1.453/0.281 ms on X11 and 1.700/0.205 ms on native Wayland. Exact RGBA pixels
 match in every pair. This scene excludes terminal cells, daemon and shells;
 its memory readings are not whole-workspace memory claims. Frozen evidence:
-.checks/tab-range-{x11,wayland}-verified.json, saved baseline64c35c5/product586768a.
+build/checks/tab-range-{x11,wayland}-verified.json, saved baseline64c35c5/product586768a.
 
 Twenty actual populated-launch pairs use 100 retained distinct directory labels
 and verified catalog counts. Fresh ready baseline/candidate medians 96.04/91.39
@@ -341,7 +341,7 @@ ms; additional-window ready 39.14/27.39 ms. Paired median differences are only
 substantial, so do not equate differences of medians with a reliable launch gain.
 Typing medians 2.52/2.38 ms. These are warm-filesystem private Xvfb software
 readiness measurements, not physical display or interactive-shell startup.
-Frozen .checks/tab-range-launch-verified.json. The strong repeatable result is
+Frozen build/checks/tab-range-launch-verified.json. The strong repeatable result is
 less hidden-label drawing CPU; broader launch optimization remains open.
 
 Installed d7bdfd9 with the existing Alacritty configuration via atomic replacement.
@@ -365,7 +365,7 @@ GTK/first-window construction and shell initialization: median fresh map/ready
 median cumulative milestones from launcher main: GTK 23.60 ms, launch-sent23.92,
 window69.63, widgets70.03, font79.52, initial frame83.86, final paint143.88.
 Tracing/resource sampling adds overhead; this is a localization audit, not a
-comparison or physical display measurement. .checks/launch-audit-current.json.
+comparison or physical display measurement. build/checks/launch-audit-current.json.
 Starting a shell before display/argument validation would change failure
 semantics and is not justified by this trace.
 
@@ -375,7 +375,7 @@ against6339f17. Candidate/baseline fresh readiness93.63/94.53 ms, additional
 with positive p95 differences15.41/13.23 ms. Mapping also shifts before lookup
 can execute; therefore these noisy end-to-end figures do not establish a causal
 launch speedup. The proven change is removing the active packet's linear search.
-Frozen .checks/active-lookup-launch-verified.json. Further launch work remains.
+Frozen build/checks/active-lookup-launch-verified.json. Further launch work remains.
 Full final local/SSH GTK suites pass on X11 and native Wayland, covering active
 and passive views, catalog removal, terminal/browser conversion, reconnect,
 ownership and close. File/line gates pass; clang-tidy is still unavailable.
@@ -414,7 +414,7 @@ figures are context, not proof of an end-to-end gain or memory reduction.
 The retained improvement removes per-page font-description copies, metric
 lookups and size-request/queue-draw calls during a catalog transaction; final
 presentation still refreshes through its existing paths. Frozen evidence:
-.checks/catalog-refresh-launch-verified.json. Broader launch work remains open.
+build/checks/catalog-refresh-launch-verified.json. Broader launch work remains open.
 
 Installed3850cd0 via atomic replacement using the existing configuration.
 All six installed product artifacts match their verified builds byte-for-byte.
@@ -428,7 +428,7 @@ A socket-level native regression confirmed that an initial catalog selecting a
 second retained terminal sent two WIRE_FOCUS claims: GtkNotebook's switch
 callback activated it, then the explicit unattached-catalog path activated it
 again. The regression failed against unchanged production code with an extra
-complete packet after the expected claim (.checks/catalog-selection-counterexample.log).
+complete packet after the expected claim (build/checks/catalog-selection-counterexample.log).
 The service already suppresses redundant snapshots when controller and geometry
 are unchanged; this is not evidence that every duplicate claim caused a frame.
 
@@ -446,7 +446,7 @@ ms, typing2.67/2.50 ms. Paired readiness medians -0.30/+0.77 ms with positive
 p95 differences10.58/13.17 ms. No end-to-end launch gain is established. The
 verified result is one catalog-selection activation instead of two, preserving
 explicit passive ownership handling without additional state or caches. Frozen
-.checks/catalog-selection-launch-verified.json. Launch optimization remains open.
+build/checks/catalog-selection-launch-verified.json. Launch optimization remains open.
 
 Installed b530a68 atomically with the existing configuration. All six installed
 product artifacts match verified builds byte-for-byte. No owner, service, PTY
@@ -481,19 +481,19 @@ physical cold-storage latency claims. Three alternating release-rendering pairs
 per backend preserve exact RGBA images for ASCII, Unicode and clipped scenes.
 Scene PSS candidate/baseline 55464/55617 KiB on X11, 37482/37388 on Wayland:
 these noisy opposite-direction results do not prove a process-memory reduction.
-Frozen .checks/frontend-gc-render-{x11,wayland}-verified.json.
+Frozen build/checks/frontend-gc-render-{x11,wayland}-verified.json.
 
 Twenty raw-fixture launch pairs show no established end-to-end gain: candidate/
 baseline fresh readiness 100.22/99.71 ms, additional 28.61/27.77 ms, typing 2.71/
 2.69 ms. Paired readiness medians -0.15/-0.45 ms with positive p95 differences
-13.43/13.29 ms. Frozen .checks/frontend-gc-launch-verified.json. Warm filesystem
+13.43/13.29 ms. Frozen build/checks/frontend-gc-launch-verified.json. Warm filesystem
 caches and private Xvfb exclude physical storage/display effects; GTK and shell
 startup remain substantially larger costs than this module's removed code.
 
 Twenty additional paired interactive-zsh launches likewise show no established
 launch gain: candidate/baseline fresh readiness 143.54/143.49 ms, additional
 122.81/119.90 ms, typing 2.70/2.59 ms. Paired readiness medians +1.94/+0.08 ms
-with p95 differences +15.66/+11.09 ms. Frozen .checks/frontend-gc-shell-verified.json.
+with p95 differences +15.66/+11.09 ms. Frozen build/checks/frontend-gc-shell-verified.json.
 The retained improvement is a smaller module and fewer relocations without
 extra resident processes, prewarming, new caches or changed user behavior.
 Broader latency optimization remains active.
@@ -518,7 +518,7 @@ Raw and interactive-zsh profiling both pass. Traced readiness is approximately
 437 ms and 1649 ms, respectively, versus untraced roughly 100/144 ms: tracing is
 substantially perturbing and these are not latency benchmarks. Raw output also
 contains teardown, so filter at the manifest readiness cutoff. Verified raw
-artifacts .checks/startup-{profile,syscalls,milestones}-raw-final.{json,log};
+artifacts build/checks/startup-{profile,syscalls,milestones}-raw-final.{json,log};
 shell artifacts use the corresponding -shell-verified names. The manifest's
 trace/milestones fields identify the ordinary latest-run filenames; frozen
 copies above preserve each observation together.
@@ -574,7 +574,7 @@ The baseline predates both the lazy location entry and local module callbacks;
 these numbers measure their combined effect. Profile storage is initialized,
 all application/helpers/service processes stop between trials, filesystem caches
 are warm, and desktop compositing/physical display are excluded. Results are
-frozen under .checks/browser-cold-{final,all-targets,cpu-samples}.json. Main
+frozen under build/checks/browser-cold-{final,all-targets,cpu-samples}.json. Main
 checkout headless checks also pass with the unrelated launcher changes retained.
 The installed running application is not replaced or restarted by this checkpoint.
 
@@ -589,7 +589,7 @@ additional-browser 68/80 ms medians. This is the PTY command path, distinct from
 direct --surf launches. The baseline also validates the ABI-named staged module
 layout. Routine headless checks pass, including real PTY conversions, caller
 path encoding, command rejection outside a terminal and missing-frontend CLI.
-The raw measurements are frozen in .checks/browser-launcher-exec.json.
+The raw measurements are frozen in build/checks/browser-launcher-exec.json.
 
 Cold browser stopping boundary and installation
 -----------------------------------------------
@@ -599,7 +599,7 @@ gave HTTP 573/592, file 550/544 and directory 526/565 ms. CPU and memory were
 essentially unchanged. With construction order identical, eleven policy-only
 pairs gave always/on-demand 616/606 ms, insufficient evidence to change the
 existing rendering policy. Restore the original construction/settings path.
-Frozen evidence: .checks/browser-graphics-policy-{first,all,control}.json.
+Frozen evidence: build/checks/browser-graphics-policy-{first,all,control}.json.
 
 Extracting the daemon command into a direct launcher wire client removed an
 exec but did not improve the requested cold path (810/793 ms over eleven pairs).
@@ -612,7 +612,7 @@ view exists and before WebKit emits load-started. Input-to-browser-module is
 roughly 38 ms in that traced observation; there is no fixed service sleep or
 synchronous child-reap wait on conversion. Traced logs perturb timing and are
 localization evidence only. Direct/conversion traces are frozen under
-.checks/browser-{direct,conversion}-milestones.log. CPU sampling already places
+build/checks/browser-{direct,conversion}-milestones.log. CPU sampling already places
 substantial work in eager library relocation and graphics/font initialization.
 
 The retained implementation preserves lazy engine loading, persistent cookies
@@ -630,13 +630,13 @@ into the regular user's ~/.local using manage.py install. The browser is publish
 as browser-v3.so, leaving legacy browser.so available to live ABI 2 owners.
 Installer tests verify legacy contents survive installation and uninstall.
 No live owner, daemon, PTY or browser was restarted or migrated. Rollback files
-are located by .checks/browser-cold-install-backup.txt.
+are located by build/checks/browser-cold-install-backup.txt.
 
 A private-display validation then exercised the actual installed executable via
 a project-local symlink using the existing manage.py browser-perf comparison
 fixture. HTTP, file and directory conversions, subsequent views and real-key
 HTTP/file response all pass; terminal-only owners still defer WebKit. Frozen
-.checks/browser-installed-smoke.json is a functional installation check, not an
+build/checks/browser-installed-smoke.json is a functional installation check, not an
 installed-versus-build speed claim. Machine load and NFS profile fixtures vary
 substantially; earlier alternating quiet-process measurements remain scoped to
 warm filesystem caches and exclude desktop compositing and physical displays.

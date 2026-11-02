@@ -47,8 +47,8 @@ main(int argc, char **argv)
 		return 0;
 	}
 	assert(pthread_atfork(before_fork, NULL, NULL) == 0);
-	assert(mkdir(".checks", 0700) == 0 || errno == EEXIST);
-	char directory[] = ".checks/spawn-client-XXXXXX", path[256];
+	assert(mkdir("build/checks", 0700) == 0 || errno == EEXIST);
+	char directory[] = "build/checks/spawn-client-XXXXXX", path[256];
 	assert(mkdtemp(directory));
 	assert(snprintf(path, sizeof(path), "%s/ssh", directory) > 0);
 	assert(symlink("/proc/self/exe", path) == 0);

@@ -150,7 +150,7 @@ impl Fixture {
             std::process::id(),
             SEQUENCE.fetch_add(1, Ordering::Relaxed)
         );
-        let root = project.join(".checks").join(&scope);
+        let root = project.join("build/checks").join(&scope);
         fs::create_dir_all(&root).unwrap();
         Self {
             root,

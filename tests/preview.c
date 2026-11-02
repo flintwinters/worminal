@@ -510,7 +510,7 @@ check_tabs(App *app, Page *terminal, Page *browser)
 	cairo_surface_t *image = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
 	cairo_t *cr = cairo_create(image);
 	tabs_draw(app->tabstrip, cr, strip);
-	g_assert_cmpint(cairo_surface_write_to_png(image, ".checks/preview-tabs.png"), ==, CAIRO_STATUS_SUCCESS);
+	g_assert_cmpint(cairo_surface_write_to_png(image, "build/checks/preview-tabs.png"), ==, CAIRO_STATUS_SUCCESS);
 	cairo_destroy(cr); cairo_surface_destroy(image);
 	/* Hit testing uses exactly the same variable widths and visible range as drawing. */
 	GList *first = first_visible(strip, width - 2);
@@ -756,14 +756,14 @@ main(int argc, char **argv)
 	WAIT(t->frame.cols != oldcols && t->frame.cols == t->cols);
 	check_ascii_line_rendering(t);
 	check_unicode_layout_rendering(t);
-	paint(t, ".checks/preview-terminal.png");
+	paint(t, "build/checks/preview-terminal.png");
 	GString *flood = g_string_new(NULL);
 	for (int i = 0; i < 2000; i++) g_string_append_printf(flood, "\r\noutput-%04d", i);
 	g_string_append(flood, "\r\nDRAINED");
 	input(t, flood->str, flood->len);
 	g_string_free(flood, TRUE);
 	WAIT(screen_has(t, "DRAINED"));
-	paint(t, ".checks/preview-terminal-dense.png");
+	paint(t, "build/checks/preview-terminal-dense.png");
 	WireBuffer scroll = {0};
 	wire_put_u32(&scroll, 1); wire_put_u32(&scroll, 3);
 	app_send(app, WIRE_SCROLL, terminal->id, scroll.data, scroll.len);
@@ -884,7 +884,7 @@ main(int argc, char **argv)
 	/* The WebKit promise resolves asynchronously after the GTK dialog response. */
 	WAIT(script_equals(web->browser, "window.permissionResult", "denied"));
 	/* Complete an actual WebKit download through the save dialog. */
-	char *download = g_build_filename(g_get_current_dir(), ".checks", "preview-download.txt", NULL);
+	char *download = g_build_filename(g_get_current_dir(), "build/checks", "preview-download.txt", NULL);
 	g_unlink(download);
 	expect_script(web->browser, "document.querySelector('a[download]').click(); 'download'", "download");
 	WAIT(dialog_of_type(GTK_TYPE_FILE_CHOOSER_DIALOG));
@@ -927,7 +927,7 @@ main(int argc, char **argv)
 	App *converter = new_app();
 	converter->master = g_strdup(master);
 	char *test_cwd = g_get_current_dir();
-	char *frontend_path = g_build_filename(test_cwd, "worminal", NULL);
+    char *frontend_path = g_strdup(g_getenv("WORMINAL_TEST_EXECUTABLE"));
 	g_free(test_cwd);
 	char *quoted_frontend = g_shell_quote(frontend_path);
 	char *convert_script = g_strdup_printf("stty raw -echo; printf CONVERT_READY; "

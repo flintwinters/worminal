@@ -1,4 +1,6 @@
 """Measure actual X11 tab painting on the current display with an isolated workspace."""
+from runtime import runtime_binary
+
 
 import os
 from pathlib import Path
@@ -59,7 +61,7 @@ def main():
     pid_atom = connection.intern_atom("_NET_WM_PID")
     active = root.get_full_property(active_atom, X.AnyPropertyType)
     previous = active.value[0] if active and active.value else None
-    command = [str(ROOT / "worminal-x11"), "-g", "120x40", "-T", "window-perf",
+    command = [str(runtime_binary("worminal-x11")), "-g", "120x40", "-T", "window-perf",
                "-e", "/bin/sh", "-c", "printf '\\033[41m\\033[2J'; exec /bin/cat"]
     process = subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL,
                                stderr=subprocess.PIPE)
@@ -93,7 +95,7 @@ def main():
         except subprocess.TimeoutExpired:
             process.kill()
             process.communicate()
-        subprocess.run([str(ROOT / "worminald-x11"), "--stop"], env=env,
+        subprocess.run([str(runtime_binary("worminald-x11")), "--stop"], env=env,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
         connection.close()
 

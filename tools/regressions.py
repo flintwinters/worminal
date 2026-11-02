@@ -1,4 +1,6 @@
 """Prove critical fixes by compiling local counterfactuals, never editing working sources."""
+from tools.paths import CHECKS
+
 
 import os
 import json
@@ -122,7 +124,7 @@ def rust_handoff_counterfactual(directory, name, filename, before, after, test, 
 def prove(match=None):
     from tools.reference import module
     historical = module()
-    directory = ROOT / ".checks/regressions"
+    directory = CHECKS / "regressions"
     directory.mkdir(parents=True, exist_ok=True)
     builder = historical.Builder()
     service_support = [f"src/{source}" for source in build.SERVER if source != "workspace/workspace_service.c"]
@@ -353,4 +355,4 @@ def prove(match=None):
         log_data = (directory / f"failure-{index}.log").read_bytes()
         if result.returncode == 0 or expected not in log_data:
             raise ValueError(f"Regression did not detect the removed fix: {name}")
-        print(f"Regression proves fix: {name} (counterfactual fails; logs in .checks/regressions)")
+        print(f"Regression proves fix: {name} (counterfactual fails; logs in build/checks/regressions)")

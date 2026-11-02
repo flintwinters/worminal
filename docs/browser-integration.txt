@@ -102,7 +102,7 @@ conservative surf defaults. No surf configuration/scripts are implicitly loaded.
 Validation and measurements
 ---------------------------
 All generated profiles, logs, fixture certificates, screenshots and compositor
-runtime files live under .checks. The project-local virtual input seat supports
+runtime files live under build/checks. The project-local virtual input seat supports
 Weston 10 and 16 with matching runtime headers; a custom WORMINAL_WESTON must provide a seat.
 Management entrypoints:
 
@@ -196,7 +196,7 @@ fresh-frontend first-key echo median/p95 changed from 161.4/180.5 ms to
 timings or a guarantee for other machines. GTK initialization and initial widget
 and font setup remain the largest fresh-frontend costs. Run manage.py latency
 and manage.py latency --forwarded separately, without concurrent test workloads;
-their phase samples are saved under .checks/latency-*.json.
+their phase samples are saved under build/checks/latency-*.json.
 
 Limits still requiring review
 -----------------------------

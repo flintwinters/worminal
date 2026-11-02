@@ -115,7 +115,7 @@ static void
 check_explorer(Browser *browser)
 {
 	char *cwd = g_get_current_dir();
-	char *directory = g_build_filename(cwd, ".checks", "explorer- +#?% ü-XXXXXX", NULL);
+	char *directory = g_build_filename(cwd, "build/checks", "explorer- +#?% ü-XXXXXX", NULL);
 	g_assert_nonnull(g_mkdtemp(directory));
 	char *empty = g_build_filename(directory, "empty", NULL);
 	char *file = g_build_filename(directory, "literal <name>.txt", NULL);
@@ -257,7 +257,7 @@ check_file_views(App *app)
 	/* File views retain their own tab storage while reusing the same resource's
 	 * renderer. Closing the original view must leave its sibling usable. */
 	char *file_cwd = g_get_current_dir();
-	char *file_document = g_build_filename(file_cwd, ".checks", "preview-resource #?% ü.html", NULL);
+	char *file_document = g_build_filename(file_cwd, "build/checks", "preview-resource #?% ü.html", NULL);
 	g_assert_true(g_file_set_contents(file_document, "<!doctype html><title>Local resource</title><input>"
 	    "<script>window.documentVersion='first';"
 	    "if(parent!==window)parent.postMessage(typeof window.worminal,'*')</script>", -1, NULL));

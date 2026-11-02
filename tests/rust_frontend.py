@@ -34,7 +34,7 @@ def compare(source, output):
 
 
 def check(backend):
-    prefix = ROOT / f".checks/rust-paint-{backend}"
+    prefix = ROOT / f"build/checks/rust-paint-{backend}"
     context = isolated_display if backend == "x11" else wayland_display
     with context() as env, prefix.with_suffix(".log").open("wb") as log:
         env.update(GDK_BACKEND=backend, WORMINAL_RENDER_FIXTURE="1", WORMINAL_RENDER_STYLES="1")

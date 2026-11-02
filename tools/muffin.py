@@ -1,4 +1,6 @@
 """Prepare an optional private activation-test window manager without installing system packages."""
+from tools.paths import CHECKS
+
 from pathlib import Path
 import os
 import shutil
@@ -6,7 +8,7 @@ import subprocess
 from tools.debian_runtime import unpack
 
 ROOT = Path(__file__).resolve().parent.parent
-LOCAL = ROOT / ".checks/muffin"
+LOCAL = CHECKS / "muffin"
 RUNTIME = LOCAL / "root"
 
 
