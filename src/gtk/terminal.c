@@ -19,6 +19,9 @@ struct Terminal {
 	PangoLayout *layout;
 	PangoLayout *ascii[4][95];
 	char *preedit;
+	GString *all_text;
+	guint32 all_generation;
+	gboolean all_pending, all_copy;
 	int cw, ch, height, ascent, cols, rows;
 	int button, last_x, last_y;
 	gboolean selecting, blink, numlock;
@@ -48,6 +51,51 @@ terminal_select(Terminal *t)
 }
 
 static void
+request_all_selection(Terminal *t, guint32 operation)
+{
+	WireBuffer b = {0};
+	wire_put_u32(&b, t->all_generation);
+	wire_put_u32(&b, operation);
+	app_send(t->page->app, WIRE_SELECT_ALL, t->page->id, b.data, b.len);
+	wire_buffer_free(&b);
+}
+
+static void
+clear_all_selection(Terminal *t)
+{
+	if (t->all_pending) request_all_selection(t, WIRE_SELECTION_CANCEL);
+	if (t->all_text) g_string_free(t->all_text, TRUE);
+	t->all_text = NULL;
+	t->all_pending = t->all_copy = FALSE;
+	t->all_generation++;
+}
+
+static void
+highlight_all_selection(Terminal *t)
+{
+	tsessionuse(t->session);
+	selstart(0, 0, SNAP_LINE);
+	selextend(t->frame.cols - 1, t->frame.rows - 1, SEL_REGULAR, 1);
+}
+
+void
+terminal_select_all(Terminal *t)
+{
+	if (!t->session) return;
+	if (!(t->page->app->service_features & WIRE_FEATURE_SELECT_ALL)) {
+		app_status(t->page->app, "Select all requires an updated workspace service.");
+		return;
+	}
+	clear_all_selection(t);
+	t->all_text = g_string_new(NULL);
+	t->all_pending = TRUE;
+	t->selecting = FALSE;
+	highlight_all_selection(t);
+	gtk_widget_queue_draw(t->page->widget);
+	request_all_selection(t, WIRE_SELECTION_START);
+}
+
+static void
 scroll_view(Terminal *t, gboolean up, int steps)
 {
 	WireBuffer b = {0};
@@ -67,6 +115,7 @@ input(Terminal *t, const char *bytes, size_t length)
 	tsessionuse(t->session);
 	tsessioncleandirty(t->session);
 	selclear();
+	clear_all_selection(t);
 	for (int row = 0; row < t->frame.rows; row++)
 		if (tsessionrowdirty(t->session, row)) damage_row(t, row);
 	app_send(t->page->app, WIRE_INPUT, t->page->id, bytes, length);
@@ -487,6 +536,11 @@ void
 terminal_copy(Terminal *t, GdkAtom selection)
 {
 	if (!t->session) return;
+	if (t->all_text) {
+		if (t->all_pending) { t->all_copy = TRUE; return; }
+		gtk_clipboard_set_text(gtk_clipboard_get(selection), t->all_text->str, -1);
+		return;
+	}
 	tsessionuse(t->session);
 	char *value = getsel();
 	if (value) {
@@ -684,6 +738,7 @@ button(GtkWidget *widget, GdkEventButton *e, Terminal *t)
 			t->selecting = FALSE;
 			terminal_copy(t, GDK_SELECTION_PRIMARY);
 		} else {
+			clear_all_selection(t);
 			selstart(x, y, e->type == GDK_2BUTTON_PRESS ? SNAP_WORD :
 			                 e->type == GDK_3BUTTON_PRESS ? SNAP_LINE : 0);
 			t->selecting = TRUE;
@@ -785,7 +840,18 @@ terminal_new(Page *page)
 void
 terminal_packet(Terminal *t, WirePacket *p)
 {
-	if (p->type == WIRE_FRAME) {
+	if (p->type == WIRE_SELECT_ALL) {
+		uint32_t generation, done;
+		if (!wire_get_u32(p, &generation) || !wire_get_u32(p, &done) || done > 1 ||
+		    !t->all_pending || generation != t->all_generation) return;
+		g_string_append_len(t->all_text, (char *)p->data + p->pos, p->len - p->pos);
+		if (!done) request_all_selection(t, WIRE_SELECTION_NEXT);
+		else {
+			t->all_pending = FALSE;
+			terminal_copy(t, GDK_SELECTION_PRIMARY);
+			if (t->all_copy) terminal_copy(t, GDK_SELECTION_CLIPBOARD);
+		}
+	} else if (p->type == WIRE_FRAME) {
 		uint32_t v[6];
 		for (size_t i = 0; i < G_N_ELEMENTS(v); i++)
 			if (!wire_get_u32(p, &v[i])) return;
@@ -801,8 +867,10 @@ terminal_packet(Terminal *t, WirePacket *p)
 			t->damaged_rows[t->frame.cursor_y] = TRUE;
 			t->damaged_rows[v[3]] = TRUE;
 		}
+		if (v[5] != (uint32_t)t->frame.alternate) clear_all_selection(t);
 		t->frame = (SessionFrame){v[0], v[1], v[2], v[3], v[4], v[5]};
 		tsessionimportframe(t->session, &t->frame);
+		if (t->all_text) highlight_all_selection(t);
 		t->page->live = TRUE;
 	} else if (p->type == WIRE_COPY_ROWS) {
 		uint32_t source, destination, count;
@@ -857,6 +925,7 @@ terminal_free(Terminal *t)
 	g_clear_object(&t->layout);
 	if (t->font) pango_font_description_free(t->font);
 	g_free(t->preedit);
+	clear_all_selection(t);
 	if (t->session) tsessionremove(t->session);
 	g_free(t);
 }

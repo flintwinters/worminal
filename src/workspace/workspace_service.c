@@ -73,6 +73,7 @@ client_drop(Client *client)
 	wire_buffer_free(&client->output);
 	client->output = (WireBuffer){0};
 	client->sent = 0;
+	free(client->selection); client->selection = NULL;
 	for (Tab *tab = tabs; tab; tab = tab->next)
 		if (tab->controller == client)
 			tab_release_control(tab);
@@ -433,8 +434,13 @@ client_message(Client *client, WirePacket *packet)
 	Launch launch;
 	if (packet->type == WIRE_CAPABILITIES) {
 		uint32_t features;
-		if (!client->ready && !packet->tab && wire_get_u32(packet, &features) && packet->pos == packet->len)
+		if (!client->ready && !packet->tab && wire_get_u32(packet, &features) && packet->pos == packet->len) {
 			client->features = features & WIRE_FEATURE_COPY_ROWS;
+			WireBuffer reply = {0};
+			wire_put_u32(&reply, WIRE_FEATURE_COPY_ROWS | WIRE_FEATURE_SELECT_ALL);
+			client_send(client, WIRE_CAPABILITIES, 0, &reply);
+			wire_buffer_free(&reply);
+		}
 		return;
 	}
 	if (packet->type == WIRE_HANDIN || packet->type == WIRE_HANDOFF) {
@@ -550,6 +556,41 @@ client_message(Client *client, WirePacket *packet)
 		return;
 	}
 	switch (packet->type) {
+	case WIRE_SELECT_ALL: {
+		uint32_t generation, operation;
+		if (!wire_get_u32(packet, &generation) || !wire_get_u32(packet, &operation) ||
+		    operation > WIRE_SELECTION_CANCEL || packet->pos != packet->len) break;
+		if (operation == WIRE_SELECTION_CANCEL) {
+			if (client->selection_tab == tab->id && client->selection_generation == generation) {
+				free(client->selection); client->selection = NULL;
+			}
+			break;
+		}
+		if (operation == WIRE_SELECTION_START) {
+			free(client->selection);
+			tsessionuse(tab->session);
+			client->selection = getall();
+			client->selection_length = strlen(client->selection);
+			client->selection_offset = 0;
+			client->selection_tab = tab->id;
+			client->selection_generation = generation;
+		}
+		if (!client->selection || client->selection_tab != tab->id ||
+		    client->selection_generation != generation) break;
+		size_t count = MIN(65536, client->selection_length - client->selection_offset);
+		WireBuffer reply = {0};
+		wire_put_u32(&reply, generation);
+		wire_put_u32(&reply, client->selection_offset + count == client->selection_length);
+		wire_put_bytes(&reply, client->selection + client->selection_offset, count);
+		client->selection_offset += count;
+		if (client->selection_offset == client->selection_length) {
+			free(client->selection); client->selection = NULL;
+		}
+		client_send(client, WIRE_SELECT_ALL, tab->id, &reply);
+		wire_buffer_free(&reply);
+		break;
+	}
+
 #ifdef WORMINAL_PREVIEW_PROTOCOL
 	case WIRE_CONTROL:
 		if (!wire_get_u32(packet, &direction) || direction > 2 || packet->pos != packet->len) break;

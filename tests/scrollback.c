@@ -17,6 +17,8 @@ int xsetcolorname(int index, const char *name) { return 0; }
 void xsetsel(char *selection) {}
 void xclipcopy(void) {}
 
+#include "selection_checks.h"
+
 #undef term
 #undef strescseq
 #include "session_transfer_checks.h"
@@ -38,6 +40,7 @@ main(void)
 	char text[] = "one\r\n\033[201~\003two";
 	pasted = paste_filter(&paste, text, strlen(text));
 	assert(pasted == 13 && memcmp(text, "one\r\n[201~two", pasted) == 0);
+	check_selection_export();
 	check_session_transfer();
 	check_session_view();
 	check_render_sync();

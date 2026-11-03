@@ -3,7 +3,9 @@
 Worminal is a deliberately small terminal. Favor cold launch to usable input and low memory over interface
 features; measure both before adding complexity.
 Frontend replacements must preserve established user behavior, including removed shortcuts;
-plain Ctrl+N belongs to terminal applications, while Ctrl+Shift+N opens a GTK window.
+Ctrl+A selects the terminal screen and retained scrollback; Ctrl+Shift+C copies the selection.
+Ctrl+Shift+A still sends the Control-A byte to terminal applications.
+Plain Ctrl+N belongs to terminal applications, while Ctrl+Shift+N opens a GTK window.
 
 The app is a GTK terminal/browser built on st 0.9.3. A per-user `worminald` service owns ordered tabs, PTYs,
 terminal state, and bounded main-screen scrollback; views connect locally or through `--master user@host` over SSH.

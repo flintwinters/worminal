@@ -14,6 +14,9 @@ struct Client {
 	WireReader input;
 	WireBuffer output;
 	size_t sent;
+	char *selection;
+	size_t selection_offset, selection_length;
+	uint32_t selection_tab, selection_generation;
 	Client *next;
 };
 struct Tab {

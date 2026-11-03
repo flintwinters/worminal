@@ -78,6 +78,58 @@ def clipboard_owner(env, text, selection="clipboard"):
 
 
 class NavigationKeysTest(unittest.TestCase):
+    @unittest.skipUnless(PREVIEW and shutil.which("xclip"), "requires GTK and xclip")
+    def test_select_all_retained_scrollback(self):
+        for connection in ([], ["--master", "key-test"]):
+            with self.subTest(connection=connection), isolated_display() as env:
+                if connection:
+                    env["PATH"] = str(ROOT / "tests/fixtures/preview-master") + os.pathsep + env["PATH"]
+                    env["WORMINAL_TEST_DAEMON"] = str(ROOT / DAEMON)
+                title = f"Worminal select all {os.getpid()}"
+                lines = ["HISTORY-START é中"]
+                lines += [f"row-{i:04d} retained output abcdefghijklmnopqrstuvwxyz0123456789" for i in range(1200)]
+                lines += ["HISTORY-END"]
+                output = "\r\n".join(lines)
+                mode = f"\033]2;{title} ready\a"
+                escaped = "".join(f"\\{byte:03o}" for byte in mode.encode())
+                command = (f"stty raw -echo; printf '{escaped}R'; dd bs=1 count=1 >/dev/null 2>&1; sleep .2; "
+                           "printf 'HISTORY-START é中\\r\\n'; i=0; "
+                           "while [ $i -lt 1200 ]; do "
+                           "printf 'row-%04d retained output abcdefghijklmnopqrstuvwxyz0123456789\\r\\n' $i; "
+                           "i=$((i+1)); done; "
+                           f"printf 'HISTORY-END{escaped}'; exec cat")
+                terminal = subprocess.Popen(
+                    [str(ROOT / FRONTEND), *connection, "-g", "80x10", "-T", title, "-o", "-",
+                     "-e", "/bin/sh", "-c", command],
+                    env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                try:
+                    self.assertEqual(read_bytes(terminal.stdout, len(mode.encode()) + 1), mode.encode() + b"R")
+                    deadline = time.monotonic() + 5
+                    window = None
+                    while time.monotonic() < deadline:
+                        result = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", title],
+                                                env=env, capture_output=True, text=True)
+                        if result.returncode == 0:
+                            window = result.stdout.splitlines()[0]
+                            break
+                        time.sleep(.01)
+                    self.assertIsNotNone(window)
+                    wait_title(env, window, title + " ready")
+                    subprocess.run(["xdotool", "windowfocus", "--sync", window, "key", "space"],
+                                   env=env, check=True)
+                    self.assertEqual(read_bytes(terminal.stdout, len((output + mode).encode())),
+                                     (output + mode).encode())
+                    subprocess.run(["xdotool", "windowfocus", "--sync", window, "key",
+                                    "--clearmodifiers", "ctrl+a", "ctrl+shift+c"], env=env, check=True)
+                    copied = subprocess.check_output(["xclip", "-selection", "clipboard", "-out"],
+                                                     env=env, timeout=3, text=True)
+                    self.assertEqual(copied, "R" + "\n".join(lines) + "\n")
+                    self.assertFalse(select.select([terminal.stdout], [], [], .1)[0],
+                                     "Ctrl+A leaked into terminal application input")
+                finally:
+                    terminal.terminate()
+                    terminal.communicate(timeout=3)
+
     @unittest.skipUnless(shutil.which("xclip"), "xclip is not installed")
     def test_clipboard_paste_bytes(self):
         self.check_clipboard_paste([])
@@ -294,8 +346,8 @@ class NavigationKeysTest(unittest.TestCase):
             ("ctrl+shift+End", b"\033[1;6F"),
         )
         # Exercise the full ASCII Control family, not individual editor bindings.
-        # t/w and bare digits are Worminal shortcuts; Alt bypasses those shortcuts.
-        letters = "abcdefghijklmnopqrsuvxyz"
+        # a/t/w and bare digits are Worminal shortcuts; Alt bypasses those shortcuts.
+        letters = "bcdefghijklmnopqrsuvxyz"
         controls = [(f"ctrl+{c}", bytes([ord(c) - ord('a') + 1])) for c in letters]
         controls += [(f"ctrl+alt+{c}", b"\033" + bytes([ord(c) - ord('a') + 1]))
                      for c in "abcdefghijklmnopqrstuvwxyz"]

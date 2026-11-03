@@ -436,7 +436,9 @@ received_packets(int fd, GIOCondition condition, gpointer data)
 		}
 		Page *page = find_page(app, packet.tab);
 		gboolean okay = TRUE;
-		if (packet.type == WIRE_CATALOG) okay = catalog(app, &packet);
+		if (packet.type == WIRE_CAPABILITIES) {
+			okay = wire_get_u32(&packet, &app->service_features) && packet.pos == packet.len;
+		} else if (packet.type == WIRE_CATALOG) okay = catalog(app, &packet);
 		else if (packet.type == WIRE_CREATED) {
 			app->created_id = packet.tab;
 			if (app->pending) app->pending--;
@@ -540,6 +542,10 @@ shortcut(GtkWidget *window, GdkEventKey *event, App *app)
 	guint mods = event->state & (GDK_CONTROL_MASK | GDK_SHIFT_MASK | GDK_MOD1_MASK);
 	Page *page = app->active;
 	if (page->url && browser_shortcut(page, key, mods)) return TRUE;
+	if (mods == GDK_CONTROL_MASK && key == GDK_KEY_a && page->terminal) {
+		terminal_select_all(page->terminal);
+		return TRUE;
+	}
 	/* Plain Ctrl+N belongs to terminal applications; window creation uses Shift. */
 	if (mods == GDK_CONTROL_MASK && (key == GDK_KEY_t || key == GDK_KEY_w)) {
 		if (key == GDK_KEY_t) app_terminal(app, FALSE);
@@ -603,6 +609,7 @@ disconnected(App *app)
 	wire_reader_free(&app->input); app->input = (WireReader){0};
 	wire_buffer_free(&app->output_queue); app->output_queue = (WireBuffer){0}; app->sent = 0;
 	app->pending = 0;
+	app->service_features = 0;
 	app->created_id = 0;
 	for (GList *item = app->pages; item; item = item->next) ((Page *)item->data)->live = FALSE;
 	if (!app->closing) app_status(app, "Workspace disconnected. Reconnecting; unsent input will not be replayed.");

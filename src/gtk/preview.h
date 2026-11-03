@@ -40,7 +40,7 @@ struct App {
 	size_t sent;
 	guint pending;
 	GQueue early_keys;
-	uint32_t created_id;
+	uint32_t created_id, service_features;
 	gboolean attached, closing, syncing;
 	/* The font pattern is immutable per window; zoom invalidates these metrics. */
 	PangoFontDescription *cached_font;
@@ -76,6 +76,7 @@ void terminal_free(Terminal *);
 void terminal_packet(Terminal *, WirePacket *);
 void terminal_zoom(Terminal *);
 void terminal_copy(Terminal *, GdkAtom);
+void terminal_select_all(Terminal *);
 void terminal_paste(Terminal *, GdkAtom);
 gboolean terminal_key(Terminal *, GdkEventKey *);
 gboolean terminal_palette(Page *, uint32_t, const char *);

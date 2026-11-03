@@ -198,8 +198,10 @@ four protocol combinations, including queued input and failure rollback. These c
 | Select exact slot 1–8 / last / slot 10 | Alt+1–8 / Alt+9 / Alt+0 |
 | Smaller / larger font | Ctrl+- / Ctrl++ or Ctrl+= |
 | Browse scrollback | Mouse wheel or Shift+PageUp / Shift+PageDown |
+| Select screen and retained scrollback | Ctrl+A |
 | Copy selected text | Ctrl+Shift+C |
 
+Ctrl+Shift+A sends Control-A to the terminal application.
 Click a tab label to select it. Typing returns scrollback to the live screen.
 In applications that capture the mouse, hold Shift while dragging to select text, release the mouse button,
 then press Ctrl+Shift+C to copy. Ctrl+Shift+V pastes the clipboard; Shift+Insert and middle-click

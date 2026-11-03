@@ -743,6 +743,7 @@ getsel(void)
 	return str;
 }
 
+#include "selection_export.h"
 void
 selclear(void)
 {

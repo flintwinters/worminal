@@ -49,11 +49,13 @@ enum wire_type {
 	WIRE_HANDOFF,
 	WIRE_CAPABILITIES,
 	WIRE_COPY_ROWS,
+	WIRE_SELECT_ALL, /* Request: generation, start/next/cancel; reply: generation, done, UTF-8 bytes. */
 };
 
 /* Advertise before HELLO/ATTACH. Older daemons ignore the optional packet;
  * unadvertised clients must continue receiving the original row encoding. */
-enum { WIRE_FEATURE_COPY_ROWS = 1u << 0 };
+enum { WIRE_FEATURE_COPY_ROWS = 1u << 0, WIRE_FEATURE_SELECT_ALL = 1u << 1 };
+enum { WIRE_SELECTION_START, WIRE_SELECTION_NEXT, WIRE_SELECTION_CANCEL };
 
 typedef struct {
 	unsigned char *data;

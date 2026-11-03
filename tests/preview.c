@@ -63,6 +63,8 @@ screen_has(Terminal *t, const char *wanted)
 	return found;
 }
 
+#include "preview_selection.c"
+
 typedef struct { Terminal *terminal; const char *wanted; gboolean painted, partial; } PaintProbe;
 
 static gboolean
@@ -743,6 +745,7 @@ main(int argc, char **argv)
 	terminal_copy(t, GDK_SELECTION_CLIPBOARD);
 	terminal_paste(t, GDK_SELECTION_CLIPBOARD);
 	WAIT(screen_has(t, "SELECT-MESELECT-ME"));
+	check_select_all(app, t);
 	int oldcols = t->frame.cols;
 	gtk_window_resize(GTK_WINDOW(app->window), 720, 420);
 	if (!g_getenv("WORMINAL_PREVIEW_TILED")) WAIT(t->frame.cols != oldcols && t->frame.cols == t->cols);
