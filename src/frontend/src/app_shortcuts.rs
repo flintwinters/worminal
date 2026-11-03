@@ -33,7 +33,7 @@ impl App {
             .borrow()
             .iter()
             .any(|page| page.id == self.active.get() && page.browser);
-        if state == Mod::CONTROL_MASK && value == key::a {
+        if state == control_shift && value == key::a {
             if let Some(terminal) = self.terminal(self.active.get()) {
                 if self.service_features.get() & WIRE_FEATURE_SELECT_ALL == 0 {
                     self.message(Some("Select all requires an updated workspace service."));

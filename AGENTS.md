@@ -4,8 +4,8 @@
 
 Worminal is a deliberately small terminal. Favor low memory use over interface features; measure before adding
 complexity. Preserve established terminal behavior and application shortcuts. Plain Ctrl+N belongs to terminal
-applications; Ctrl+Shift+N opens a window. Ctrl+A selects screen and retained scrollback for Ctrl+Shift+C;
-Ctrl+Shift+A sends Control-A to applications. Keep the upstream st attribution and license intact.
+applications; Ctrl+Shift+N opens a window. Ctrl+Shift+A selects screen and retained scrollback for Ctrl+Shift+C;
+Ctrl+A sends Control-A to applications. Keep the upstream st attribution and license intact.
 Use existing modules. Keep each shared rule or definition in one place. Enforce state rules where the state changes.
 For bugs with subtle causes, add a test that fails without the fix and explain the reason beside the code.
 

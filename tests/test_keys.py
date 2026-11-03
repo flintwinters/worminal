@@ -123,7 +123,7 @@ class NavigationKeysTest(unittest.TestCase):
                     self.assertEqual(read_bytes(terminal.stdout, len((output + mode).encode())),
                                      (output + mode).encode())
                     subprocess.run(["xdotool", "windowfocus", "--sync", window, "key",
-                                    "--clearmodifiers", "ctrl+a", "ctrl+shift+c"], env=env, check=True)
+                                    "--clearmodifiers", "ctrl+shift+a", "ctrl+shift+c"], env=env, check=True)
                     expected = "R" + "\n".join(lines) + "\n"
                     deadline = time.monotonic() + 3
                     copied = ""
@@ -136,7 +136,7 @@ class NavigationKeysTest(unittest.TestCase):
                         time.sleep(.01)
                     self.assertEqual(copied, expected)
                     self.assertFalse(select.select([terminal.stdout], [], [], .1)[0],
-                                     "Ctrl+A leaked into terminal application input")
+                                     "Ctrl+Shift+A leaked into terminal application input")
                 finally:
                     terminal.terminate()
                     terminal.communicate(timeout=3)
@@ -358,8 +358,8 @@ class NavigationKeysTest(unittest.TestCase):
             ("ctrl+shift+End", b"\033[1;6F"),
         )
         # Exercise the full ASCII Control family, not individual editor bindings.
-        # a/t/w and bare digits are Worminal shortcuts; Alt bypasses those shortcuts.
-        letters = "bcdefghijklmnopqrsuvxyz"
+        # t/w and bare digits are Worminal shortcuts; Alt bypasses those shortcuts.
+        letters = "abcdefghijklmnopqrsuvxyz"
         controls = [(f"ctrl+{c}", bytes([ord(c) - ord('a') + 1])) for c in letters]
         controls += [(f"ctrl+alt+{c}", b"\033" + bytes([ord(c) - ord('a') + 1]))
                      for c in "abcdefghijklmnopqrstuvwxyz"]
@@ -372,7 +372,7 @@ class NavigationKeysTest(unittest.TestCase):
         controls += [(f"ctrl+alt+{key}", b"\033" + bytes([value]))
                      for key, value in (("2", 0), ("3", 27), ("4", 28), ("5", 29),
                                         ("6", 30), ("7", 31), ("8", 127))]
-        controls += [("ctrl+shift+a", b"\x01"), ("ctrl+exclam", b"!")]
+        controls += [("ctrl+exclam", b"!")]
         if PREVIEW:
             cases += tuple(controls)
         with isolated_display() as env:
