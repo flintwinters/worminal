@@ -282,6 +282,9 @@ class NavigationKeysTest(unittest.TestCase):
 
     def check_navigation_keys(self, connection):
         cases = (
+            ("slash", b"/"),
+            ("ctrl+slash", b"\x1f"),
+            ("ctrl+alt+slash", b"\033\x1f"),
             ("Delete", b"\033[3~"),
             ("ctrl+Delete", b"\033[3;5~"),
             ("shift+Delete", b"\033[3;2~"),
@@ -294,6 +297,24 @@ class NavigationKeysTest(unittest.TestCase):
             ("shift+Home", b"\033[1;2H"),
             ("ctrl+shift+End", b"\033[1;6F"),
         )
+        # Exercise the full ASCII Control family, not individual editor bindings.
+        # t/w and bare digits are Worminal shortcuts; Alt bypasses those shortcuts.
+        letters = "abcdefghijklmnopqrsuvxyz"
+        controls = [(f"ctrl+{c}", bytes([ord(c) - ord('a') + 1])) for c in letters]
+        controls += [(f"ctrl+alt+{c}", b"\033" + bytes([ord(c) - ord('a') + 1]))
+                     for c in "abcdefghijklmnopqrstuvwxyz"]
+        symbols = (("space", 0), ("at", 0), ("bracketleft", 27), ("backslash", 28),
+                   ("bracketright", 29), ("asciicircum", 30), ("underscore", 31),
+                   ("grave", 0), ("braceleft", 27), ("bar", 28), ("braceright", 29),
+                   ("asciitilde", 30), ("question", 127))
+        controls += [(f"ctrl+{key}", bytes([value])) for key, value in symbols]
+        controls += [(f"ctrl+alt+{key}", b"\033" + bytes([value])) for key, value in symbols]
+        controls += [(f"ctrl+alt+{key}", b"\033" + bytes([value]))
+                     for key, value in (("2", 0), ("3", 27), ("4", 28), ("5", 29),
+                                        ("6", 30), ("7", 31), ("8", 127))]
+        controls += [("ctrl+shift+a", b"\x01"), ("ctrl+exclam", b"!")]
+        if PREVIEW:
+            cases += tuple(controls)
         with isolated_display() as env:
             if connection:
                 fixtures = ROOT / "tests/fixtures" / ("preview-master" if PREVIEW else "master")

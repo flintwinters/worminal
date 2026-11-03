@@ -11,11 +11,19 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from tools.privacy import check_privacy, findings
+from tools.privacy import DEFAULT_EMAIL, check_privacy, findings
 from tools.git_index import tracked_files
 
 
 class PrivacyTests(unittest.TestCase):
+    def test_email_whitelist_matches_only_the_approved_address(self):
+        self.assertEqual(findings(DEFAULT_EMAIL.encode()), [])
+        self.assertEqual(findings(DEFAULT_EMAIL.upper().encode()), [])
+        for address in ("other@" + "mail.invalid", "prefix" + DEFAULT_EMAIL, DEFAULT_EMAIL + ".invalid"):
+            with self.subTest(address=address):
+                self.assertIn(("email address", 1), findings(address.encode()))
+        self.assertIn(("service credential", 1), findings(DEFAULT_EMAIL.encode() + b" ghp_" + b"a" * 30))
+
     def test_cli_scans_requested_repository_instead_of_parent(self):
         root = Path(__file__).resolve().parent.parent
         checks = root / "build/checks"

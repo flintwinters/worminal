@@ -66,15 +66,21 @@ impl Keyboard {
             return KeyAction::Bytes(bytes.to_vec());
         }
         if state.contains(Mod::CONTROL_MASK) {
-            if let Some(c) = value
-                .to_unicode()
-                .filter(|c| ('@'..='_').contains(c) || c.is_ascii_lowercase() || *c == ' ')
-            {
+            // Encode ASCII Control before the input method, including NUL and numeric aliases.
+            // Locale strings can lose embedded NUL; punctuation pairs share five-bit encoding.
+            if let Some(c) = value.to_unicode().and_then(|c| match c {
+                '@'..='~' | ' ' => Some(c as u8 & 31),
+                '2' => Some(0),
+                '3'..='7' => Some(c as u8 - b'3' + 27),
+                '8' | '?' => Some(127),
+                '/' => Some(31),
+                _ => None,
+            }) {
                 let mut bytes = Vec::new();
                 if state.contains(Mod::MOD1_MASK) {
                     bytes.push(0x1b);
                 }
-                bytes.push(if c == ' ' { 0 } else { c as u8 & 31 });
+                bytes.push(c);
                 return KeyAction::Bytes(bytes);
             }
         }

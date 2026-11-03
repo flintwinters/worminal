@@ -7,6 +7,11 @@ from rich.console import Console
 from tools.git_index import tracked_files
 
 
+# Exact public address approved for repository content.
+DEFAULT_EMAIL = "flintwinters.0@gmail.com"
+EMAIL_WHITELIST = frozenset({DEFAULT_EMAIL})
+
+
 PATTERNS = {
     "private key": r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----",
     "service credential": r"\b(?:AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|"
@@ -27,7 +32,8 @@ def findings(data):
     """Return categories and line numbers without retaining matched values."""
     text = data.decode("utf-8", errors="replace")
     return [(name, text.count("\n", 0, match.start()) + 1)
-            for name, pattern in RULES.items() for match in pattern.finditer(text)]
+            for name, pattern in RULES.items() for match in pattern.finditer(text)
+            if name != "email address" or match.group().casefold() not in EMAIL_WHITELIST]
 
 
 def git(*args):
