@@ -52,7 +52,11 @@ The browser has no navigation toolbar. Alt+Left/Right navigate history;
 Ctrl+R or F5 reloads and Escape stops loading. Ctrl+K reveals and selects the
 normally hidden address entry; Enter navigates and hides it, and Escape dismisses
 it. Tab activation and moving a browser between windows cannot reveal the entry.
-Ctrl+T always creates a terminal. Ctrl+Shift+B has no browser action.
+Ctrl+T creates a blank browser tab from a browser, or a terminal from a terminal.
+Ctrl+Shift+T always creates a terminal. Unselected browser titles are red; terminal titles are white.
+Selected tabs use the original solid inverted highlight.
+Ctrl+D and Ctrl+Q close the selected browser tab;
+terminal applications retain those keys. Ctrl+Shift+B has no browser action.
 Inside a Worminal terminal, worminal --new-browser-tab URL|FILE replaces that terminal
 with a browser under the same ordered identity, ending its shell and PTY. A target is required.
 Ctrl+K reveals the address entry. For example:
@@ -98,7 +102,7 @@ conservative surf defaults. No surf configuration/scripts are implicitly loaded.
 Validation and measurements
 ---------------------------
 All generated profiles, logs, fixture certificates, screenshots and compositor
-runtime files live under .checks. The project-local virtual input seat supports
+runtime files live under build/checks. The project-local virtual input seat supports
 Weston 10 and 16 with matching runtime headers; a custom WORMINAL_WESTON must provide a seat.
 Management entrypoints:
 
@@ -192,7 +196,7 @@ fresh-frontend first-key echo median/p95 changed from 161.4/180.5 ms to
 timings or a guarantee for other machines. GTK initialization and initial widget
 and font setup remain the largest fresh-frontend costs. Run manage.py latency
 and manage.py latency --forwarded separately, without concurrent test workloads;
-their phase samples are saved under .checks/latency-*.json.
+their phase samples are saved under build/checks/latency-*.json.
 
 Limits still requiring review
 -----------------------------
@@ -216,3 +220,23 @@ API constraints consulted
 https://docs.gtk.org/gtk3/class.IMMulticontext.html
 https://webkitgtk.org/reference/webkit2gtk/stable/signal.WebView.create.html
 https://webkitgtk.org/reference/webkit2gtk/stable/signal.WebView.permission-request.html
+
+Browser module updates
+----------------------
+With the generation-aware GTK loader, each new browser view checks the installed
+ABI-named browser module. Changed compatible code starts a new module generation;
+existing views retain their creating module, live forms, JavaScript, navigation,
+and session storage. Generations share the live profile for login cookies and
+local storage; each keeps its own URI handlers and view-private capabilities.
+Identical installs reuse the current generation. A rejected
+module falls back to the last working generation; rollback can reopen older code
+without replacing newer live views. Local-file access remains private per view.
+Unused retired engine contexts are released, while module code remains resident
+for asynchronous WebKit callbacks. Renderer sharing stays within a generation.
+This updates browser-module code, not the GTK frontend itself. An older GTK owner
+needs one initial restart to gain the loader; replacing files alone cannot add
+this capability to its already-loaded code. Explorer HTML keeps its existing
+explicit reload/reopen behavior.
+Run manage.py check-browser-generations for real-WebKit state-preservation checks
+on a private display; prove-preview-regressions --match 'browser module generations'
+checks that retaining the old one-module cache fails the regression.

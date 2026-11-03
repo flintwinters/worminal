@@ -10,11 +10,23 @@
 
 static void (*packet)(Terminal *, WirePacket *);
 static TermSession *(*current_session)(void);
+static FILE *fixture;
+typedef struct {
+	const char *name;
+	uint32_t mode, cursor;
+	gboolean selection, fractional;
+} PaintStyle;
 
 static void
 import_packet(Terminal *terminal, uint32_t type, WireBuffer *buffer)
 {
 	WirePacket message = {.type = type, .data = buffer->data, .len = buffer->len};
+	if (fixture) {
+		WireBuffer encoded = {0};
+		wire_append_packet(&encoded, type, 0, buffer->data, buffer->len);
+		g_assert_cmpuint(fwrite(encoded.data, 1, encoded.len, fixture), ==, encoded.len);
+		wire_buffer_free(&encoded);
+	}
 	packet(terminal, &message);
 }
 
@@ -36,12 +48,25 @@ process_ns(void)
 
 static void
 paint_case(Terminal *terminal, GtkWidget *widget, int cols, int rows,
-           int content, gboolean clipped, const char *prefix, int frames)
+           int content, gboolean clipped, const char *prefix, int frames, Page *page, const PaintStyle *style)
 {
 	const gunichar runes[] = {0x03bb, 0x00e9, 0x0416, 0x05d0, 0x0639, 0x253c, 0x4e2d, 0x1f642};
+	const char *name = style ? style->name : clipped ? "clipped_ascii" :
+	    content == 2 ? "dense_unicode" : content == 1 ? "mixed_unicode" : "dense_ascii";
+	if (style) {
+		page->mode = style->mode; page->cursor = style->cursor;
+		g_assert_true(gdk_rgba_parse(&page->colors[2], "rgba(20,90,160,0.55)"));
+		gtk_widget_grab_focus(widget);
+	}
+	if (getenv("WORMINAL_RENDER_FIXTURE")) {
+		char *path = g_strdup_printf("%s-%s.wire", prefix, name);
+		fixture = fopen(path, "wb");
+		g_assert_nonnull(fixture);
+		g_free(path);
+	}
 	uint32_t coverage = 0;
 	WireBuffer frame = {0};
-	uint32_t values[] = {cols, rows, 0, 0, 0, 0};
+	uint32_t values[] = {cols, rows, style ? 6 : 0, 0, 0, 0};
 	for (size_t i = 0; i < G_N_ELEMENTS(values); i++) wire_put_u32(&frame, values[i]);
 	deliver(terminal, WIRE_FRAME, &frame);
 	for (int row = 0; row < rows; row++) {
@@ -71,6 +96,12 @@ paint_case(Terminal *terminal, GtkWidget *widget, int cols, int rows,
 			if (col % 7 == 0) mode |= ATTR_UNDERLINE;
 			if (col % 13 == 0) mode |= ATTR_STRUCK;
 			if (col % 11 == 0) mode |= ATTR_REVERSE;
+			if (style) {
+				if (col % 5 == 0) mode |= ATTR_FAINT;
+				if (col % 9 == 0) mode |= ATTR_INVISIBLE;
+				if (col % 3 == 0) mode |= ATTR_BLINK;
+				if (col % 4 == 0) fg = WORMINAL_TRUECOLOR_FLAG | 0x7694ab;
+			}
 			if (is_dummy) { mode = dummy_mode | ATTR_WDUMMY; fg = dummy_fg; }
 			else if (mode & ATTR_WIDE) { dummy_mode = mode & ~ATTR_WIDE; dummy_fg = fg; }
 			wire_put_u32(&cells, rune); wire_put_u32(&cells, mode);
@@ -80,9 +111,17 @@ paint_case(Terminal *terminal, GtkWidget *widget, int cols, int rows,
 	}
 	if (content == 2) g_assert_cmpuint(coverage, ==, (1u << G_N_ELEMENTS(runes)) - 1);
 	deliver(terminal, WIRE_FRAME_FINISH, &frame);
+	if (fixture) { g_assert_cmpint(fclose(fixture), ==, 0); fixture = NULL; }
 	cairo_surface_t *image = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
 	    gtk_widget_get_allocated_width(widget), gtk_widget_get_allocated_height(widget));
 	cairo_t *cr = cairo_create(image);
+	current_session()->engine.sel = (Selection){.ob = {.x = -1}};
+	if (style && style->selection) {
+		/* Paint a known regular selection; semantic selection parity is checked at the engine boundary. */
+		current_session()->engine.sel = (Selection){.mode = SEL_READY, .type = SEL_REGULAR,
+		    .ob = {0, 0}, .nb = {0, 0}, .oe = {5, 1}, .ne = {5, 1}};
+	}
+	if (style && style->fractional) { cairo_translate(cr, .25, .375); cairo_scale(cr, 1.25, 1.25); }
 	if (clipped) {
 		cairo_rectangle(cr, 0, gtk_widget_get_allocated_height(widget) / 2,
 		    gtk_widget_get_allocated_width(widget), 16);
@@ -92,12 +131,13 @@ paint_case(Terminal *terminal, GtkWidget *widget, int cols, int rows,
 	gint64 started_cpu = process_ns(), started = g_get_monotonic_time();
 	for (int i = 0; i < frames; i++) gtk_widget_draw(widget, cr);
 	gint64 elapsed = g_get_monotonic_time() - started, cpu = process_ns() - started_cpu;
-	const char *name = clipped ? "clipped_ascii" :
-	    content == 2 ? "dense_unicode" : content == 1 ? "mixed_unicode" : "dense_ascii";
 	char *path = g_strdup_printf("%s-%s.png", prefix, name);
 	g_assert_cmpint(cairo_surface_write_to_png(image, path), ==, CAIRO_STATUS_SUCCESS);
 	g_print("{\"case\":\"%s\",\"frames\":%d,\"cols\":%d,\"rows\":%d,\"wall_us\":%" G_GINT64_FORMAT
-	    ",\"cpu_ns\":%" G_GINT64_FORMAT "}", name, frames, cols, rows, elapsed, cpu);
+	    ",\"cpu_ns\":%" G_GINT64_FORMAT ",\"mode\":%u,\"cursor\":%u,\"focused\":%d,"
+	    "\"selection\":%d,\"fractional\":%d,\"styled\":%d}", name, frames, cols, rows, elapsed, cpu,
+	    page->mode, page->cursor, gtk_widget_has_focus(widget), style && style->selection,
+	    style && style->fractional, style != NULL);
 	g_free(path);
 	cairo_destroy(cr); cairo_surface_destroy(image);
 }
@@ -119,16 +159,36 @@ tabs_case(GModule *module, int count, const char *prefix, int frames,
 	g_assert_true(g_module_symbol(module, "tabs_new", (gpointer *)&create));
 	g_assert_true(g_module_symbol(module, "tabs_refresh", (gpointer *)&refresh));
 	App app = {.fd = -1, .cols = 80, .rows = 1};
+	gboolean export = g_getenv("WORMINAL_RENDER_FIXTURE") != NULL;
+	if (export) app.zoom = count % 2 ? 0 : 2;
 	Page *pages = g_new0(Page, count);
 	for (int i = 0; i < count; i++) {
 		pages[i].app = &app; pages[i].id = i + 1;
 		char *name = g_strdup_printf("project-%05d", i);
+		if (export) {
+			if (i == 2 || i % 4 == 1 || i % 4 == 3) {
+				g_free(name);
+				name = i == 2 ? g_strnfill(300, 'W') : g_strdup(i % 4 == 1 ? "local + 文🙂" : "document-λ");
+			}
+			if (i % 2) pages[i].url = "about:blank";
+		}
 		pages[i].label = gtk_label_new(name);
 		g_object_ref_sink(pages[i].label);
 		g_free(name);
 		app.pages = g_list_append(app.pages, &pages[i]);
 	}
 	app.active = &pages[count - 1];
+	if (export) {
+		WireBuffer data = {0};
+		wire_put_u32(&data, count); wire_put_u32(&data, app.active->id); wire_put_u32(&data, app.zoom);
+		for (int i = 0; i < count; i++) {
+			wire_put_u32(&data, pages[i].id); wire_put_u32(&data, pages[i].url != NULL);
+			wire_put_string(&data, gtk_label_get_text(GTK_LABEL(pages[i].label)));
+		}
+		char *path = g_strdup_printf("%s-tab_strip.wire", prefix);
+		g_assert_true(g_file_set_contents(path, (char *)data.data, data.len, NULL));
+		g_free(path); wire_buffer_free(&data);
+	}
 	for (size_t i = 0; i < G_N_ELEMENTS(app.active->colors); i++) palette(app.active, i, NULL);
 	app.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	app.tabstrip = create(&app);
@@ -195,10 +255,10 @@ resize_case(Terminal *terminal, GtkWidget *widget, int cols, int rows, const cha
 	for (int y = 0; y < 2 * rows; y++) wire_buffer_free(&lines[y]);
 	g_free(lines);
 	TermSession *view = current_session();
-	g_assert_cmpint(view->term.col, ==, widths[1]);
-	g_assert_cmpint(view->term.row, ==, rows);
-	int alternate_rows = view->term.alt ? rows : 0;
-	size_t cells = (size_t)(rows + alternate_rows + view->term.histlen) * widths[1] * sizeof(Glyph);
+	g_assert_cmpint(view->engine.term.col, ==, widths[1]);
+	g_assert_cmpint(view->engine.term.row, ==, rows);
+	int alternate_rows = view->engine.term.alt ? rows : 0;
+	size_t cells = (size_t)(rows + alternate_rows + view->engine.term.histlen) * widths[1] * sizeof(Glyph);
 	cairo_surface_t *image = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
 	    gtk_widget_get_allocated_width(widget), gtk_widget_get_allocated_height(widget));
 	cairo_t *cr = cairo_create(image);
@@ -207,7 +267,7 @@ resize_case(Terminal *terminal, GtkWidget *widget, int cols, int rows, const cha
 	g_assert_cmpint(cairo_surface_write_to_png(image, path), ==, CAIRO_STATUS_SUCCESS);
 	g_print("{\"case\":\"resize_import\",\"frames\":%d,\"cycles\":%d,\"cols\":%d,\"rows\":%d,\"wall_us\":%" G_GINT64_FORMAT
 	    ",\"cpu_ns\":%" G_GINT64_FORMAT ",\"local_history_rows\":%d,\"alternate_rows\":%d,\"glyph_storage_bytes\":%zu}",
-	    2 * frames, frames, widths[1], rows, wall, cpu, view->term.histlen, alternate_rows, cells);
+	    2 * frames, frames, widths[1], rows, wall, cpu, view->engine.term.histlen, alternate_rows, cells);
 	g_free(path); cairo_destroy(cr); cairo_surface_destroy(image);
 }
 
@@ -260,13 +320,26 @@ main(int argc, char **argv)
 	g_print("[");
 	if (argc == 5) resize_case(page.terminal, page.widget, cols, rows, argv[2], frames);
 	else {
-		paint_case(page.terminal, page.widget, cols, rows, FALSE, FALSE, argv[2], frames);
+		paint_case(page.terminal, page.widget, cols, rows, FALSE, FALSE, argv[2], frames, &page, NULL);
 		g_print(",");
-		paint_case(page.terminal, page.widget, cols, rows, TRUE, FALSE, argv[2], frames);
+		paint_case(page.terminal, page.widget, cols, rows, TRUE, FALSE, argv[2], frames, &page, NULL);
 		g_print(",");
-		paint_case(page.terminal, page.widget, cols, rows, 2, FALSE, argv[2], frames);
+		paint_case(page.terminal, page.widget, cols, rows, 2, FALSE, argv[2], frames, &page, NULL);
 		g_print(",");
-		paint_case(page.terminal, page.widget, cols, rows, FALSE, TRUE, argv[2], frames);
+		paint_case(page.terminal, page.widget, cols, rows, FALSE, TRUE, argv[2], frames, &page, NULL);
+		if (getenv("WORMINAL_RENDER_STYLES")) {
+			for (uint32_t cursor = 0; cursor <= 7; cursor++) {
+				char name[32];
+				g_snprintf(name, sizeof(name), "cursor_%u", cursor);
+				PaintStyle style = {.name = name, .cursor = cursor, .selection = cursor == 2};
+				g_print(",");
+				paint_case(page.terminal, page.widget, cols, rows, 2, FALSE, argv[2], frames, &page, &style);
+			}
+			PaintStyle style = {.name = "fractional_styles", .mode = MODE_REVERSE, .cursor = 4,
+			                    .selection = TRUE, .fractional = TRUE};
+			g_print(",");
+			paint_case(page.terminal, page.widget, cols, rows, 2, FALSE, argv[2], frames, &page, &style);
+		}
 	}
 	/* Let the parent sample memory while the shaped layouts are still alive. */
 	await_sample();

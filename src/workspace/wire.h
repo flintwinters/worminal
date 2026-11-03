@@ -4,6 +4,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "service_policy.h"
 
 #ifdef WORMINAL_PREVIEW_PROTOCOL
 #define WIRE_VERSION 2
@@ -16,8 +17,13 @@
 #define WORKSPACE_DAEMON "worminald"
 #endif
 #define WIRE_MAX_BYTES (8u * 1024u * 1024u)
+#define WORKSPACE_MAX_COLS 400u
+#define WORKSPACE_MAX_ROWS 200u
+#define WORKSPACE_MAX_ARGS 1024u
+#define WORKSPACE_MAX_ENV 8192u
+#define WORKSPACE_INITIAL_CURSOR 2u
 /* Rune, attributes, foreground, background: independent of native Glyph padding. */
-#define WIRE_CELL_BYTES (4u * sizeof(uint32_t))
+enum { WIRE_CELL_BYTES = 4u * sizeof(uint32_t) };
 
 enum wire_type {
 	WIRE_HELLO = 1,
@@ -49,13 +55,19 @@ enum wire_type {
 	WIRE_HANDOFF,
 	WIRE_CAPABILITIES,
 	WIRE_COPY_ROWS,
-	WIRE_SELECT_ALL, /* Request: generation, start/next/cancel; reply: generation, done, UTF-8 bytes. */
+	WIRE_SERVICE_INFO,
+	WIRE_SELECT_ALL, /* generation, start/next/cancel; reply: generation, done, UTF-8 bytes. */
 };
 
 /* Advertise before HELLO/ATTACH. Older daemons ignore the optional packet;
  * unadvertised clients must continue receiving the original row encoding. */
-enum { WIRE_FEATURE_COPY_ROWS = 1u << 0, WIRE_FEATURE_SELECT_ALL = 1u << 1 };
-enum { WIRE_SELECTION_START, WIRE_SELECTION_NEXT, WIRE_SELECTION_CANCEL };
+enum wire_feature {
+	WIRE_FEATURE_COPY_ROWS = 1u << 0,
+	/* Bit 1 advertised the pre-Rust select-all packet at SERVICE_INFO's current ID.
+	 * Keep it reserved so those installed peers cannot negotiate the wrong message. */
+	WIRE_FEATURE_SELECT_ALL = 1u << 2
+};
+enum wire_selection { WIRE_SELECTION_START, WIRE_SELECTION_NEXT, WIRE_SELECTION_CANCEL };
 
 typedef struct {
 	unsigned char *data;

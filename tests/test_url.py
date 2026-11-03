@@ -1,4 +1,6 @@
 """Hover and open visible shell URLs through the local X11 window."""
+from runtime import runtime_binary
+
 
 import hashlib
 import os
@@ -31,7 +33,7 @@ class UrlClickTest(unittest.TestCase):
                 env = {**env, "PATH": f"{ROOT / 'build'}:{env['PATH']}",
                        "WORMINAL_URL_OPENED": str(opened)}
                 terminal = subprocess.Popen(
-                    [str(ROOT / "worminal-x11"), "-g", "40x10", "-T", "URL click test",
+                    [str(runtime_binary("worminal-x11")), "-g", "40x10", "-T", "URL click test",
                      "-e", "/bin/sh", "-c",
                      "printf '\\033[?25lhttps://example.org/from-ssh\\n'; "
                      f"while [ ! -e '{gate}' ]; do sleep .05; done; "

@@ -2,6 +2,7 @@
 #ifndef WORMINAL_ST_H
 #define WORMINAL_ST_H
 #include <stddef.h>
+#include "engine.h"
 
 #include <stdint.h>
 #include <sys/select.h>
@@ -29,40 +30,8 @@
 #define WORMINAL_THEME_HEADER "build/theme.h"
 #endif
 
-#define TRUECOLOR(r,g,b)	(1 << 24 | (r) << 16 | (g) << 8 | (b))
-#define IS_TRUECOL(x)		(1 << 24 & (x))
-
-enum glyph_attribute {
-	ATTR_NULL       = 0,
-	ATTR_BOLD       = 1 << 0,
-	ATTR_FAINT      = 1 << 1,
-	ATTR_ITALIC     = 1 << 2,
-	ATTR_UNDERLINE  = 1 << 3,
-	ATTR_BLINK      = 1 << 4,
-	ATTR_REVERSE    = 1 << 5,
-	ATTR_INVISIBLE  = 1 << 6,
-	ATTR_STRUCK     = 1 << 7,
-	ATTR_WRAP       = 1 << 8,
-	ATTR_WIDE       = 1 << 9,
-	ATTR_WDUMMY     = 1 << 10,
-	ATTR_BOLD_FAINT = ATTR_BOLD | ATTR_FAINT,
-};
-
-enum selection_mode {
-	SEL_IDLE = 0,
-	SEL_EMPTY = 1,
-	SEL_READY = 2
-};
-
-enum selection_type {
-	SEL_REGULAR = 1,
-	SEL_RECTANGULAR = 2
-};
-
-enum selection_snap {
-	SNAP_WORD = 1,
-	SNAP_LINE = 2
-};
+#define TRUECOLOR(r,g,b)	(WORMINAL_TRUECOLOR_FLAG | (r) << 16 | (g) << 8 | (b))
+#define IS_TRUECOL(x)		(WORMINAL_TRUECOLOR_FLAG & (x))
 
 typedef unsigned char uchar;
 typedef unsigned int uint;
@@ -110,6 +79,9 @@ void kscrollup(const Arg *);
 void kscrolldown(const Arg *);
 int tisaltscr(void);
 
+void tlegacyprint(char *, size_t);
+void tlegacyraw(const char *, size_t);
+void tlegacyinput(const char *, size_t, int);
 void printscreen(const Arg *);
 void printsel(const Arg *);
 void sendbreak(const Arg *);
@@ -139,7 +111,6 @@ void selstart(int, int, int);
 void selextend(int, int, int, int);
 int selected(int, int);
 char *getsel(void);
-char *getall(void);
 
 size_t utf8encode(Rune, char *);
 
@@ -147,7 +118,7 @@ void *xmalloc(size_t);
 void *xrealloc(void *, size_t);
 char *xstrdup(const char *);
 
-/* config.h globals */
+/* Terminal settings. */
 extern char *utmp;
 extern char *scroll;
 extern char *stty_args;

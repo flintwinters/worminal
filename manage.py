@@ -8,15 +8,19 @@ from pathlib import Path
 import subprocess
 import sys
 
+sys.dont_write_bytecode = True
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+
 try:
     import typer
 except ModuleNotFoundError as error:
     raise SystemExit("Install Typer to use manage.py: python3 -m pip install typer") from error
 
+from tools.paths import CHECKS, runtime_binary
 from tools import build as native_build
 from tools.theme import explorer_font
 from tools.icon import generate_icon
-from tools.privacy import DEFAULT_EMAIL, DEFAULT_NAME, check_privacy
+from tools.privacy import check_privacy
 from tools.git_index import tracked_files
 
 
@@ -26,10 +30,10 @@ proof_app = typer.Typer(help="Run proofs on private Xvfb displays.")
 app.add_typer(proof_app, name="proof")
 MAX_FILE_LINES = 1000
 MAX_LINE_LENGTH = 120
-NATIVE_CHECKS = ("build/scrollback_test", "build/url_test", "build/frame_schedule_test")
+NATIVE_CHECKS = ("build/url_test", "build/frame_schedule_test",
+                 "build/workspace_client_test")
 # These merged files exceed the limit; prevent further growth until they are split.
-LEGACY_FILE_LINES = {"src/terminal/st.c": 3225, "src/x11/x.c": 3417,
-                     "tests/test_native.py": 1333}
+LEGACY_FILE_LINES = {"tests/test_native.py": 1333}
 
 
 # Checks own private virtual displays; none may draw on or inject into the developer's desktop.
@@ -39,19 +43,28 @@ DESKTOP_VARIABLES = ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY")
 @app.callback()
 def root():
     os.chdir(ROOT)
+    (CHECKS).mkdir(parents=True, exist_ok=True)
     for name in DESKTOP_VARIABLES:
         os.environ.pop(name, None)
 
 
 def run(args, *, env=None):
-    return subprocess.run(args, env=env).returncode
+    # Maintenance checks must never read or overwrite the user's recovery recipes.
+    private_env = {**(os.environ if env is None else env),
+                   "XDG_STATE_HOME": str(CHECKS / "state")}
+    return subprocess.run(args, env=private_env).returncode
 
 
 def check_file_limits():
     index = subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=ROOT)
     problems = []
     for name in tracked_files(index):
+        # Dependency lockfiles are generated data; their size follows the resolved graph, not source complexity.
+        if name == "Cargo.lock":
+            continue
         path = ROOT / name
+        if not path.is_file() or path.is_symlink():
+            continue  # Skip deleted files and temporary links created by tests.
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
         except UnicodeDecodeError:
@@ -77,14 +90,22 @@ def run_checks(match=None):
         "worminal-x11", "worminald-x11", "worminald-preview", "build/key_injector",
         "build/placement_wm", "build/compact-worminal",
         "build/overlap_probe",
-        "build/border_probe", "build/icon_probe", "build/view_state_test", *NATIVE_CHECKS,
+        "build/border_probe", "build/icon_probe", "build/view_state_test",
+        "build/frontend.so", "build/browser.so", "build/browser_generations_test", "build/incompatible_browser.so",
+        "build/unresolved_browser.so", *NATIVE_CHECKS,
     )
     code = run_native_checks()
     if code:
         return code
     code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-q",
                 *(["-k", match] if match else [])])
-    return code or (0 if match else preview_checks("x11"))
+    if code or match:
+        return code
+    code = preview_checks("x11")
+    if not code:
+        native_build.build_targets("worminal-rust", "build/worminald-c-v2", "build/gui-peer.so")
+        code = run([sys.executable, "tests/rust_app.py"])
+    return code or run([sys.executable, "tests/rust_browser.py"])
 
 
 def run_native_checks():
@@ -92,16 +113,20 @@ def run_native_checks():
         code = run([binary], env={**os.environ, "ASAN_OPTIONS": "detect_leaks=0"})
         if code:
             return code
-    return 0
+    from tools.engine_checks import check
+    code = check()
+    return code or run_rust_workspace_checks() or run_rust_process_checks() or run_rust_frontend_tests()
 
 
 def run_headless_checks():
-    native_build.build_targets(*NATIVE_CHECKS, "worminald-x11", "worminald-preview")
+    native_build.build_targets(*NATIVE_CHECKS, "worminald-x11", "worminald-preview",
+                               "build/frontend.so", "build/browser.so")
     code = run_native_checks()
     if code:
         return code
-    patterns = ("test_build.py", "test_perf_metrics.py", "test_cli.py", "test_workspace.py",
-                "test_preview_workspace.py", "test_theme.py", "test_privacy.py", "test_handoff.py")
+    patterns = ("test_build.py", "test_reference.py", "test_perf_metrics.py", "test_cli.py", "test_workspace.py",
+                "test_preview_workspace.py", "test_theme.py", "test_privacy.py", "test_handoff.py",
+                "test_restore.py", "test_upgrade.py")
     for pattern in patterns:
         code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                     "-p", pattern, "-q"])
@@ -120,20 +145,171 @@ def build():
     native_build.build_targets()
 
 
+@app.command("check-rust-platform")
+def check_rust_platform():
+    """Build locked Rust bindings and exercise GTK/WebKit on private Xvfb."""
+    native_build.invoke(["cargo", "build", "--locked", "-p", "worminal-platform"])
+    raise typer.Exit(run([sys.executable, "tests/rust_platform.py"]))
+
+
+@app.command("check-engine")
+def check_engine():
+    """Check parser equivalence, sanitized engine boundaries, and the Rust owning wrapper."""
+    from tools.engine_checks import check
+    raise typer.Exit(check())
+
+
+def run_rust_workspace_checks():
+    builder = native_build.Builder()
+    for target in ("build/wire_reference", "build/recovery_reference", "build/browser_target_reference"):
+        builder.target(target)
+    return run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-protocol", "-p", "worminal-workspace"])
+
+
+@app.command("check-rust-workspace")
+def check_rust_workspace():
+    """Check Rust framing, launch requests, recovery recipes and local transport against C."""
+    raise typer.Exit(run_rust_workspace_checks())
+
+
+@app.command("check-rust-process")
+def check_rust_process():
+    """Check headless Rust PTYs, child identities and real zsh restoration on project-local fixtures."""
+    raise typer.Exit(run_rust_process_checks())
+
+
+def run_rust_process_checks():
+    native_build.generate_theme()
+    native_build.Builder().target("build/libworminal_engine.a")
+    return run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-daemon"])
+
+
+def build_rust_daemon():
+    native_build.generate_theme()
+    return native_build.Builder().rust_artifact("worminal-daemon")
+
+
+def run_rust_frontend_tests():
+    return run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-frontend", "--lib", "--tests"])
+
+
+@app.command("check-rust-frontend")
+def check_rust_frontend():
+    """Check imported Rust viewports and exact C/Rust painter pixels on private X11 and native Wayland."""
+    native_build.build_targets("build/render_probe")
+    code = run_rust_frontend_tests()
+    if not code:
+        native_build.invoke(["cargo", "build", "--locked", "--release", "--quiet", "-p", "worminal-frontend",
+                             "--bin", "worminal-render-check"])
+        code = run([sys.executable, "tests/rust_frontend.py"])
+    raise typer.Exit(code)
+
+
+@app.command("build-rust-app")
+def build_rust_app():
+    """Build the native Rust terminal/browser application with its lazy frontend and browser modules."""
+    native_build.build_targets("worminal-rust")
+    typer.echo("Built build/bin/worminal-rust; native terminal/SSH/browser. Installation unchanged.")
+
+
+@app.command("check-rust-app")
+def check_rust_app():
+    """Check the actual Rust app: private shell input, clipboard, tabs and surviving-session reattachment."""
+    native_build.build_targets("worminal-rust", "build/worminald-c-v2", "build/gui-peer.so")
+    raise typer.Exit(run([sys.executable, "tests/rust_app.py"]))
+
+
+@app.command("check-rust-browser")
+def check_rust_browser():
+    """Check real Rust browser views, lazy loading, owner forwarding and local-document security privately."""
+    native_build.build_targets("worminal-rust")
+    raise typer.Exit(run([sys.executable, "tests/rust_browser.py"]))
+
+
+@app.command("build-rust-daemon")
+def build_rust_daemon_command():
+    """Build the Rust service artifact without publishing or replacing installed daemons."""
+    typer.echo(build_rust_daemon())
+
+
+@app.command("check-rust-daemon")
+def check_rust_daemon():
+    """Check the Rust service with existing C v2 clients, ownership, output and recovery fixtures."""
+    native_build.build_targets("worminald-preview")
+    candidate = build_rust_daemon()
+    code = run_rust_process_checks()
+    for pattern in ("test_preview_workspace.py", "test_restore.py", "test_workspace.py"):
+        if code:
+            break
+        code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", pattern, "-q"],
+                   env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate),
+                        "WORMINAL_TEST_RUST_DAEMON": "1", "WORMINAL_TEST_WORKSPACE_DAEMON": str(candidate),
+                        "WORMINAL_TEST_BRIDGE_VERSION": "2"})
+    raise typer.Exit(code)
+
+
+@app.command("check-rust-daemon-wayland")
+def check_rust_daemon_wayland():
+    """Exercise the C GTK/WebKit frontend against the Rust candidate on private native Wayland."""
+    native_build.build_targets("build/preview_test")
+    candidate = build_rust_daemon()
+    raise typer.Exit(run([sys.executable, "tests/preview.py", "wayland"],
+                        env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate)}))
+
+
+@app.command("check-rust-daemon-x11")
+def check_rust_daemon_x11():
+    """Exercise GTK/WebKit, SSH and live browser DOM through Rust upgrades and C reverse rollback on private Xvfb."""
+    native_build.build_targets("build/preview_test", "build/worminald-c-v2")
+    candidate = build_rust_daemon()
+    raise typer.Exit(run([sys.executable, "tests/preview.py", "x11"],
+                        env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate),
+                             "WORMINAL_TEST_UPGRADE_PEER": str(ROOT / "build/worminald-c-v2")}))
+
+
+@app.command("check-rust-handoff")
+def check_rust_handoff():
+    """Test shell transfers between Rust and old C daemons built from Git."""
+    native_build.build_targets("worminald-x11", "worminald-preview", "build/worminald-c-v2")
+    candidate = build_rust_daemon()
+    code = run_rust_process_checks() or run_rust_workspace_checks()
+    if not code:
+        code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                    "-p", "test_handoff.py", "-q"],
+                   env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate),
+                        "WORMINAL_TEST_RUST_DAEMON": "1",
+                        "WORMINAL_TEST_HANDOFF_BASELINE": str(ROOT / "build/worminald-c-v2")})
+    raise typer.Exit(code)
+
+
+@app.command("check-rust-upgrade")
+def check_rust_upgrade():
+    """Upgrade and reverse-transfer private Rust/C daemons, including legacy bootstrap and failed replacements."""
+    native_build.build_targets("worminald-x11", "worminald-preview", "build/worminald-c-v2")
+    candidate = build_rust_daemon()
+    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                         "-p", "test_upgrade.py", "-q"],
+                        env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate),
+                             "WORMINAL_TEST_UPGRADE_PEER": str(ROOT / "build/worminald-c-v2"),
+                             "WORMINAL_TEST_RUST_DAEMON": "1",
+                             "WORMINAL_TEST_HANDOFF_BASELINE": str(ROOT / "build/worminald-c-v2")}))
+
+
+@app.command("inventory")
+def inventory():
+    """Record installed hashes, live owners, windows and PTYs without copies or process changes."""
+    from tools.migration import inventory
+    inventory()
+
+
 @app.command("build-preview")
 def build_preview():
     """Build compatibility names for the GTK frontend and v2 service."""
     native_build.build_targets("worminal-preview", "worminald-preview")
 
 
-@app.command("build-x11")
-def build_x11():
-    """Build release binaries and the original X11 rollback pair."""
-    native_build.build_targets("worminal-x11", "worminald-x11")
-
-
 def preview_checks(backend):
-    native_build.build_targets("worminal-preview", "worminald-preview", "build/preview_test")
+    native_build.build_targets("worminal-preview", "worminald-preview", "build/preview_test", "build/worminal-gtk-c")
     return run([sys.executable, "tests/preview.py", backend])
 
 
@@ -141,6 +317,15 @@ def preview_checks(backend):
 def media_fixtures():
     """Regenerate silent browser media fixtures (requires ffmpeg)."""
     raise typer.Exit(run_proof_script("tests/media_fixtures.py"))
+
+
+@app.command("check-browser-generations")
+def check_browser_generations():
+    """Verify updated browser code and preserved old live page state on private GTK/WebKit views."""
+    native_build.build_targets("build/browser.so", "build/browser_generations_test",
+                               "build/incompatible_browser.so", "build/unresolved_browser.so")
+    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                         "-p", "test_browser_generations.py", "-q"]))
 
 
 @app.command("check-preview")
@@ -151,21 +336,21 @@ def check_preview():
 
 @app.command("setup-preview-wayland")
 def setup_preview_wayland():
-    """Download/extract an optional Debian Weston runtime under .checks; no system installation."""
+    """Download/extract an optional Debian Weston runtime under build/checks; no system installation."""
     from tools.weston import setup
     setup()
 
 
 @app.command("prove-preview-regressions")
-def prove_preview_regressions():
-    """Compile project-local counterfactuals and require critical regression tests to fail."""
+def prove_preview_regressions(match: str = typer.Option(None, help="Only run matching regression proofs.")):
+    """Rebuild with fixes removed and check that the tests fail."""
     from tools.regressions import prove
-    prove()
+    prove(match)
 
 
 @app.command("preview-perf")
 def preview_perf():
-    """Compare original and preview launch, shell/input latency, and helper-inclusive memory."""
+    """Compare launch time, input delay and memory use against the old C app."""
     native_build.build_targets("worminal-preview", "worminal-x11", "worminald-x11",
                                "worminald-preview", "build/key_injector")
     raise typer.Exit(run([sys.executable, "tests/frontend_perf.py"]))
@@ -200,34 +385,54 @@ def check(match: str = typer.Option(None, help="Run matching Python checks; full
 @app.command("check-privacy")
 def privacy(history: bool = typer.Option(False, "--history", help="Also scan reachable Git history."),
             staged: bool = typer.Option(False, "--staged", help="Scan index content instead of working files."),
-            identities: bool = typer.Option(False, "--identities", help="Require approved commit identities."),
             message_file: Path = typer.Option(None, "--message-file", help="Also scan a commit message."),
             repository: Path = typer.Option(ROOT, "--repository", help="Repository or initialized submodule to scan.")):
     """Scan tracked content for common private data; redact matched values."""
     repository = repository.resolve()
     message_file = message_file.resolve() if message_file else None
     with chdir(repository):
-        raise typer.Exit(int(check_privacy(repository, history, staged, identities, message_file)))
+        raise typer.Exit(int(check_privacy(repository, history, staged, message_file)))
+
+
+@app.command("check-privacy-tests")
+def check_privacy_tests():
+    """Check privacy scanning and identity-preserving hook setup."""
+    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                         "-p", "test_privacy.py", "-q"]))
 
 
 @app.command("privacy-setup")
 def privacy_setup():
-    """Install tracked privacy hooks and set the approved repository-local identity."""
-    for name, value in (("core.hooksPath", ".githooks"), ("user.name", DEFAULT_NAME),
-                        ("user.email", DEFAULT_EMAIL)):
-        code = run(["git", "config", "--local", name, value])
-        if code:
-            raise typer.Exit(code)
-    typer.echo("Privacy hooks and approved identity installed for this checkout.")
+    """Install tracked privacy hooks without changing the configured Git identity."""
+    code = run(["git", "config", "--local", "core.hooksPath", "tools/hooks"])
+    if code:
+        raise typer.Exit(code)
+    typer.echo("Privacy hooks installed; configured Git identity preserved.")
 
 
 @app.command("check-keys")
-def check_keys(legacy: bool = typer.Option(False, "--legacy", help="Check the rollback X11 frontend.")):
+def check_keys(legacy: bool = typer.Option(False, "--legacy", help="Test the old X11 app built from Git.")):
     """Check keys, mouse input, and clipboard bytes on private Xvfb displays."""
     native_build.build_targets(*(("worminal-x11", "worminald-x11") if legacy else ()))
     raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                           "-p", "test_keys.py", "-q"],
                           env={**os.environ, "WORMINAL_FRONTEND": "worminal-x11" if legacy else "worminal"}))
+
+
+@app.command("check-upgrade")
+def check_upgrade():
+    """Verify automatic replacements, rollback, legacy bootstrap, and live tab identities privately."""
+    native_build.build_targets("worminald-x11", "worminald-preview")
+    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                         "-p", "test_upgrade.py", "-q"]))
+
+
+@app.command("upgrade-daemon")
+def upgrade_daemon(executable: Path = typer.Option(
+        Path("/usr/local/bin/worminald"), exists=True, dir_okay=False, help="Installed release daemon.")):
+    """Activate the installed v2 daemon while preserving a pre-automatic daemon's live tabs."""
+    from tools.daemon_upgrade import upgrade
+    upgrade(executable)
 
 
 @app.command("check-handoff")
@@ -243,6 +448,14 @@ def check_handoff(baseline: Path = typer.Option(
         code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                     "-p", "test_handoff.py", "-q"], env=env)
     raise typer.Exit(code)
+
+
+@app.command("check-restore")
+def check_restore():
+    """Check tab/directory recovery across daemon shutdowns and crashes, including real zsh startup."""
+    native_build.build_targets("worminald-x11", "worminald-preview")
+    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                         "-p", "test_restore.py", "-q"]))
 
 
 @app.command("check-headless")
@@ -264,12 +477,32 @@ def check_bridge():
             raise typer.Exit(code)
 
 
+@app.command("check-master-startup")
+def check_master_startup(
+    executable: Path = typer.Option(None, help="Executable to check; defaults to project build."),
+    master: str = typer.Option(None, help="Use real SSH with a private remote workspace."),
+):
+    """Check native --master startup and input on private Xvfb, using an isolated workspace."""
+    native_build.build_targets()
+    native_build.build_targets("build/workspace_client_test")
+    code = run(["build/workspace_client_test"])
+    if code:
+        raise typer.Exit(code)
+    env = dict(os.environ)
+    if executable:
+        env["WORMINAL_TEST_EXECUTABLE"] = str(executable.resolve())
+    if master:
+        env["WORMINAL_TEST_REAL_MASTER"] = master
+    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                         "-p", "test_master_startup.py", "-q"], env=env))
+
+
 @app.command("check-network")
 def check_network(daemon: Path = typer.Option(None, help="Compatible v2 daemon binary to check a baseline.")):
     """Check redundant catalogs/rows, stationary scrolling, and complete-frame flushing."""
     if daemon is None:
         native_build.build_targets("worminald-preview")
-        daemon = ROOT / "worminald-preview"
+        daemon = runtime_binary("worminald-preview")
     raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                          "-p", "test_preview_workspace.py", "-k", "redundant_catalog",
                          "-k", "frame_transport", "-k", "redraw_rows", "-k", "scroll_at_boundary",
@@ -294,6 +527,13 @@ def check_window_activation():
                          "-p", "test_window_activation.py", "-v"]))
 
 
+@app.command("setup-window-activation")
+def setup_window_activation():
+    """Prepare a project-local Muffin runtime for private activation checks, without system installation."""
+    from tools.muffin import setup
+    setup()
+
+
 @app.command()
 def lint():
     """Check file limits and run Clang static analysis (requires clang-tidy)."""
@@ -309,9 +549,18 @@ def clean():
 
 @app.command("check-build")
 def check_build():
-    """Check build freshness, installation, and cleanup without building the app."""
-    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
-                          "-p", "test_build.py", "-q"]))
+    """Check build freshness, historical fixtures, installation, and cleanup without building the app."""
+    for pattern in ("test_build.py", "test_reference.py"):
+        code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", pattern, "-q"])
+        if code:
+            raise typer.Exit(code)
+
+
+@app.command("check-install")
+def check_install(installed: bool = typer.Option(False, help='Verify published /usr/local artifacts without writing.')):
+    """Stage /usr/local privately; verify hashes, native SSH input, browser and loaded module paths."""
+    native_build.build_targets()
+    raise typer.Exit(run([sys.executable, "tests/installation.py", *(['--installed'] if installed else [])]))
 
 
 def explorer_command(command):
@@ -485,9 +734,9 @@ def frame_perf(compare: Path = typer.Option(None, help="Saved latency-visible ba
     code = run(["build/frame_schedule_test"])
     if code:
         raise typer.Exit(code)
-    variants = [("candidate", ROOT / "worminald-preview")]
+    variants = [("candidate", runtime_binary("worminald-preview"))]
     if compare:
-        daemon = compare.resolve() / "worminald"
+        daemon = runtime_binary("worminald", prefix=compare.resolve())
         if not daemon.is_file():
             raise typer.BadParameter("Comparison directory must contain worminald")
         variants.insert(0, ("baseline", daemon))
@@ -525,15 +774,6 @@ def window_perf():
     """Measure isolated tab repaint on the current X11 display (needs python-xlib)."""
     native_build.build_targets("worminal-x11", "worminald-x11")
     raise typer.Exit(run([sys.executable, "tests/window_perf.py"]))
-
-
-@app.command("run")
-def run_window():
-    """Run the already-built Worminal binary."""
-    if not (ROOT / "worminal").is_file():
-        typer.echo("Build Worminal first with: python3 manage.py build", err=True)
-        raise typer.Exit(1)
-    os.execv("./worminal", ["./worminal"])
 
 
 @proof_app.callback(invoke_without_command=True)

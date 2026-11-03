@@ -24,14 +24,14 @@ check_browser_media(App *app)
 		expect_script(b, "String(!!document.querySelector('audio,video'))", "true");
 		expect_script(b, "const media=document.querySelector('audio,video'); media.pause(); media.muted=false;"
 		    "media.tabIndex=0; media.focus(); String(media.controls)", "true");
-		gtk_window_present(GTK_WINDOW(app->window));
+		present_test_window(app->window);
 		WAIT(gtk_window_is_active(GTK_WINDOW(app->window)));
 		gtk_widget_grab_focus(browser_view(b));
 		media_image = NULL;
 		webkit_web_view_get_snapshot(b->view, WEBKIT_SNAPSHOT_REGION_VISIBLE, WEBKIT_SNAPSHOT_OPTIONS_NONE,
 		    NULL, media_snapshot, NULL);
 		WAIT(media_image);
-		cairo_surface_write_to_png(media_image, ".checks/media-player.png");
+		cairo_surface_write_to_png(media_image, "build/checks/media-player.png");
 		cairo_surface_destroy(media_image);
 		/* GTK WebKit's audio Play follows its 15-second-back button. Video accepts
 		 * the central play overlay; geometry is in CSS pixels before page zoom. */

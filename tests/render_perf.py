@@ -1,4 +1,6 @@
 """Compare actual release terminal rendering, pixels, CPU, and memory on private displays."""
+from runtime import CHECKS
+
 
 import argparse
 from contextlib import ExitStack
@@ -24,7 +26,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def sample(module, label, frames, backend, log, resize=False, tabs=0):
     context = isolated_display if backend == "x11" else wayland_display
-    prefix = ROOT / f".checks/render-{label}"
+    prefix = ROOT / f"build/checks/render-{label}"
     with context() as env:
         env.update(GDK_BACKEND=backend)
         process = subprocess.Popen([str(ROOT / "build/render_probe"), str(module), str(prefix), str(frames),
@@ -66,8 +68,8 @@ def main():
         modules["baseline"] = args.compare.resolve() / "build/frontend.so"
         if not modules["baseline"].is_file():
             parser.error("--compare must name a latency-visible snapshot")
-    checks = ROOT / ".checks"
-    checks.mkdir(exist_ok=True)
+    checks = CHECKS
+    checks.mkdir(parents=True, exist_ok=True)
     measurements = {label: [] for label in modules}
     resources = {label: [] for label in modules}
     expected = {}

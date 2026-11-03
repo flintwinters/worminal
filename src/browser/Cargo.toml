@@ -1,0 +1,17 @@
+[package]
+name = "worminal-browser"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+worminal-browser-api = { path = "../browser-api" }
+worminal-workspace = { path = "../workspace" }
+gtk.workspace = true
+glib.workspace = true
+webkit2gtk.workspace = true
+libc.workspace = true
+soup3 = "0.5"

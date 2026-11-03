@@ -1,4 +1,8 @@
 """Real Codex typing through the actual GTK viewer, observed on private Xvfb pixels."""
+from runtime import CHECKS
+
+from runtime import runtime_binary
+
 
 import json
 import os
@@ -17,7 +21,7 @@ from visible_latency import capture_failure, find_window, image_bytes, stop, wai
 from x11 import isolated_display
 
 ROOT = Path(__file__).resolve().parent.parent
-CHECKS = ROOT / '.checks'
+CHECKS = CHECKS
 WORD = 'mwxyzabc'
 
 
@@ -142,7 +146,7 @@ def measure(host, remote, viewer):
 
 def main():
     CHECKS.mkdir(exist_ok=True)
-    viewer = Path(os.environ.get('WORMINAL_CODEX_VIEWER', str(ROOT / 'worminal')))
+    viewer = Path(os.environ.get('WORMINAL_CODEX_VIEWER', str(runtime_binary("worminal"))))
     results = {}
     for remote in (False, True):
         results['master' if remote else 'ordinary-ssh'] = measure(sys.argv[1], remote, viewer)

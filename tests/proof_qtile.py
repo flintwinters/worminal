@@ -1,4 +1,6 @@
 """Check zoom alignment under Qtile on a private Xvfb display."""
+from runtime import CHECKS
+
 
 from pathlib import Path
 import subprocess
@@ -13,8 +15,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def main():
     with isolated_display() as env:
-        log_path = ROOT / ".checks" / "qtile-proof.log"
-        socket_path = ROOT / ".checks" / "qtile-proof.sock"
+        log_path = CHECKS / "qtile-proof.log"
+        socket_path = CHECKS / "qtile-proof.sock"
         with log_path.open("wb") as log:
             manager = subprocess.Popen(
                 ["qtile", "start", "--backend", "x11", "--no-spawn",

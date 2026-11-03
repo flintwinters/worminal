@@ -1,4 +1,6 @@
 """Check Alt-dragging above the screen under Muffin on a private Xvfb display."""
+from runtime import runtime_binary
+
 
 from pathlib import Path
 import os
@@ -30,7 +32,7 @@ def geometry(env, window):
 def check_drag(env, undecorated, control=False, frontend="worminal"):
     title = "Offscreen move proof"
     args = (["xmessage", "-geometry", "640x320", "-title", title, "Control window"] if control else
-            [str(ROOT / frontend), "-T", title, "-e", "/bin/cat"])
+            [str(runtime_binary(frontend)), "-T", title, "-e", "/bin/cat"])
     terminal = subprocess.Popen(args, env=env)
     try:
         window = command(env, "xdotool", "search", "--sync", "--onlyvisible", "--name", f"^{title}$")

@@ -1,17 +1,38 @@
 """Alacritty import and palette compilation checks."""
 
 from pathlib import Path
+import json
 import os
+import re
 import unittest
 from unittest.mock import patch
 
-from tools.theme import explorer_font, find_config, font_height, read_config, theme_header
+from tools.theme import explorer_font, find_config, font_height, read_config, render_header, render_rust, theme_header
+from tools.theme import theme_values
 
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "alacritty"
 
 
 class ThemeTest(unittest.TestCase):
+    def test_c_and_rust_share_all_palette_and_font_inputs(self):
+        settings, palette = theme_values({"font": {"normal": {"family": 'Aé "Font" \\ family'}, "size": 13.5,
+                                                  "offset": {"y": -3}}})
+        c_header, rust = render_header(settings, palette), render_rust(settings, palette)
+        indexed = {int(index): json.loads(value) for index, value in re.findall(r'\[(\d+)\] = ("[^"]+")', c_header)}
+        c_colors = [indexed.get(index) for index in range(max(indexed) + 1)]
+        rust_colors = []
+        for line in rust.splitlines():
+            if line.startswith("    "):
+                literal = line.strip().removesuffix(",")
+                rust_colors.append(None if literal == "None" else json.loads(literal[5:-1]))
+        self.assertEqual(c_colors, rust_colors)
+        self.assertEqual(len(c_colors), 270)
+        self.assertIn('FONT_OFFSET_Y: i32 = -3;', rust)
+        self.assertIn('FONT_SIZE: f64 = 13.5;', rust)
+        font = re.search(r'FONT_FAMILY: Option<&str> = Some\((.*)\);', rust)[1]
+        self.assertEqual(json.loads(font), settings["font_family"])
+
     def test_explorer_line_height_uses_terminal_metrics_and_offset(self):
         config = {"font": {"normal": {"family": "monospace"}, "size": 14,
                            "offset": {"y": -7}}}
@@ -24,6 +45,12 @@ class ThemeTest(unittest.TestCase):
             config["font"]["offset"]["y"] = -100
             self.assertEqual(explorer_font()["lineHeight"], 1)
         self.assertGreater(font_height("monospace", 14), 14)
+
+    def test_explorer_font_without_configuration_needs_no_removed_c_source(self):
+        with patch("tools.theme.find_config", return_value=None), \
+                patch("tools.theme.font_height", return_value=6) as metrics:
+            self.assertEqual(explorer_font(), {"family": "sans", "size": 4, "lineHeight": 6})
+            metrics.assert_called_once_with("sans", 4)
 
     def test_default_alacritty_palette(self):
         header = theme_header({})

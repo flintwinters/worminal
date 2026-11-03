@@ -1,26 +1,12 @@
 /* Shared real-WebKit script assertions and embedded filesystem regressions. */
 static GtkWidget *dialog_of_type(GType type);
 
-static char *script_result;
-static gboolean script_done;
-static void
-script_finished(GObject *source, GAsyncResult *result, gpointer data)
-{
-	GError *error = NULL;
-	JSCValue *value = webkit_web_view_evaluate_javascript_finish(WEBKIT_WEB_VIEW(source), result, &error);
-	if (error) g_error("JavaScript %s: %s", (const char *)data, error->message);
-	script_result = jsc_value_to_string(value);
-	g_object_unref(value);
-	script_done = TRUE;
-}
+#include "webkit_script.c"
 
 static char *
 evaluate(Browser *b, const char *script)
 {
-	script_done = FALSE;
-	webkit_web_view_evaluate_javascript(b->view, script, -1, NULL, NULL, NULL, script_finished, (gpointer)script);
-	WAIT(script_done);
-	return script_result;
+	return evaluate_view(b->view, script);
 }
 
 static void
@@ -38,10 +24,7 @@ expect_script(Browser *b, const char *script, const char *expected)
 static gboolean
 script_equals(Browser *b, const char *script, const char *expected)
 {
-	char *value = evaluate(b, script);
-	gboolean equal = !strcmp(value, expected);
-	g_free(value);
-	return equal;
+	return script_equals_view(b->view, script, expected);
 }
 
 static void
@@ -132,7 +115,7 @@ static void
 check_explorer(Browser *browser)
 {
 	char *cwd = g_get_current_dir();
-	char *directory = g_build_filename(cwd, ".checks", "explorer- +#?% ü-XXXXXX", NULL);
+	char *directory = g_build_filename(cwd, "build/checks", "explorer- +#?% ü-XXXXXX", NULL);
 	g_assert_nonnull(g_mkdtemp(directory));
 	char *empty = g_build_filename(directory, "empty", NULL);
 	char *file = g_build_filename(directory, "literal <name>.txt", NULL);
@@ -274,7 +257,7 @@ check_file_views(App *app)
 	/* File views retain their own tab storage while reusing the same resource's
 	 * renderer. Closing the original view must leave its sibling usable. */
 	char *file_cwd = g_get_current_dir();
-	char *file_document = g_build_filename(file_cwd, ".checks", "preview-resource #?% ü.html", NULL);
+	char *file_document = g_build_filename(file_cwd, "build/checks", "preview-resource #?% ü.html", NULL);
 	g_assert_true(g_file_set_contents(file_document, "<!doctype html><title>Local resource</title><input>"
 	    "<script>window.documentVersion='first';"
 	    "if(parent!==window)parent.postMessage(typeof window.worminal,'*')</script>", -1, NULL));

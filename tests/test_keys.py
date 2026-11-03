@@ -1,4 +1,6 @@
 """Check keys, mouse input, and clipboard bytes through real PTYs and the micro editor."""
+from runtime import runtime_binary
+
 
 from contextlib import contextmanager
 import os
@@ -14,7 +16,7 @@ from x11 import isolated_display
 
 ROOT = Path(__file__).resolve().parent.parent
 FRONTEND = os.environ.get("WORMINAL_FRONTEND", "worminal-x11")
-PREVIEW = FRONTEND in ("worminal", "worminal-preview")
+PREVIEW = FRONTEND in ("worminal", "worminal-preview", "worminal-rust")
 DAEMON = "worminald" if PREVIEW else "worminald-x11"
 
 
@@ -46,7 +48,8 @@ def wait_title(env, window, title):
     # acknowledgment that the same catalog carrying the input modes was applied.
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
-        actual = subprocess.check_output(["xdotool", "getwindowname", window], env=env, text=True).strip()
+        actual = subprocess.check_output(["xdotool", "getwindowname", window], env=env,
+                                         text=True, timeout=max(.1, deadline - time.monotonic())).strip()
         if actual == title:
             return
         time.sleep(.01)
@@ -84,7 +87,7 @@ class NavigationKeysTest(unittest.TestCase):
             with self.subTest(connection=connection), isolated_display() as env:
                 if connection:
                     env["PATH"] = str(ROOT / "tests/fixtures/preview-master") + os.pathsep + env["PATH"]
-                    env["WORMINAL_TEST_DAEMON"] = str(ROOT / DAEMON)
+                    env["WORMINAL_TEST_DAEMON"] = str(runtime_binary(DAEMON))
                 title = f"Worminal select all {os.getpid()}"
                 lines = ["HISTORY-START é中"]
                 lines += [f"row-{i:04d} retained output abcdefghijklmnopqrstuvwxyz0123456789" for i in range(1200)]
@@ -99,7 +102,7 @@ class NavigationKeysTest(unittest.TestCase):
                            "i=$((i+1)); done; "
                            f"printf 'HISTORY-END{escaped}'; exec cat")
                 terminal = subprocess.Popen(
-                    [str(ROOT / FRONTEND), *connection, "-g", "80x10", "-T", title, "-o", "-",
+                    [str(runtime_binary(FRONTEND)), *connection, "-g", "80x10", "-T", title, "-o", "-",
                      "-e", "/bin/sh", "-c", command],
                     env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 try:
@@ -121,9 +124,17 @@ class NavigationKeysTest(unittest.TestCase):
                                      (output + mode).encode())
                     subprocess.run(["xdotool", "windowfocus", "--sync", window, "key",
                                     "--clearmodifiers", "ctrl+a", "ctrl+shift+c"], env=env, check=True)
-                    copied = subprocess.check_output(["xclip", "-selection", "clipboard", "-out"],
-                                                     env=env, timeout=3, text=True)
-                    self.assertEqual(copied, "R" + "\n".join(lines) + "\n")
+                    expected = "R" + "\n".join(lines) + "\n"
+                    deadline = time.monotonic() + 3
+                    copied = ""
+                    while time.monotonic() < deadline:
+                        result = subprocess.run(["xclip", "-selection", "clipboard", "-out"],
+                                                env=env, timeout=3, text=True, capture_output=True)
+                        copied = result.stdout
+                        if result.returncode == 0 and copied == expected:
+                            break
+                        time.sleep(.01)
+                    self.assertEqual(copied, expected)
                     self.assertFalse(select.select([terminal.stdout], [], [], .1)[0],
                                      "Ctrl+A leaked into terminal application input")
                 finally:
@@ -143,14 +154,14 @@ class NavigationKeysTest(unittest.TestCase):
             if connection:
                 fixtures = ROOT / "tests/fixtures" / ("preview-master" if PREVIEW else "master")
                 env["PATH"] = str(fixtures) + os.pathsep + env["PATH"]
-                env["WORMINAL_TEST_DAEMON"] = str(ROOT / DAEMON)
+                env["WORMINAL_TEST_DAEMON"] = str(runtime_binary(DAEMON))
             for bracket in (False, True):
                 title = f"Worminal clipboard {os.getpid()} {bracket}"
                 mode = (b"\033[?2004h" if bracket else b"\033[?2004l")
                 mode += f"\033]2;{title} ready\a".encode()
                 escapes = "".join(f"\\{byte:03o}" for byte in mode)
                 terminal = subprocess.Popen(
-                    [str(ROOT / FRONTEND), *connection, "-T", title, "-o", "-", "-e", "/bin/sh", "-c",
+                    [str(runtime_binary(FRONTEND)), *connection, "-T", title, "-o", "-", "-e", "/bin/sh", "-c",
                      f"stty raw -echo; printf '{escapes}R'; exec cat"],
                     env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 try:
@@ -158,7 +169,8 @@ class NavigationKeysTest(unittest.TestCase):
                     window = None
                     while time.monotonic() < deadline:
                         result = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", title],
-                                                env=env, capture_output=True, text=True)
+                                                env=env, capture_output=True, text=True,
+                                                timeout=max(.1, deadline - time.monotonic()))
                         if result.returncode == 0:
                             window = result.stdout.splitlines()[0]
                             break
@@ -198,7 +210,7 @@ class NavigationKeysTest(unittest.TestCase):
             if connection:
                 fixtures = ROOT / "tests/fixtures" / ("preview-master" if PREVIEW else "master")
                 env["PATH"] = str(fixtures) + os.pathsep + env["PATH"]
-                env["WORMINAL_TEST_DAEMON"] = str(ROOT / DAEMON)
+                env["WORMINAL_TEST_DAEMON"] = str(runtime_binary(DAEMON))
             for appcursor, mouse_report in ((False, False), (True, False), (False, True)):
                 title = f"Worminal alternate scroll {os.getpid()} {appcursor} {mouse_report}"
                 mode = b"\033[?1049h\033[?1007h"
@@ -210,7 +222,7 @@ class NavigationKeysTest(unittest.TestCase):
                 escapes = "".join(f"\\{byte:03o}" for byte in mode)
                 command = f"stty raw -echo; printf '{escapes}R'; exec cat"
                 terminal = subprocess.Popen(
-                    [str(ROOT / FRONTEND), *connection, "-T", title, "-o", "-",
+                    [str(runtime_binary(FRONTEND)), *connection, "-T", title, "-o", "-",
                      "-e", "/bin/sh", "-c", command],
                     env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 )
@@ -270,7 +282,7 @@ class NavigationKeysTest(unittest.TestCase):
         title = f"Worminal micro keys {os.getpid()}"
         with isolated_display() as env:
             terminal = subprocess.Popen(
-                [str(ROOT / FRONTEND), "-T", title, "-o", str(log), "-e", "micro",
+                [str(runtime_binary(FRONTEND)), "-T", title, "-o", str(log), "-e", "micro",
                  "-config-dir", str(config), str(path)],
                 env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
             )
@@ -367,7 +379,7 @@ class NavigationKeysTest(unittest.TestCase):
             if connection:
                 fixtures = ROOT / "tests/fixtures" / ("preview-master" if PREVIEW else "master")
                 env["PATH"] = str(fixtures) + os.pathsep + env["PATH"]
-                env["WORMINAL_TEST_DAEMON"] = str(ROOT / DAEMON)
+                env["WORMINAL_TEST_DAEMON"] = str(runtime_binary(DAEMON))
             for appcursor, appkeypad in ((False, False), (False, True), (True, False), (True, True)):
                 title = f"Worminal keys {os.getpid()} {appcursor} {appkeypad}"
                 mode = (b"\033[?1h" if appcursor else b"") + (b"\033=" if appkeypad else b"")
@@ -375,7 +387,7 @@ class NavigationKeysTest(unittest.TestCase):
                 escapes = "".join(f"\\{byte:03o}" for byte in mode)
                 command = f"stty raw -echo; printf '{escapes}R'; exec cat"
                 terminal = subprocess.Popen(
-                    [str(ROOT / FRONTEND), *connection, "-T", title, "-o", "-",
+                    [str(runtime_binary(FRONTEND)), *connection, "-T", title, "-o", "-",
                      "-e", "/bin/sh", "-c", command],
                     env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 )

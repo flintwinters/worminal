@@ -8,6 +8,7 @@
 #include <sys/select.h>
 #include <sys/ioctl.h>
 #include <syslog.h>
+#include <poll.h>
 #include <termios.h>
 
 static void
@@ -51,6 +52,23 @@ int
 openpty(int *master, int *slave, char *name, const struct termios *term, const struct winsize *size)
 {
 	(void)master; (void)slave; (void)name; (void)term; (void)size;
+	errno = EMFILE;
+	return -1;
+}
+
+int
+ppoll(struct pollfd *fds, nfds_t count, const struct timespec *timeout, const sigset_t *mask)
+{
+	if (getenv("WORMINAL_TEST_PSELECT_FAILURE")) { errno = EBADF; return -1; }
+	int (*original)(struct pollfd *, nfds_t, const struct timespec *, const sigset_t *) =
+		dlsym(RTLD_NEXT, "ppoll");
+	return original(fds, count, timeout, mask);
+}
+
+int
+posix_openpt(int flags)
+{
+	(void)flags;
 	errno = EMFILE;
 	return -1;
 }

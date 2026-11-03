@@ -1,0 +1,12 @@
+[package]
+name = "worminal-daemon"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+worminal-engine = { path = "../engine" }
+worminal-protocol = { path = "../protocol" }
+worminal-workspace = { path = "../workspace" }
+worminal-config = { path = "../config" }
+libc.workspace = true

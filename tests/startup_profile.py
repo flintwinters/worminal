@@ -1,4 +1,6 @@
 """Trace a private startup through the shared visible-readiness fixture, never the desktop."""
+from runtime import CHECKS
+
 
 import argparse
 import json
@@ -23,8 +25,8 @@ def main():
     args = parser.parse_args()
     if not shutil.which("strace"):
         parser.error("Install strace to profile startup")
-    checks = ROOT / ".checks"
-    checks.mkdir(exist_ok=True)
+    checks = CHECKS
+    checks.mkdir(parents=True, exist_ok=True)
     trace = checks / "startup-syscalls.log"
     log_path = checks / "startup-profile.log"
     process = None
@@ -59,8 +61,8 @@ def main():
                 # --kill-on-exit also contains failures to this private trace tree.
                 stop(process)
     (checks / "startup-profile.json").write_text(json.dumps(report, indent=2) + "\n")
-    Console().print("Diagnostic startup trace: .checks/startup-syscalls.log")
-    Console().print("Owner PID, readiness cutoff and trace limitations: .checks/startup-profile.json")
+    Console().print("Diagnostic startup trace: build/checks/startup-syscalls.log")
+    Console().print("Owner PID, readiness cutoff and trace limitations: build/checks/startup-profile.json")
 
 
 if __name__ == "__main__":

@@ -44,14 +44,13 @@ worminal \- simple terminal based on st
 .IR title ]
 .RB \-l
 .IR line
-.RI [ stty_args ...]
 .SH DESCRIPTION
 .B worminal
 is a GTK terminal emulator with WebKitGTK browser tabs on Wayland and X11.
 Use --surf URL to open a browser tab or --attach to open existing tabs without a new shell.
 The geometry option accepts COLSxROWS; X11 position offsets and embedding (-w) are unsupported.
-The original X11 frontend is available as worminal-x11 with worminald-x11 on its separate v1 workspace.
-Existing v1 sessions are preserved. The release uses the v2 workspace.
+The Rust application uses a shared C terminal engine and the v2 workspace.
+Legacy C application implementations are available in Git history; existing v1 processes are not stopped or migrated.
 Each launch opens a window and tab in the local per-user workspace service.
 The service owns the PTYs and ordered tabs and persists after all windows close.
 Use
@@ -61,6 +60,35 @@ to stop it and end its tabs.
 connects over SSH to a service on that host; the remote account needs
 .B worminald
 in its PATH. Further hosts can be reached with ordinary SSH inside a tab.
+.SH DAEMON UPGRADES
+The release v2 service watches its executable directory. Replacing its executable automatically starts a
+replacement daemon and transfers live tabs using the validated handoff transaction.
+The listening socket stays bound, and tab IDs, shell PIDs, PTYs, terminal state, scrollback, and queued input survive.
+Windows reconnect to the replacement. Client stdout streams have the same limitation as manual session transfer.
+No empty donor catalog or recovery file is published during the switch.
+If preparation fails, the existing daemon retains its tabs; another executable replacement retries the upgrade.
+The original v1 service remains available for explicit rollback and never upgrades automatically.
+Daemons that were already running before automatic upgrades need a one-time explicit handoff.
+.SH RESTART RECOVERY
+The service automatically saves ordered terminal working directories and browser URLs in
+$XDG_STATE_HOME/worminal (default ~/.local/state/worminal), separately for each protocol and workspace scope.
+After a daemon or computer restart, terminal tabs start fresh default shells in their saved directories;
+browser tabs reopen their saved URLs. Commands, environments, running programs, scrollback, and window layouts
+are not restored. Missing directories fall back to the home directory, then /.
+The first ordinary launch selects the restored workspace without adding a shell;
+explicit commands and subsequent launches still create new tabs.
+Closing a tab removes its recovery entry. Stopping the service retains its recovery entries.
+Files are private and atomically replaced after state changes; unreadable or malformed recovery files
+are preserved and disable saving for that daemon rather than being overwritten.
+.PP
+Restored shells receive WORMINAL_RESTORE=1. Shell configuration that changes the initial directory
+should skip that change when this variable is present, then unset it so nested shells behave normally.
+For example, in .zshrc:
+.PP
+.nf
+[[ -n ${WORMINAL_RESTORE-} ]] || . ~/.lastfile
+unset WORMINAL_RESTORE
+.fi
 .SH SESSION TRANSFER
 Arm a running destination with
 .B worminald --handin NAME
@@ -83,8 +111,8 @@ relative to the calling shell's directory. Bare hostnames default to HTTPS; exis
 Prefix missing dotted filenames with ./ to distinguish them from hostnames. Explicit URLs
 are preserved; use about:blank for a blank page. Run this command inside a Worminal terminal.
 .PP
-GTK accepts the options below except -w. X11 geometry positioning and stty_args apply only
-to worminal-x11. --surf URL opens a browser; --attach creates no new terminal tab.
+GTK accepts the options below except -w. X11 geometry positioning is unsupported.
+--surf URL opens a browser; --attach creates no new terminal tab.
 .TP
 .B \-a
 disable alternate screens in terminal
@@ -164,6 +192,9 @@ and all the remaining arguments are used as a command
 even without it.
 .SH SHORTCUTS
 .TP
+.B Ctrl-d or Ctrl-q (browser)
+Close the selected browser tab. Terminal tabs pass both keys to their applications.
+.TP
 .B Ctrl-f (browser)
 Find text in the current page. Enter selects the next match; Shift-Enter selects
 the previous match. Escape selects the result and focuses its link so Enter opens it.
@@ -204,6 +235,12 @@ Reset to default font size.
 .B Ctrl-Shift-y
 Paste from primary selection (middle mouse button).
 .TP
+.B Ctrl-a
+Select the active terminal screen and retained scrollback.
+.TP
+.B Ctrl-Shift-a
+Send Control-A to the terminal application.
+.TP
 .B Ctrl-Shift-c
 Copy the selected text to the clipboard selection.
 .TP
@@ -211,7 +248,11 @@ Copy the selected text to the clipboard selection.
 Paste from the clipboard selection.
 .TP
 .B Ctrl-t
-Create and select a tab.
+Create and select a tab of the current type: a blank browser from a browser, or a terminal from a terminal.
+.TP
+.B Ctrl-Shift-t
+Create and select a terminal tab. Unselected browser titles are red; terminal titles are white.
+Selected tabs use the original solid inverted highlight.
 .TP
 .B Ctrl-w
 Close the selected tab in all windows.

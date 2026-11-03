@@ -1,4 +1,8 @@
 """Compare original, terminal-only preview, and mixed preview on a private display."""
+from runtime import CHECKS
+
+from runtime import runtime_binary
+
 
 import json
 import os
@@ -43,14 +47,15 @@ def steady(frontend, mixed):
     daemon_name = "worminald-preview" if preview else "worminald-x11"
     with isolated_display() as display, profile(display) as env, fixture() as url:
         env["GDK_BACKEND"] = "x11"
-        daemon = subprocess.Popen([str(ROOT / daemon_name), "--serve"], env=env,
+        daemon = subprocess.Popen([str(runtime_binary(daemon_name)), "--serve"], env=env,
                                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         terminal = None
         try:
             title = f"Worminal perf {os.getpid()}"
             command = "stty raw -echo; printf READY; exec cat"
             started = time.monotonic_ns()
-            terminal = subprocess.Popen([str(ROOT / frontend), "-T", title, "-o", "-", "-e", "/bin/sh", "-c", command],
+            terminal = subprocess.Popen([str(runtime_binary(frontend)), "-T", title, "-o", "-",
+                                         "-e", "/bin/sh", "-c", command],
                                         env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             read_until(terminal.stdout, b"READY")
             shell_ms = (time.monotonic_ns() - started) / 1e6
@@ -98,7 +103,7 @@ def steady(frontend, mixed):
             if terminal:
                 terminal.terminate()
                 terminal.communicate(timeout=5)
-            subprocess.run([str(ROOT / daemon_name), "--stop"], env=env,
+            subprocess.run([str(runtime_binary(daemon_name)), "--stop"], env=env,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             daemon.communicate(timeout=5)
 
@@ -119,7 +124,7 @@ def main():
         if frontend == "worminal-preview":
             result[frontend]["mixed"] = steady(frontend, True)
         print(f"{frontend}: launch {launch['cat']['median_ms']} ms; shell {launch['shell']['median_ms']} ms")
-    path = ROOT / ".checks/preview-performance.json"
+    path = CHECKS / "preview-performance.json"
     path.write_text(json.dumps(result, indent=2) + "\n")
     for name in ("worminal-x11", "worminal-preview"):
         for mode in ("terminal", "mixed"):

@@ -1,0 +1,8 @@
+[package]
+name = "worminal-browser-api"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+
+[build-dependencies]
+bindgen.workspace = true

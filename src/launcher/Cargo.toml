@@ -1,0 +1,18 @@
+[package]
+name = "worminal-launcher"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+worminal-protocol = { path = "../protocol" }
+worminal-workspace = { path = "../workspace" }
+libc.workspace = true
+glib-sys.workspace = true
+
+[build-dependencies]
+bindgen.workspace = true
+
+[[bin]]
+name = "worminal-rust-launcher"
+path = "src/candidate.rs"

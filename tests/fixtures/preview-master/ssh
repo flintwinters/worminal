@@ -1,8 +1,9 @@
 #!/bin/sh
 # Exercise the production SSH bridge arguments without a remote host.
 case "$*" in
-  "-T -C preview-test worminald --bridge" | "-T -C wheel-test worminald --bridge" | \
-  "-T -C key-test worminald --bridge") ;;
+  "-T -C -oConnectTimeout=10 preview-test worminald --bridge" | \
+  "-T -C -oConnectTimeout=10 wheel-test worminald --bridge" | \
+  "-T -C -oConnectTimeout=10 key-test worminald --bridge") ;;
   *) exit 64 ;;
 esac
 if [ -n "${WORMINAL_TEST_REAL_MASTER:-}" ]; then

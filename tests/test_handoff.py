@@ -1,7 +1,10 @@
 """Local ownership transfers use real PTYs, isolated scopes, and both daemon ABIs."""
+from runtime import runtime_binary
+
 import array
 import hashlib
 import os
+import select
 from pathlib import Path
 import socket
 import shlex
@@ -12,44 +15,18 @@ import time
 import unittest
 import uuid
 
-from workspace_protocol import number, string, send, wait_kind
+from workspace_protocol import number, string, send, wait_kind, catalog_records, rust_daemon
 
 ROOT = Path(__file__).resolve().parent.parent
-BINARIES = {1: ROOT / "worminald-x11", 2: ROOT / "worminald-preview"}
+BINARIES = {1: runtime_binary("worminald-x11"),
+            2: runtime_binary(os.environ.get("WORMINAL_TEST_PREVIEW_DAEMON", "worminald-preview"))}
 
 
 def catalog_rows(payload, version):
-    offset = 12
-    rows = []
-
-    def integer():
-        nonlocal offset
-        result, = struct.unpack_from("!I", payload, offset)
-        offset += 4
-        return result
-
-    def text():
-        nonlocal offset
-        size = integer()
-        result = payload[offset:offset + size].decode()
-        offset += size
-        return result
-
-    for _ in range(struct.unpack_from("!I", payload)[0]):
-        tab = integer()
-        if version == 2:
-            integer()
-            text()
-        integer()
-        integer()
-        title, cwd = text(), text()
-        for _ in range(integer()):
-            text()
-        rows.append((tab, title, cwd))
-    return rows
+    return [(r[0], r[5], r[6]) for r in catalog_records(payload, version)]
 
 
-class HandoffTest(unittest.TestCase):
+class HandoffFixture:
     def setUp(self):
         self.services = []
         self.peers = []
@@ -60,18 +37,17 @@ class HandoffTest(unittest.TestCase):
             peer.close()
         # Stop through the protocol so the service hangs up owned shells and closes PTYs.
         for service, version, env in reversed(self.services):
-            if service.poll() is None:
-                subprocess.run([str(BINARIES[version]), "--stop"], env=env, timeout=3,
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run([str(BINARIES[version]), "--stop"], env=env, timeout=3,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             try:
                 service.communicate(timeout=3)
             except subprocess.TimeoutExpired:
                 service.kill()
                 service.communicate(timeout=3)
 
-    def start(self, version, binary=None):
+    def start(self, version, binary=None, environment=None):
         scope = f"handoff-{uuid.uuid4().hex}"
-        env = {**os.environ, "WORMINAL_SHARED_SOCKET_SCOPE": scope}
+        env = {**os.environ, **(environment or {}), "WORMINAL_SHARED_SOCKET_SCOPE": scope}
         service = subprocess.Popen([str(binary or BINARIES[version]), "--serve"], env=env,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         self.services.append((service, version, env))
@@ -123,6 +99,31 @@ class HandoffTest(unittest.TestCase):
                 return
         self.fail(f"screen did not contain {expected!r}")
 
+    def assert_no_masters(self, service):
+        for descriptor in Path(f"/proc/{service.pid}/fdinfo").iterdir():
+            try:
+                info = descriptor.read_text()
+            except FileNotFoundError:
+                continue  # Transient client sockets may close during enumeration.
+            self.assertNotIn("tty-index:", info)
+
+    def receive_descriptors(self, peer):
+        marker, control, flags, _ = peer.recvmsg(1, socket.CMSG_SPACE(201 * 4))
+        descriptors = []
+        try:
+            for level, kind, data in control:
+                if level == socket.SOL_SOCKET and kind == socket.SCM_RIGHTS:
+                    values = array.array("i"); values.frombytes(data)
+                    descriptors.extend(values)
+            self.assertEqual(marker, b"H")
+            self.assertEqual(flags & (socket.MSG_CTRUNC | socket.MSG_TRUNC), 0)
+            return descriptors
+        except BaseException:
+            for descriptor in descriptors: os.close(descriptor)
+            raise
+
+
+class HandoffTest(HandoffFixture, unittest.TestCase):
     def test_live_round_trips_merge_without_replacing_shells(self):
         pairs = [(source, destination, None, None) for source, destination in ((1, 2), (2, 1), (1, 1), (2, 2))]
         baseline = os.environ.get("WORMINAL_TEST_HANDOFF_BASELINE")
@@ -133,13 +134,15 @@ class HandoffTest(unittest.TestCase):
             with self.subTest(source=source, destination=destination, old_donor=bool(source_binary),
                               old_receiver=bool(target_binary)):
                 donor, source_env, donor_process = self.start(source, source_binary)
-                receiver, target_env, _ = self.start(destination, target_binary)
+                receiver, target_env, receiver_process = self.start(destination, target_binary)
                 _, existing_pid = self.launch(receiver, destination, "existing")
                 tab, pid = self.launch(donor, source, "incoming")
                 send(donor, 3, tab, b"before-transfer", version=source)
                 self.assert_screen(donor, source, tab, "before-transfer")
                 self.command(destination, target_env, "--handin")
                 self.command(source, source_env, "--handoff")
+                if destination == 2 and target_binary is None and rust_daemon(BINARIES[2]):
+                    self.assertEqual(os.getsid(receiver_process.pid), receiver_process.pid)
                 _, catalog = wait_kind(receiver, 7, version=destination)
                 records = catalog_rows(catalog, destination)
                 self.assertEqual([r[1] for r in records], ["existing", "incoming"])
@@ -147,14 +150,7 @@ class HandoffTest(unittest.TestCase):
                 imported = records[1][0]
                 self.assertNotEqual(records[0][0], imported)
                 # Ownership has moved: the donor retains no PTY master descriptors.
-                donor_fds = Path(f"/proc/{donor_process.pid}/fdinfo")
-                for descriptor in donor_fds.iterdir():
-                    try:
-                        info = descriptor.read_text()
-                    except FileNotFoundError:
-                        # Transient client sockets may close during enumeration.
-                        continue
-                    self.assertNotIn("tty-index:", info)
+                self.assert_no_masters(donor_process)
                 # The same child and PTY survive, including when the original parent exits.
                 self.assertTrue(Path(f"/proc/{pid}").exists())
                 self.assertTrue(Path(f"/proc/{existing_pid}").exists())
@@ -279,15 +275,116 @@ class HandoffTest(unittest.TestCase):
             listener.settimeout(3)
             peer, _ = listener.accept()
             with peer:
-                _, control, _, _ = peer.recvmsg(1, socket.CMSG_SPACE(201 * 4))
-                for level, kind, data in control:
-                    if level == socket.SOL_SOCKET and kind == socket.SCM_RIGHTS:
-                        values = array.array("i")
-                        values.frombytes(data)
-                        for fd in values:
-                            os.close(fd)
+                for fd in self.receive_descriptors(peer): os.close(fd)
             process.communicate(timeout=3)
             self.assertNotEqual(process.returncode, 0)
         self.assertTrue(Path(f"/proc/{pid}").exists())
         send(donor, 3, tab, b"rollback-working", version=1)
         self.assert_screen(donor, 1, tab, "rollback-working")
+
+    def test_commit_delivery_disowns_even_when_receiver_acknowledgement_is_lost(self):
+        for version in (1, 2):
+            with self.subTest(version=version):
+                donor, env, service = self.start(version)
+                _, pid = self.launch(donor, version, "committed")
+                descriptors = []
+                with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as listener:
+                    listener.bind(f"\0worminal-handoff-{os.getuid()}-{self.token}")
+                    listener.listen(1); listener.settimeout(3)
+                    command = subprocess.Popen([str(BINARIES[version]), "--handoff", self.token], env=env,
+                                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    peer, _ = listener.accept()
+                    try:
+                        with peer:
+                            descriptors = self.receive_descriptors(peer)
+                            self.assertEqual(len(descriptors), 3)
+                            peer.sendall(b"R")
+                            self.assertEqual(peer.recv(1), b"C")
+                            # C crossed the ownership boundary. Deliberately omit A, retaining the
+                            # received master so closing the donor's copy cannot hang up this shell.
+                        _, errors = command.communicate(timeout=3)
+                        self.assertEqual(command.returncode, 0, errors)
+                        self.assert_no_masters(service)
+                        self.assertTrue(Path(f"/proc/{pid}").exists())
+                        master = descriptors[1]
+                        os.write(master, b"receiver-still-owns")
+                        output = b""
+                        deadline = time.monotonic() + 3
+                        while b"receiver-still-owns" not in output and time.monotonic() < deadline:
+                            if select.select([master], [], [], max(0, deadline - time.monotonic()))[0]:
+                                output += os.read(master, 4096)
+                        self.assertIn(b"receiver-still-owns", output)
+                    finally:
+                        for descriptor in descriptors:
+                            os.close(descriptor)
+                        if command.poll() is None:
+                            command.terminate()
+                        command.communicate(timeout=3)
+
+    def test_commit_write_failure_after_ready_retains_donor(self):
+        for version in (1, 2):
+            with self.subTest(version=version):
+                donor, env, _ = self.start(version)
+                tab, pid = self.launch(donor, version, "uncommitted")
+                with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as listener:
+                    listener.bind(f"\0worminal-handoff-{os.getuid()}-{self.token}")
+                    listener.listen(1); listener.settimeout(3)
+                    command = subprocess.Popen([str(BINARIES[version]), "--handoff", self.token], env=env,
+                                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    peer, _ = listener.accept()
+                    with peer:
+                        for descriptor in self.receive_descriptors(peer): os.close(descriptor)
+                        peer.shutdown(socket.SHUT_RD)
+                        peer.sendall(b"R")
+                        command.communicate(timeout=3)
+                    self.assertNotEqual(command.returncode, 0)
+                self.assertTrue(Path(f"/proc/{pid}").exists())
+                send(donor, 3, tab, b"commit-rollback", version=version)
+                self.assert_screen(donor, version, tab, "commit-rollback")
+
+    def test_rejected_descriptor_layout_never_signals_staged_shells(self):
+        for version in (1, 2):
+            with self.subTest(receiver=version):
+                donor, env, _ = self.start(1)
+                incoming, pid = self.launch(donor, 1, "unpublished")
+                capture = self.token + "-capture"
+                with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as listener:
+                    listener.bind(f"\0worminal-handoff-{os.getuid()}-{capture}")
+                    listener.listen(1); listener.settimeout(3)
+                    command = subprocess.Popen([str(BINARIES[1]), "--handoff", capture], env=env,
+                                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    peer, _ = listener.accept()
+                    with peer:
+                        descriptors = self.receive_descriptors(peer)
+                    command.communicate(timeout=3)
+                    self.assertNotEqual(command.returncode, 0)
+                try:
+                    self.assertEqual(len(descriptors), 3)
+                    receiver, target_env, _ = self.start(version)
+                    existing, _ = self.launch(receiver, version, "existing")
+                    self.command(version, target_env, "--handin")
+                    layouts = (descriptors[:1], [descriptors[0], descriptors[2], descriptors[2]],
+                               descriptors[:2], [*descriptors, descriptors[2]])
+                    for index, layout in enumerate(layouts):
+                        with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as peer:
+                            peer.settimeout(3)
+                            peer.connect(f"\0worminal-handoff-{os.getuid()}-{self.token}")
+                            peer.sendmsg([b"H"], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array("i", layout))])
+                            self.assertEqual(peer.recv(1), b"", "invalid layout reached ready/commit")
+                        self.assertTrue(Path(f"/proc/{pid}").exists())
+                        marker = f"layout-{index}".encode()
+                        send(donor, 3, incoming, marker, version=1)
+                        self.assert_screen(donor, 1, incoming, marker.decode())
+                        send(receiver, 3, existing, marker, version=version)
+                        self.assert_screen(receiver, version, existing, marker.decode())
+                    # Rejections retain the listener, but a later valid transaction consumes it.
+                    self.command(1, env, "--handoff")
+                    _, payload = wait_kind(receiver, 7, version=version)
+                    rows = catalog_rows(payload, version)
+                    self.assertEqual([row[1] for row in rows], ["existing", "unpublished"])
+                    self.assertTrue(Path(f"/proc/{pid}").exists())
+                    imported = rows[-1][0]
+                    send(receiver, 4, imported, number(40) + number(8), version=version)
+                    self.assert_screen(receiver, version, imported, "layout-3")
+                finally:
+                    for descriptor in descriptors: os.close(descriptor)

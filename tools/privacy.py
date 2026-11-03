@@ -7,14 +7,9 @@ from rich.console import Console
 from tools.git_index import tracked_files
 
 
-DEFAULT_NAME = "flintwinters"
+# Exact public address approved for repository content.
 DEFAULT_EMAIL = "flintwinters.0@gmail.com"
-# Exact public addresses explicitly approved for repository content and identities.
 EMAIL_WHITELIST = frozenset({DEFAULT_EMAIL})
-
-
-def approved_identity(name, email):
-    return (name == "Worminal contributor" and email == "anonymous") or email.casefold() in EMAIL_WHITELIST
 
 
 PATTERNS = {
@@ -45,7 +40,7 @@ def git(*args):
     return subprocess.check_output(["git", *args])
 
 
-def check_privacy(root, history=False, staged=False, identities=False, message_file=None):
+def check_privacy(root, history=False, staged=False, message_file=None):
     console = Console()
     count = 0
 
@@ -66,13 +61,6 @@ def check_privacy(root, history=False, staged=False, identities=False, message_f
             count += 1
         data = git("show", f":{path.relative_to(root).as_posix()}") if staged else path.read_bytes()
         report(path.relative_to(root).as_posix(), data)
-    if identities:
-        for variable in ("GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"):
-            identity = git("var", variable).decode("utf-8", errors="replace")
-            match = re.fullmatch(r"(.+) <([^<>]+)> \d+ [+-]\d{4}\s*", identity)
-            if not match or not approved_identity(*match.group(1, 2)):
-                console.print(f"{variable}: use an approved project identity (manage.py privacy-setup).")
-                count += 1
     if message_file:
         report("commit message", message_file.read_bytes())
     if history:
@@ -85,11 +73,7 @@ def check_privacy(root, history=False, staged=False, identities=False, message_f
                 report(f"history blob {oid.decode()[:12]}", git("cat-file", "blob", oid.decode()))
         for entry in git("log", "--all", "--format=%H").splitlines():
             oid = entry.decode()
-            report(f"commit {oid[:12]}", git("show", "-s", "--format=%an <%ae>%n%cn <%ce>%n%B", oid))
-            identity = git("show", "-s", "--format=%an%n%ae%n%cn%n%ce", oid).splitlines()
-            values = [value.decode("utf-8", errors="replace") for value in identity]
-            if len(values) != 4 or not all(approved_identity(*values[i:i + 2]) for i in (0, 2)):
-                console.print(f"commit {oid[:12]}: unapproved identity", markup=False)
-                count += 1
+            # Attribution is public metadata; scan the message for accidental disclosures.
+            report(f"commit {oid[:12]}", git("show", "-s", "--format=%B", oid))
     console.print(f"Privacy check: {count} finding(s).", markup=False)
     return bool(count)

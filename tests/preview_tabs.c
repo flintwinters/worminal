@@ -131,3 +131,72 @@ check_catalog_selection_claim(void)
 	g_clear_pointer(&app.cached_font, pango_font_description_free);
 	close(sockets[0]); close(sockets[1]);
 }
+
+/* Verify solid inverted selection and the unselected browser/terminal title colors. */
+static void
+check_tab_title_colors(App *app, Page *terminal, Page *browser)
+{
+	TabStrip *strip = g_object_get_data(G_OBJECT(app->tabstrip), "tabs");
+	GList *saved_pages = app->pages;
+	Page *saved_active = app->active;
+	Page *pages[] = {terminal, browser};
+	int colors[] = {1, 7, defaultbg, defaultfg};
+	GdkRGBA saved[2][G_N_ELEMENTS(colors)];
+	char *names[2];
+	GdkRGBA palette[] = {{1, 0, 0, 1}, {1, 1, 1, 1}, {0, 0, 0, 1}, {1, 1, 1, 1}};
+	app->pages = NULL;
+	for (int i = 0; i < 2; i++) {
+		names[i] = g_strdup(gtk_label_get_text(GTK_LABEL(pages[i]->label)));
+		gtk_label_set_text(GTK_LABEL(pages[i]->label), "MMMM");
+		for (int c = 0; c < (int)G_N_ELEMENTS(colors); c++) {
+			saved[i][c] = pages[i]->colors[colors[c]];
+			pages[i]->colors[colors[c]] = palette[c];
+		}
+		app->pages = g_list_append(app->pages, pages[i]);
+	}
+	int width = gtk_widget_get_allocated_width(app->tabstrip), height = strip->ch + 2;
+	int tabwidth = tab_width(strip, terminal);
+	g_assert_cmpint(width, >, 2 * tabwidth + 4);
+	for (int selected = 0; selected < 2; selected++) {
+		app->active = pages[selected];
+		cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+		cairo_t *cr = cairo_create(surface);
+		tabs_draw(app->tabstrip, cr, strip);
+		cairo_surface_flush(surface);
+		unsigned char *data = cairo_image_surface_get_data(surface);
+		int stride = cairo_image_surface_get_stride(surface), red[2] = {0}, white[2] = {0}, dark[2] = {0};
+		uint32_t *top = (uint32_t *)(data + 2 * stride);
+		g_assert_cmphex(top[2 + selected * tabwidth + tabwidth / 2], ==, 0xffffffff);
+		g_assert_cmphex(top[2 + (1 - selected) * tabwidth + tabwidth / 2], ==, 0xff000000);
+		uint32_t *middle = (uint32_t *)(data + (2 + strip->ch / 2) * stride);
+		g_assert_cmphex(middle[2 + selected * tabwidth + strip->cw / 2], ==, 0xffffffff);
+		g_assert_cmphex(middle[2 + (1 - selected) * tabwidth + strip->cw / 2], ==, 0xff000000);
+		int baseline = 2 + (strip->ch - strip->height) / 2 + strip->ascent;
+		for (int y = 4; y < MIN(baseline, height); y++) {
+			uint32_t *row = (uint32_t *)(data + y * stride);
+			for (int x = 2; x < 2 + 2 * tabwidth; x++) {
+				int within_tab = (x - 2) % tabwidth;
+				if (within_tab < strip->cw || within_tab >= tabwidth - strip->cw) continue;
+				uint32_t pixel = row[x];
+				int r = (pixel >> 16) & 255, g = (pixel >> 8) & 255, b = pixel & 255;
+				if (r > g + 32 && r > b + 32) red[(x - 2) / tabwidth]++;
+				if (r > 200 && abs(r - g) < 2 && abs(r - b) < 2) white[(x - 2) / tabwidth]++;
+				if (r < 128 && g < 128 && b < 128) dark[(x - 2) / tabwidth]++;
+			}
+		}
+		g_assert_cmpint(dark[selected], >, 0);
+		g_assert_cmpint(red[selected], ==, 0);
+		if (selected == 0) {
+			g_assert_cmpint(red[1], >, 0); g_assert_cmpint(white[1], ==, 0);
+		} else {
+			g_assert_cmpint(white[0], >, 0); g_assert_cmpint(red[0], ==, 0);
+		}
+		cairo_destroy(cr); cairo_surface_destroy(surface);
+	}
+	g_list_free(app->pages);
+	app->pages = saved_pages; app->active = saved_active;
+	for (int i = 0; i < 2; i++) {
+		gtk_label_set_text(GTK_LABEL(pages[i]->label), names[i]); g_free(names[i]);
+		for (int c = 0; c < (int)G_N_ELEMENTS(colors); c++) pages[i]->colors[colors[c]] = saved[i][c];
+	}
+}

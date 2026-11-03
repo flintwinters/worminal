@@ -1,4 +1,8 @@
 """Type an unsubmitted draft in real Codex, through ordinary SSH and --master."""
+from runtime import CHECKS
+
+from runtime import runtime_binary
+
 
 import json
 import os
@@ -14,7 +18,7 @@ import uuid
 from master_perf import SSH, launch, receive, send, summary
 
 ROOT = Path(__file__).resolve().parent.parent
-CHECKS = ROOT / '.checks'
+CHECKS = CHECKS
 BURST_INTERVAL = .05
 
 
@@ -72,7 +76,7 @@ def ready(process, view, tab, label):
         if view.apply(*packet, tab):
             last_frame = time.monotonic()
     view.save(label)
-    raise RuntimeError(f'Codex input editor not ready; inspect .checks/codex-perf-{label}-screen.txt')
+    raise RuntimeError(f'Codex input editor not ready; inspect build/checks/codex-perf-{label}-screen.txt')
 
 
 def wait_text(process, view, tab, anchor, text):
@@ -126,7 +130,7 @@ def measure(host, remote_command, remote):
     daemon = os.environ.get('WORMINAL_MASTER_DAEMON', 'worminald')
     prefix = f'env WORMINAL_SHARED_SOCKET_SCOPE={shlex.quote(scope)} {shlex.quote(daemon)}'
     env = {**os.environ, 'WORMINAL_SHARED_SOCKET_SCOPE': scope}
-    local_daemon = os.environ.get('WORMINAL_LOCAL_DAEMON', str(ROOT / 'worminald'))
+    local_daemon = os.environ.get('WORMINAL_LOCAL_DAEMON', str(runtime_binary("worminald")))
     arguments = [*SSH, '-C', host, f'{prefix} --bridge'] if remote else [local_daemon, '--bridge']
     stop = [*SSH, host, f'{prefix} --stop'] if remote else [local_daemon, '--stop']
     log = (CHECKS / f'codex-perf-{label}.log').open('w+b')

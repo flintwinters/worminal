@@ -1,119 +1,101 @@
 # Worminal
 
-Worminal is a deliberately small terminal. Favor cold launch to usable input and low memory over interface
-features; measure both before adding complexity.
-Frontend replacements must preserve established user behavior, including removed shortcuts;
-Ctrl+A selects the terminal screen and retained scrollback; Ctrl+Shift+C copies the selection.
-Ctrl+Shift+A still sends the Control-A byte to terminal applications.
-Plain Ctrl+N belongs to terminal applications, while Ctrl+Shift+N opens a GTK window.
+## Motivation and judgement
 
-The app is a GTK terminal/browser built on st 0.9.3. A per-user `worminald` service owns ordered tabs, PTYs,
-terminal state, and bounded main-screen scrollback; views connect locally or through `--master user@host` over SSH.
-Main-screen width changes reflow soft-wrapped text. GTK replicas keep one imported viewport;
-reflow and scrollback are not recomputed in the GTK frontend. A tab has one live painting view
-and can run with no windows. Each window maps early while its connection worker sends the initial launch request;
-font loading and shell startup overlap.
-Validated launches overlap connection requests and shell startup with widget construction;
-a per-request completion gate keeps GTK callbacks behind completed widget setup.
-`manage.py` is internal build/test/install tooling, never a user-facing application launcher.
-Checks run only on private virtual displays and never on the desktop; `manage.py` drops the desktop's
-display variables. `manage.py check` (full Xvfb graphical suite) is the routine regression run.
-User workflows use the native application executable; do not require Python to launch the explorer.
-`manage.py build` compiles Alacritty colors, font family, size, spacing, and scrollback into a generated C header.
-The active installation is `/usr/local/bin/worminal`, with modules in `/usr/local/lib/worminal`.
-Build as the regular user to retain that user's Alacritty configuration, then publish with
-`sudo -n python3 manage.py install --prefix /usr/local --skip-build`. Do not install fixes into `~/.local`.
-Compare installed artifacts with the verified build and check the running executable and module paths.
-Running owners retain loaded modules until all their windows close; verify loaded code before claiming a fix is active.
-`src/terminal` owns terminal state,
-`src/gtk` paints release views, `src/x11` preserves the original renderer, and `src/workspace` connects the service.
-GTK encodes the complete ASCII Control family before input methods; do not use locale event strings
-for terminal bytes, since NUL is significant. Ordinary text retains input-method composition.
-Both frontends share paste filtering: bracketed text preserves line endings, while ordinary paste
-normalizes CRLF/LF to Enter.
-GTK redraws changed rows and cursor damage, including overlapping glyph ink;
-blink ticks damage only visible blinking rows, while catalog style changes invalidate their own pixels.
-compact rows paint matching background runs before glyphs, with scalar fallback on fractional device grids.
-Single-line text draws eligible Pango-shaped horizontal glyph runs directly; other runs retain line drawing.
-Multiline text keeps full layouts. Only printable ASCII shaping is cached; Unicode retains on-demand font fallback.
-Unchanged frames do not repaint or consume the immediate paint allowance for the first changed keyboard response.
-Tab claims can present their first complete response early; cached mapping and rapid selections keep GTK's frame clock.
-`tools/build.py` owns builds and installation; `manage.py` owns
-checks and latency measurements on private displays.
-Generated modules, test binaries and configuration headers belong in `build/`; preserve diagnostics in `.checks/`.
-Root binaries retain release and X11 rollback names; preview aliases are built on demand.
-`manage.py latency-visible` measures real key events to visible echo and fresh/additional window presentation
-using distinct launch canvases on private Xvfb; --shell includes real interactive initialization.
-It excludes desktop compositing and physical display latency.
-`manage.py interaction-perf` measures first ownership claims, cached tab switches, and wheel/page scroll pixels.
-`manage.py browser-perf` measures first/additional PTY-to-browser conversions to visible HTTP/file/explorer pixels,
-checks HTTP/file keyboard response, and records helper-inclusive memory; snapshots support alternating comparisons.
-Browser latency work prioritizes genuine cold opens: `browser-perf --cold-open` includes fresh-process launch,
-GTK, service connection and WebKit startup; `--kind` isolates HTTP, file or directory targets.
-Use `--established-profile` to distinguish normal cold processes from first-use profile setup;
-all private application, helper and service processes stop between trials. Startup reports include CPU and
-scheduler queue waits, and milestone logging is opt-in because diagnostic I/O can affect elapsed time.
-`--profile-cpu` attributes startup CPU samples without kernel profiling privileges; its timings are diagnostic.
-`manage.py render-perf` compares actual release-module painting, exact pixels, CPU and memory on private backends.
-The upstream source and license remain in the repository. Keep machine destinations in environment configuration
-and use the approved flintwinters commit identity; the exact public email whitelist lives in `tools/privacy.py`.
-Run `manage.py privacy-setup` in fresh clones; privacy hooks guard staged content and history.
+Worminal is a deliberately small terminal. Favor low memory use over interface features; measure before adding
+complexity. Preserve established terminal behavior and application shortcuts. Plain Ctrl+N belongs to terminal
+applications; Ctrl+Shift+N opens a window. Ctrl+A selects screen and retained scrollback for Ctrl+Shift+C;
+Ctrl+Shift+A sends Control-A to applications. Keep the upstream st attribution and license intact.
+Use existing modules. Keep each shared rule or definition in one place. Enforce state rules where the state changes.
+For bugs with subtle causes, add a test that fails without the fix and explain the reason beside the code.
 
-`src/gtk` is the release GTK 3/Pango-Cairo/WebKitGTK 4.1 frontend for native Wayland and X11. It shares terminal cells,
-keys and directory-basename labels with the original frontend. Its Cairo tab strip uses terminal metrics and colors.
-File-browser tabs show decoded filenames; web tabs retain document titles.
-One GTK owner per display/workspace accepts separate launches and moves live browser views between local windows;
-remote machines share saved URLs only. `worminald` uses the v2 endpoint; browser records have no PTY.
-Its shell command converts the calling PTY's ordered tab into a browser. GTK and WebKit never enter the service.
-Launchers link GLib only and forward to an existing owner before loading the GTK/Pango frontend module;
-the WebKit module loads when a browser view is first claimed. Both modules use local linker scope;
-explicit host callbacks carry browser actions across the module boundary. Installed browser modules are
-ABI-named so live owners retain compatible lazy loading across upgrades.
-New browser views reuse a live renderer for matching HTTP origins or the same local file path;
-tabs retain independent navigation and session storage, and the first browser launch stays lazy.
-GTK publishes selected terminal directories and window focus through a read-only session D-Bus interface;
-`docs/window-state.md` defines the public contract and `manage.py check-window-state` checks it privately.
-Explicit X11 window launches use fresh server timestamps for desktop activation;
-`manage.py check-window-activation` verifies forwarded and shortcut launches under private Muffin.
-The daemon refreshes shell directories after output and every 250 ms, including silent directory changes.
-The frontend exports its module/callback interface explicitly; linker collection removes unused owner/parser code.
-Hidden terminal views defer cell buffers until first use or frame, and font layouts, input methods,
-and blink timers until mapped or used. Empty tab strips defer Pango layouts until catalog refresh.
-Service output batching sleeps to its existing deadline rather than adding a fresh interval after partial bursts.
-The SSH bridge forwards both directions independently; congested display output must never block incoming input.
-Catalog broadcasts describe changed state, not parser operations; complete frames queue before transport flushing.
-Dirty rows replicate only when their encoded cells differ from the last queued viewport; ownership release frees it.
-Negotiated row moves preserve scrolling as a move plus exposed rows; legacy clients retain complete row packets.
-Application synchronized redraws hold frames and their tab metadata until completion, with bounded timeout recovery.
-`manage.py check-preview*` and `preview-perf` validate GTK; `build-preview` retains compatibility binary names.
-Private Wayland checks use a project-local Weston runtime and matching virtual-seat ABI, without X11 fallback.
+## Architecture
 
-Current jobs: prioritize remaining launch latency, while auditing input, rendering, output delivery, and view switching
-until further gains require correctness, resource, or compatibility compromises; review remaining compatibility gaps.
-Investigate intermittent local workspace loss after idle time; no root cause is confirmed.
-Daemon lifecycle, event-loop failures and fatal terminal errors go to syslog for journal diagnosis.
-Continue auditing first-frame presentation and peak startup resources after the verified first-window worker overlap.
-Browser cold startup is dominated by engine initialization; preserve lazy startup, persistent profiles and
-rendering compatibility when revisiting that cost.
-`worminal`/`worminald` are GTK/v2; preview build aliases share that workspace and existing browser profiles.
-Keep `worminal-x11`/`worminald-x11` and live v1 sessions available for rollback; never migrate or stop them implicitly.
-Both daemon builds share explicit `--handin`/`--handoff` ownership transfer via sealed native snapshots and SCM_RIGHTS.
-The receiver stages and validates state before commit; the donor then closes PTYs and forgets transferred tabs.
-`manage.py check-handoff` covers parser state, queued input, ownership, rollback, and all v1/v2 transfer combinations.
-Running daemons that predate the protocol cannot gain it through installation; preserve their live sessions.
-Investigate remote Codex scrolling separately from tested wheel modes.
+The maintained application is Rust above a small C terminal engine, with GTK 3, Pango/Cairo and WebKitGTK 4.1 on
+native Wayland and X11. `src/terminal/engine.h` defines the C API; Rust bindings generate from it.
+Each terminal has its own C instance. C handles parsing, cells, UTF-8, modes, scrollback/reflow, selection, redraw
+deadlines and serialization. It does not manage processes, descriptors, GUI objects or application policy.
+The Rust wrapper manages C handles and screen buffers.
+`src/workspace` contains shared protocol/snapshot formats and limits; `src/gtk` contains module/D-Bus definitions
+and browser scripts/templates. The Rust crates under `src` contain the launcher, daemon, frontend, browser
+and wrappers.
 
-`--new-browser-tab URL|FILE` requires a target and preserves explicit URLs. Bare hosts default to HTTPS;
-existing paths win, and ./ or ../ disambiguate missing local paths.
-Local paths and file URLs use native WebKit handling. Worminal knows no explorer assets or build paths.
-The independently compiled `file-explorer/dist/index.html` is opened directly; changing it needs no native
-rebuild, reinstall, or frontend restart: normal Ctrl+R or reopening reads the new artifact.
-Launch the explorer through the native browser CLI with the HTML target explicitly.
-Explorer changes take effect on explicit page reload/reopen; do not add live updates without a request.
-Generic read-only directory metadata and bounded regular-file reads belong to the initially selected local document,
-including query routes.
-A top-frame-only script owns its private per-view credential; subframes and other navigated documents have no access.
-Native browser error/find chrome belongs to `src/gtk`; native palette defaults belong to `assets/palette.json`.
-The independent TypeScript workspace retains a folder picker outside Worminal. Parent explorer commands
-supply its palette and resolved terminal font as build inputs; standalone builds retain their own defaults.
-Use `manage.py explorer-build`, `explorer-check`, and `explorer-lint` after `npm ci` in the submodule.
+The per-user v2 daemon owns ordered tabs, PTYs and bounded scrollback. Views connect locally or through SSH
+`--master user@host`. A terminal has one live painting view and can outlive every window. Frontend replicas import
+one viewport; they never parse terminal output or recompute history/reflow. Browser records have no PTY.
+The daemon atomically saves ordered terminal directories and browser URLs, scoped by protocol/workspace under
+XDG_STATE_HOME. Restart recovery creates fresh shells with the one-shot WORMINAL_RESTORE=1 marker, never replays
+commands or restores processes/scrollback. Real shell startup must respect that marker.
+
+Rust owns bounded queues, controller checks and process identities. Queue complete frames before flushing;
+unchanged encoded rows/catalog state must not generate traffic. Row moves and synchronized redraw retain their
+negotiated compatibility/deadline behavior. SSH directions advance independently under congestion. Spawn local
+daemons and SSH without GUI fork hooks, after validating the display. A failed launch must not create orphan tabs.
+The same-user GUI broker authenticates peers before accepting launch data or descriptors.
+
+Ownership transfers stage and validate sealed native snapshots and SCM_RIGHTS before commit. Receivers establish
+an independent session before accepting PTYs. Track local children separately from transferred processes and pin
+identities before signalling. After commit, donors close descriptors without destroying transferred shells or
+saving empty recovery recipes. Failed upgrades retain healthy owners; never restart live shells for rollback.
+Existing v1 processes must never be stopped or migrated implicitly.
+
+The lightweight launcher links GLib only and forwards before loading graphics. Frontend and browser use distinct,
+versioned C module ABIs with opaque handles and explicit callbacks; no Rust containers cross modules. Each browser
+view pins its creating generation; generations share a persistent profile manager. Keep code resident for async
+callbacks and release unused contexts. Never let concurrent owners write the same browser profile. Candidate
+owners/profiles are isolated from the stable installation. Browser moves preserve live DOM within the local owner;
+remote workspaces share saved URLs only. GTK/frontend updates require closing their old owners.
+
+Painting preserves matching background runs, overlapping glyph/cursor damage, fractional-grid fallback and Unicode
+font fallback. Cache printable ASCII shaping only. Views defer unused buffers/layouts/input methods/timers.
+The Cairo tab strip uses terminal metrics/colors and the tab order reported by the daemon. Browser file labels
+decode the filename; web tabs retain document titles. D-Bus directory arrays retain original filesystem bytes.
+`docs/window-state.md` defines that read-only public contract. X11 activation uses fresh server timestamps;
+Wayland activation remains compositor policy.
+
+Browser URL resolution preserves explicit URLs, prefers existing paths and otherwise defaults bare hosts to HTTPS.
+`--new-browser-tab URL|FILE` requires a target; `./` and `../` disambiguate missing local files.
+Selected local documents have bounded, read-only file/directory APIs through a private per-view credential held by
+a top-frame-only script. Subframes and other navigated documents have no capability. Native error/find chrome is
+Rust; its shared scripts/templates remain under `src/gtk`. Renderer recovery retains the last valid URI because
+WebKit can clear it after termination. Release Rust borrows before entering reentrant GTK/WebKit operations.
+The independent TypeScript `file-explorer` workspace opens its HTML artifact through the native browser CLI.
+Its changes take effect only on explicit reload/reopen; do not add live updates. Native builds do not embed it.
+Parent explorer build commands supply palette/font inputs; standalone builds retain their own defaults.
+
+## Build, test and install
+
+`manage.py` is strictly internal build/test/install/maintenance tooling. Product workflows use native executables.
+Build as the regular user to compile their Alacritty appearance. Cargo output and generated files belong in
+`build/`; native executables use `build/bin` and modules use `build/lib/worminal`, matching installed prefixes.
+`tools/paths.py` owns runtime/diagnostic path decisions. Diagnostics belong in `build/checks`; optional Python
+virtualenvs use `build/venv`. `clean` preserves diagnostics/virtualenvs while removing compiled output.
+Hooks and analysis/dependency configuration live under `tools`; management suppresses Python bytecode caches.
+Never test under /tmp or inject test input into the desktop.
+`manage.py` drops desktop display variables. `manage.py check` runs the full private-display suite. Native Wayland
+checks use project-local Weston with matching virtual-seat ABI and no X11 fallback. Prepare optional private
+Muffin/Weston through their setup commands. Performance checks measure private software presentation, not desktop
+compositing or physical display latency. Launch latency is not a migration acceptance target.
+
+The old C applications are no longer maintained or installed. Roll back code from Git; do not keep executable
+backups. Some tests still need the old C code. `tools/reference.py` gets it from Git, builds it under `build/`,
+and creates temporary source links for those tests. It removes the files and links when the test process exits.
+Normal builds do not use this code. `manage.py clean` removes links left by interrupted tests.
+Keep behavior checks when changing tests. Some tests check fixes by removing them and requiring a failure.
+Keep user profiles and diagnostic records when cleaning up code.
+
+The active installation is `/usr/local/bin/worminal`, with modules in `/usr/local/lib/worminal`. Install a tested
+regular-user build with `sudo -n python3 manage.py install --prefix /usr/local --skip-build`; do not install fixes
+into ~/.local. `check-install` validates a staged installation; `check-install --installed` checks installed files,
+modes, SSH/browser operation and actual module paths on private displays. Running owners retain mapped code;
+check the running executable and loaded module files before claiming a change is active. Inventory commands record
+process IDs, tabs, windows and file hashes without copying executables. Keep destinations in environment configuration
+and preserve the contributor's configured Git identity. Privacy hooks check staged content and commit messages;
+public commit attribution is allowed.
+
+## Current investigations
+
+Investigate intermittent local workspace loss after idle time and reported desktop freezes during master
+connections; neither root cause is confirmed. Treat remote Codex scrolling separately from tested wheel modes.
+Daemon lifecycle/event-loop/fatal terminal errors go to syslog for diagnosis. Audit input, rendering, output delivery
+and view switching until further gains require correctness, resource or compatibility compromises.

@@ -6,6 +6,10 @@ This includes launch, mapping, keyboard dispatch, and PTY output processing.
 The optional shell mode also measures interactive shell startup. Neither mode
 includes Xvfb startup or uses the host display.
 """
+from runtime import CHECKS
+
+from runtime import runtime_binary
+
 
 import argparse
 import json
@@ -61,7 +65,7 @@ def measure_one(env, index, shell=False):
             raise RuntimeError(f"Trial {index}: key injector did not become ready")
         started = time.monotonic_ns()
         terminal = subprocess.Popen(
-            [str(ROOT / env.get("WORMINAL_FRONTEND", "worminal")), "-T", title, "-o", "-", "-e", *command],
+            [str(runtime_binary(env.get("WORMINAL_FRONTEND", "worminal"))), "-T", title, "-o", "-", "-e", *command],
             cwd=ROOT,
             env=env,
             stdout=subprocess.PIPE,
@@ -141,8 +145,8 @@ def main():
     shell = options.shell
     with isolated_display() as env:
         owner = None
-        checks = ROOT / ".checks"
-        checks.mkdir(exist_ok=True)
+        checks = CHECKS
+        checks.mkdir(parents=True, exist_ok=True)
         with (checks / "latency-owner.log").open("wb") as log:
             try:
                 if options.forwarded:
@@ -150,7 +154,7 @@ def main():
                         raise SystemExit("Forwarded launches require the GTK frontend")
                     title = f"Worminal latency owner {os.getpid()}"
                     owner = subprocess.Popen(
-                        [str(ROOT / env.get("WORMINAL_FRONTEND", "worminal")), "-T", title, "-e", "/bin/cat"],
+                        [str(runtime_binary(env.get("WORMINAL_FRONTEND", "worminal"))), "-T", title, "-e", "/bin/cat"],
                         env=env, stdout=log, stderr=log)
                     subprocess.run(["xdotool", "search", "--sync", "--onlyvisible", "--name", f"^{title}$"],
                                    env=env, check=True, stdout=subprocess.DEVNULL, timeout=TIMEOUT)

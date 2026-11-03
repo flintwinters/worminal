@@ -11,14 +11,9 @@
 
 static void diagnostics(void);
 
-#define WAIT(condition) do { \
-	gint64 deadline = g_get_monotonic_time() + 10000000; \
-	while (!(condition) && g_get_monotonic_time() < deadline) { \
-		while (g_main_context_iteration(NULL, FALSE)) {} \
-		g_usleep(1000); \
-	} \
-	if (!(condition)) { diagnostics(); g_error("Timed out: %s (line %d)", #condition, __LINE__); } \
-} while (0)
+#define GTK_WAIT_DIAGNOSTICS diagnostics
+#include "gtk_wait.h"
+#include "preview_focus.c"
 
 static void
 diagnostics(void)
@@ -62,8 +57,6 @@ screen_has(Terminal *t, const char *wanted)
 	g_string_free(screen, TRUE);
 	return found;
 }
-
-#include "preview_selection.c"
 
 typedef struct { Terminal *terminal; const char *wanted; gboolean painted, partial; } PaintProbe;
 
@@ -472,9 +465,12 @@ check_initial_dimensions(void)
 	g_object_unref(page.widget);
 }
 
+#include "preview_connection.c"
+
 static void
 check_connection_gate(void)
 {
+	check_remote_pending_status();
 	App *app = new_app();
 	/* Fail before any transport/daemon work. A nested main loop must not
 	 * dispatch the failure callback against an unfinished window. */
@@ -504,6 +500,7 @@ check_connection_gate(void)
 static void
 check_tabs(App *app, Page *terminal, Page *browser)
 {
+	check_tab_title_colors(app, terminal, browser);
 	TabStrip *strip = g_object_get_data(G_OBJECT(app->tabstrip), "tabs");
 	g_assert_cmpint(strip->cw, ==, terminal->terminal->cw);
 	g_assert_cmpint(strip->ch, ==, terminal->terminal->ch);
@@ -513,7 +510,7 @@ check_tabs(App *app, Page *terminal, Page *browser)
 	cairo_surface_t *image = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
 	cairo_t *cr = cairo_create(image);
 	tabs_draw(app->tabstrip, cr, strip);
-	g_assert_cmpint(cairo_surface_write_to_png(image, ".checks/preview-tabs.png"), ==, CAIRO_STATUS_SUCCESS);
+	g_assert_cmpint(cairo_surface_write_to_png(image, "build/checks/preview-tabs.png"), ==, CAIRO_STATUS_SUCCESS);
 	cairo_destroy(cr); cairo_surface_destroy(image);
 	/* Hit testing uses exactly the same variable widths and visible range as drawing. */
 	GList *first = first_visible(strip, width - 2);
@@ -538,7 +535,7 @@ check_tabs(App *app, Page *terminal, Page *browser)
 static void
 select_page(Page *page)
 {
-	gtk_window_present(GTK_WINDOW(page->app->window));
+	present_test_window(page->app->window);
 	if (page->url) app_select(page);
 	else gtk_notebook_set_current_page(GTK_NOTEBOOK(page->app->notebook),
 	    gtk_notebook_page_num(GTK_NOTEBOOK(page->app->notebook), page->widget));
@@ -554,6 +551,7 @@ press_browser_key(Page *page, guint key, guint mods)
 }
 
 #include "preview_find.c"
+#include "preview_shortcuts.c"
 
 static Page *
 open_browser(App *app, const char *url)
@@ -669,11 +667,11 @@ check_outline_focus(App *app)
 {
 	GtkWidget *other = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_widget_show(other);
-	gdk_window_focus(gtk_widget_get_window(other), GDK_CURRENT_TIME);
+	present_test_window(other);
 	WAIT(gtk_window_is_active(GTK_WINDOW(other)) &&
 	    !gtk_window_is_active(GTK_WINDOW(app->window)));
 	check_outline(app);
-	gdk_window_focus(gtk_widget_get_window(app->window), GDK_CURRENT_TIME);
+	present_test_window(app->window);
 	WAIT(gtk_window_is_active(GTK_WINDOW(app->window)));
 	check_outline(app);
 	gtk_widget_destroy(other);
@@ -745,7 +743,6 @@ main(int argc, char **argv)
 	terminal_copy(t, GDK_SELECTION_CLIPBOARD);
 	terminal_paste(t, GDK_SELECTION_CLIPBOARD);
 	WAIT(screen_has(t, "SELECT-MESELECT-ME"));
-	check_select_all(app, t);
 	int oldcols = t->frame.cols;
 	gtk_window_resize(GTK_WINDOW(app->window), 720, 420);
 	if (!g_getenv("WORMINAL_PREVIEW_TILED")) WAIT(t->frame.cols != oldcols && t->frame.cols == t->cols);
@@ -759,14 +756,14 @@ main(int argc, char **argv)
 	WAIT(t->frame.cols != oldcols && t->frame.cols == t->cols);
 	check_ascii_line_rendering(t);
 	check_unicode_layout_rendering(t);
-	paint(t, ".checks/preview-terminal.png");
+	paint(t, "build/checks/preview-terminal.png");
 	GString *flood = g_string_new(NULL);
 	for (int i = 0; i < 2000; i++) g_string_append_printf(flood, "\r\noutput-%04d", i);
 	g_string_append(flood, "\r\nDRAINED");
 	input(t, flood->str, flood->len);
 	g_string_free(flood, TRUE);
 	WAIT(screen_has(t, "DRAINED"));
-	paint(t, ".checks/preview-terminal-dense.png");
+	paint(t, "build/checks/preview-terminal-dense.png");
 	WireBuffer scroll = {0};
 	wire_put_u32(&scroll, 1); wire_put_u32(&scroll, 3);
 	app_send(app, WIRE_SCROLL, terminal->id, scroll.data, scroll.len);
@@ -813,7 +810,7 @@ main(int argc, char **argv)
 	expect_script(sibling->browser, "String(window.opener)", "null");
 	expect_script(sibling->browser, "String(sessionStorage.getItem('private-tab'))", "null");
 	int sibling_count = g_list_length(app->pages);
-	app_close(sibling);
+	press_browser_key(sibling, GDK_KEY_d, GDK_CONTROL_MASK);
 	WAIT(g_list_length(app->pages) == sibling_count - 1);
 	select_page(web);
 	check_tabs(app, terminal, web);
@@ -887,7 +884,7 @@ main(int argc, char **argv)
 	/* The WebKit promise resolves asynchronously after the GTK dialog response. */
 	WAIT(script_equals(web->browser, "window.permissionResult", "denied"));
 	/* Complete an actual WebKit download through the save dialog. */
-	char *download = g_build_filename(g_get_current_dir(), ".checks", "preview-download.txt", NULL);
+	char *download = g_build_filename(g_get_current_dir(), "build/checks", "preview-download.txt", NULL);
 	g_unlink(download);
 	expect_script(web->browser, "document.querySelector('a[download]').click(); 'download'", "download");
 	WAIT(dialog_of_type(GTK_TYPE_FILE_CHOOSER_DIALOG));
@@ -921,16 +918,16 @@ main(int argc, char **argv)
 	app_close(failed);
 	WAIT(g_list_length(app->pages) == before_tls);
 	uint32_t webid = web->id;
-	app_close(web);
+	press_browser_key(web, GDK_KEY_q, GDK_CONTROL_MASK);
 	WAIT(find_page(app, webid) == NULL && find_page(peer, webid) == NULL);
 	web = open_browser(app, url);
 	expect_script(web->browser, "localStorage.getItem('saved') + ':' + document.cookie", "yes:session=local");
-	/* The shell command changes the existing record, then Ctrl+T always creates
-	 * a fresh terminal. Ctrl+Shift+B has no browser action. */
+	/* The shell command changes the existing record. Tab creation follows its
+	 * resulting type; Ctrl+Shift+B has no browser action. */
 	App *converter = new_app();
 	converter->master = g_strdup(master);
 	char *test_cwd = g_get_current_dir();
-	char *frontend_path = g_build_filename(test_cwd, "worminal", NULL);
+    char *frontend_path = g_strdup(g_getenv("WORMINAL_TEST_EXECUTABLE"));
 	g_free(test_cwd);
 	char *quoted_frontend = g_shell_quote(frontend_path);
 	char *convert_script = g_strdup_printf("stty raw -echo; printf CONVERT_READY; "
@@ -954,12 +951,15 @@ main(int argc, char **argv)
 	g_assert_null(peer->active->browser);
 	g_assert_null(converted_browser->entry);
 	WAIT(gtk_window_get_focus(GTK_WINDOW(converter->window)) == browser_view(converted_browser));
-	GdkEventKey control_t = {.type = GDK_KEY_PRESS, .keyval = GDK_KEY_t, .state = GDK_CONTROL_MASK};
-	g_assert_true(shortcut(converter->window, &control_t, converter));
-	WAIT(converter->active && converter->active->terminal && converter->active->id != converted_id);
+	check_new_tab_shortcuts(converter, converted_id);
 	GdkEventKey removed = {.type = GDK_KEY_PRESS, .keyval = GDK_KEY_b,
 	    .state = GDK_CONTROL_MASK | GDK_SHIFT_MASK};
 	g_assert_false(shortcut(converter->window, &removed, converter));
+	guint terminal_keys[] = {GDK_KEY_d, GDK_KEY_q};
+	for (size_t i = 0; i < G_N_ELEMENTS(terminal_keys); i++) {
+		GdkEventKey application_key = {.type = GDK_KEY_PRESS, .keyval = terminal_keys[i], .state = GDK_CONTROL_MASK};
+		g_assert_false(shortcut(converter->window, &application_key, converter));
+	}
 	WAIT(find_page(app, converted_id));
 	gtk_widget_destroy(converter->window);
 	select_page(find_page(app, converted_id));

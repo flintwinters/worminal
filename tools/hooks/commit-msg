@@ -1,0 +1,2 @@
+#!/bin/sh
+exec python3 manage.py check-privacy --staged --message-file "$1"

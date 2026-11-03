@@ -1,0 +1,33 @@
+[package]
+name = "worminal-frontend"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+worminal-engine = { path = "../engine" }
+worminal-engine-sys = { path = "../engine-sys" }
+worminal-protocol = { path = "../protocol" }
+worminal-config = { path = "../config" }
+worminal-workspace = { path = "../workspace" }
+worminal-browser-api = { path = "../browser-api" }
+gtk.workspace = true
+pango.workspace = true
+cairo-rs = { workspace = true, features = ["png"] }
+# URI parsing matches the GLib API already required by the retained C frontend.
+glib = { workspace = true, features = ["v2_66"] }
+libc.workspace = true
+
+[build-dependencies]
+bindgen.workspace = true
+
+[[bin]]
+name = "worminal-render-check"
+path = "../../tests/rust_render.rs"
+
+[[bin]]
+name = "worminal-rust"
+path = "src/main.rs"
