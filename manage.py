@@ -557,9 +557,11 @@ def check_build():
 
 
 @app.command("check-install")
-def check_install(installed: bool = typer.Option(False, help='Verify published /usr/local artifacts without writing.')):
+def check_install(installed: bool = typer.Option(False, help='Verify published /usr/local artifacts without writing.'),
+                  skip_build: bool = typer.Option(False, help='Verify existing artifacts, including transferred builds.')):
     """Stage /usr/local privately; verify hashes, native SSH input, browser and loaded module paths."""
-    native_build.build_targets()
+    if not skip_build:
+        native_build.build_targets()
     raise typer.Exit(run([sys.executable, "tests/installation.py", *(['--installed'] if installed else [])]))
 
 
