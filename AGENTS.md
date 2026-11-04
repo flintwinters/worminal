@@ -66,7 +66,10 @@ Parent explorer build commands supply palette/font inputs; standalone builds ret
 ## Build, test and install
 
 `manage.py` is strictly internal build/test/install/maintenance tooling. Product workflows use native executables.
-Build as the regular user to compile their Alacritty appearance. Cargo output and generated files belong in
+Build as the regular user to compile their Alacritty appearance.
+Shared font defaults in `assets/font.toml` use bundled Atkinson Hyperlegible Mono; installation includes
+both font styles and their OFL license. Explicit Alacritty fields override defaults, including for explorer builds.
+Cargo output and generated files belong in
 `build/`; native executables use `build/bin` and modules use `build/lib/worminal`, matching installed prefixes.
 `tools/paths.py` owns runtime/diagnostic path decisions. Diagnostics belong in `build/checks`; optional Python
 virtualenvs use `build/venv`. `clean` preserves diagnostics/virtualenvs while removing compiled output.

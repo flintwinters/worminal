@@ -10,4 +10,7 @@ Its integrated browser lets a shell command turn the current terminal tab into a
 
 The aim is to make the terminal useful for more of your work while keeping the interface small and memory use low.
 
+Installations include Atkinson Hyperlegible Mono as the default font, at 9 pt with a -3 pixel line offset.
+Explicit Alacritty font settings at build time and the `-f` command-line option override the defaults.
+
 Built with Rust, GTK, WebKitGTK, and a terminal engine derived from [st](https://git.suckless.org/st/); see [LICENSE](LICENSE).

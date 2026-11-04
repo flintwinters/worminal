@@ -95,9 +95,11 @@ def dim_color(value):
 def theme_values(config):
     source = ROOT / "assets/palette.json"
     defaults = json.loads(source.read_text())
+    font_defaults = tomllib.loads((ROOT / "assets/font.toml").read_text())["font"]
     font = config.get("font", {})
     if not isinstance(font, dict):
         raise ValueError("[font] must be a table")
+    font = merge(font_defaults, font)
     normal = font.get("normal", {})
     if not isinstance(normal, dict):
         raise ValueError("font.normal must be a table")

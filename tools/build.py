@@ -12,6 +12,8 @@ from tools.paths import runtime_binary
 
 
 ROOT = Path(__file__).resolve().parent.parent
+FONT_DIRECTORY = Path("assets/fonts/atkinson-hyperlegible-mono")
+FONT_FILES = ("AtkinsonHyperlegibleMono[wght].ttf", "AtkinsonHyperlegibleMono-Italic[wght].ttf", "OFL.txt")
 VERSION = next(line.split('"')[1] for line in (ROOT / "src/version.h").read_text().splitlines()
                if line.startswith("#define WORMINAL_VERSION "))
 RUST_BROWSER_MODULE = next(line.split('"')[1]
@@ -247,6 +249,8 @@ def installation_files(prefix=None):
     files += [("docs/man/worminal.1", manprefix / "man1/worminal.1", 0o644),
               ("assets/worminal.desktop", prefix / "share/applications/worminal.desktop", 0o644),
               ("assets/worminal.svg", prefix / "share/icons/hicolor/scalable/apps/worminal.svg", 0o644)]
+    files += [(str(FONT_DIRECTORY / name), prefix / "share/fonts/worminal" / name, 0o644)
+              for name in FONT_FILES]
     return [(ROOT / source, staging / str(destination).lstrip("/"), mode) for source, destination, mode in files]
 
 

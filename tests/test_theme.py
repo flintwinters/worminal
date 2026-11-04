@@ -48,9 +48,10 @@ class ThemeTest(unittest.TestCase):
 
     def test_explorer_font_without_configuration_needs_no_removed_c_source(self):
         with patch("tools.theme.find_config", return_value=None), \
-                patch("tools.theme.font_height", return_value=6) as metrics:
-            self.assertEqual(explorer_font(), {"family": "sans", "size": 4, "lineHeight": 6})
-            metrics.assert_called_once_with("sans", 4)
+                patch("tools.theme.font_height", return_value=16) as metrics:
+            self.assertEqual(explorer_font(), {"family": "Atkinson Hyperlegible Mono", "size": 9,
+                                               "lineHeight": 13})
+            metrics.assert_called_once_with("Atkinson Hyperlegible Mono", 9)
 
     def test_default_alacritty_palette(self):
         header = theme_header({})
@@ -62,12 +63,22 @@ class ThemeTest(unittest.TestCase):
         self.assertIn('[261] = "#0f0f0f"', header)
         self.assertIn('[269] = "#8e8e8e"', header)
         self.assertIn("theme_bold_bright = 0", header)
-        self.assertIn("theme_font_offset_y = 0", header)
+        self.assertIn("theme_font_offset_y = -3", header)
         self.assertIn("theme_glyph_offset_y = 0", header)
-        self.assertIn("theme_font_size = 0.0", header)
-        self.assertIn("theme_font_family = NULL", header)
+        self.assertIn("theme_font_size = 9.0", header)
+        self.assertIn('theme_font_family = "Atkinson Hyperlegible Mono"', header)
         self.assertIn("theme_history_size = 10000", header)
         self.assertIn("theme_scroll_multiplier = 3", header)
+
+    def test_partial_font_override_keeps_other_shared_defaults(self):
+        settings, _ = theme_values({"font": {"size": 12}})
+        self.assertEqual(settings["font_family"], "Atkinson Hyperlegible Mono")
+        self.assertEqual(settings["font_offset_y"], -3)
+        self.assertEqual(settings["font_size"], 12)
+        settings, _ = theme_values({"font": {"normal": {"family": "monospace"}, "offset": {"y": 0}}})
+        self.assertEqual(settings["font_family"], "monospace")
+        self.assertEqual(settings["font_offset_y"], 0)
+        self.assertEqual(settings["font_size"], 9)
 
     def test_imports_override_by_color_key(self):
         header = theme_header(read_config(FIXTURES / "main.toml"))

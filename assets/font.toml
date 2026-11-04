@@ -1,0 +1,7 @@
+# Shared defaults; explicit Alacritty font settings override individual fields.
+[font]
+size = 9
+offset = { y = -3 }
+
+[font.normal]
+family = "Atkinson Hyperlegible Mono"

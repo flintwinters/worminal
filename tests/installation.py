@@ -12,6 +12,7 @@ import socket
 import subprocess
 import sys
 import time
+import xml.etree.ElementTree as ET
 
 from preview import fixture, profile
 from workspace_protocol import service_pid
@@ -20,6 +21,7 @@ from x11 import close_window, isolated_display
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from tools import build
+from tools.theme import theme_values
 
 
 def digest(path):
@@ -47,6 +49,19 @@ def main(installed=False):
             raise AssertionError(f"Staged artifact differs from verified build: {target}")
         records.append({"path": str(target.relative_to(stage)), "sha256": digest(target)})
     prefix = stage / "usr/local"
+    # A private Fontconfig search path catches missing/corrupt font payloads even when
+    # the developer already has the default family installed elsewhere.
+    fontconfig = ET.Element('fontconfig')
+    ET.SubElement(fontconfig, 'dir').text = str(prefix / 'share/fonts/worminal')
+    ET.SubElement(fontconfig, 'cachedir').text = str(CHECKS / 'install-font-cache')
+    fontconfig_path = CHECKS / 'install-fontconfig.xml'
+    ET.ElementTree(fontconfig).write(fontconfig_path, encoding='utf-8', xml_declaration=True)
+    family = theme_values({})[0]['font_family']
+    for style, filename in (('Regular', build.FONT_FILES[0]), ('Italic', build.FONT_FILES[1])):
+        matched = subprocess.check_output(['fc-match', '-f', '%{file}', f'{family}:style={style}'],
+            env={**os.environ, 'FONTCONFIG_FILE': str(fontconfig_path)}, text=True, timeout=10)
+        if Path(matched) != prefix / 'share/fonts/worminal' / filename:
+            raise AssertionError(f'Bundled {style} font did not resolve: {matched}')
     executable = prefix / "bin/worminal"
     for name, option, status in (("worminal", "--version", 0),):
         result = subprocess.run([str(prefix / "bin" / name), option],
