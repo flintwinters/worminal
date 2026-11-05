@@ -48,7 +48,10 @@ impl Queue {
                 "bounded transport queue is full",
             ));
         }
-        if self.sent != 0 {
+        // Amortize compaction: moving the live suffix after every short write
+        // makes congested streams copy their backlog on every append. Until
+        // half is consumed, let the vector use/grow its tail instead.
+        if self.sent != 0 && self.sent >= self.len() {
             self.bytes.drain(..self.sent);
             self.sent = 0;
         }
@@ -126,5 +129,26 @@ mod tests {
             queue.flush(&mut output, 4).unwrap();
         }
         assert_eq!(output.bytes, b"abcdefg");
+    }
+
+    #[test]
+    fn short_writes_do_not_repeatedly_move_the_live_backlog() {
+        let mut queue = Queue::new(8);
+        queue.append(b"abcdefgh").unwrap();
+        queue.flush(&mut std::io::sink(), 2).unwrap();
+        queue.append(b"ij").unwrap();
+        assert_eq!(queue.pending(), b"cdefghij");
+        assert_eq!(queue.sent, 2);
+        assert_eq!(queue.remaining(), 0);
+        let before = queue.bytes.clone();
+        assert!(queue.append(b"x").is_err());
+        assert_eq!(queue.bytes, before);
+        queue.flush(&mut std::io::sink(), 6).unwrap();
+        queue.append(b"klmnop").unwrap();
+        assert_eq!(queue.pending(), b"ijklmnop");
+        assert_eq!(queue.sent, 0);
+        queue.flush(&mut std::io::sink(), usize::MAX).unwrap();
+        assert!(queue.bytes.is_empty());
+        assert_eq!(queue.sent, 0);
     }
 }
