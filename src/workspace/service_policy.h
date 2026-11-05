@@ -3,7 +3,8 @@
 #define WORMINAL_SERVICE_POLICY_H
 #define WORKSPACE_CLIENT_QUEUE_BYTES (4u * 1024u * 1024u)
 #define WORKSPACE_INPUT_QUEUE_BYTES (1024u * 1024u)
-#define WORKSPACE_FRAME_BACKLOG_BYTES (1024u * 1024u)
+// Coalesce engine damage early; queued complete frames and their baselines remain intact.
+#define WORKSPACE_FRAME_BACKLOG_BYTES (128u * 1024u)
 #define WORKSPACE_RESYNC_BACKLOG_BYTES 65536u
 #define WORKSPACE_IO_BYTES 16384u
 #define WORKSPACE_FRAME_INTERVAL_NS 16000000LL

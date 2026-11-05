@@ -181,6 +181,15 @@ def daemon_perf(label: str = typer.Option(..., help="Filename label for retained
     measure(label, trials, compare)
 
 
+@app.command("network-perf")
+def network_perf(label: str = typer.Option(..., help="Filename label for retained measurements."),
+                 trials: int = typer.Option(3, min=1),
+                 compare: str = typer.Option(None, help="Git baseline for identical service transport workloads.")):
+    """Measure sparse traffic and modeled congested frame age; excludes SSH, RTT and presentation."""
+    from tools.daemon_perf import measure
+    measure(label, trials, compare, network=True)
+
+
 @app.command("check-rust-process")
 def check_rust_process():
     """Check headless Rust PTYs, child identities and real zsh restoration on project-local fixtures."""

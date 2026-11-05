@@ -150,7 +150,12 @@ impl Service {
         if !client.ready {
             return Ok(false);
         }
-        if client.output.len() > WORKSPACE_FRAME_BACKLOG_BYTES as usize {
+        if client.needs_resync || client.output.len() >= WORKSPACE_FRAME_BACKLOG_BYTES as usize {
+            // The baseline still describes ordered queued bytes. Retain damage for one later delta,
+            // but remember explicit full-frame requests across the congestion gate.
+            if full {
+                tab.screen.bytes.clear();
+            }
             client.needs_resync = true;
             tab.pending_frame = false;
             return Ok(false);
@@ -543,3 +548,7 @@ pub(crate) fn receive_upgrade(scope: &[u8], legacy: bool) -> io::Result<()> {
     drop(receiving);
     service.run(signals)
 }
+
+#[cfg(test)]
+#[path = "network_tests.rs"]
+mod network_tests;

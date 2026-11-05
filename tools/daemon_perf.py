@@ -15,11 +15,16 @@ COMMAND = ["cargo", "test", "--locked", "--release", "--quiet", "-p", "worminal-
            "--lib", "perf_tests::hot_paths", "--", "--ignored", "--nocapture", "--test-threads=1"]
 
 
-def sample(root):
-    result = subprocess.check_output(COMMAND, cwd=root, text=True)
+def sample(root, network=False):
+    command = [part.replace("perf_tests::hot_paths", "service::network_tests::transport_model")
+               for part in COMMAND] if network else COMMAND
+    result = subprocess.check_output(command, cwd=root, text=True)
     values = {}
     for line in result.splitlines():
-        if line.startswith("DAEMON_PERF "):
+        if network and line.startswith("NETWORK_PERF "):
+            _, name, value = line.split()
+            values[name] = int(value)
+        elif not network and line.startswith("DAEMON_PERF "):
             _, name, elapsed, iterations = line.split()
             values[name] = int(elapsed) / int(iterations)
     if not values:
@@ -27,7 +32,8 @@ def sample(root):
     return values
 
 
-def measure(label, trials, compare=None):
+def measure(label, trials, compare=None, *, network=False):
+    entrypoint = "network-perf" if network else "daemon-perf"
     if not label or Path(label).name != label or label in (".", ".."):
         raise ValueError("Choose a single filename component as the measurement label")
     build.generate_theme()
@@ -44,18 +50,25 @@ def measure(label, trials, compare=None):
             extract(revision, baseline, paths=("src", "tests", "tools", "assets", "manage.py",
                                                "Cargo.toml", "Cargo.lock", ".cargo"))
             # Both owners execute the exact same workload and CPU clock, independent of their implementations.
-            shutil.copyfile(build.ROOT / "src/daemon/src/perf_tests.rs", baseline / "src/daemon/src/perf_tests.rs")
+            workload = "network_tests.rs" if network else "perf_tests.rs"
+            relative = Path("src/daemon/src") / workload
+            shutil.copyfile(build.ROOT / relative, baseline / relative)
+            if network:
+                service = baseline / "src/daemon/src/service.rs"
+                source = service.read_text()
+                if "mod network_tests;" not in source:
+                    service.write_text(source + '\n#[cfg(test)]\n#[path = "network_tests.rs"]\nmod network_tests;\n')
             subprocess.run([sys.executable, "manage.py", "daemon-perf", "--label", "warmup", "--trials", "1"],
                            cwd=baseline, check=True, stdout=subprocess.DEVNULL)
             roots["baseline"] = baseline
         for root in roots.values():
-            sample(root)  # Compile and warm both owners before alternating measured trials.
+            sample(root, network)  # Compile and warm both owners before alternating measured trials.
         samples = {variant: {} for variant in roots}
         for trial in range(trials):
             print(f"Measuring trial {trial + 1}/{trials}", flush=True)
             order = list(roots) if trial % 2 == 0 else list(reversed(roots))
             for variant in order:
-                values = sample(roots[variant])
+                values = sample(roots[variant], network)
                 if samples[variant] and values.keys() != samples[variant].keys():
                     raise RuntimeError("Daemon workloads changed during measurement")
                 for name, value in values.items():
@@ -65,12 +78,19 @@ def measure(label, trials, compare=None):
     report = {"revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
               "baseline_revision": revision,
               "working_tree": subprocess.check_output(["git", "diff", "--stat"], text=True),
-              "trials": trials, "unit": "thread CPU nanoseconds per iteration", "samples": samples,
+              "trials": trials, "unit": "metric suffix (bytes, ms, frames)" if network else
+              "thread CPU nanoseconds per iteration", "samples": samples,
               "medians": medians,
               "notes": "Release microbenchmarks; excludes GUI, SSH and physical presentation. "
                        "Catalog iterations assemble 64 cached tab entries; frames are full 100x40 viewports. "
                        "Comparison uses identical current workloads, warmed builds and alternating owner order."}
-    destination = CHECKS / f"daemon-perf-{label}.json"
+    if network:
+        report["notes"] = ("Deterministic service model: 120x40, 250 dense updates at virtual 16 ms intervals; "
+                           "4096 raw protocol bytes drained per interval (2.048 Mbps), no compression, "
+                           "RTT, kernel/SSH buffering or GTK presentation. Sparse: 100 counter updates. "
+                           "Same workload on both revisions, capability negotiation selects supported encoding. "
+                           "Frame age is virtual source-to-complete-frame age; tail is drain time after output stops.")
+    destination = CHECKS / f"{entrypoint}-{label}.json"
     destination.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report["medians"], indent=2))
     print(f"Saved {destination.relative_to(build.ROOT)}")

@@ -164,7 +164,8 @@ impl Service {
         for client in clients {
             for index in 0..self.tabs.len() {
                 if self.tabs[index].controller == Some(client) {
-                    self.send_frame(index, true, now)?;
+                    // No queued bytes were discarded: resume from the queued baseline, not a full snapshot.
+                    self.send_frame(index, false, now)?;
                 }
             }
         }

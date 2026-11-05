@@ -682,3 +682,29 @@ The final frame workload observes encoded output before discarding it. Both
 implementations use that identical observation and thread CPU clock.
 Both v1 and v2 bridge congestion checks also pass: blocked output does not stop
 input delivery in the opposite direction.
+
+Congested viewport coalescing
+-----------------------------
+The Rust owner starts coalescing engine damage at 128 KiB of queued client data
+and resumes below 64 KiB. Already queued bytes, including partially sent frames,
+remain ordered and intact. Resume uses a delta against the queued baseline;
+explicit full-frame requests invalidate that baseline while deferred. This avoids
+both a deep stream of old screens and unnecessary full snapshots on recovery.
+An admitted frame can exceed the watermark; it is not a strict queue-size cap.
+
+Reproduce the retained deterministic service model with:
+  python3 manage.py network-perf --label coalescing --trials 3 --compare 46e682e
+Both revisions execute the same workload through actual service capability and
+frame handlers. The model produces 250 dense 120x40 updates at virtual 16 ms
+intervals and drains 4096 raw protocol bytes per interval (2.048 Mbps). Frame age
+ends only on complete frame delivery; final cells must match the engine. It
+excludes SSH/compression, RTT, socket buffers, GTK and physical presentation.
+These are queueing estimates, not measured real-network latency improvements.
+
+Three trials give original/current peak pending bytes 1124824/186032, p95 frame
+age 4384/720 ms, and drain time after output stops 4432/768 ms. Total traffic is
+2157012/1218620 bytes; fewer intermediate screens are delivered. Sparse updates
+remain 1996 bytes per complete response. Frozen raw metrics and model details:
+build/checks/network-perf-coalescing.json. Daemon/process checks and all 11 private
+network regressions pass, including preservation of a partially sent snapshot.
+The installation and running owners are unchanged.
