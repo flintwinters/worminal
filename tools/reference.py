@@ -1,4 +1,4 @@
-"""Build old C versions from Git for tests, then remove the temporary files."""
+"""Build historical source fixtures from Git for tests, then remove temporary files."""
 import atexit
 import importlib.util
 import io
@@ -35,8 +35,8 @@ def cleanup():
         _directory = None
 
 
-def extract(revision, destination):
-    archive = subprocess.check_output(['git', 'archive', revision, 'src', 'tests', 'tools/build.py', 'assets'],
+def extract(revision, destination, paths=('src', 'tests', 'tools/build.py', 'assets')):
+    archive = subprocess.check_output(['git', 'archive', revision, *paths],
                                       cwd=ROOT)
     with tarfile.open(fileobj=io.BytesIO(archive)) as source:
         for entry in source:

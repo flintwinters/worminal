@@ -8,7 +8,7 @@ mod constants {
 pub use constants::*;
 
 pub const MAX_PAYLOAD: usize = WIRE_MAX_BYTES as usize;
-const HEADER_BYTES: usize = 4 * mem::size_of::<u32>();
+pub const HEADER_BYTES: usize = 4 * mem::size_of::<u32>();
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
@@ -35,7 +35,8 @@ impl Buffer {
         }
     }
 
-    fn reserve(&mut self, extra: usize) -> io::Result<()> {
+    /// Reserve additional storage without changing encoded bytes or bypassing the bound.
+    pub fn reserve(&mut self, extra: usize) -> io::Result<()> {
         if extra > self.limit.saturating_sub(self.bytes.len()) {
             return Err(invalid("wire buffer limit exceeded"));
         }
@@ -66,15 +67,27 @@ impl Buffer {
     }
 
     pub fn append_packet_bytes(&mut self, kind: u32, tab: u32, body: &[u8]) -> io::Result<()> {
-        if body.len() > MAX_PAYLOAD {
+        self.append_packet_parts(kind, tab, &[body])
+    }
+
+    /// Encode borrowed body fragments with one preflight and no intermediate body allocation.
+    pub fn append_packet_parts(&mut self, kind: u32, tab: u32, parts: &[&[u8]]) -> io::Result<()> {
+        let length = parts.iter().try_fold(0usize, |length, part| {
+            length
+                .checked_add(part.len())
+                .ok_or_else(|| invalid("wire packet too large"))
+        })?;
+        if length > MAX_PAYLOAD {
             return Err(invalid("wire packet too large"));
         }
         // Reserve the complete frame before publishing any header bytes to a transport queue.
-        self.reserve(HEADER_BYTES + body.len())?;
-        for value in [WIRE_VERSION, kind, tab, body.len() as u32] {
+        self.reserve(HEADER_BYTES + length)?;
+        for value in [WIRE_VERSION, kind, tab, length as u32] {
             self.bytes.extend_from_slice(&value.to_be_bytes());
         }
-        self.bytes.extend_from_slice(body);
+        for part in parts {
+            self.bytes.extend_from_slice(part);
+        }
         Ok(())
     }
 

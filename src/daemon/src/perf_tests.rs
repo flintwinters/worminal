@@ -3,15 +3,22 @@ use crate::{
     queue::Queue,
     state::{Screen, Tab},
 };
-use std::{hint::black_box, time::Instant};
+use std::{hint::black_box, mem::MaybeUninit};
 use worminal_engine::Engine;
 
+fn cpu_ns() -> i64 {
+    let mut time = MaybeUninit::<libc::timespec>::uninit();
+    assert_eq!(unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, time.as_mut_ptr()) }, 0);
+    let time = unsafe { time.assume_init() };
+    time.tv_sec * 1_000_000_000 + time.tv_nsec
+}
+
 fn measure(name: &str, iterations: usize, mut operation: impl FnMut()) {
-    let started = Instant::now();
+    let started = cpu_ns();
     for _ in 0..iterations {
         operation();
     }
-    println!("DAEMON_PERF {name} {} {iterations}", started.elapsed().as_nanos());
+    println!("DAEMON_PERF {name} {} {iterations}", cpu_ns() - started);
 }
 
 #[test]
@@ -37,7 +44,7 @@ fn hot_paths() {
     measure("cached_catalog_64_tabs", 200, || {
         let mut catalog = worminal_protocol::Buffer::with_limit(usize::MAX);
         for tab in &mut tabs {
-            catalog.put_bytes(tab.metadata(1).unwrap()).unwrap();
+            catalog.put_bytes(tab.metadata(1).unwrap().as_ref()).unwrap();
         }
         black_box(catalog);
     });
@@ -48,6 +55,7 @@ fn hot_paths() {
         screen
             .replicate(&mut engine, &mut output, 1, true, false, false, 1)
             .unwrap();
+        black_box(output.pending());
         output.flush(&mut std::io::sink(), usize::MAX).unwrap();
         black_box(&screen.bytes);
     });

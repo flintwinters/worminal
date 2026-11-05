@@ -110,3 +110,34 @@ fn multiple_frames_leave_the_next_packet_to_the_caller() {
     assert_eq!(used_again, bytes.len());
     assert_eq!(first, second);
 }
+
+#[test]
+fn fragmented_packet_bodies_match_contiguous_encoding_and_reject_atomically() {
+    let packet = Packet {
+        kind: WIRE_HELLO,
+        tab: 7,
+        body: b"ab\0\xffcd".to_vec(),
+    };
+    let expected = packet.encode().unwrap();
+    for split in 0..=packet.body.len() {
+        let parts = [&packet.body[..split], &[][..], &packet.body[split..]];
+        let mut output = Buffer::with_limit(expected.len());
+        output.reserve(expected.len()).unwrap();
+        assert!(output.as_bytes().is_empty());
+        output.append_packet_parts(packet.kind, packet.tab, &parts).unwrap();
+        assert_eq!(output.as_bytes(), expected);
+        let before = output.as_bytes().to_vec();
+        assert!(output.append_packet_parts(1, 0, &[]).is_err());
+        assert_eq!(output.as_bytes(), before);
+        let mut limited = Buffer::with_limit(expected.len() - 1);
+        limited.put_u32(42).unwrap();
+        assert!(limited.append_packet_parts(packet.kind, packet.tab, &parts).is_err());
+        assert!(limited.reserve(expected.len()).is_err());
+        assert_eq!(limited.as_bytes(), 42u32.to_be_bytes());
+    }
+    let large = vec![0; MAX_PAYLOAD];
+    let mut output = Buffer::with_limit(usize::MAX);
+    output.put_u32(42).unwrap();
+    assert!(output.append_packet_parts(1, 0, &[&large, b"x"]).is_err());
+    assert_eq!(output.as_bytes(), 42u32.to_be_bytes());
+}

@@ -640,3 +640,45 @@ build/checks/browser-installed-smoke.json is a functional installation check, no
 installed-versus-build speed claim. Machine load and NFS profile fixtures vary
 substantially; earlier alternating quiet-process measurements remain scoped to
 warm filesystem caches and exclude desktop compositing and physical displays.
+
+Daemon queue, catalog and frame preparation
+-----------------------------------------
+Output-driven shell directory checks now share the existing directory interval
+instead of performing process-liveness and procfs work for every PTY read. The
+periodic poll bypasses and renews the output throttle, preserving its observation
+schedule. A real-shell regression covers repeated output, periodic bypass and
+the exact output deadline. The throttle is transient across native handoff.
+
+Transport queues compact consumed prefixes only when amortized or required by
+their existing storage bound. Clean catalog entries reuse their encoded bytes
+and are borrowed by catalog assembly. Dirty and pending metadata still obey
+synchronized redraw. Frame preparation reserves row/packet storage, encodes
+borrowed body fragments without temporary row bodies, and transfers complete
+frames into empty queues without another copy. Failed queue publication still
+preserves engine damage and the last delivered baseline.
+
+Reproduce release comparisons through:
+  python3 manage.py daemon-perf --label paired --trials 9 --compare 1261c03
+The immutable baseline comes from Git and runs the identical current workload.
+Builds warm before alternating owner order. Thread CPU time excludes scheduling
+waits; these measurements exclude GUI, SSH and physical display presentation.
+Raw samples and medians are retained in build/checks/daemon-perf-paired.json.
+Earlier elapsed-time reports were variable and do not establish a frame gain.
+
+Daemon/process and protocol/workspace suites pass, including independent full
+frame byte equivalence, queue rejection and storage bounds. All 11 private
+network checks pass: complete frames, synchronized redraw, unchanged catalogs
+and rows, scrolling boundaries and partial delivery. Build/reference tooling
+checks also pass. The browser-command source gate stops on pre-existing long
+lines in README.md, the bundled font license and an install command signature.
+The active installation and running owners are unchanged.
+
+Nine alternating CPU trials against 1261c03 measured baseline/current medians:
+  congested queue append:       23638 / 152 ns per iteration
+  cached catalog (64 tabs):    103733 / 3062 ns per iteration
+  full frame (100x40):          72896 / 36679 ns per iteration
+These are workload-specific preparation costs, not end-to-end latency claims.
+The final frame workload observes encoded output before discarding it. Both
+implementations use that identical observation and thread CPU clock.
+Both v1 and v2 bridge congestion checks also pass: blocked output does not stop
+input delivery in the opposite direction.

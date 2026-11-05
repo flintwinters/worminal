@@ -174,10 +174,11 @@ def check_rust_workspace():
 
 @app.command("daemon-perf")
 def daemon_perf(label: str = typer.Option(..., help="Filename label for retained measurements."),
-                trials: int = typer.Option(5, min=1)):
-    """Measure release daemon queue, catalog and frame hot paths without a display."""
+                trials: int = typer.Option(5, min=1),
+                compare: str = typer.Option(None, help="Git revision with daemon-perf for alternating trials.")):
+    """Measure release daemon queue, catalog and frame CPU costs without a display."""
     from tools.daemon_perf import measure
-    measure(label, trials)
+    measure(label, trials, compare)
 
 
 @app.command("check-rust-process")

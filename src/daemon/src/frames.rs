@@ -6,7 +6,7 @@ use crate::{
 use std::io;
 use worminal_engine::{Cell, Engine, Frame};
 use worminal_protocol::{
-    Buffer, Packet, WIRE_CELL_BYTES, WIRE_COPY_ROWS, WIRE_FRAME, WIRE_FRAME_FINISH, WIRE_ROW,
+    Buffer, HEADER_BYTES, WIRE_CELL_BYTES, WIRE_COPY_ROWS, WIRE_FRAME, WIRE_FRAME_FINISH, WIRE_ROW,
 };
 
 fn same_frame(a: Frame, b: Frame) -> bool {
@@ -94,14 +94,6 @@ fn find_move(before: &[u8], current: &[Option<Vec<u8>>], width: usize) -> Option
     })
 }
 
-fn packet(output: &mut Buffer, kind: u32, tab: u32, body: Buffer) -> io::Result<()> {
-    output.append_packet(&Packet {
-        kind,
-        tab,
-        body: body.into_bytes(),
-    })
-}
-
 struct Plan {
     frame: Frame,
     full: bool,
@@ -153,36 +145,17 @@ impl Screen {
             }
             core(engine.row(row as i32, &mut cells))?;
             let mut encoded = Buffer::default();
+            encoded.reserve(width)?;
             for cell in &cells {
-                for value in [cell.rune, cell.attributes, cell.foreground, cell.background] {
-                    encoded.put_u32(value)?;
-                }
+                let fields = [cell.rune, cell.attributes, cell.foreground, cell.background]
+                    .map(u32::to_be_bytes);
+                encoded.put_bytes(fields.as_flattened())?;
             }
             current.push(Some(encoded.into_bytes()));
         }
         let movement = search_move
             .then(|| find_move(&self.bytes, &current, width))
             .flatten();
-        let mut output = Buffer::default();
-        let mut header = Buffer::default();
-        for field in [
-            frame.columns,
-            frame.rows,
-            frame.cursor_x,
-            frame.cursor_y,
-            frame.scroll,
-            frame.alternate,
-        ] {
-            header.put_u32(field as u32)?;
-        }
-        packet(&mut output, WIRE_FRAME, tab, header)?;
-        if let Some(m) = movement {
-            let mut body = Buffer::default();
-            for field in [m.source, m.destination, m.count] {
-                body.put_u32(field as u32)?;
-            }
-            packet(&mut output, WIRE_COPY_ROWS, tab, body)?;
-        }
         let mut updates = Vec::new();
         for (row, bytes) in current.into_iter().enumerate() {
             if !full && !dirty[row] {
@@ -195,10 +168,6 @@ impl Screen {
             if !full && bytes == self.bytes[baseline_row * width..(baseline_row + 1) * width] {
                 continue;
             }
-            let mut body = Buffer::default();
-            body.put_u32(row as u32)?;
-            body.put_bytes(&bytes)?;
-            packet(&mut output, WIRE_ROW, tab, body)?;
             updates.push((row, bytes));
         }
         if !full
@@ -210,7 +179,35 @@ impl Screen {
             core(engine.clean())?;
             return Ok(Prepared::Unchanged);
         }
-        packet(&mut output, WIRE_FRAME_FINISH, tab, Buffer::default())?;
+        let header = [
+            frame.columns,
+            frame.rows,
+            frame.cursor_x,
+            frame.cursor_y,
+            frame.scroll,
+            frame.alternate,
+        ]
+        .map(|field| (field as u32).to_be_bytes());
+        let move_body = movement.map(|m| {
+            [m.source, m.destination, m.count].map(|field| (field as u32).to_be_bytes())
+        });
+        let mut output = Buffer::default();
+        let row_bytes: usize = updates
+            .iter()
+            .map(|(_, bytes)| HEADER_BYTES + std::mem::size_of::<u32>() + bytes.len())
+            .sum();
+        output.reserve(
+            2 * HEADER_BYTES + header.as_flattened().len() + row_bytes
+                + move_body.as_ref().map_or(0, |fields| HEADER_BYTES + fields.as_flattened().len()),
+        )?;
+        output.append_packet_bytes(WIRE_FRAME, tab, header.as_flattened())?;
+        if let Some(fields) = move_body {
+            output.append_packet_bytes(WIRE_COPY_ROWS, tab, fields.as_flattened())?;
+        }
+        for (row, bytes) in &updates {
+            output.append_packet_parts(WIRE_ROW, tab, &[&(*row as u32).to_be_bytes(), bytes])?;
+        }
+        output.append_packet_bytes(WIRE_FRAME_FINISH, tab, &[])?;
         Ok(Prepared::Changed(Plan {
             frame,
             full,
@@ -223,7 +220,7 @@ impl Screen {
     fn commit(&mut self, plan: Plan, output: &mut Queue, engine: &mut Engine) -> io::Result<()> {
         // This is the only publication point: a rejected queue leaves both damage and baseline intact.
         // replicate owns preparation through commit, excluding feeds/resizes between them.
-        output.append(&plan.bytes)?;
+        output.append_owned(plan.bytes)?;
         let width = plan.frame.columns as usize * WIRE_CELL_BYTES as usize;
         if plan.full {
             self.bytes.resize(width * plan.frame.rows as usize, 0);

@@ -30,6 +30,12 @@ class HistoricalReferenceTests(unittest.TestCase):
         self.assertTrue((self.root / 'src/terminal/st_state.h').is_file())
         self.assertFalse((self.root / 'src/terminal/engine.c').exists())
 
+    def test_explicit_source_paths_support_isolated_rust_performance_baselines(self):
+        reference.extract('HEAD', self.root, paths=('Cargo.toml', 'Cargo.lock'))
+        self.assertTrue((self.root / 'Cargo.toml').is_file())
+        self.assertTrue((self.root / 'Cargo.lock').is_file())
+        self.assertFalse((self.root / 'src').exists())
+
     def test_archive_cannot_escape_its_disposable_directory(self):
         output = io.BytesIO()
         with tarfile.open(fileobj=output, mode='w') as archive:

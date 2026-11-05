@@ -1,5 +1,5 @@
 use super::*;
-use worminal_protocol::Decoder;
+use worminal_protocol::{Decoder, Packet};
 
 fn feed(engine: &mut Engine, mut bytes: &[u8], now: i64) {
     while !bytes.is_empty() {
@@ -183,4 +183,47 @@ fn deferred_full_claim_retains_damage_and_rebuilds_every_row() {
             .count(),
         4
     );
+}
+
+#[test]
+fn full_frame_matches_independently_encoded_cells_and_packet_order() {
+    let mut engine = Engine::new(8, 4).unwrap();
+    feed(
+        &mut engine,
+        "\x1b[1;38;2;12;34;56mAé\r\n\x1b[0mwide界".as_bytes(),
+        1,
+    );
+    let frame = engine.frame(1).unwrap();
+    let mut body = Buffer::default();
+    for value in [
+        frame.columns, frame.rows, frame.cursor_x, frame.cursor_y, frame.scroll, frame.alternate,
+    ] {
+        body.put_u32(value as u32).unwrap();
+    }
+    let mut expected = Buffer::default();
+    expected
+        .append_packet(&Packet { kind: WIRE_FRAME, tab: 7, body: body.into_bytes() })
+        .unwrap();
+    let mut cells = Vec::new();
+    for row in 0..frame.rows {
+        let mut body = Buffer::default();
+        body.put_u32(row as u32).unwrap();
+        engine.row(row, &mut cells).unwrap();
+        for cell in &cells {
+            for value in [cell.rune, cell.attributes, cell.foreground, cell.background] {
+                body.put_u32(value).unwrap();
+            }
+        }
+        expected
+            .append_packet(&Packet { kind: WIRE_ROW, tab: 7, body: body.into_bytes() })
+            .unwrap();
+    }
+    expected
+        .append_packet(&Packet { kind: WIRE_FRAME_FINISH, tab: 7, body: Vec::new() })
+        .unwrap();
+    let mut output = Queue::new(4096);
+    Screen::default()
+        .replicate(&mut engine, &mut output, 7, true, true, false, 1)
+        .unwrap();
+    assert_eq!(output.pending(), expected.as_bytes());
 }
