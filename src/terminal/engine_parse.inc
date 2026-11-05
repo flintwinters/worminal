@@ -596,6 +596,19 @@ te_csihandle(TermEngine *session)
 		case 2: /* all */
 			te_tclearregion(session, 0, 0, term.col-1, term.row-1);
 			break;
+		case 3: /* saved lines (xterm E3, emitted by clear) */
+			/* ED 2 only erases the screen. ED 3 must also discard the
+			 * retained ring and leave a scrolled viewport on live rows. */
+			te_selclear(session);
+			if (term.hist) {
+				for (int i = 0; i < theme_history_size; i++)
+					free(term.hist[i]);
+				free(term.hist);
+				term.hist = NULL;
+			}
+			term.histlen = term.histi = term.scr = 0;
+			te_tfulldirt(session);
+			break;
 		default:
 			goto unknown;
 		}

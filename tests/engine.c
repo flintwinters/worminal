@@ -176,6 +176,34 @@ snapshot_validation(void)
 }
 
 static void
+clear_scrollback(void)
+{
+	WorminalEngine *engine;
+	WorminalFrame frame;
+	uint8_t text[256];
+	size_t used;
+	assert(worminal_engine_create(8, 3, &engine) == WORMINAL_OK);
+	feed(engine, "old\r\nolder\r\nkeep\r\nlast", 1);
+	feed(engine, "\033[2J", 1);
+	assert(worminal_engine_all_text(engine, text, sizeof(text), &used) == WORMINAL_OK);
+	assert(used >= 3 && !memcmp(text, "old", 3));
+	feed(engine, "\033[Hvisible", 1);
+	assert(worminal_engine_scroll(engine, 1, 0) == WORMINAL_OK);
+	assert(worminal_engine_frame(engine, 1, &frame) == WORMINAL_OK && frame.scroll > 0);
+	feed(engine, "\033[3J", 1);
+	assert(worminal_engine_frame(engine, 1, &frame) == WORMINAL_OK && frame.scroll == 0);
+	assert(worminal_engine_all_text(engine, text, sizeof(text), &used) == WORMINAL_OK);
+	assert(used >= 7 && !memcmp(text, "visible", 7));
+	assert(worminal_engine_scroll(engine, 1, 100) == WORMINAL_OK);
+	assert(worminal_engine_frame(engine, 1, &frame) == WORMINAL_OK && frame.scroll == 0);
+	/* Repeated erasure and subsequent history must remain safe after freeing the ring. */
+	feed(engine, "\033[3J\033[H\033[2J\033[3Jfresh\r\nnew\r\nmore\r\nend", 1);
+	assert(worminal_engine_all_text(engine, text, sizeof(text), &used) == WORMINAL_OK);
+	assert(used >= 5 && !memcmp(text, "fresh", 5));
+	worminal_engine_destroy(engine);
+}
+
+static void
 borrowed_selection(void)
 {
 	WorminalSelection *selection;
@@ -233,6 +261,7 @@ main(void)
 	input_modes();
 	malformed_input();
 	snapshot_validation();
+	clear_scrollback();
 	borrowed_selection();
 	return 0;
 }
