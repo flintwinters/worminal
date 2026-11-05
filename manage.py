@@ -172,6 +172,14 @@ def check_rust_workspace():
     raise typer.Exit(run_rust_workspace_checks())
 
 
+@app.command("daemon-perf")
+def daemon_perf(label: str = typer.Option(..., help="Filename label for retained measurements."),
+                trials: int = typer.Option(5, min=1)):
+    """Measure release daemon queue, catalog and frame hot paths without a display."""
+    from tools.daemon_perf import measure
+    measure(label, trials)
+
+
 @app.command("check-rust-process")
 def check_rust_process():
     """Check headless Rust PTYs, child identities and real zsh restoration on project-local fixtures."""

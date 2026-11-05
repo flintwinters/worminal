@@ -15,3 +15,6 @@ mod state;
 mod upgrade_io;
 pub use cli::run;
 pub use service::serve;
+
+#[cfg(test)]
+mod perf_tests;
