@@ -28,10 +28,11 @@ XDG_STATE_HOME. Restart recovery creates fresh shells with the one-shot WORMINAL
 commands or restores processes/scrollback. Real shell startup must respect that marker.
 
 Rust owns bounded queues, controller checks and process identities. Queue complete frames before flushing;
-unchanged encoded rows/catalog state must not generate traffic. Row moves and synchronized redraw retain their
-negotiated compatibility/deadline behavior. SSH directions advance independently under congestion. Spawn local
-daemons and SSH without GUI fork hooks, after validating the display. A failed launch must not create orphan tabs.
-The same-user GUI broker authenticates peers before accepting launch data or descriptors.
+unchanged encoded rows/catalog state must not generate traffic. Negotiated row moves and cell spans preserve
+older peers; synchronized redraw retains its deadline behavior. SSH directions advance independently under
+congestion. Spawn local daemons and SSH without GUI fork hooks, after validating the display. A failed launch
+must not create orphan tabs. The same-user GUI broker authenticates peers before accepting launch data or
+descriptors.
 
 Ownership transfers stage and validate sealed native snapshots and SCM_RIGHTS before commit. Receivers establish
 an independent session before accepting PTYs. Track local children separately from transferred processes and pin

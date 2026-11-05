@@ -7,8 +7,11 @@ struct Fixture {
     _peer: UnixStream,
 }
 impl Fixture {
-    fn new() -> Self {
-        let scope = format!("network-{}-{:?}", std::process::id(), thread::current().id());
+    fn new() -> Self { Self::with_features(9) }
+    fn with_features(features: u32) -> Self {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
+        let serial = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let scope = format!("network-{}-{serial}", std::process::id());
         let (mut service, _) = create(scope.as_bytes(), socket::listen(process::uid(), scope.as_bytes()).unwrap())
             .unwrap();
         let (stream, peer) = UnixStream::pair().unwrap();
@@ -18,7 +21,7 @@ impl Fixture {
         });
         // Bit 3 is ROW_SPAN. Literal permits the identical workload to run on pre-feature revisions;
         // their real capability handler ignores it, just as it would for a newer network client.
-        service.message(1, Packet { kind: WIRE_CAPABILITIES, tab: 0, body: 9u32.to_be_bytes().to_vec() })
+        service.message(1, Packet { kind: WIRE_CAPABILITIES, tab: 0, body: features.to_be_bytes().to_vec() })
             .unwrap();
         service.clients.get_mut(&1).unwrap().ready = true;
         service.clients.get_mut(&1).unwrap().output.flush(&mut io::sink(), usize::MAX).unwrap();
@@ -206,4 +209,21 @@ fn transport_model() {
     metric("congested_tail_ms", (tick - 250) * 16);
     metric("congested_protocol_bytes", receiver.bytes);
     metric("congested_frames", receiver.frames);
+}
+
+#[test]
+fn row_spans_require_negotiation_and_dense_rows_keep_legacy_encoding() {
+    for features in [0u32, 1, 8, 9] {
+        let mut fixture = Fixture::with_features(features);
+        fixture.send(0);
+        fixture.output().flush(&mut io::sink(), usize::MAX).unwrap();
+        fixture.feed(b"!", 1);
+        fixture.send(1);
+        let spans = features & 8 != 0;
+        assert_eq!(fixture.output().len(), if spans { 96 } else { 1996 });
+        fixture.output().flush(&mut io::sink(), usize::MAX).unwrap();
+        fixture.feed(format!("\x1b[H{}", "X".repeat(120)).as_bytes(), 2);
+        fixture.send(2);
+        assert_eq!(fixture.output().len(), 1996, "dense updates must avoid span header overhead");
+    }
 }

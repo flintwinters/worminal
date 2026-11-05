@@ -1,5 +1,6 @@
 """Release daemon microbenchmarks with revision and raw samples retained under build/checks."""
 from contextlib import ExitStack
+import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -34,6 +35,8 @@ def sample(root, network=False):
 
 def measure(label, trials, compare=None, *, network=False):
     entrypoint = "network-perf" if network else "daemon-perf"
+    workload = Path("src/daemon/src") / ("network_tests.rs" if network else "perf_tests.rs")
+    workload_hash = hashlib.sha256((build.ROOT / workload).read_bytes()).hexdigest()
     if not label or Path(label).name != label or label in (".", ".."):
         raise ValueError("Choose a single filename component as the measurement label")
     build.generate_theme()
@@ -50,8 +53,7 @@ def measure(label, trials, compare=None, *, network=False):
             extract(revision, baseline, paths=("src", "tests", "tools", "assets", "manage.py",
                                                "Cargo.toml", "Cargo.lock", ".cargo"))
             # Both owners execute the exact same workload and CPU clock, independent of their implementations.
-            workload = "network_tests.rs" if network else "perf_tests.rs"
-            relative = Path("src/daemon/src") / workload
+            relative = workload
             shutil.copyfile(build.ROOT / relative, baseline / relative)
             if network:
                 service = baseline / "src/daemon/src/service.rs"
@@ -73,10 +75,12 @@ def measure(label, trials, compare=None, *, network=False):
                     raise RuntimeError("Daemon workloads changed during measurement")
                 for name, value in values.items():
                     samples[variant].setdefault(name, []).append(value)
+    if hashlib.sha256((build.ROOT / workload).read_bytes()).hexdigest() != workload_hash:
+        raise RuntimeError("Measurement workload changed during comparison; rerun with stable sources")
     medians = {variant: {name: statistics.median(values) for name, values in group.items()}
                for variant, group in samples.items()}
     report = {"revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
-              "baseline_revision": revision,
+              "baseline_revision": revision, "workload_sha256": workload_hash,
               "working_tree": subprocess.check_output(["git", "diff", "--stat"], text=True),
               "trials": trials, "unit": "metric suffix (bytes, ms, frames)" if network else
               "thread CPU nanoseconds per iteration", "samples": samples,

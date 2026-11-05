@@ -43,7 +43,7 @@ impl Damage {
 }
 
 enum Operation {
-    Row(usize, Vec<Cell>),
+    Span { row: usize, column: usize, cells: Vec<Cell> },
     Copy {
         source: usize,
         destination: usize,
@@ -166,18 +166,25 @@ impl Viewport {
                     bytes: 0,
                 });
             }
-            WIRE_ROW => {
+            WIRE_ROW | WIRE_ROW_SPAN => {
                 let pending = self.pending.as_mut().ok_or_else(invalid)?;
                 let row = body.u32()? as usize;
                 if row >= pending.frame.rows as usize {
                     return Err(invalid());
                 }
                 let columns = pending.frame.columns as usize;
-                if packet.body.len() != 4 + columns * WIRE_CELL_BYTES as usize {
+                let span = packet.kind == WIRE_ROW_SPAN;
+                let column = if span { body.u32()? as usize } else { 0 };
+                let header = if span { 8 } else { 4 };
+                let length = packet.body.len().checked_sub(header).ok_or_else(invalid)?;
+                let count = length / WIRE_CELL_BYTES as usize;
+                if count == 0 || count > columns || column > columns - count
+                    || length % WIRE_CELL_BYTES as usize != 0 || (!span && count != columns)
+                {
                     return Err(invalid());
                 }
-                let mut cells = Vec::with_capacity(columns);
-                for _ in 0..columns {
+                let mut cells = Vec::with_capacity(count);
+                for _ in 0..count {
                     cells.push(Cell {
                         rune: body.u32()?,
                         attributes: body.u32()? & u32::from(u16::MAX),
@@ -187,8 +194,8 @@ impl Viewport {
                 }
                 body.finish()?;
                 pending.push(
-                    Operation::Row(row, cells),
-                    columns * std::mem::size_of::<Cell>(),
+                    Operation::Span { row, column, cells },
+                    count * std::mem::size_of::<Cell>(),
                 )?;
             }
             WIRE_COPY_ROWS => {
@@ -264,8 +271,9 @@ impl Viewport {
         }
         for operation in pending.operations {
             match operation {
-                Operation::Row(row, cells) => {
-                    let target = &mut self.cells[row * columns..(row + 1) * columns];
+                Operation::Span { row, column, cells } => {
+                    let first = row * columns + column;
+                    let target = &mut self.cells[first..first + cells.len()];
                     if target != cells {
                         target.copy_from_slice(&cells);
                         damage[row] = true;

@@ -57,6 +57,7 @@ enum wire_type {
 	WIRE_COPY_ROWS,
 	WIRE_SERVICE_INFO,
 	WIRE_SELECT_ALL, /* generation, start/next/cancel; reply: generation, done, UTF-8 bytes. */
+	WIRE_ROW_SPAN, /* row, first column, then one or more complete wire cells. */
 };
 
 /* Advertise before HELLO/ATTACH. Older daemons ignore the optional packet;
@@ -65,7 +66,8 @@ enum wire_feature {
 	WIRE_FEATURE_COPY_ROWS = 1u << 0,
 	/* Bit 1 advertised the pre-Rust select-all packet at SERVICE_INFO's current ID.
 	 * Keep it reserved so those installed peers cannot negotiate the wrong message. */
-	WIRE_FEATURE_SELECT_ALL = 1u << 2
+	WIRE_FEATURE_SELECT_ALL = 1u << 2,
+	WIRE_FEATURE_ROW_SPAN = 1u << 3
 };
 enum wire_selection { WIRE_SELECTION_START, WIRE_SELECTION_NEXT, WIRE_SELECTION_CANCEL };
 

@@ -525,7 +525,7 @@ def check_network(daemon: Path = typer.Option(None, help="Compatible v2 daemon b
                          "-p", "test_preview_workspace.py", "-k", "redundant_catalog",
                          "-k", "frame_transport", "-k", "redraw_rows", "-k", "scroll_at_boundary",
                          "-k", "scrolling_", "-k", "synchronized_redraw", "-k", "input_without_local_echo",
-                         "-k", "partially_sent_snapshot", "-q"],
+                         "-k", "partially_sent_snapshot", "-k", "row_spans", "-q"],
                         env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(daemon.resolve())}))
 
 

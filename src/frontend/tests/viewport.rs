@@ -1,5 +1,5 @@
 use worminal_engine_sys::{
-    ATTR_WIDE, ATTR_WRAP, WORMINAL_DEFAULT_BACKGROUND, WORMINAL_DEFAULT_FOREGROUND,
+    ATTR_WIDE, ATTR_WDUMMY, ATTR_WRAP, WORMINAL_DEFAULT_BACKGROUND, WORMINAL_DEFAULT_FOREGROUND,
 };
 use worminal_frontend::viewport::Viewport;
 use worminal_protocol::*;
@@ -21,16 +21,9 @@ fn header(view: &mut Viewport, columns: u32, rows: u32) {
         .is_none());
 }
 fn row(view: &mut Viewport, row: u32, text: &str, attributes: u32) {
-    let mut values = vec![row];
-    for rune in text.chars() {
-        values.extend([
-            u32::from(rune),
-            attributes,
-            WORMINAL_DEFAULT_FOREGROUND,
-            WORMINAL_DEFAULT_BACKGROUND,
-        ]);
-    }
-    assert!(view.packet(&packet(WIRE_ROW, &values)).unwrap().is_none());
+    let mut update = packet(WIRE_ROW, &[row]);
+    row_packet_cells(&mut update.body, text, attributes);
+    assert!(view.packet(&update).unwrap().is_none());
 }
 fn finish(view: &mut Viewport) -> worminal_frontend::viewport::Damage {
     view.packet(&packet(WIRE_FRAME_FINISH, &[]))
@@ -162,4 +155,65 @@ fn malformed_headers_rows_and_unbounded_updates_never_publish() {
         "small row-move packets must not create unbounded finish work"
     );
     assert!(view.cells().is_empty());
+}
+
+fn span(view: &mut Viewport, row: u32, column: u32, text: &str, attributes: u32) {
+    let mut update = packet(WIRE_ROW_SPAN, &[row, column]);
+    row_packet_cells(&mut update.body, text, attributes);
+    view.packet(&update).unwrap();
+}
+
+fn row_packet_cells(body: &mut Vec<u8>, text: &str, attributes: u32) {
+    for rune in text.chars() {
+        for value in [u32::from(rune), attributes, WORMINAL_DEFAULT_FOREGROUND, WORMINAL_DEFAULT_BACKGROUND] {
+            body.extend_from_slice(&value.to_be_bytes());
+        }
+    }
+}
+
+#[test]
+fn spans_are_atomic_preserve_neighbors_and_follow_overlapping_moves() {
+    let mut view = Viewport::new(5, 3).unwrap();
+    header(&mut view, 5, 3);
+    row(&mut view, 0, "abcde", 0);
+    row(&mut view, 1, "ABCDE", 0);
+    row(&mut view, 2, "12345", 0);
+    finish(&mut view);
+    header(&mut view, 5, 3);
+    view.packet(&packet(WIRE_COPY_ROWS, &[0, 1, 2])).unwrap();
+    span(&mut view, 1, 1, "界", ATTR_WIDE);
+    span(&mut view, 1, 2, " ", ATTR_WDUMMY);
+    span(&mut view, 2, 4, "é", ATTR_WRAP);
+    assert_eq!(text(&view, 1), "ABCDE", "spans must remain private until finish");
+    let damage = finish(&mut view);
+    assert_eq!(damage.rows, [1, 2]);
+    assert_eq!(text(&view, 1), "a界 de");
+    assert_eq!(text(&view, 2), "ABCDé");
+    assert_eq!(view.row(1).unwrap()[1].attributes, ATTR_WIDE);
+    assert_eq!(view.row(2).unwrap()[4].attributes, ATTR_WRAP);
+    header(&mut view, 5, 3);
+    span(&mut view, 2, 4, "é", ATTR_WRAP);
+    assert!(!finish(&mut view).changed());
+}
+
+#[test]
+fn malformed_spans_discard_the_entire_pending_frame() {
+    let mut view = Viewport::new(3, 1).unwrap();
+    header(&mut view, 3, 1);
+    row(&mut view, 0, "old", 0);
+    finish(&mut view);
+    for (y, column, cells) in [(1, 0, 1), (0, 3, 1), (0, 2, 2), (0, 0, 0), (0, u32::MAX, 1)] {
+        header(&mut view, 3, 1);
+        span(&mut view, 0, 0, "X", 0);
+        let mut bad = packet(WIRE_ROW_SPAN, &[y, column]);
+        row_packet_cells(&mut bad.body, &"Y".repeat(cells), 0);
+        assert!(view.packet(&bad).is_err());
+        assert!(view.packet(&packet(WIRE_FRAME_FINISH, &[])).is_err());
+        assert_eq!(text(&view, 0), "old");
+    }
+    header(&mut view, 3, 1);
+    let mut truncated = packet(WIRE_ROW_SPAN, &[0, 0, 65]);
+    truncated.body.push(0);
+    assert!(view.packet(&truncated).is_err());
+    assert_eq!(text(&view, 0), "old");
 }

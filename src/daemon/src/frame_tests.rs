@@ -1,3 +1,14 @@
+// Keep the existing legacy-encoding workload callable unchanged on older Git baselines.
+impl Screen {
+    pub(crate) fn replicate(
+        &mut self, engine: &mut Engine, output: &mut Queue, tab: u32,
+        full: bool, copy_rows: bool, reply: bool, now: i64,
+    ) -> io::Result<Outcome> {
+        self.replicate_encoded(engine, output, tab, full,
+            if copy_rows { WIRE_FEATURE_COPY_ROWS } else { 0 }, reply, now)
+    }
+}
+
 use super::*;
 use worminal_protocol::{Decoder, Packet};
 
@@ -33,6 +44,11 @@ fn apply(replica: &mut Vec<u8>, packets: &[Packet], columns: usize, rows: usize)
         if packet.kind == WIRE_ROW {
             let row = u32::from_be_bytes(packet.body[..4].try_into().unwrap()) as usize;
             replica[row * width..(row + 1) * width].copy_from_slice(&packet.body[4..]);
+        } else if packet.kind == WIRE_ROW_SPAN {
+            let row = u32::from_be_bytes(packet.body[..4].try_into().unwrap()) as usize;
+            let column = u32::from_be_bytes(packet.body[4..8].try_into().unwrap()) as usize;
+            let first = row * width + column * WIRE_CELL_BYTES as usize;
+            replica[first..first + packet.body.len() - 8].copy_from_slice(&packet.body[8..]);
         } else if packet.kind == WIRE_COPY_ROWS {
             let fields: Vec<_> = packet
                 .body
@@ -226,4 +242,42 @@ fn full_frame_matches_independently_encoded_cells_and_packet_order() {
         .replicate(&mut engine, &mut output, 7, true, true, false, 1)
         .unwrap();
     assert_eq!(output.pending(), expected.as_bytes());
+}
+
+#[test]
+fn spans_and_moves_reconstruct_engine_cells_and_queue_rejection_keeps_the_baseline() {
+    for features in [0, WIRE_FEATURE_COPY_ROWS, WIRE_FEATURE_ROW_SPAN,
+                     WIRE_FEATURE_COPY_ROWS | WIRE_FEATURE_ROW_SPAN] {
+        let mut engine = Engine::new(8, 6).unwrap();
+        let mut screen = Screen::default();
+        let mut replica = Vec::new();
+        for tick in 1..=24 {
+            let text = if tick % 4 == 0 {
+                format!("\x1b[6;1H\r\nline{tick}")
+            } else {
+                format!("\x1b[{};{}H\x1b[{}m界é", tick % 5 + 1, tick % 4 + 1, 30 + tick % 8)
+            };
+            feed(&mut engine, text.as_bytes(), tick);
+            let old = screen.bytes.clone();
+            let mut rejected = Queue::new(1);
+            assert!(screen.replicate_encoded(&mut engine, &mut rejected, 1, false, features, false, tick).is_err());
+            assert_eq!(screen.bytes, old);
+            assert!(rejected.is_empty());
+            let mut output = Queue::new(8192);
+            screen.replicate_encoded(&mut engine, &mut output, 1, false, features, false, tick).unwrap();
+            apply(&mut replica, &packets(&output), 8, 6);
+            let mut expected = Vec::new();
+            let mut cells = Vec::new();
+            for row in 0..6 {
+                engine.row(row, &mut cells).unwrap();
+                for cell in &cells {
+                    for field in [cell.rune, cell.attributes, cell.foreground, cell.background] {
+                        expected.extend_from_slice(&field.to_be_bytes());
+                    }
+                }
+            }
+            assert_eq!(replica, expected, "features={features} tick={tick}");
+            assert_eq!(screen.bytes, expected);
+        }
+    }
 }

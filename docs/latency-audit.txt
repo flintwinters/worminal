@@ -708,3 +708,42 @@ remain 1996 bytes per complete response. Frozen raw metrics and model details:
 build/checks/network-perf-coalescing.json. Daemon/process checks and all 11 private
 network regressions pass, including preservation of a partially sent snapshot.
 The installation and running owners are unchanged.
+
+Negotiated cell spans
+---------------------
+New Rust clients advertise ROW_SPAN independently of COPY_ROWS. Changed rows
+send their smallest enclosing changed-cell span only when it beats the original
+row packet. Full snapshots and dense rows retain whole rows; older peers retain
+the original encoding. Span comparison follows any row move and includes rune,
+attributes and both colors. Queued baselines still commit only after complete
+frame publication. Replicas share row/span validation and publish only at finish.
+
+Daemon regressions cover both feature bits independently, dense fallback, queue
+rejection and exact reconstruction against engine cells across Unicode, styles
+and scrolling. Viewport regressions cover wide/dummy cells, wrap attributes,
+neighbor preservation, overlapping moves, unchanged spans and malformed packets.
+The real PTY/socket check observes exactly FRAME, one-cell ROW_SPAN and FINISH.
+The shared text-only performance oracle now reconstructs spans and moves, so
+manage.py master-perf HOST can measure newly negotiated traffic as well.
+
+Three final identical-workload trials against 46e682e report original/current:
+  sparse response bytes (mean over 100 updates):   1996 / 98
+  congested peak queue bytes:                  1124824 / 181468
+  congested p95 complete-frame age (virtual ms):   4384 / 704
+  post-output drain (virtual ms):                4432 / 480
+  total congested protocol bytes:            2157012 / 1144852
+A single-cell response is 96 bytes. These are raw, uncompressed service model
+results, excluding RTT, SSH/socket buffering and GUI presentation. Real-network
+speedups remain unmeasured. Reproduce via manage.py network-perf --label final
+--trials 3 --compare 46e682e. Raw samples and workload SHA-256 are retained in
+build/checks/network-perf-final.json; every trial verifies the final engine cells.
+
+Daemon/process, protocol/workspace, all 12 network checks, Rust viewport tests
+and exact X11/native-Wayland painter comparisons pass. The optional Weston ABI
+16 runtime was prepared inside build/checks. The broader application rerun has
+no behavioral assertion failures but remains red on three TemporaryDirectory
+teardown errors (directory not empty); see build/checks/network-app-final.log.
+Its earlier run also timed out on two startup/input cases; both pass on rerun.
+Lint still stops at pre-existing long lines in README.md, the font OFL license
+and an unchanged manage.py install signature. Installed artifacts and running
+owners were not replaced or migrated.

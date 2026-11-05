@@ -22,7 +22,7 @@ import time
 import unittest
 import uuid
 
-from workspace_protocol import (number, string, catalog_records, send as wire_send,
+from workspace_protocol import (TextReplica, number, string, catalog_records, send as wire_send,
                                 wait_kind as wire_wait, packet as wire_packet)
 from perf_metrics import cpu_time, memory
 
@@ -365,6 +365,33 @@ class PreviewWorkspaceTest(unittest.TestCase):
             self.assertTrue(all(last == 10 for _, last, _ in frames),
                             "frame header flushed before rows and completion were queued")
             self.stop()
+
+    def test_row_spans_transport_a_sparse_response_after_negotiation(self):
+        send(self.peer, 28, payload=number(9))
+        tab = self.launch("stty raw -echo; printf READY; dd bs=1 count=1 >/dev/null 2>&1; "
+                          "printf '\\033[HX'; exec sleep 30")
+        replica = TextReplica(40, 4)
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            kind, identity, payload = wire_packet(self.peer, version=2)
+            if identity == tab and replica.apply(kind, payload) and replica.lines[0].startswith('READY'):
+                break
+        else:
+            self.fail('initial replica did not become ready')
+        send(self.peer, 3, tab, b'x')
+        kinds = []
+        while True:
+            kind, identity, payload = wire_packet(self.peer, version=2)
+            if identity != tab:
+                continue
+            if kind in (8, 9, 10, 29, 32):
+                kinds.append(kind)
+            if kind == 32:
+                self.assertEqual(len(payload), 24, 'single-cell span must contain row, column and one cell')
+                self.assertEqual(struct.unpack_from('!2I', payload), (0, 0))
+            if replica.apply(kind, payload) and replica.lines[0].startswith('XEADY'):
+                break
+        self.assertEqual(kinds, [8, 32, 10])
 
     def test_unchanged_redraw_rows_do_not_replicate(self):
         code = ("import os\nrows=['READY fixed','café 界','unchanged','last']\n"

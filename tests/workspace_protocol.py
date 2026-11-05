@@ -88,3 +88,34 @@ def service_pid(connection, version=2):
     # Ask the accepting daemon instead of mistaking that stale PID for its owner.
     send(connection, 30, version=version)
     return struct.unpack("!I", wait_kind(connection, 30, version=version)[1])[0]
+
+
+class TextReplica:
+    """Text-only response oracle for traffic/latency probes, including negotiated deltas.
+
+    This deliberately ignores styles; actual Rust viewport tests validate complete cells.
+    """
+    def __init__(self, columns=120, rows=40):
+        self.lines = [' ' * columns for _ in range(rows)]
+        self.pending = None
+
+    def apply(self, kind, payload):
+        if kind == 8:
+            columns, rows = struct.unpack_from('!2I', payload)
+            self.pending = [(self.lines[y] if y < len(self.lines) else '').ljust(columns)[:columns]
+                            for y in range(rows)]
+        elif kind in (9, 32):
+            row = struct.unpack_from('!I', payload)[0]
+            column, offset = (struct.unpack_from('!I', payload, 4)[0], 8) if kind == 32 else (0, 4)
+            text = ''.join(chr(struct.unpack_from('!I', payload, at)[0])
+                           for at in range(offset, len(payload), 16))
+            before = self.pending[row]
+            self.pending[row] = before[:column] + text + before[column + len(text):]
+        elif kind == 29:
+            source, destination, count = struct.unpack('!3I', payload)
+            self.pending[destination:destination + count] = self.pending[source:source + count]
+        elif kind == 10:
+            self.lines = self.pending
+            self.pending = None
+            return True
+        return False

@@ -10,6 +10,8 @@ import sys
 import time
 import uuid
 
+from workspace_protocol import TextReplica
+
 
 HELLO, NEW, FOCUS, FRAME, FINISH = 1, 2, 4, 8, 10
 VERSION = int(os.environ.get("WORMINAL_MASTER_PROTOCOL", "2"))
@@ -70,8 +72,10 @@ def launch(process, kind, command=None):
             return tab, total, (time.monotonic() - started) * 1000
 
 
-def echo_frame(process, tab, expected, row=0):
-    matched = False
+def echo_frame(process, tab, expected, replicas, row=0):
+    if tab not in replicas:
+        replicas[tab] = TextReplica()
+    replica = replicas[tab]
     total = 0
     deadline = time.monotonic() + 20
     while True:
@@ -79,11 +83,7 @@ def echo_frame(process, tab, expected, row=0):
         if identity != tab:
             continue
         total += size
-        if kind == 9 and struct.unpack_from("!I", payload)[0] == row:
-            text = ''.join(chr(struct.unpack_from("!I", payload, offset)[0])
-                           for offset in range(4, len(payload), 16))
-            matched = text.startswith(expected)
-        if kind == FINISH and matched:
+        if replica.apply(kind, payload) and replica.lines[row].startswith(expected):
             return total
 
 
@@ -138,9 +138,10 @@ def measure(host, daemon, compress):
     ssh = [*SSH, "-C"] if compress else SSH
     process = subprocess.Popen([*ssh, host, f"{prefix} --bridge"], stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    replicas = {}
     try:
         if VERSION == 2:
-            send(process, 28, payload=number(1))
+            send(process, 28, payload=number(9))
         first, initial_bytes, initial_ms = launch(process, HELLO)
         second, new_bytes, new_ms = launch(process, NEW)
         started = time.monotonic()
@@ -168,23 +169,23 @@ def measure(host, daemon, compress):
               f"resize frame began after {delay_ms:.1f} ms", flush=True)
         tab, _, _ = launch(process, NEW, ["/bin/sh", "-c", "stty raw -echo; printf READY; exec cat"])
         expected = "READY"
-        echo_frame(process, tab, expected)
+        echo_frame(process, tab, expected, replicas)
         samples = []
         for _ in range(40):
             expected += "x"
             started = time.monotonic_ns()
             send(process, 3, tab, b"x")
-            echo_frame(process, tab, expected)
+            echo_frame(process, tab, expected, replicas)
             samples.append((time.monotonic_ns() - started) / 1e6)
         summary(f"Worminal input to complete frame ({'SSH -C' if compress else 'SSH'})", samples)
         if compress:
             tab, _, _ = launch(process, NEW, ["/bin/sh", "-c", scroll_command()])
-            echo_frame(process, tab, "READY", row=39)
+            echo_frame(process, tab, "READY", replicas, row=39)
             samples, traffic = [], []
             for index in range(40):
                 started = time.monotonic_ns()
                 send(process, 3, tab, b"x")
-                traffic.append(echo_frame(process, tab, f"ACK{index:06d}", row=39))
+                traffic.append(echo_frame(process, tab, f"ACK{index:06d}", replicas, row=39))
                 samples.append((time.monotonic_ns() - started) / 1e6)
             summary("Worminal scrolling input to complete frame (SSH -C)", samples)
             print(f"Protocol bytes per scrolling response: median {statistics.median(traffic):.0f}; "

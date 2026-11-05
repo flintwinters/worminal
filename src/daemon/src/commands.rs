@@ -53,12 +53,12 @@ impl Service {
                 if !ready && packet.tab == 0 {
                     if let Some(features) = integer(&packet.body) {
                         self.clients.get_mut(&client).unwrap().features =
-                            features & WIRE_FEATURE_COPY_ROWS;
+                            features & (WIRE_FEATURE_COPY_ROWS | WIRE_FEATURE_ROW_SPAN);
                         self.queue(
                             client,
                             WIRE_CAPABILITIES,
                             0,
-                            (WIRE_FEATURE_COPY_ROWS | WIRE_FEATURE_SELECT_ALL).to_be_bytes(),
+                            (WIRE_FEATURE_COPY_ROWS | WIRE_FEATURE_SELECT_ALL | WIRE_FEATURE_ROW_SPAN).to_be_bytes(),
                         );
                     }
                 }

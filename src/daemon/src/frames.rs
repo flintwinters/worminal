@@ -6,7 +6,8 @@ use crate::{
 use std::io;
 use worminal_engine::{Cell, Engine, Frame};
 use worminal_protocol::{
-    Buffer, HEADER_BYTES, WIRE_CELL_BYTES, WIRE_COPY_ROWS, WIRE_FRAME, WIRE_FRAME_FINISH, WIRE_ROW,
+    Buffer, HEADER_BYTES, WIRE_CELL_BYTES, WIRE_COPY_ROWS, WIRE_FEATURE_COPY_ROWS,
+    WIRE_FEATURE_ROW_SPAN, WIRE_FRAME, WIRE_FRAME_FINISH, WIRE_ROW, WIRE_ROW_SPAN,
 };
 
 fn same_frame(a: Frame, b: Frame) -> bool {
@@ -94,11 +95,17 @@ fn find_move(before: &[u8], current: &[Option<Vec<u8>>], width: usize) -> Option
     })
 }
 
+struct Update {
+    row: usize,
+    bytes: Vec<u8>,
+    span: Option<std::ops::Range<usize>>,
+}
+
 struct Plan {
     frame: Frame,
     full: bool,
     movement: Option<Move>,
-    updates: Vec<(usize, Vec<u8>)>,
+    updates: Vec<Update>,
     bytes: Vec<u8>,
 }
 
@@ -120,7 +127,7 @@ impl Screen {
         engine: &mut Engine,
         tab: u32,
         full: bool,
-        copy_rows: bool,
+        features: u32,
         reply: bool,
         now: i64,
     ) -> io::Result<Prepared> {
@@ -135,7 +142,8 @@ impl Screen {
             .map(|row| core(engine.row_dirty(row)))
             .collect::<io::Result<_>>()?;
         let dirty_count = dirty.iter().filter(|flag| **flag).count();
-        let search_move = !full && copy_rows && dirty_count >= 3 && dirty_count * 2 >= rows;
+        let search_move = !full && features & WIRE_FEATURE_COPY_ROWS != 0
+            && dirty_count >= 3 && dirty_count * 2 >= rows;
         let mut current = Vec::with_capacity(rows);
         let mut cells: Vec<Cell> = Vec::new();
         for (row, dirty) in dirty.iter().enumerate() {
@@ -168,7 +176,19 @@ impl Screen {
             if !full && bytes == self.bytes[baseline_row * width..(baseline_row + 1) * width] {
                 continue;
             }
-            updates.push((row, bytes));
+            // Compare against the row after any negotiated move. The span includes every changed
+            // field of every changed cell, including wide/dummy pairs and wrap/style attributes.
+            let span = if !full && features & WIRE_FEATURE_ROW_SPAN != 0 {
+                let baseline = &self.bytes[baseline_row * width..(baseline_row + 1) * width];
+                let cell = WIRE_CELL_BYTES as usize;
+                let first = bytes.chunks_exact(cell).zip(baseline.chunks_exact(cell))
+                    .position(|(a, b)| a != b).unwrap();
+                let last = bytes.chunks_exact(cell).zip(baseline.chunks_exact(cell))
+                    .rposition(|(a, b)| a != b).unwrap() + 1;
+                let range = first * cell..last * cell;
+                (range.len() + 4 < width).then_some(range)
+            } else { None };
+            updates.push(Update { row, bytes, span });
         }
         if !full
             && movement.is_none()
@@ -194,7 +214,7 @@ impl Screen {
         let mut output = Buffer::default();
         let row_bytes: usize = updates
             .iter()
-            .map(|(_, bytes)| HEADER_BYTES + std::mem::size_of::<u32>() + bytes.len())
+            .map(|update| HEADER_BYTES + 4 + update.span.as_ref().map_or(update.bytes.len(), |span| 4 + span.len()))
             .sum();
         output.reserve(
             2 * HEADER_BYTES + header.as_flattened().len() + row_bytes
@@ -204,8 +224,14 @@ impl Screen {
         if let Some(fields) = move_body {
             output.append_packet_bytes(WIRE_COPY_ROWS, tab, fields.as_flattened())?;
         }
-        for (row, bytes) in &updates {
-            output.append_packet_parts(WIRE_ROW, tab, &[&(*row as u32).to_be_bytes(), bytes])?;
+        for update in &updates {
+            let row = (update.row as u32).to_be_bytes();
+            if let Some(span) = &update.span {
+                let column = (span.start as u32 / WIRE_CELL_BYTES).to_be_bytes();
+                output.append_packet_parts(WIRE_ROW_SPAN, tab, &[&row, &column, &update.bytes[span.clone()]])?;
+            } else {
+                output.append_packet_parts(WIRE_ROW, tab, &[&row, &update.bytes])?;
+            }
         }
         output.append_packet_bytes(WIRE_FRAME_FINISH, tab, &[])?;
         Ok(Prepared::Changed(Plan {
@@ -231,24 +257,24 @@ impl Screen {
                 m.destination * width,
             );
         }
-        for (row, bytes) in plan.updates {
-            self.bytes[row * width..(row + 1) * width].copy_from_slice(&bytes);
+        for update in plan.updates {
+            self.bytes[update.row * width..(update.row + 1) * width].copy_from_slice(&update.bytes);
         }
         self.frame = plan.frame;
         core(engine.clean())
     }
 
-    pub fn replicate(
+    pub fn replicate_encoded(
         &mut self,
         engine: &mut Engine,
         output: &mut Queue,
         tab: u32,
         full: bool,
-        copy_rows: bool,
+        features: u32,
         reply: bool,
         now: i64,
     ) -> io::Result<Outcome> {
-        match self.prepare(engine, tab, full, copy_rows, reply, now)? {
+        match self.prepare(engine, tab, full, features, reply, now)? {
             Prepared::Held => {
                 if full {
                     self.bytes.clear();

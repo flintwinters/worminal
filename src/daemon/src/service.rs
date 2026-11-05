@@ -160,12 +160,12 @@ impl Service {
             tab.pending_frame = false;
             return Ok(false);
         }
-        let result = tab.screen.replicate(
+        let result = tab.screen.replicate_encoded(
             &mut terminal.engine,
             &mut client.output,
             tab.id,
             full,
-            client.features & WIRE_FEATURE_COPY_ROWS != 0,
+            client.features,
             tab.frame_reply,
             now,
         );
