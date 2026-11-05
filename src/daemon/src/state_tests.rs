@@ -151,3 +151,26 @@ fn clean_metadata_reuses_storage_and_dirty_metadata_replaces_the_cache() {
     assert_eq!(tab.metadata(11).unwrap(), updated);
     assert_eq!(tab.catalog.as_ptr(), storage);
 }
+
+#[test]
+fn output_directory_checks_coalesce_without_delaying_periodic_checks() {
+    let mut fixture = Fixture::new();
+    let tab = &mut fixture.tab;
+    let interval = worminal_protocol::WORKSPACE_DIRECTORY_INTERVAL_NS as i64;
+    tab.refresh_directory_after_output(1);
+    let actual = tab.directory.clone();
+    assert!(!actual.is_empty());
+    tab.directory = b"not-the-shell-directory".to_vec();
+    for now in 2..1002 {
+        tab.refresh_directory_after_output(now);
+        assert_ne!(tab.directory, actual);
+    }
+    // The periodic poll must still observe a change even within the output gate.
+    tab.refresh_directory(interval / 2);
+    assert_eq!(tab.directory, actual);
+    tab.directory = b"not-the-shell-directory".to_vec();
+    tab.refresh_directory_after_output(interval);
+    assert_ne!(tab.directory, actual);
+    tab.refresh_directory_after_output(interval + interval / 2);
+    assert_eq!(tab.directory, actual);
+}

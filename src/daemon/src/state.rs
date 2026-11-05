@@ -104,6 +104,7 @@ pub(crate) struct Tab {
     pub title: Vec<u8>,
     pub initial_title: Vec<u8>,
     pub directory: Vec<u8>,
+    next_output_directory: i64,
     pub clipboard: Vec<u8>,
     pub url: Option<Vec<u8>>,
     pub colors: Option<Vec<Option<Vec<u8>>>>,
@@ -178,6 +179,7 @@ impl Tab {
             title: title.to_vec(),
             initial_title: title.to_vec(),
             directory: Vec::new(),
+            next_output_directory: 0,
             clipboard: Vec::new(),
             url: None,
             colors: None,
@@ -214,7 +216,19 @@ impl Tab {
             .transpose()
     }
 
-    pub fn refresh_directory(&mut self) {
+    pub fn refresh_directory_after_output(&mut self, now: i64) {
+        if now >= self.next_output_directory {
+            self.refresh_directory(now);
+        }
+    }
+
+    pub fn refresh_directory(&mut self, now: i64) {
+        // Output can arrive in thousands of tiny reads. Coalesce those checks,
+        // but let the periodic service poll bypass this gate so it retains its
+        // existing observation interval even after an early output check.
+        self.next_output_directory = now.saturating_add(
+            worminal_protocol::WORKSPACE_DIRECTORY_INTERVAL_NS as i64,
+        );
         let Some(terminal) = &mut self.terminal else {
             return;
         };

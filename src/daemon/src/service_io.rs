@@ -135,7 +135,7 @@ impl Service {
         let now = self.now();
         let notices = self.tabs[index].feed(&bytes[..count], now)?;
         self.notices(id, notices);
-        self.tabs[index].refresh_directory();
+        self.tabs[index].refresh_directory_after_output(now);
         if self.tabs[index].input_frame
             || (self.tabs[index].controller.is_some() && self.tabs[index].screen.bytes.is_empty())
         {

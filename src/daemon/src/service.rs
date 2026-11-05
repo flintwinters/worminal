@@ -366,7 +366,7 @@ impl Service {
         let now = self.now();
         if now >= self.next_directory {
             for tab in &mut self.tabs {
-                tab.refresh_directory();
+                tab.refresh_directory(now);
             }
             self.next_directory = now + WORKSPACE_DIRECTORY_INTERVAL_NS as i64;
         }
