@@ -37,7 +37,7 @@ fn hot_paths() {
     measure("cached_catalog_64_tabs", 200, || {
         let mut catalog = worminal_protocol::Buffer::with_limit(usize::MAX);
         for tab in &mut tabs {
-            catalog.put_bytes(&tab.metadata(1).unwrap()).unwrap();
+            catalog.put_bytes(tab.metadata(1).unwrap()).unwrap();
         }
         black_box(catalog);
     });

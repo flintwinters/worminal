@@ -190,7 +190,7 @@ impl Service {
             bytes.put_u32(value)?;
         }
         for tab in &mut self.tabs {
-            bytes.put_bytes(&tab.metadata(now)?)?;
+            bytes.put_bytes(tab.metadata(now)?)?;
         }
         Ok(bytes.into_bytes())
     }

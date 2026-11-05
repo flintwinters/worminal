@@ -231,14 +231,17 @@ impl Tab {
         }
     }
 
-    pub fn metadata(&mut self, now: i64) -> io::Result<Vec<u8>> {
+    pub fn metadata(&mut self, now: i64) -> io::Result<&[u8]> {
+        if !self.catalog_dirty && !self.catalog_pending && !self.catalog.is_empty() {
+            return Ok(&self.catalog);
+        }
         if self
             .frame(now)?
             .is_some_and(|frame| frame.redraw_deadline != 0)
             && !self.catalog.is_empty()
         {
             self.catalog_pending = true;
-            return Ok(self.catalog.clone());
+            return Ok(&self.catalog);
         }
         // Native handoff metadata can expand when default palette strings are restored. Keep
         // packet/queue limits in the transport owner: oversized catalogs must not kill PTY owners.
@@ -261,7 +264,7 @@ impl Tab {
         self.catalog = buffer.into_bytes();
         self.catalog_pending = false;
         self.catalog_dirty = false;
-        Ok(self.catalog.clone())
+        Ok(&self.catalog)
     }
 
     pub fn feed(&mut self, bytes: &[u8], now: i64) -> io::Result<Vec<Notice>> {

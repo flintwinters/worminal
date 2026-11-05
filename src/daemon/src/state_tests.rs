@@ -79,7 +79,7 @@ fn arbitrary_chunks_keep_utf8_effects_and_terminal_replies_in_order() {
 fn synchronized_output_holds_catalog_and_reset_releases_palette_storage() {
     let mut fixture = Fixture::new();
     let tab = &mut fixture.tab;
-    let before = tab.metadata(1).unwrap();
+    let before = tab.metadata(1).unwrap().to_vec();
     tab.feed(b"\x1b[?2026h\x1b]2;held\x07\x1b]4;1;#123456\x07", 2)
         .unwrap();
     assert_eq!(tab.metadata(3).unwrap(), before);
@@ -111,7 +111,7 @@ fn native_pending_output_is_consumed_before_new_bytes() {
 #[test]
 fn oversized_native_metadata_remains_state_while_transport_rejects_the_packet() {
     let mut tab = Tab::record(1, &vec![b'x'; worminal_protocol::MAX_PAYLOAD]);
-    let bytes = tab.metadata(1).unwrap();
+    let bytes = tab.metadata(1).unwrap().to_vec();
     assert!(bytes.len() > worminal_protocol::MAX_PAYLOAD);
     let (socket, _peer) = std::os::unix::net::UnixStream::pair().unwrap();
     let mut client = Client {
@@ -130,4 +130,24 @@ fn oversized_native_metadata_remains_state_while_transport_rejects_the_packet() 
         .queue(worminal_protocol::WIRE_CATALOG, 0, &bytes)
         .is_err());
     assert_eq!(client.output.pending(), b"previously-queued");
+}
+
+#[test]
+fn clean_metadata_reuses_storage_and_dirty_metadata_replaces_the_cache() {
+    let mut tab = Tab::browser(1, b"https://first.test".to_vec());
+    let first = tab.metadata(1).unwrap().to_vec();
+    let storage = tab.catalog.as_ptr();
+    for now in 2..10 {
+        assert_eq!(tab.metadata(now).unwrap(), first);
+        assert_eq!(tab.catalog.as_ptr(), storage);
+        assert!(!tab.catalog_dirty);
+        assert!(!tab.catalog_pending);
+    }
+    tab.url = Some(b"https://second.test".to_vec());
+    tab.catalog_dirty = true;
+    assert_ne!(tab.metadata(10).unwrap(), first);
+    let updated = tab.catalog.clone();
+    let storage = tab.catalog.as_ptr();
+    assert_eq!(tab.metadata(11).unwrap(), updated);
+    assert_eq!(tab.catalog.as_ptr(), storage);
 }
