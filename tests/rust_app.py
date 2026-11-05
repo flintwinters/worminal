@@ -3,6 +3,7 @@ from runtime import CHECKS
 
 from runtime import runtime_binary
 
+from contextlib import ExitStack
 import os
 import fcntl
 from pathlib import Path
@@ -26,6 +27,7 @@ from test_window_state import private_bus, WindowStateTest
 from test_window_activation import WindowActivationTests
 from runtime import copy_runtime, window, stop_application
 from rust_module import RustModuleTest
+from test_runtime import RuntimeCleanupTest
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -71,8 +73,8 @@ class RustApplicationTest(unittest.TestCase):
 
     def test_replacement_reclaims_idle_view_without_keyboard_input(self):
         from Xlib import X, display
-        with (isolated_display() as env,
-              tempfile.TemporaryDirectory(prefix='rust-app-upgrade-', dir=CHECKS) as directory):
+        with (tempfile.TemporaryDirectory(prefix='rust-app-upgrade-', dir=CHECKS) as directory,
+              isolated_display() as env, ExitStack() as cleanup):
             env.update(GDK_BACKEND='x11', SHELL='/bin/sh')
             env.pop('WAYLAND_DISPLAY', None)
             base = Path(directory)
@@ -82,7 +84,7 @@ class RustApplicationTest(unittest.TestCase):
             app = subprocess.Popen([str(runtime_binary('worminal-rust', prefix=base)), '-T', 'Rust upgrade',
                                     '-o', '-', '-e', '/bin/sh', '-c',
                                     command], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            self.addCleanup(lambda: self.stop(app))
+            cleanup.callback(stop_application, app)
             wid = window(env, app)
             ready = read_through(app.stdout, b'\n')
             self.assertTrue(ready.startswith(b'R:'), ready)
@@ -239,6 +241,7 @@ def main():
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(WindowStateTest))
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(WindowActivationTests))
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(RustModuleTest))
+    suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(RuntimeCleanupTest))
     for name in ('test_navigation_keys', 'test_alternate_scroll_sends_cursor_keys',
                  'test_clipboard_paste_bytes', 'test_ctrl_end_in_micro', 'test_master_navigation_keys',
                  'test_master_alternate_scroll_sends_cursor_keys', 'test_master_clipboard_paste_bytes'):

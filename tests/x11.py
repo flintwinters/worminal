@@ -1,13 +1,14 @@
 """Run X11 checks on a display that cannot reach the desktop session."""
 
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 import os
-from pathlib import Path
 import select
 import shutil
 import subprocess
 import time
 import uuid
+
+from workspace_protocol import stop_workspace
 
 
 def close_window(env, title, timeout=5):
@@ -72,19 +73,21 @@ def isolated_display():
             raise RuntimeError("Private Xvfb display never accepted connections")
         yield env
     finally:
-        if workspace_env is not None:
-            for name in ("worminald", "worminald-x11", "worminald-preview"):
-                daemon = Path(__file__).resolve().parent.parent / name
-                if daemon.exists():
-                    subprocess.run([str(daemon), "--stop"], env=workspace_env,
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
-        os.close(read_fd)
-        if write_fd != -1:
-            os.close(write_fd)
-        if server is not None:
-            server.terminate()
-            try:
-                server.communicate(timeout=5)
-            except subprocess.TimeoutExpired:
-                server.kill()
-                server.communicate()
+        try:
+            # Services outlive windows and may execute a copied runtime. Wait for their exit before
+            # fixture deletion: NFS retains mapped/unlinked executables as .nfs files until then.
+            with ExitStack() as cleanup:
+                if workspace_env is not None:
+                    for version in (1, 2):
+                        cleanup.callback(stop_workspace, workspace_env, version=version)
+        finally:
+            os.close(read_fd)
+            if write_fd != -1:
+                os.close(write_fd)
+            if server is not None:
+                server.terminate()
+                try:
+                    server.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    server.kill()
+                    server.communicate()

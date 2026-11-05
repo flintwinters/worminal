@@ -230,10 +230,21 @@ def build_rust_app():
     typer.echo("Built build/bin/worminal-rust; native terminal/SSH/browser. Installation unchanged.")
 
 
+@app.command("check-test-runtime")
+def check_test_runtime(prove: bool = typer.Option(False, help="Also require failure with owner cleanup removed.")):
+    """Check private display/service shutdown and copied-runtime cleanup, including exception paths."""
+    native_build.build_targets("worminald", "worminald-x11")
+    code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                "-p", "test_runtime.py", "-q"])
+    if not code and prove:
+        code = run([sys.executable, "tests/test_runtime.py", "--prove"])
+    raise typer.Exit(code)
+
+
 @app.command("check-rust-app")
 def check_rust_app():
     """Check the actual Rust app: private shell input, clipboard, tabs and surviving-session reattachment."""
-    native_build.build_targets("worminal-rust", "build/worminald-c-v2", "build/gui-peer.so")
+    native_build.build_targets("worminal-rust", "worminald-x11", "build/worminald-c-v2", "build/gui-peer.so")
     raise typer.Exit(run([sys.executable, "tests/rust_app.py"]))
 
 

@@ -747,3 +747,31 @@ Its earlier run also timed out on two startup/input cases; both pass on rerun.
 Lint still stops at pre-existing long lines in README.md, the font OFL license
 and an unchanged manage.py install signature. Installed artifacts and running
 owners were not replaced or migrated.
+
+Private runtime teardown
+------------------------
+The application suite's three directory-not-empty errors came from deleting
+copied runtimes while their owners still mapped executable/module files. On NFS,
+unlinked mapped files remain as .nfs files until their owners exit. The private
+X11 helper still searched for old root-level daemon paths and skipped shutdown;
+the affected runtime directories also exited before the display context. The
+upgrade test additionally deferred GUI shutdown until unittest cleanup, after
+its runtime directory had already started teardown.
+
+Fixture shutdown now talks directly to the explicit private v1/v2 workspace
+scope, asks the accepting service for its current identity, pins it with pidfd
+and waits for exit. It tolerates an owner exiting during the identity handshake,
+while preserving malformed-packet and bounded-timeout failures. It does not
+signal unrelated processes or depend on the copied executable's path. GUI,
+display/service and runtime contexts now unwind in that order in affected tests.
+
+Reproduce through python3 manage.py check-test-runtime --prove. The actual v1
+and v2 owners must exit before directory deletion on both normal and exceptional
+paths. A stopped owner verifies timeout reporting and concurrent-shutdown
+handling. The counterfactual deliberately omits owner retirement and requires
+both exit-path assertions to fail; build/checks/runtime-cleanup-proof.log contains
+those expected failures. Normal checks pass in runtime-cleanup-verified.log.
+
+The previously red application suite now passes all 22 tests, including the
+three affected fixtures; see build/checks/runtime-cleanup-app.log. These changes
+are test infrastructure only; installed artifacts and live sessions are unchanged.

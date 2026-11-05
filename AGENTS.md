@@ -77,6 +77,7 @@ Cargo output and generated files belong in
 virtualenvs use `build/venv`. `clean` preserves diagnostics/virtualenvs while removing compiled output.
 Hooks and analysis/dependency configuration live under `tools`; management suppresses Python bytecode caches.
 Never test under /tmp or inject test input into the desktop.
+Private test runtimes must outlive their GUI and service owners; await owner exit before removing their files.
 `manage.py` drops desktop display variables. `manage.py check` runs the full private-display suite. Native Wayland
 checks use project-local Weston with matching virtual-seat ABI and no X11 fallback. Prepare optional private
 Muffin/Weston through their setup commands. Performance checks measure private software presentation, not desktop

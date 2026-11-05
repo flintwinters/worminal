@@ -22,8 +22,8 @@ from x11 import isolated_display
 class RustModuleTest(unittest.TestCase):
     def test_gui_broker_rejects_foreign_credentials(self):
         from runtime import window, stop_application
-        with (isolated_display() as env,
-              tempfile.TemporaryDirectory(prefix='rust-peer-', dir=CHECKS) as directory):
+        with (tempfile.TemporaryDirectory(prefix='rust-peer-', dir=CHECKS) as directory,
+              isolated_display() as env):
             executable = copy_runtime(directory)
             env.update(GDK_BACKEND='x11', LD_PRELOAD=str(ROOT / 'build/gui-peer.so'))
             app = subprocess.Popen([str(executable), '--attach', '-T', 'Credential owner'], env=env,
@@ -80,8 +80,8 @@ class RustModuleTest(unittest.TestCase):
         dependencies = subprocess.check_output(['readelf', '-d', str(runtime_binary("worminal-rust"))], text=True)
         for library in ('libgtk', 'libgdk', 'libpango', 'libcairo', 'libwebkit'):
             self.assertNotIn(library, dependencies, f'lightweight launcher links {library}')
-        with (isolated_display() as env,
-              tempfile.TemporaryDirectory(prefix='rust-module-launch-', dir=CHECKS) as directory):
+        with (tempfile.TemporaryDirectory(prefix='rust-module-launch-', dir=CHECKS) as directory,
+              isolated_display() as env):
             env.update(GDK_BACKEND='x11', SHELL='/bin/sh'); env.pop('WAYLAND_DISPLAY', None)
             executable = copy_runtime(directory)
             app = subprocess.Popen([str(executable), '--attach', '-T', 'Module owner'], env=env,

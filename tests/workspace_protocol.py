@@ -2,6 +2,9 @@
 
 import struct
 import os
+import select
+import socket
+import time
 from pathlib import Path
 from runtime import runtime_binary
 
@@ -25,12 +28,16 @@ def string(value):
     return number(len(encoded)) + encoded
 
 
+class WorkspaceClosed(AssertionError):
+    """A fixture owner closed the stream, distinct from a malformed protocol packet."""
+
+
 def read_exact(connection, count):
     data = bytearray()
     while len(data) < count:
         part = connection.recv(count - len(data))
         if not part:
-            raise AssertionError("workspace closed its connection")
+            raise WorkspaceClosed("workspace closed its connection")
         data.extend(part)
     return bytes(data)
 
@@ -88,6 +95,45 @@ def service_pid(connection, version=2):
     # Ask the accepting daemon instead of mistaking that stale PID for its owner.
     send(connection, 30, version=version)
     return struct.unpack("!I", wait_kind(connection, 30, version=version)[1])[0]
+
+
+def stop_workspace(env, version=2, timeout=5):
+    """Stop only an explicitly scoped fixture and wait until its current owner releases mapped files."""
+    scope = env.get('WORMINAL_SHARED_SOCKET_SCOPE')
+    if not scope:
+        raise ValueError('Fixture cleanup requires an explicit workspace scope')
+    if version not in (1, 2):
+        raise ValueError('Unknown fixture workspace protocol')
+    endpoint = 'worminal-workspace-v2' if version == 2 else 'worminal-workspace'
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(f'Private workspace {scope} did not stop')
+        try:
+            with socket.socket(socket.AF_UNIX) as peer:
+                peer.settimeout(remaining)
+                try:
+                    peer.connect(f'\0{endpoint}-{os.getuid()}-{scope}')
+                except ConnectionRefusedError:
+                    return  # Most display-only fixtures never start a workspace.
+                # Ask the accepting owner: SO_PEERCRED can name a retired listener creator after an upgrade.
+                pid = service_pid(peer, version)
+                identity = os.pidfd_open(pid)
+                try:
+                    try:
+                        send(peer, 13, version=version)
+                    except (BrokenPipeError, ConnectionResetError):
+                        pass  # Another fixture cleanup may already be stopping this pinned owner.
+                    if not select.select([identity], [], [], max(0, deadline - time.monotonic()))[0]:
+                        raise TimeoutError(f'Private workspace {scope} owner {pid} did not stop')
+                    return
+                finally:
+                    os.close(identity)
+        except (WorkspaceClosed, BrokenPipeError, ConnectionResetError, ProcessLookupError):
+            # An owner may exit between connect, SERVICE_INFO and pidfd_open. Retry only the
+            # scoped endpoint; a refused connection confirms it is gone. Invalid packets still fail.
+            time.sleep(min(.01, max(0, deadline - time.monotonic())))
 
 
 class TextReplica:
