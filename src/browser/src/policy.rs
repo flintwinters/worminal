@@ -20,8 +20,7 @@ pub(crate) fn connect(browser: &Rc<Browser>) {
                         decision.ignore(); return true;
                     }
                     let scheme = glib::Uri::parse_scheme(&uri).map(|scheme| scheme.to_ascii_lowercase());
-                    let local = std::ffi::CStr::from_bytes_with_nul(worminal_workspace::WORKSPACE_BROWSER_SCHEME)
-                        .unwrap().to_str().unwrap();
+                    let local = worminal_workspace::WORKSPACE_BROWSER_SCHEME;
                     if !matches!(scheme.as_deref(), Some("http" | "https" | "about" | "file" | "data" | "blob"))
                         && scheme.as_deref() != Some(local) {
                         decision.ignore(); browser.notice(Some("This URL scheme is unsupported.")); return true;

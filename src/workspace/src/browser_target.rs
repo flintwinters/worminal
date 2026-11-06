@@ -7,6 +7,9 @@ use std::{
     path::Path,
 };
 
+pub const WORKSPACE_BROWSER_SCHEME: &str = "worminal";
+pub const WORKSPACE_BROWSER_HOME: &str = "about:blank";
+
 /// Native CLI conversion replaces this process with the service client before GUI initialization.
 pub fn command(arguments: &[OsString]) -> io::Result<()> {
     if arguments
@@ -85,12 +88,7 @@ pub fn resolve(text: Option<&OsStr>) -> io::Result<Vec<u8>> {
 }
 pub fn resolve_in(text: Option<&OsStr>, directory: &Path) -> io::Result<Vec<u8>> {
     let Some(text) = text else {
-        return Ok(
-            CStr::from_bytes_with_nul(crate::recovery::format::WORKSPACE_BROWSER_HOME)
-                .unwrap()
-                .to_bytes()
-                .to_vec(),
-        );
+        return Ok(WORKSPACE_BROWSER_HOME.as_bytes().to_vec());
     };
     let bytes = text.as_bytes();
     if bytes.is_empty() {

@@ -17,7 +17,11 @@ use std::{
     ptr,
     rc::Rc,
 };
-use worminal_workspace::{launch::Launch, PROCESS_SHELL, PROCESS_STTY, PROCESS_TERM_NAME};
+use worminal_workspace::launch::Launch;
+
+const PROCESS_TERM_NAME: &str = "xterm-256color";
+const PROCESS_SHELL: &str = "/bin/sh";
+const PROCESS_STTY: &str = "stty raw pass8 nl -echo -iexten -cstopb 38400";
 
 fn checked(result: libc::c_int) -> io::Result<libc::c_int> {
     if result < 0 {
@@ -135,15 +139,6 @@ impl io::Write for StdioDescriptor {
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
-}
-
-fn os_constant(bytes: &[u8]) -> OsString {
-    OsString::from_vec(
-        CStr::from_bytes_with_nul(bytes)
-            .unwrap()
-            .to_bytes()
-            .to_vec(),
-    )
 }
 
 pub fn uid() -> u32 {
@@ -401,12 +396,12 @@ impl Pty {
         if !launch.line.is_empty() {
             let line = PathBuf::from(&directory).join(OsString::from_vec(launch.line.clone()));
             let master = OpenOptions::new().read(true).write(true).open(line)?;
-            let mut configuration = os_constant(PROCESS_STTY).into_vec();
+            let mut configuration = PROCESS_STTY.as_bytes().to_vec();
             for arg in &launch.arguments {
                 configuration.push(b' ');
                 configuration.extend_from_slice(arg.as_bytes());
             }
-            let mut command = Command::new(os_constant(PROCESS_SHELL));
+            let mut command = Command::new(PROCESS_SHELL);
             command
                 .arg("-c")
                 .arg(OsString::from_vec(configuration))
@@ -439,7 +434,7 @@ impl Pty {
             .cloned()
             .unwrap_or_else(|| {
                 if account.shell.is_empty() {
-                    os_constant(PROCESS_SHELL)
+                    OsString::from(PROCESS_SHELL)
                 } else {
                     account.shell
                 }
@@ -451,7 +446,7 @@ impl Pty {
         environment.insert("USER".into(), account.name);
         environment.insert("HOME".into(), account.home);
         environment.insert("SHELL".into(), shell.clone());
-        environment.insert("TERM".into(), os_constant(PROCESS_TERM_NAME));
+        environment.insert("TERM".into(), PROCESS_TERM_NAME.into());
         if !launch.window_id.is_empty() {
             environment.insert(
                 "WINDOWID".into(),

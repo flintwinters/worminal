@@ -53,13 +53,7 @@ impl App {
                     .iter()
                     .any(|page| page.id == self.active.get() && page.browser)
                 {
-                    let home = std::ffi::CStr::from_bytes_with_nul(
-                        worminal_workspace::WORKSPACE_BROWSER_HOME,
-                    )
-                    .unwrap()
-                    .to_str()
-                    .unwrap();
-                    self.open_browser(home);
+                    self.open_browser(worminal_workspace::WORKSPACE_BROWSER_HOME);
                 } else {
                     self.new_tab();
                 }

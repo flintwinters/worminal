@@ -192,10 +192,7 @@ fn serve(request: &URISchemeRequest) -> Result<(), glib::Error> {
     Ok(())
 }
 pub(crate) fn register(context: &WebContext) {
-    let scheme = std::ffi::CStr::from_bytes_with_nul(worminal_workspace::WORKSPACE_BROWSER_SCHEME)
-        .unwrap()
-        .to_str()
-        .unwrap();
+    let scheme = worminal_workspace::WORKSPACE_BROWSER_SCHEME;
     context.register_uri_scheme(scheme, |request| {
         if let Err(mut error) = serve(request) {
             request.finish_error(&mut error);
