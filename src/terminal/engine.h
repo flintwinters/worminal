@@ -69,9 +69,6 @@ enum worminal_default_color {
 };
 #define WORMINAL_PENDING_BYTES 8192
 #define WORMINAL_TRUECOLOR_FLAG (1u << 24)
-#define WORMINAL_PASTE_BEGIN "\033[200~"
-#define WORMINAL_PASTE_END "\033[201~"
-typedef struct { int32_t bracketed, previous_cr; } WorminalPasteFilter;
 /* Compatibility fields are supplied by the application, never owned by the terminal engine. */
 typedef struct {
 	int32_t pending_bytes, remote_scroll, output_kind;
@@ -152,6 +149,4 @@ int worminal_selection_select(WorminalSelection *, const WorminalCell *, size_t,
 int worminal_selection_text(WorminalSelection *, const WorminalCell *, size_t, uint8_t *, size_t, size_t *);
 /* One half-open column interval per viewport row, empty when first == end. */
 int worminal_selection_ranges(WorminalSelection *, WorminalSelectionRange *, size_t, size_t *);
-/* In-place terminal paste normalization; written never exceeds the supplied byte capacity. */
-int worminal_paste_filter(WorminalPasteFilter *, uint8_t *, size_t, size_t *);
 #endif

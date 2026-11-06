@@ -606,19 +606,15 @@ impl Inner {
                 let bracketed = inner.state.borrow().mode & MODE_BRCKTPASTE != 0;
                 let mut filter = PasteFilter::new(bracketed);
                 let mut bytes = text.as_bytes().to_vec();
-                match filter.filter(&mut bytes) {
-                    Ok(length) => {
-                        if bracketed {
-                            inner.input(paste_begin());
-                        }
-                        for chunk in bytes[..length].chunks(32768) {
-                            inner.input(chunk);
-                        }
-                        if bracketed {
-                            inner.input(paste_end());
-                        }
-                    }
-                    Err(error) => inner.error(format!("paste engine: {}", error.0)),
+                let length = filter.filter(&mut bytes);
+                if bracketed {
+                    inner.input(paste_begin());
+                }
+                for chunk in bytes[..length].chunks(32768) {
+                    inner.input(chunk);
+                }
+                if bracketed {
+                    inner.input(paste_end());
                 }
             }
         });

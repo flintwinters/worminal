@@ -1,4 +1,4 @@
-//! Terminal key and pointer policy; GTK owns event delivery and the C engine owns paste/selection semantics.
+//! Terminal key and pointer policy; GTK owns event delivery and Rust filters paste and the C engine owns selection semantics.
 use gtk::gdk::{
     self,
     keys::{constants as key, Key},
