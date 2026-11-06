@@ -1,6 +1,5 @@
 //! Terminal key and pointer policy; GTK owns event delivery and Rust filters paste and the C engine owns selection semantics.
 use gtk::gdk::{
-    self,
     keys::{constants as key, Key},
     ModifierType as Mod,
 };
@@ -13,7 +12,9 @@ struct KeyEntry {
     appkey: i32,
     appcursor: i32,
 }
-include!(concat!(env!("OUT_DIR"), "/keymap.rs"));
+#[path = "keymap.rs"]
+mod keymap;
+use keymap::KEYS;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum KeyAction {
@@ -195,4 +196,52 @@ pub fn position(px: f64, py: f64, width: i32, height: i32, columns: i32, rows: i
         ((px - 2.0) as i32 / width.max(1)).clamp(0, columns - 1),
         ((py - 2.0) as i32 / height.max(1)).clamp(0, rows - 1),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keyboard_mapping_matches_pre_migration_behavior() {
+        // Freeze the observable C-table behavior before moving its source to Rust.
+        // Cover every mapped key, all supported modifier combinations and both
+        // application modes with Num Lock on/off. Ordering and wildcard masks matter.
+        let mut keys: Vec<_> = KEYS.iter().map(|entry| entry.key).collect();
+        keys.sort_by_key(|key| **key);
+        keys.dedup();
+        let modifiers = [
+            Mod::SHIFT_MASK, Mod::CONTROL_MASK, Mod::MOD1_MASK,
+            Mod::MOD4_MASK, Mod::MOD3_MASK,
+        ];
+        let mut hash = 0xcbf29ce484222325u64;
+        let mut record = |byte: u8| {
+            hash = (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3);
+        };
+        for value in keys {
+            for bits in 0..32 {
+                let mut state = Mod::empty();
+                for (i, modifier) in modifiers.iter().enumerate() {
+                    if bits & (1 << i) != 0 {
+                        state |= *modifier;
+                    }
+                }
+                for mode in [0, MODE_APPKEYPAD, MODE_APPCURSOR, MODE_APPKEYPAD | MODE_APPCURSOR] {
+                    for numlock in [false, true] {
+                        for byte in (*value).to_le_bytes() {
+                            record(byte);
+                        }
+                        let result = Keyboard { numlock }.mapping(value, state, mode);
+                        record(result.map_or(255, |bytes| bytes.len() as u8));
+                        if let Some(bytes) = result {
+                            for &byte in bytes {
+                                record(byte);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(hash, 4_334_246_905_110_447_577, "keyboard behavior fingerprint changed");
+    }
 }

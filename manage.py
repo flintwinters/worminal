@@ -212,8 +212,13 @@ def run_rust_frontend_tests():
 
 
 @app.command("check-rust-frontend")
-def check_rust_frontend():
+def check_rust_frontend(unit_only: bool = typer.Option(
+        False, help="Run Rust tests without private-display painter comparisons.")):
     """Check imported Rust viewports and exact C/Rust painter pixels on private X11 and native Wayland."""
+    if unit_only:
+        native_build.generate_theme()
+        native_build.Builder().target("build/libworminal_engine.a")
+        raise typer.Exit(run_rust_frontend_tests())
     native_build.build_targets("build/render_probe")
     code = run_rust_frontend_tests()
     if not code:

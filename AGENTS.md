@@ -16,6 +16,7 @@ native Wayland and X11. `src/terminal/engine.h` defines the C API; Rust bindings
 Each terminal has its own C instance. C handles parsing, cells, UTF-8, modes, scrollback/reflow, selection, redraw
 deadlines and serialization. It does not manage processes, descriptors, GUI objects or application policy.
 The Rust wrapper manages C handles and screen buffers, and normalizes clipboard paste in place.
+The frontend owns its ordered keyboard mappings in Rust.
 `src/workspace` contains shared protocol/snapshot formats and limits; `src/gtk` contains module/D-Bus definitions
 and browser scripts/templates. The Rust crates under `src` contain the launcher, daemon, frontend, browser
 and wrappers.
