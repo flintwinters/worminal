@@ -20,7 +20,10 @@ pub const WORKSPACE_INPUT_QUEUE_BYTES: u32 = 1024 * 1024;
 pub const WORKSPACE_FRAME_BACKLOG_BYTES: u32 = 128 * 1024;
 pub const WORKSPACE_RESYNC_BACKLOG_BYTES: u32 = 65536;
 pub const WORKSPACE_IO_BYTES: u32 = 16384;
-pub const WORKSPACE_FRAME_INTERVAL_NS: u32 = 16_000_000;
+// Minimum spacing of coalesced output frames (30 per second). A terminal gains nothing visible
+// from display-rate streaming, and every frame costs remote bandwidth. Input echo bypasses this:
+// the first output after delivered input, and scroll/focus replies, are sent immediately.
+pub const WORKSPACE_FRAME_INTERVAL_NS: u32 = 33_000_000;
 pub const WORKSPACE_DIRECTORY_INTERVAL_NS: u32 = 250_000_000;
 
 pub const WIRE_HELLO: u32 = 1;
