@@ -1,5 +1,7 @@
-//! Plain left-click on an http(s) URL in visible text opens it with xdg-open.
+//! Plain left-click on an http(s) URL in visible text opens it with xdg-open; the pointer's
+//! link is underlined.
 //! Ported from the retired X11 frontend's url.c; detection reads only the imported viewport.
+use std::ops::RangeInclusive;
 use worminal_engine::Cell;
 use worminal_engine_sys::{ATTR_WDUMMY, ATTR_WRAP};
 
@@ -19,8 +21,14 @@ fn unmatched_closer(text: &[u8], open: u8, close: u8) -> bool {
     }) < 0
 }
 
-/// The URL under (column, row) in a row-major cell grid, following soft-wrapped rows.
-pub fn at(cells: &[Cell], columns: usize, column: usize, row: usize) -> Option<String> {
+/// The URL under (column, row) in a row-major cell grid, following soft-wrapped rows, and the
+/// row-major cell indices it covers.
+pub fn at(
+    cells: &[Cell],
+    columns: usize,
+    column: usize,
+    row: usize,
+) -> Option<(String, RangeInclusive<usize>)> {
     let rows = if columns == 0 { 0 } else { cells.len() / columns };
     if column >= columns || row >= rows {
         return None;
@@ -36,6 +44,7 @@ pub fn at(cells: &[Cell], columns: usize, column: usize, row: usize) -> Option<S
         last += 1;
     }
     let mut text = Vec::new();
+    let mut positions = Vec::new();
     let mut clicked = None;
     for index in first..=last {
         let cells = line(index);
@@ -56,6 +65,7 @@ pub fn at(cells: &[Cell], columns: usize, column: usize, row: usize) -> Option<S
                 return None;
             }
             text.push(if url_char(cell.rune) { cell.rune as u8 } else { b' ' });
+            positions.push(index * columns + position);
         }
         if index == row && column >= width {
             return None;
@@ -91,7 +101,10 @@ pub fn at(cells: &[Cell], columns: usize, column: usize, row: usize) -> Option<S
         }
         end -= 1;
     }
-    (clicked < end).then(|| String::from_utf8_lossy(&text[start..end]).into_owned())
+    (clicked < end).then(|| {
+        let url = String::from_utf8_lossy(&text[start..end]).into_owned();
+        (url, positions[start]..=positions[end - 1])
+    })
 }
 
 #[cfg(test)]
@@ -113,18 +126,22 @@ mod tests {
         }
         cells
     }
+    fn url(cells: &[Cell], columns: usize, column: usize, row: usize) -> Option<String> {
+        at(cells, columns, column, row).map(|(url, _)| url)
+    }
     #[test]
     fn finds_urls_trims_punctuation_and_follows_soft_wraps() {
         let cells = grid(&["see (https://a.example/x_(y)).", "plain text"], 32, &[]);
-        assert_eq!(at(&cells, 32, 10, 0).as_deref(), Some("https://a.example/x_(y)"));
-        assert_eq!(at(&cells, 32, 0, 0), None);
-        assert_eq!(at(&cells, 32, 29, 0), None, "trailing punctuation is not the link");
-        assert_eq!(at(&cells, 32, 2, 1), None);
-        assert_eq!(at(&cells, 32, 31, 0), None, "blank tail is not the link");
+        assert_eq!(url(&cells, 32, 10, 0).as_deref(), Some("https://a.example/x_(y)"));
+        assert_eq!(url(&cells, 32, 0, 0), None);
+        assert_eq!(url(&cells, 32, 29, 0), None, "trailing punctuation is not the link");
+        assert_eq!(url(&cells, 32, 2, 1), None);
+        assert_eq!(url(&cells, 32, 31, 0), None, "blank tail is not the link");
         let cells = grid(&["go http://wrap.exa", "mple/path now"], 18, &[0]);
-        assert_eq!(at(&cells, 18, 1, 1).as_deref(), Some("http://wrap.example/path"));
-        assert_eq!(at(&cells, 18, 5, 0).as_deref(), Some("http://wrap.example/path"));
+        assert_eq!(url(&cells, 18, 1, 1).as_deref(), Some("http://wrap.example/path"));
+        assert_eq!(url(&cells, 18, 5, 0).as_deref(), Some("http://wrap.example/path"));
+        assert_eq!(at(&cells, 18, 1, 1).map(|(_, span)| span), Some(3..=26), "span crosses the wrap");
         let cells = grid(&["http:// x"], 9, &[]);
-        assert_eq!(at(&cells, 9, 2, 0), None, "a bare scheme is not a link");
+        assert_eq!(url(&cells, 9, 2, 0), None, "a bare scheme is not a link");
     }
 }

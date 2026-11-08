@@ -140,6 +140,8 @@ pub struct Style<'a> {
     pub blink: bool,
     pub focused: bool,
     pub preedit: &'a str,
+    /// Row-major cells of the link under the pointer, drawn underlined.
+    pub link: Option<&'a std::ops::RangeInclusive<usize>>,
 }
 pub struct Painter {
     layout: pango::Layout,
@@ -386,7 +388,10 @@ impl Painter {
                     } else {
                         1
                     };
-                if cell.attributes & ATTR_UNDERLINE != 0 {
+                let link = style.link.is_some_and(|link| {
+                    link.contains(&(y * viewport.frame().columns as usize + x))
+                });
+                if cell.attributes & ATTR_UNDERLINE != 0 || link {
                     cr.rectangle(
                         f64::from(2 + x as i32 * metrics.width),
                         f64::from(2 + (y as i32 + 1) * metrics.height - 1),

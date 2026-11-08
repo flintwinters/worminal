@@ -32,6 +32,9 @@ struct State {
     selecting: bool,
     /// URL pressed with plain button 1; it opens only if released on the same cell.
     link: Option<(String, i32, i32)>,
+    /// Pointer cell while inside the terminal, and the underlined link under it.
+    pointer: Option<(i32, i32)>,
+    hover: Option<std::ops::RangeInclusive<usize>>,
     preedit: String,
     columns: u32,
     rows: u32,
@@ -77,6 +80,8 @@ impl Terminal {
                 blink: false,
                 selecting: false,
                 link: None,
+                pointer: None,
+                hover: None,
                 preedit: String::new(),
                 columns,
                 rows,
@@ -94,6 +99,7 @@ impl Terminal {
             gdk::EventMask::BUTTON_PRESS_MASK
                 | gdk::EventMask::BUTTON_RELEASE_MASK
                 | gdk::EventMask::POINTER_MOTION_MASK
+                | gdk::EventMask::LEAVE_NOTIFY_MASK
                 | gdk::EventMask::SCROLL_MASK
                 | gdk::EventMask::SMOOTH_SCROLL_MASK
                 | gdk::EventMask::FOCUS_CHANGE_MASK,
@@ -129,6 +135,10 @@ impl Terminal {
         inner.widget.connect_motion_notify_event(
             glib::clone!(@weak inner => @default-return glib::Propagation::Proceed,
             move |_, event| { inner.motion(event); glib::Propagation::Stop }),
+        );
+        inner.widget.connect_leave_notify_event(
+            glib::clone!(@weak inner => @default-return glib::Propagation::Proceed,
+            move |_, _| { inner.state.borrow_mut().pointer = None; inner.hover(); glib::Propagation::Proceed }),
         );
         inner.widget.connect_scroll_event(
             glib::clone!(@weak inner => @default-return glib::Propagation::Proceed,
@@ -230,6 +240,8 @@ impl Terminal {
         if let Some(damage) = damage {
             crate::timing("frame");
             self.0.damage(&damage);
+            // Text can change under a still pointer.
+            self.0.hover();
         }
         if immediate {
             if let Some(window) = self.0.widget.window() {
@@ -405,6 +417,7 @@ impl Inner {
                 cursor,
                 blink,
                 preedit,
+                hover,
                 ..
             } = &mut *state;
             let Some(painter) = painter else {
@@ -419,6 +432,7 @@ impl Inner {
                     blink: *blink,
                     focused: self.widget.has_focus(),
                     preedit,
+                    link: hover.as_ref(),
                 },
                 cr,
             );
@@ -681,7 +695,7 @@ impl Inner {
             } else {
                 let columns = state.viewport.frame().columns as usize;
                 let url = crate::link::at(state.viewport.cells(), columns, x as usize, y as usize);
-                if let Some(url) = url {
+                if let Some((url, _)) = url {
                     state.link = Some((url, x, y));
                     return;
                 }
@@ -747,10 +761,33 @@ impl Inner {
             self.paste(gdk::SELECTION_PRIMARY);
         }
     }
+    /// Underline the link under the pointer, redrawing only the rows of a changed span.
+    fn hover(&self) {
+        let (old, new, columns) = {
+            let mut state = self.state.borrow_mut();
+            let columns = state.viewport.frame().columns as usize;
+            let new = state.pointer.and_then(|(x, y)| {
+                crate::link::at(state.viewport.cells(), columns, x as usize, y as usize)
+                    .map(|(_, span)| span)
+            });
+            if new == state.hover {
+                return;
+            }
+            (std::mem::replace(&mut state.hover, new.clone()), new, columns)
+        };
+        let rows = [old, new]
+            .into_iter()
+            .flatten()
+            .flat_map(|span| span.start() / columns..=span.end() / columns)
+            .collect();
+        self.damage(&Damage { full: false, rows });
+    }
     fn motion(self: &Rc<Self>, event: &gdk::EventMotion) {
         self.prepare();
         let (px, py) = event.position();
         let (x, y) = self.pointer(px, py);
+        self.state.borrow_mut().pointer = Some((x, y));
+        self.hover();
         let result = {
             let mut state = self.state.borrow_mut();
             if state.mode & MODE_MOUSE != 0

@@ -147,6 +147,7 @@ fn main() {
                     blink: false,
                     focused,
                     preedit: "",
+                    link: None,
                 },
                 &cr,
             )
