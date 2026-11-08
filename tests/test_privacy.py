@@ -49,6 +49,8 @@ class PrivacyTests(unittest.TestCase):
             git("init", "-q")
             git("config", "user.name", "Configured Contributor")
             git("config", "user.email", "configured")
+            # Setups before generated hooks pointed Git at tracked files; hooks must not follow it.
+            git("config", "core.hooksPath", "tools/hooks")
             subprocess.run([sys.executable, str(root / "manage.py"), "privacy-setup"],
                            cwd=directory, check=True, capture_output=True,
                            env={**os.environ, "GIT_DIR": str(Path(directory) / ".git")})
@@ -59,6 +61,7 @@ class PrivacyTests(unittest.TestCase):
                 self.assertTrue(os.access(hooks / name, os.X_OK), name)
             self.assertIn("check-privacy", (hooks / "commit-msg").read_text())
             self.assertEqual(subprocess.run(["git", "-C", directory, "config", "core.hooksPath"]).returncode, 1)
+            self.assertFalse((Path(directory) / "tools").exists())
 
     def test_forced_private_file_is_rejected_even_without_recognized_credentials(self):
         root = Path(__file__).resolve().parent.parent

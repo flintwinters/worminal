@@ -449,6 +449,8 @@ PRIVACY_HOOKS = {
 @app.command("privacy-setup")
 def privacy_setup():
     """Generate the privacy hooks into the Git directory without changing the configured Git identity."""
+    # Older setups pointed Git at tracked hook files. Unset that first: --git-path resolves through it.
+    subprocess.run(["git", "config", "--local", "--unset", "core.hooksPath"])
     hooks = Path(subprocess.check_output(["git", "rev-parse", "--git-path", "hooks"], text=True).strip())
     hooks.mkdir(parents=True, exist_ok=True)
     for name, arguments in PRIVACY_HOOKS.items():
@@ -457,8 +459,6 @@ def privacy_setup():
                         "import os\nimport sys\n\n"
                         f'os.execv(sys.executable, [sys.executable, "manage.py", "check-privacy", {arguments}])\n')
         hook.chmod(0o755)
-    # Older setups pointed Git at tracked hook files; the generated hooks replace them.
-    subprocess.run(["git", "config", "--local", "--unset", "core.hooksPath"])
     typer.echo("Privacy hooks installed; configured Git identity preserved.")
 
 
