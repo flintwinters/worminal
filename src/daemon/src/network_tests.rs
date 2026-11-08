@@ -250,6 +250,31 @@ fn hidden_busy_tab(features: u32, ticks: usize) -> (usize, usize) {
     (hidden, revealed)
 }
 
+/// The frontend's tab blink for BEL (`WIRE_BELL`) exists for background tabs, which are exactly the
+/// tabs whose frames are deferred; the bell must not depend on the frame gate.
+#[test]
+fn hidden_tab_bell_still_reaches_its_controller() {
+    let mut fixture = Fixture::sized(9 | 16, 120, 40, 2);
+    for tab in [2, 1] {
+        let body = [120u32, 40].iter().flat_map(|v| v.to_be_bytes()).collect();
+        let packet = Packet {
+            kind: WIRE_FOCUS,
+            tab,
+            body,
+        };
+        fixture.service.message(1, packet).unwrap();
+    }
+    assert!(!fixture.service.tabs[1].shown, "tab 2 must be hidden");
+    let now = fixture.service.now();
+    let notices = fixture.service.tabs[1].feed(b"done\x07", now).unwrap();
+    assert!(
+        notices
+            .iter()
+            .any(|n| matches!(n, Notice::Packet(1, WIRE_BELL, _))),
+        "a hidden controlled tab must still notify its controller of BEL"
+    );
+}
+
 #[test]
 fn hidden_tabs_defer_frames_and_reveal_with_a_delta() {
     let full = 40 * (120 * 16 + 4);
