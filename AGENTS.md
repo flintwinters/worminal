@@ -2,8 +2,9 @@
 
 ## Motivation and judgement
 
-Worminal is a deliberately small terminal. Its long-term direction is a distributed operating system: one trusted
-user's daemons across machines act as one system, so placement-agnostic identity and naming outweigh local shortcuts. Favor low memory use over interface features; measure before adding
+Worminal is a deliberately small terminal. Its long-term direction is a distributed operating system that feels present
+everywhere at once: machines are appendages and resources of one trusted system, not places the user goes. Tailscale
+provides host identity and reachability for now; resources may keep their own protocols. Favor low memory use over interface features; measure before adding
 complexity. Preserve established terminal behavior and application shortcuts. Plain Ctrl+N belongs to terminal
 applications; Ctrl+Shift+N opens a window. Ctrl+Shift+A selects screen and retained scrollback for Ctrl+Shift+C;
 Ctrl+A sends Control-A to applications. Keep the upstream st attribution and license intact.
