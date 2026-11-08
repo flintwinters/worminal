@@ -11,6 +11,9 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
 REVISION = 'c1d4f8e'
+# Tests built only against the historical code whose maintained source is the working tree. Their
+# checks and tolerances evolve with the project; the historical revision supplies only the product code.
+MAINTAINED_TESTS = ('tests/preview.c', 'tests/preview_text.c')
 _module = None
 _directory = None
 _links = {}
@@ -49,9 +52,8 @@ def extract(revision, destination, paths=('src', 'tests', 'tools/build.py', 'ass
                 data = source.extractfile(entry).read()
                 if target.suffix in ('.c', '.h', '.py'):
                     data = data.replace(b'.checks', CHECKS.relative_to(ROOT).as_posix().encode())
-                if name.as_posix() == 'tests/preview.c':
-                    data = data.replace(b'g_build_filename(test_cwd, "worminal", NULL)',
-                                        b'g_strdup(g_getenv("WORMINAL_TEST_EXECUTABLE"))')
+                if name.as_posix() in MAINTAINED_TESTS:
+                    data = (ROOT / name).read_bytes()
                 target.write_bytes(data)
 
 

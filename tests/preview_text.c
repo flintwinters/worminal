@@ -16,6 +16,29 @@ ascii_grid(Terminal *t, cairo_t *cr, gboolean lines, PangoLayout *legacy[4][95])
 	}
 }
 
+/* Rise/underline attributes under a fractional transform antialias differently on the two paths:
+ * measured at about 1% of pixels with a largest channel delta of 2/255. A missing, misplaced or
+ * wrong-style glyph differs by far more than this antialiasing tolerance. */
+#define ASCII_CHANNEL_TOLERANCE 4u
+
+/* Count differing pixels and the largest per-channel difference between equal-sized ARGB32 images. */
+static void
+image_difference(cairo_surface_t *a, cairo_surface_t *b, guint *differing, guint *worst)
+{
+	int width = cairo_image_surface_get_width(a), height = cairo_image_surface_get_height(a);
+	int stride = cairo_image_surface_get_stride(a);
+	const unsigned char *x = cairo_image_surface_get_data(a), *y = cairo_image_surface_get_data(b);
+	for (int row = 0; row < height; row++)
+		for (int col = 0; col < width; col++) {
+			const unsigned char *p = x + row * stride + 4 * col, *q = y + row * stride + 4 * col;
+			guint delta = 0;
+			for (int channel = 0; channel < 4; channel++)
+				delta = MAX(delta, (guint)ABS(p[channel] - q[channel]));
+			*differing += delta != 0;
+			*worst = MAX(*worst, delta);
+		}
+}
+
 static void
 check_ascii_line_rendering(Terminal *t)
 {
@@ -73,8 +96,11 @@ check_ascii_line_rendering(Terminal *t)
 						cairo_destroy(cr);
 						cairo_surface_flush(images[lines]);
 					}
-					g_assert_cmpmem(cairo_image_surface_get_data(images[0]), cairo_image_surface_get_stride(images[0]) * height,
-					    cairo_image_surface_get_data(images[1]), cairo_image_surface_get_stride(images[1]) * height);
+					guint differing = 0, worst = 0;
+					image_difference(images[0], images[1], &differing, &worst);
+					if (worst > ASCII_CHANNEL_TOLERANCE)
+						g_error("ASCII paths differ attributed=%d rtl=%d transform=%d clipped=%d: %u/%d pixels, max channel delta %u",
+						    attributed, rtl, transform, clipped, differing, width * height, worst);
 					cairo_surface_destroy(images[0]); cairo_surface_destroy(images[1]);
 				}
 			}

@@ -343,7 +343,9 @@ def build_preview():
 
 
 def preview_checks(backend):
-    native_build.build_targets("worminal-preview", "worminald-preview", "build/preview_test", "build/worminal-gtk-c")
+    # The X11 broker check copies the historical frontend/browser modules.
+    native_build.build_targets("worminal-preview", "worminald-preview", "build/preview_test", "build/worminal-gtk-c",
+                               "build/frontend.so", "build/browser.so")
     return run([sys.executable, "tests/preview.py", backend])
 
 

@@ -927,7 +927,7 @@ main(int argc, char **argv)
 	App *converter = new_app();
 	converter->master = g_strdup(master);
 	char *test_cwd = g_get_current_dir();
-    char *frontend_path = g_strdup(g_getenv("WORMINAL_TEST_EXECUTABLE"));
+	char *frontend_path = g_strdup(g_getenv("WORMINAL_TEST_EXECUTABLE"));
 	g_free(test_cwd);
 	char *quoted_frontend = g_shell_quote(frontend_path);
 	char *convert_script = g_strdup_printf("stty raw -echo; printf CONVERT_READY; "
