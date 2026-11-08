@@ -200,6 +200,10 @@ clear_scrollback(void)
 	feed(engine, "\033[3J\033[H\033[2J\033[3Jfresh\r\nnew\r\nmore\r\nend", 1);
 	assert(worminal_engine_all_text(engine, text, sizeof(text), &used) == WORMINAL_OK);
 	assert(used >= 5 && !memcmp(text, "fresh", 5));
+	/* Select-all ends at the last screen row; blank rows below the output must not be copied. */
+	feed(engine, "\033[3J\033[H\033[2Jtop\r\n\r\nbottom\r\n", 1);
+	assert(worminal_engine_all_text(engine, text, sizeof(text), &used) == WORMINAL_OK);
+	assert(used == 12 && !memcmp(text, "top\n\nbottom\n", 12));
 	worminal_engine_destroy(engine);
 }
 

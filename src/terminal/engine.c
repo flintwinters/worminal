@@ -172,16 +172,28 @@ worminal_engine_control(WorminalEngine *engine, uint32_t operation)
 	return WORMINAL_OK;
 }
 
-int
-worminal_engine_selection(WorminalEngine *engine, uint8_t *output, size_t capacity, size_t *bytes)
+/* Copies selected text. Trimming drops the breaks of blank trailing rows but keeps the one that
+ * terminates the last nonblank line. */
+static int
+copy_selection(WorminalEngine *engine, uint8_t *output, size_t capacity, size_t *bytes, int trim)
 {
 	if (!engine || !bytes || (!output && capacity)) return WORMINAL_INVALID;
 	char *text = te_getsel(engine);
 	*bytes = text ? strlen(text) : 0;
+	if (trim) {
+		while (*bytes && text[*bytes - 1] == '\n') --*bytes;
+		if (*bytes) ++*bytes;
+	}
 	int result = *bytes > capacity ? WORMINAL_CAPACITY : WORMINAL_OK;
 	if (*bytes && result == WORMINAL_OK) memcpy(output, text, *bytes);
 	free(text);
 	return result;
+}
+
+int
+worminal_engine_selection(WorminalEngine *engine, uint8_t *output, size_t capacity, size_t *bytes)
+{
+	return copy_selection(engine, output, capacity, bytes, 0);
 }
 
 int
@@ -196,7 +208,8 @@ worminal_engine_all_text(WorminalEngine *engine, uint8_t *output, size_t capacit
 	    .ob = {0, first}, .nb = {0, first},
 	    .oe = {engine->term.col - 1, engine->term.row - 1},
 	    .ne = {engine->term.col - 1, engine->term.row - 1}};
-	int status = worminal_engine_selection(engine, output, capacity, bytes);
+	/* The selection always ends at the last screen row, so rows below the output are blank. */
+	int status = copy_selection(engine, output, capacity, bytes, 1);
 	engine->sel = saved;
 	engine->term.scr = scroll;
 	return status;
