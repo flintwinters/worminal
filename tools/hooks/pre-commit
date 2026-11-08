@@ -1,2 +1,6 @@
-#!/bin/sh
-exec python3 manage.py check-privacy --staged
+#!/usr/bin/env python3
+"""Git pre-commit hook: run the privacy check through manage.py."""
+import os
+import sys
+
+os.execv(sys.executable, [sys.executable, "manage.py", "check-privacy", "--staged"])
