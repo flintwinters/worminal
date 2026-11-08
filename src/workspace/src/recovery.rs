@@ -7,14 +7,17 @@ use std::{
 };
 use worminal_protocol::{Buffer, Payload, WIRE_VERSION};
 
-#[allow(non_camel_case_types, non_upper_case_globals)]
-pub(crate) mod format {
-    include!(concat!(env!("OUT_DIR"), "/restore.rs"));
-}
-pub use format::RESTORE_ENV_NAME;
-use format::{
-    RESTORE_DIRECTORY_LIMIT, RESTORE_LIMIT, RESTORE_TABS, RESTORE_URL_LIMIT, RESTORE_VERSION,
-};
+// Recovery recipe format. Saved recipes outlive the binaries that wrote them.
+const RESTORE_VERSION: u32 = 1;
+const RESTORE_LIMIT: u32 = 8 * 1024 * 1024;
+const RESTORE_TABS: u32 = 4096;
+const RESTORE_URL_LIMIT: u32 = 65536;
+/// Initial size of a recovered shell before a view reports its own.
+pub(crate) const RESTORE_COLUMNS: u32 = 80;
+pub(crate) const RESTORE_ROWS: u32 = 24;
+const RESTORE_DIRECTORY_LIMIT: usize = libc::PATH_MAX as usize;
+/// One-shot marker telling a recovered shell that it replaces a saved terminal.
+pub const RESTORE_ENV_NAME: &std::ffi::CStr = c"WORMINAL_RESTORE";
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Recipe {
@@ -41,7 +44,7 @@ impl Recipe {
     }
 
     fn valid(&self) -> bool {
-        self.directory.len() < RESTORE_DIRECTORY_LIMIT as usize
+        self.directory.len() < RESTORE_DIRECTORY_LIMIT
             && self.url.len() <= RESTORE_URL_LIMIT as usize
             && !self.directory.contains(&0)
             && !self.url.contains(&0)

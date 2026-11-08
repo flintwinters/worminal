@@ -1,8 +1,4 @@
-use std::{
-    ffi::{CStr, OsString},
-    io,
-    os::unix::ffi::OsStringExt,
-};
+use std::{ffi::OsString, io, os::unix::ffi::OsStringExt};
 use worminal_protocol::{
     Payload, WORKSPACE_MAX_ARGS, WORKSPACE_MAX_COLS, WORKSPACE_MAX_ENV, WORKSPACE_MAX_ROWS,
 };
@@ -34,8 +30,8 @@ fn c_string(payload: &mut Payload<'_>) -> io::Result<Vec<u8>> {
 impl Launch {
     pub fn restore(directory: Vec<u8>) -> Self {
         Self {
-            columns: crate::recovery::format::RESTORE_COLUMNS,
-            rows: crate::recovery::format::RESTORE_ROWS,
+            columns: crate::recovery::RESTORE_COLUMNS,
+            rows: crate::recovery::RESTORE_ROWS,
             allow_alternate: true,
             title: Vec::new(),
             directory,
@@ -48,7 +44,7 @@ impl Launch {
     }
 
     pub fn environment_for_restore(&self) -> Vec<(OsString, OsString)> {
-        let marker = CStr::from_bytes_with_nul(crate::recovery::RESTORE_ENV_NAME).unwrap();
+        let marker = crate::recovery::RESTORE_ENV_NAME;
         let marker = OsString::from_vec(marker.to_bytes().to_vec());
         let mut environment = self
             .environment

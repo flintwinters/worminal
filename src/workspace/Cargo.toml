@@ -7,6 +7,3 @@ publish.workspace = true
 [dependencies]
 worminal-protocol = { path = "../protocol" }
 libc.workspace = true
-
-[build-dependencies]
-bindgen.workspace = true

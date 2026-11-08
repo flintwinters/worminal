@@ -1,7 +1,7 @@
 //! Start SSH with posix_spawnp in its own session, so GTK fork hooks do not run and SSH cannot
 //! stop the GUI process group through a terminal.
 use std::{
-    ffi::{CStr, CString, OsStr},
+    ffi::{CString, OsStr},
     io,
     os::{
         fd::{AsFd, AsRawFd, FromRawFd, OwnedFd},
@@ -46,7 +46,7 @@ pub fn connect(master: &OsStr) -> io::Result<(UnixStream, Child)> {
         ));
     }
     let (parent, remote) = UnixStream::pair()?;
-    let daemon = CStr::from_bytes_with_nul(WORKSPACE_DAEMON).expect("generated daemon command");
+    let daemon = WORKSPACE_DAEMON;
     let arguments = [
         b"ssh".as_slice(),
         b"-T",

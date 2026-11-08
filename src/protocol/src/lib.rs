@@ -1,10 +1,7 @@
-//! Safe v2 framing. wire.h owns the constants; no native-layout structures are sent on the wire.
+//! Safe v2 framing. No native-layout structures are sent on the wire.
 use std::{io, mem};
 
-#[allow(non_camel_case_types, non_snake_case, non_upper_case_globals)]
-mod constants {
-    include!(concat!(env!("OUT_DIR"), "/constants.rs"));
-}
+mod constants;
 pub use constants::*;
 
 pub const MAX_PAYLOAD: usize = WIRE_MAX_BYTES as usize;

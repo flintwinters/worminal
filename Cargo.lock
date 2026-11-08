@@ -1072,15 +1072,11 @@ dependencies = [
 [[package]]
 name = "worminal-protocol"
 version = "0.1.0"
-dependencies = [
- "bindgen",
-]
 
 [[package]]
 name = "worminal-workspace"
 version = "0.1.0"
 dependencies = [
- "bindgen",
  "libc",
  "worminal-protocol",
 ]

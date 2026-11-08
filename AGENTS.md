@@ -17,9 +17,9 @@ Each terminal has its own C instance. C handles parsing, cells, UTF-8, modes, sc
 deadlines and serialization. It does not manage processes, descriptors, GUI objects or application policy.
 The Rust wrapper manages C handles and screen buffers, and normalizes clipboard paste in place.
 The frontend owns its ordered keyboard mappings in Rust. Shell defaults live with Rust PTY creation;
-browser defaults live with Rust target resolution. C headers retain shared wire/snapshot and module ABIs.
-`src/workspace` contains shared protocol/snapshot formats and limits; `src/gtk` contains module/D-Bus definitions
-and browser scripts/templates. The Rust crates under `src` contain the launcher, daemon, frontend, browser
+browser defaults live with Rust target resolution. C headers retain only engine snapshot and module ABIs:
+`src/protocol` owns wire constants and framing, `src/workspace` owns recovery/handoff formats, and `src/gtk`
+contains module/D-Bus definitions and browser scripts/templates. The Rust crates under `src` contain the launcher, daemon, frontend, browser
 and wrappers.
 
 The per-user v2 daemon owns ordered tabs, PTYs and bounded scrollback. Views connect locally or through SSH

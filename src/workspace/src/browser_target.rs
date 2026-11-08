@@ -1,6 +1,6 @@
 //! Resolve targets in the caller's directory before the service receives them.
 use std::{
-    ffi::{CStr, OsStr, OsString},
+    ffi::{OsStr, OsString},
     fs, io,
     net::Ipv6Addr,
     os::unix::ffi::OsStrExt,
@@ -25,7 +25,7 @@ pub fn command(arguments: &[OsString]) -> io::Result<()> {
         ));
     }
     use std::{os::unix::process::CommandExt, process::Command};
-    let daemon = CStr::from_bytes_with_nul(worminal_protocol::WORKSPACE_DAEMON).unwrap();
+    let daemon = worminal_protocol::WORKSPACE_DAEMON;
     let daemon = std::env::current_exe()?.with_file_name(OsStr::from_bytes(daemon.to_bytes()));
     Err(Command::new(daemon)
         .arg("--new-browser-tab")
