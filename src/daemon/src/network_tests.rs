@@ -11,6 +11,9 @@ impl Fixture {
         Self::with_features(9)
     }
     fn with_features(features: u32) -> Self {
+        Self::sized(features, 120, 40, 1)
+    }
+    fn sized(features: u32, columns: u32, rows: u32, tabs: u32) -> Self {
         static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
         let serial = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let scope = format!("network-{}-{serial}", std::process::id());
@@ -55,12 +58,14 @@ impl Fixture {
             .flush(&mut io::sink(), usize::MAX)
             .unwrap();
         let mut launch = Launch::restore(Vec::new());
-        launch.columns = 120;
-        launch.rows = 40;
+        launch.columns = columns;
+        launch.rows = rows;
         launch.arguments = vec!["/bin/cat".into()];
-        service
-            .tabs
-            .push(Tab::shell(1, &launch, false, Some(1), service.reaper.clone()).unwrap());
+        for id in 1..=tabs {
+            service
+                .tabs
+                .push(Tab::shell(id, &launch, false, Some(1), service.reaper.clone()).unwrap());
+        }
         Self {
             service,
             _peer: peer,
@@ -82,7 +87,9 @@ impl Fixture {
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
-        self.service.tabs[0].terminal.as_mut().unwrap().pty.stop();
+        for tab in &mut self.service.tabs {
+            tab.terminal.as_mut().unwrap().pty.stop();
+        }
         for _ in 0..200 {
             if self.service.reaper.reap() == 0 {
                 return;
@@ -139,6 +146,43 @@ fn deferred_full_requests_survive_the_congestion_gate() {
     fixture.output().flush(&mut io::sink(), usize::MAX).unwrap();
     fixture.service.resync(48_000_001).unwrap();
     assert_eq!(fixture.output().len(), 77_656);
+}
+
+/// Attach idle tabs at 187x82 (247040-byte full frames) that all remain controlled, as hidden tabs
+/// do after activation, then drain a 2 Mbps link. Returns delivered protocol bytes and settlement.
+/// Before 2fc0825, resync() sent FULL frames for every controlled tab. Once their sum exceeded the
+/// then 1 MiB backlog, the last tabs were gated and re-armed resync, which resent every full frame:
+/// idle hidden tabs streamed at link rate until disconnect.
+const IDLE_TABS: usize = 6;
+fn idle_controlled_tabs(ticks: usize) -> (usize, bool) {
+    let mut fixture = Fixture::sized(9, 187, 82, IDLE_TABS as u32);
+    for index in 0..IDLE_TABS {
+        fixture.service.send_frame(index, true, 1).unwrap();
+    }
+    let mut bytes = 0;
+    for tick in 1..=ticks {
+        bytes += fixture.output().flush(&mut io::sink(), 4096).unwrap();
+        fixture
+            .service
+            .resync(tick as i64 * 16_000_000 + 1)
+            .unwrap();
+    }
+    let settled = fixture.output().is_empty() && !fixture.service.clients[&1].needs_resync;
+    (bytes, settled)
+}
+
+#[test]
+fn idle_controlled_tabs_settle_after_one_full_frame_each() {
+    let (bytes, settled) = idle_controlled_tabs(3000);
+    let full = 82 * (187 * 16 + 4);
+    assert!(
+        settled,
+        "idle tabs must stop sending once their baselines are delivered"
+    );
+    assert!(
+        bytes < 2 * IDLE_TABS * full,
+        "idle tabs resent full frames: {bytes} bytes"
+    );
 }
 
 #[derive(Default)]
@@ -287,6 +331,8 @@ fn transport_model() {
     metric("congested_tail_ms", (tick - 250) * 16);
     metric("congested_protocol_bytes", receiver.bytes);
     metric("congested_frames", receiver.frames);
+    // 3000 ticks of 16 ms at 4096 bytes/tick cap this at 12288000 bytes (link saturation).
+    metric("idle_hidden_tabs_bytes", idle_controlled_tabs(3000).0);
 }
 
 #[test]
