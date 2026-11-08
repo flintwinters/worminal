@@ -174,3 +174,22 @@ fn output_directory_checks_coalesce_without_delaying_periodic_checks() {
     tab.refresh_directory_after_output(interval + interval / 2);
     assert_eq!(tab.directory, actual);
 }
+
+#[test]
+fn catalog_lists_palette_overrides_only_through_the_last_one() {
+    let mut fixture = Fixture::new();
+    let tab = &mut fixture.tab;
+    let none = 0u32.to_be_bytes();
+    assert!(
+        tab.metadata(1).unwrap().ends_with(&none),
+        "theme defaults belong to each view, not the catalog"
+    );
+    tab.feed(b"\x1b]4;1;#123456\x07", 2).unwrap();
+    let mut tail = 2u32.to_be_bytes().to_vec();
+    tail.extend(0u32.to_be_bytes());
+    tail.extend(7u32.to_be_bytes());
+    tail.extend(b"#123456");
+    assert!(tab.metadata(3).unwrap().ends_with(&tail));
+    tab.feed(b"\x1b]104;1\x07", 4).unwrap();
+    assert!(tab.metadata(5).unwrap().ends_with(&none));
+}

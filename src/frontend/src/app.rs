@@ -746,11 +746,13 @@ impl App {
                 page
             };
             let mut palette_changed = false;
-            for (index, color) in record.colors.iter().enumerate() {
+            // The catalog lists overrides only through the last one; later entries are defaults.
+            for index in 0..worminal_config::COLOR_NAMES.len() {
+                let color = record.colors.get(index).filter(|color| !color.is_empty());
                 palette_changed |= page
                     .palette
                     .borrow_mut()
-                    .set(index, if color.is_empty() { None } else { Some(color) });
+                    .set(index, color.map(String::as_str));
             }
             if let Some(terminal) = &page.terminal {
                 terminal.configure(record.mode, record.cursor, palette_changed);

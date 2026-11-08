@@ -270,13 +270,18 @@ impl Tab {
         buffer.put_u32(self.cursor)?;
         buffer.put_string(&self.title)?;
         buffer.put_string(&self.directory)?;
-        buffer.put_u32(worminal_config::COLOR_NAMES.len() as u32)?;
-        for (index, default) in worminal_config::COLOR_NAMES.iter().enumerate() {
-            let color = self
-                .colors
-                .as_ref()
-                .and_then(|colors| colors[index].as_deref());
-            buffer.put_string(color.unwrap_or_else(|| default.unwrap_or("").as_bytes()))?;
+        // Only palette overrides set by the tab's applications travel; each view supplies its own
+        // theme for the rest. Entries run through the last override, with empty meaning default, so
+        // a tab without overrides sends none. This replaced a full 270-entry table per tab, which
+        // every catalog change resent for every tab.
+        let overrides = self.colors.as_deref().unwrap_or_default();
+        let count = overrides
+            .iter()
+            .rposition(Option::is_some)
+            .map_or(0, |last| last + 1);
+        buffer.put_u32(count as u32)?;
+        for color in &overrides[..count] {
+            buffer.put_string(color.as_deref().unwrap_or_default())?;
         }
         self.catalog = buffer.into_bytes();
         self.catalog_pending = false;
