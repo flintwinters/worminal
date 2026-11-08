@@ -301,8 +301,12 @@ impl App {
                 }
                 glib::Propagation::Proceed
             }));
-        app.window
-            .connect_is_active_notify(|_| window_state::changed());
+        app.window.connect_is_active_notify(|window| {
+            if window.is_active() {
+                window.set_urgency_hint(false);
+            }
+            window_state::changed();
+        });
         app.window.connect_delete_event(
             glib::clone!(@weak app => @default-return glib::Propagation::Proceed, move |_, _| {
                 app.release_browsers(); glib::Propagation::Proceed
@@ -574,7 +578,13 @@ impl App {
                     terminal.release();
                 }
             }
-            WIRE_BELL => self.window.error_bell(),
+            WIRE_BELL => {
+                self.window.error_bell();
+                self.tabstrip.alert(packet.tab);
+                if !self.window.is_active() {
+                    self.window.set_urgency_hint(true);
+                }
+            }
             WIRE_PRINT => {
                 self.print(&packet.body)?;
             }

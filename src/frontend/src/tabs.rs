@@ -25,6 +25,11 @@ struct State {
     entries: RefCell<Vec<Tab>>,
     active: Cell<u32>,
     palette: RefCell<Option<Rc<RefCell<Palette>>>>,
+    /// Background tabs that rang the bell; never contains the active tab.
+    attention: RefCell<Vec<u32>>,
+    /// Blink phase. The timer runs only while some tab needs attention.
+    lit: Cell<bool>,
+    blink: RefCell<Option<glib::SourceId>>,
 }
 #[derive(Clone)]
 pub struct Tabs(Rc<State>);
@@ -91,8 +96,9 @@ impl State {
             }
             let width = width(layout, entry, metrics);
             let selected = entry.id == self.active.get();
-            if selected {
-                paint::source(cr, &palette.color(FG));
+            let alert = self.lit.get() && self.attention.borrow().contains(&entry.id);
+            if selected || alert {
+                paint::source(cr, &palette.color(if selected { FG } else { 3 }));
                 cr.rectangle(
                     f64::from(x),
                     2.0,
@@ -103,7 +109,7 @@ impl State {
             }
             paint::source(
                 cr,
-                &palette.color(if selected {
+                &palette.color(if selected || alert {
                     BG
                 } else if entry.browser {
                     1
@@ -168,6 +174,9 @@ impl Tabs {
             entries: RefCell::new(Vec::new()),
             active: Cell::new(0),
             palette: RefCell::new(None),
+            attention: RefCell::new(Vec::new()),
+            lit: Cell::new(false),
+            blink: RefCell::new(None),
         });
         state.widget.add_events(gdk::EventMask::BUTTON_PRESS_MASK);
         state.widget.connect_draw(
@@ -195,8 +204,43 @@ impl Tabs {
                 glib::Propagation::Proceed
             }));
     }
+    /// Blink a background tab until it is selected; bells from the active tab are already visible.
+    pub fn alert(&self, id: u32) {
+        let state = &self.0;
+        if id == state.active.get() || state.attention.borrow().contains(&id) {
+            return;
+        }
+        state.attention.borrow_mut().push(id);
+        state.lit.set(true);
+        state.widget.queue_draw();
+        if state.blink.borrow().is_some() {
+            return;
+        }
+        let weak = Rc::downgrade(state);
+        *state.blink.borrow_mut() = Some(glib::timeout_add_local(
+            std::time::Duration::from_millis(500),
+            move || {
+                let Some(state) = weak.upgrade() else {
+                    return glib::ControlFlow::Break;
+                };
+                if state.attention.borrow().is_empty() {
+                    state.lit.set(false);
+                    state.blink.borrow_mut().take();
+                    return glib::ControlFlow::Break;
+                }
+                state.lit.set(!state.lit.get());
+                state.widget.queue_draw();
+                glib::ControlFlow::Continue
+            },
+        ));
+    }
     pub fn update(&self, entries: Vec<Tab>, active: u32, palette: Option<Rc<RefCell<Palette>>>) {
         self.0.active.set(active);
+        // Selecting a tab answers its alert; closed tabs cannot be answered.
+        self.0
+            .attention
+            .borrow_mut()
+            .retain(|id| *id != active && entries.iter().any(|entry| entry.id == *id));
         *self.0.palette.borrow_mut() = palette;
         let empty = entries.is_empty();
         *self.0.entries.borrow_mut() = entries;
