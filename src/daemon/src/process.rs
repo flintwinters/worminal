@@ -383,6 +383,10 @@ impl Pty {
         }
         self.master.take();
     }
+    #[expect(
+        clippy::too_many_lines,
+        reason = "PTY spawn is one ordered fork/exec setup sequence"
+    )]
     pub fn spawn(launch: &Launch, restored: bool, reaper: ChildReaper) -> io::Result<Self> {
         let directory = if launch.directory.is_empty() {
             std::env::var_os("HOME").unwrap_or_else(|| "/".into())

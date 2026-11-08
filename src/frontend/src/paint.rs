@@ -327,6 +327,10 @@ impl Painter {
         }
         Ok(())
     }
+    #[expect(
+        clippy::too_many_lines,
+        reason = "row painting is one ordered pass of backgrounds, glyphs and cursor"
+    )]
     pub fn paint(
         &mut self,
         viewport: &Viewport,

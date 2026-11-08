@@ -21,6 +21,26 @@ fn unmatched_closer(text: &[u8], open: u8, close: u8) -> bool {
     }) < 0
 }
 
+/// Length of a URL candidate after dropping sentence punctuation and unmatched closing brackets.
+fn without_trailing_punctuation(text: &[u8]) -> usize {
+    let mut end = text.len();
+    while end > 0 {
+        let span = &text[..end];
+        let closes = match text[end - 1] {
+            b'.' | b',' | b';' | b':' | b'!' | b'?' => true,
+            b')' => unmatched_closer(span, b'(', b')'),
+            b']' => unmatched_closer(span, b'[', b']'),
+            b'}' => unmatched_closer(span, b'{', b'}'),
+            _ => false,
+        };
+        if !closes {
+            break;
+        }
+        end -= 1;
+    }
+    end
+}
+
 /// The URL under (column, row) in a row-major cell grid, following wrapped rows, and the
 /// row-major cell indices it covers.
 ///
@@ -120,20 +140,7 @@ pub fn at(
     if start == end || clicked < start {
         return None;
     }
-    while end > start {
-        let span = &text[start..end];
-        let closes = match text[end - 1] {
-            b'.' | b',' | b';' | b':' | b'!' | b'?' => true,
-            b')' => unmatched_closer(span, b'(', b')'),
-            b']' => unmatched_closer(span, b'[', b']'),
-            b'}' => unmatched_closer(span, b'{', b'}'),
-            _ => false,
-        };
-        if !closes {
-            break;
-        }
-        end -= 1;
-    }
+    let end = without_trailing_punctuation(&text[start..end]) + start;
     (clicked < end).then(|| {
         let url = String::from_utf8_lossy(&text[start..end]).into_owned();
         (url, positions[start]..=positions[end - 1])

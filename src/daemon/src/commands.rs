@@ -32,6 +32,10 @@ impl Service {
         Ok(())
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one arm per wire message type; splitting scatters the dispatch"
+    )]
     pub fn message(&mut self, client: ClientId, packet: Packet) -> io::Result<()> {
         let Some(peer) = self.clients.get(&client) else {
             return Ok(());

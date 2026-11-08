@@ -613,6 +613,10 @@ impl App {
         }
         Ok(())
     }
+    #[expect(
+        clippy::too_many_lines,
+        reason = "catalog import applies tab, focus and title changes in one pass"
+    )]
     fn catalog(self: &Rc<Self>, bytes: &[u8]) -> io::Result<()> {
         let mut body = Payload::new(bytes);
         let count = body.u32()?;

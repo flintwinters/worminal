@@ -33,6 +33,7 @@ fn argument(message: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> io:
     io::Error::new(io::ErrorKind::InvalidInput, message)
 }
 impl Config {
+    #[expect(clippy::too_many_lines, reason = "one arm per command-line option")]
     pub(super) fn parse(
         request: &worminal_workspace::broker::Request,
         candidate: bool,

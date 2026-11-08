@@ -122,6 +122,10 @@ pub(crate) enum Outcome {
 }
 
 impl Screen {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "frame preparation is one ordered pass over damaged rows"
+    )]
     fn prepare(
         &self,
         engine: &mut Engine,

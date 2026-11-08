@@ -108,16 +108,29 @@ def run_checks(match=None):
     return code or run([sys.executable, "tests/rust_browser.py"])
 
 
-def run_clippy():
+RUST_FILE_LINES = 1000
+
+
+def run_rust_lint():
+    if run(["cargo", "fmt", "--all", "--", "--check"]):
+        print("Run `cargo fmt --all` to apply rustfmt (100-column lines).")
+        return 1
+    tracked = subprocess.check_output(["git", "ls-files", "-z", "*.rs"], cwd=ROOT).split(b"\0")
+    long = [(path.decode(), lines) for path in tracked if path
+            and (lines := (ROOT / path.decode()).read_bytes().count(b"\n")) > RUST_FILE_LINES]
+    for path, lines in long:
+        print(f"{path}: {lines} lines; split files above {RUST_FILE_LINES} lines by responsibility.")
+    if long:
+        return 1
     # engine-sys links the C engine archive, so it must exist before Rust code is checked.
     native_build.Builder().target("build/libworminal_engine.a")
     return run(["cargo", "clippy", "--locked", "--quiet", "--workspace", "--all-targets", "--", "-D", "warnings"])
 
 
-@app.command("check-clippy")
-def check_clippy():
-    """Lint every Rust crate, test and build script with Clippy; any warning fails."""
-    raise typer.Exit(run_clippy())
+@app.command("check-rust-lint")
+def check_rust_lint():
+    """Check rustfmt formatting, Rust file length and Clippy (warnings fail) for every crate, test and build script."""
+    raise typer.Exit(run_rust_lint())
 
 
 def run_native_checks():
@@ -127,7 +140,7 @@ def run_native_checks():
             return code
     from tools.engine_checks import check
     code = check()
-    return (code or run_clippy() or run_rust_workspace_checks() or run_rust_process_checks()
+    return (code or run_rust_lint() or run_rust_workspace_checks() or run_rust_process_checks()
             or run_rust_frontend_tests())
 
 

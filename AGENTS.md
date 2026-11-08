@@ -72,7 +72,8 @@ Parent explorer build commands supply palette/font inputs; standalone builds ret
 `manage.py` is strictly internal build/test/install/maintenance tooling. Product workflows use native executables.
 Build as the regular user to compile their Alacritty appearance.
 Rust bindings require libclang plus the matching Clang compiler and builtin headers; libclang alone is insufficient.
-`check` denies Clippy warnings (rustup component `clippy`); allowed lints are listed once in the workspace `Cargo.toml`.
+`check-rust-lint` (part of `check`) enforces rustfmt, a Rust file-length cap and warning-free Clippy (rustup
+component `clippy`). Lint policy lives once in the workspace `Cargo.toml`; long-function exceptions use `#[expect]`.
 Shared font defaults in `assets/font.toml` use bundled Atkinson Hyperlegible Mono; installation includes
 both font styles and their OFL license. Explicit Alacritty fields override defaults, including for explorer builds.
 Cargo output and generated files belong in

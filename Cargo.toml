@@ -13,6 +13,8 @@ publish = false
 # Functions and types at the C boundary mirror C signatures; splitting them adds indirection, not clarity.
 too_many_arguments = "allow"
 type_complexity = "allow"
+# New functions stay within 100 lines; existing exceptions carry #[expect] with a reason.
+too_many_lines = "warn"
 
 [workspace.dependencies]
 bindgen = { version = "0.72", default-features = false, features = ["runtime"] }

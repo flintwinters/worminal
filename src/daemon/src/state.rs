@@ -360,6 +360,7 @@ impl Tab {
         self.effects(effects, now)
     }
 
+    #[expect(clippy::too_many_lines, reason = "one arm per engine event kind")]
     pub fn effects(&mut self, events: Vec<Event>, now: i64) -> io::Result<Vec<Notice>> {
         let mut notices = Vec::new();
         for event in events {
