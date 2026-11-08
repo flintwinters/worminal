@@ -51,6 +51,25 @@ def pkg_flags(option, packages=PACKAGES):
         [*words("PKG_CONFIG", "pkg-config"), option, *packages], cwd=ROOT, text=True))
 
 
+GRAPHICS_PACKAGES = ("gtk+-3.0", "webkit2gtk-4.1", "pangocairo")
+
+
+def headless():
+    """True when the build target has no graphics stack: WORMINAL_HEADLESS=1/0 overrides pkg-config probing.
+
+    Headless targets run only the daemon, which links no GTK/WebKit; views connect from elsewhere via --master.
+    """
+    forced = os.environ.get("WORMINAL_HEADLESS")
+    if forced is not None:
+        return forced not in ("", "0")
+    try:
+        subprocess.run([*words("PKG_CONFIG", "pkg-config"), "--exists", *GRAPHICS_PACKAGES],
+                       cwd=ROOT, check=True, capture_output=True)
+    except (OSError, subprocess.CalledProcessError):
+        return True
+    return False
+
+
 def compile_flags():
     return [*pkg_flags("--cflags"), *CPPFLAGS, *words("CPPFLAGS"), *words("CFLAGS", "-O3")]
 
@@ -200,7 +219,8 @@ def __getattr__(name):
 def build_targets(*targets):
     generate_theme()
     builder = Builder()
-    for target in dict.fromkeys(("worminal", "worminald", *targets)):
+    core = ("worminald",) if headless() else ("worminal", "worminald")
+    for target in dict.fromkeys((*core, *targets)):
         builder.target(target)
 
 
@@ -241,6 +261,9 @@ def installation_files(prefix=None):
     if not prefix.is_absolute() or not manprefix.is_absolute():
         raise ValueError("PREFIX and MANPREFIX must be absolute paths")
     staging = Path(os.environ.get("DESTDIR", "/"))
+    if headless():
+        return [(ROOT / "build/bin/worminald", staging / str(prefix / "bin/worminald").lstrip("/"), 0o755),
+                (ROOT / "docs/man/worminal.1", staging / str(manprefix / "man1/worminal.1").lstrip("/"), 0o644)]
     # Publish modules before a launcher that may immediately need them.
     files = [("build/lib/worminal/" + RUST_BROWSER_MODULE, prefix / "lib/worminal" / RUST_BROWSER_MODULE, 0o755),
              ("build/lib/worminal/" + RUST_FRONTEND_MODULE, prefix / "lib/worminal" / RUST_FRONTEND_MODULE, 0o755)]
@@ -287,7 +310,9 @@ def install(prefix=None, *, skip_build=False):
             temporary.unlink(missing_ok=True)
     for path in retired_installation_files(prefix):
         path.unlink(missing_ok=True)
-    print("Installed Rust binaries/modules, manual, desktop launcher, and icon; retired C artifacts removed.")
+    print("Installed headless daemon and manual (no graphics stack detected, or WORMINAL_HEADLESS set)."
+          if headless() else
+          "Installed Rust binaries/modules, manual, desktop launcher, and icon; retired C artifacts removed.")
 
 
 def uninstall(prefix=None):

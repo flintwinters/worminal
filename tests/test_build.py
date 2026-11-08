@@ -39,6 +39,20 @@ class BuildTests(unittest.TestCase):
                 self.assertIn(unittest.mock.call("build/lib/worminal/" + build.RUST_BROWSER_MODULE, "worminal-browser"),
                               library.call_args_list)
 
+    def test_headless_target_builds_and_installs_only_the_daemon(self):
+        names = lambda: {destination.name for _, destination, _ in build.installation_files("/usr/local")}
+        with patch.dict(os.environ, {"WORMINAL_HEADLESS": "1"}):
+            self.assertEqual(names(), {"worminald", "worminal.1"})
+            with patch.object(build, "generate_theme"), patch.object(build, "Builder") as builder:
+                build.build_targets()
+                self.assertEqual([c.args[0] for c in builder().target.call_args_list], ["worminald"])
+        with patch.dict(os.environ, {"WORMINAL_HEADLESS": "0"}):
+            self.assertIn("worminal", names())
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("WORMINAL_HEADLESS", None)
+            with patch.object(build.subprocess, "run", side_effect=subprocess.CalledProcessError(1, "pkg-config")):
+                self.assertTrue(build.headless())
+
     def test_historical_c_targets_delegate_to_disposable_git_fixtures(self):
         with patch.object(build, "pkg_flags", return_value=[]), patch('tools.reference.target') as historical:
             builder = build.Builder()

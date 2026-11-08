@@ -77,7 +77,7 @@ Rust bindings require libclang plus the matching Clang compiler and builtin head
 component `clippy`). Lint policy lives once in the workspace `Cargo.toml`; long-function exceptions use `#[expect]`.
 Shared font defaults in `assets/font.toml` use bundled Atkinson Hyperlegible Mono; installation includes
 both font styles and their OFL license. Explicit Alacritty fields override defaults, including for explorer builds.
-Cargo output and generated files belong in
+Builds and installs auto-detect a headless host (no GTK/WebKit/Pango via pkg-config, or `WORMINAL_HEADLESS=1`; `0` forces graphics) and then build/install only `worminald` and the manual. Cargo output and generated files belong in
 `build/`; native executables use `build/bin` and modules use `build/lib/worminal`, matching installed prefixes.
 `tools/paths.py` owns runtime/diagnostic path decisions. Diagnostics belong in `build/checks`; optional Python
 virtualenvs use `build/venv`. `clean` preserves diagnostics/virtualenvs while removing compiled output.
