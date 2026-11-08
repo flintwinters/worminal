@@ -30,6 +30,8 @@ struct State {
     cursor: u32,
     blink: bool,
     selecting: bool,
+    /// URL pressed with plain button 1; it opens only if released on the same cell.
+    link: Option<(String, i32, i32)>,
     preedit: String,
     columns: u32,
     rows: u32,
@@ -74,6 +76,7 @@ impl Terminal {
                 cursor: 2,
                 blink: false,
                 selecting: false,
+                link: None,
                 preedit: String::new(),
                 columns,
                 rows,
@@ -661,6 +664,29 @@ impl Inner {
         self.widget.grab_focus();
         let (px, py) = event.position();
         let (x, y) = self.pointer(px, py);
+        // Links take button 1 before mouse reporting, as in the retired X11 frontend; Shift
+        // bypasses them to select or report. Both press and release stay local.
+        if event.button() == 1 && !event.state().contains(gdk::ModifierType::SHIFT_MASK) {
+            let mut state = self.state.borrow_mut();
+            if release {
+                if let Some((url, column, row)) = state.link.take() {
+                    drop(state);
+                    if (column, row) == (x, y) {
+                        if let Err(error) = crate::startup::open_url(&url) {
+                            eprintln!("worminal: open {url}: {error}");
+                        }
+                    }
+                    return;
+                }
+            } else {
+                let columns = state.viewport.frame().columns as usize;
+                let url = crate::link::at(state.viewport.cells(), columns, x as usize, y as usize);
+                if let Some(url) = url {
+                    state.link = Some((url, x, y));
+                    return;
+                }
+            }
+        }
         let bytes = {
             let mut state = self.state.borrow_mut();
             if state.mode & MODE_MOUSE != 0

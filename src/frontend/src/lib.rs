@@ -5,6 +5,7 @@ mod browser;
 pub mod fonts;
 mod graphics_ffi;
 pub mod input;
+mod link;
 pub mod paint;
 mod startup;
 pub mod tabs;
