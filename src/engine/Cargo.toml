@@ -6,3 +6,6 @@ publish.workspace = true
 
 [dependencies]
 worminal-engine-sys = { path = "../engine-sys" }
+
+[lints]
+workspace = true

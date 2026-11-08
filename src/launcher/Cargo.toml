@@ -16,3 +16,6 @@ bindgen.workspace = true
 [[bin]]
 name = "worminal-rust-launcher"
 path = "src/candidate.rs"
+
+[lints]
+workspace = true

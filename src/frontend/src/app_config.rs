@@ -84,7 +84,7 @@ impl Config {
                 })
                 .collect(),
         };
-        let mut args = request.args.iter().cloned().skip(1);
+        let mut args = request.args.iter().skip(1).cloned();
         while let Some(arg) = args.next() {
             match arg.to_str() {
                 Some("--help" | "-h") => {

@@ -303,7 +303,7 @@ impl AsFd for Channel {
 pub(crate) fn snapshot() -> io::Result<File> {
     let fd = checked(unsafe {
         libc::memfd_create(
-            b"worminal-handoff\0".as_ptr().cast(),
+            c"worminal-handoff".as_ptr().cast(),
             libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING,
         )
     })?;

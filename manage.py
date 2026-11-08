@@ -108,6 +108,18 @@ def run_checks(match=None):
     return code or run([sys.executable, "tests/rust_browser.py"])
 
 
+def run_clippy():
+    # engine-sys links the C engine archive, so it must exist before Rust code is checked.
+    native_build.Builder().target("build/libworminal_engine.a")
+    return run(["cargo", "clippy", "--locked", "--quiet", "--workspace", "--all-targets", "--", "-D", "warnings"])
+
+
+@app.command("check-clippy")
+def check_clippy():
+    """Lint every Rust crate, test and build script with Clippy; any warning fails."""
+    raise typer.Exit(run_clippy())
+
+
 def run_native_checks():
     for binary in NATIVE_CHECKS:
         code = run([binary], env={**os.environ, "ASAN_OPTIONS": "detect_leaks=0"})
@@ -115,7 +127,8 @@ def run_native_checks():
             return code
     from tools.engine_checks import check
     code = check()
-    return code or run_rust_workspace_checks() or run_rust_process_checks() or run_rust_frontend_tests()
+    return (code or run_clippy() or run_rust_workspace_checks() or run_rust_process_checks()
+            or run_rust_frontend_tests())
 
 
 def run_headless_checks():

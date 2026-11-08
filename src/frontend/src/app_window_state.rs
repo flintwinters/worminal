@@ -83,8 +83,8 @@ pub(super) fn changed() {
         let Some(bus) = slot.as_mut() else {
             return;
         };
-        if bus.published.as_ref() != Some(&snapshot) {
-            if bus
+        if bus.published.as_ref() != Some(&snapshot)
+            && bus
                 .connection
                 .emit_signal(
                     None,
@@ -94,9 +94,8 @@ pub(super) fn changed() {
                     Some(&snapshot),
                 )
                 .is_ok()
-            {
-                bus.published = Some(snapshot);
-            }
+        {
+            bus.published = Some(snapshot);
         }
     });
 }

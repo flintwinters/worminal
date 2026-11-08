@@ -31,3 +31,6 @@ path = "../../tests/rust_render.rs"
 [[bin]]
 name = "worminal-rust"
 path = "src/main.rs"
+
+[lints]
+workspace = true

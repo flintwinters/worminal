@@ -10,3 +10,6 @@ glib.workspace = true
 pango.workspace = true
 cairo-rs.workspace = true
 webkit2gtk.workspace = true
+
+[lints]
+workspace = true

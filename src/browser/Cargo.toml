@@ -15,3 +15,6 @@ glib.workspace = true
 webkit2gtk.workspace = true
 libc.workspace = true
 soup3 = "0.5"
+
+[lints]
+workspace = true

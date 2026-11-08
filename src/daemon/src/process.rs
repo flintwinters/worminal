@@ -34,7 +34,7 @@ fn checked(result: libc::c_int) -> io::Result<libc::c_int> {
 fn log(priority: libc::c_int, message: &str) {
     if let Ok(message) = std::ffi::CString::new(message) {
         unsafe {
-            libc::syslog(priority, b"%s\0".as_ptr().cast(), message.as_ptr());
+            libc::syslog(priority, c"%s".as_ptr().cast(), message.as_ptr());
         }
     }
 }
@@ -59,12 +59,8 @@ pub(crate) fn operation(name: &str, error: io::Error) -> io::Error {
 /// Call once in the headless executable, before any parser, thread, or signal registration exists.
 pub fn prepare_service() -> io::Result<()> {
     unsafe {
-        libc::openlog(
-            b"worminald\0".as_ptr().cast(),
-            libc::LOG_PID,
-            libc::LOG_USER,
-        );
-        if libc::setlocale(libc::LC_CTYPE, b"\0".as_ptr().cast()).is_null() {
+        libc::openlog(c"worminald".as_ptr().cast(), libc::LOG_PID, libc::LOG_USER);
+        if libc::setlocale(libc::LC_CTYPE, c"".as_ptr().cast()).is_null() {
             return Err(io::Error::other(
                 "cannot initialize terminal character locale",
             ));

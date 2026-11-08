@@ -42,8 +42,10 @@ fn snapshot_retains_parser_and_application_fragments() {
         1,
     );
     original.resize(7, 5).unwrap();
-    let mut transport = TransportState::default();
-    transport.pending_bytes = 2;
+    let mut transport = TransportState {
+        pending_bytes: 2,
+        ..Default::default()
+    };
     transport.pending[..2].copy_from_slice(&[0xe2, 0x82]);
     let snapshot = original.export(&transport).unwrap();
     let (mut restored, imported) = Engine::import(&snapshot).unwrap();

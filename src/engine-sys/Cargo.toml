@@ -7,3 +7,6 @@ links = "worminal_engine"
 
 [build-dependencies]
 bindgen.workspace = true
+
+[lints]
+workspace = true

@@ -136,12 +136,11 @@ impl Service {
         let notices = self.tabs[index].feed(&bytes[..count], now)?;
         self.notices(id, notices);
         self.tabs[index].refresh_directory_after_output(now);
-        if self.tabs[index].input_frame
-            || (self.tabs[index].controller.is_some() && self.tabs[index].screen.bytes.is_empty())
+        if (self.tabs[index].input_frame
+            || (self.tabs[index].controller.is_some() && self.tabs[index].screen.bytes.is_empty()))
+            && self.send_frame(index, false, now)?
         {
-            if self.send_frame(index, false, now)? {
-                self.tabs[index].input_frame = false;
-            }
+            self.tabs[index].input_frame = false;
         }
         Ok(())
     }

@@ -149,7 +149,7 @@ fn main() {
                     preedit: "",
                     link: None,
                 },
-                &cr,
+                cr,
             )
             .unwrap();
         glib::Propagation::Proceed

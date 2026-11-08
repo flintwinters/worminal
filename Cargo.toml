@@ -9,6 +9,11 @@ version = "0.9.3"
 edition = "2021"
 publish = false
 
+[workspace.lints.clippy]
+# Functions and types at the C boundary mirror C signatures; splitting them adds indirection, not clarity.
+too_many_arguments = "allow"
+type_complexity = "allow"
+
 [workspace.dependencies]
 bindgen = { version = "0.72", default-features = false, features = ["runtime"] }
 libc = "0.2"

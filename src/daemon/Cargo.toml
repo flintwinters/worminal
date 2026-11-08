@@ -10,3 +10,6 @@ worminal-protocol = { path = "../protocol" }
 worminal-workspace = { path = "../workspace" }
 worminal-config = { path = "../config" }
 libc.workspace = true
+
+[lints]
+workspace = true

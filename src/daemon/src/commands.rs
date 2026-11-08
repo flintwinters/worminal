@@ -45,7 +45,7 @@ impl Service {
                     client,
                     WIRE_SERVICE_INFO,
                     0,
-                    std::process::id().to_be_bytes().to_vec(),
+                    std::process::id().to_be_bytes(),
                 );
                 return Ok(());
             }
@@ -58,7 +58,10 @@ impl Service {
                             client,
                             WIRE_CAPABILITIES,
                             0,
-                            (WIRE_FEATURE_COPY_ROWS | WIRE_FEATURE_SELECT_ALL | WIRE_FEATURE_ROW_SPAN).to_be_bytes(),
+                            (WIRE_FEATURE_COPY_ROWS
+                                | WIRE_FEATURE_SELECT_ALL
+                                | WIRE_FEATURE_ROW_SPAN)
+                                .to_be_bytes(),
                         );
                     }
                 }

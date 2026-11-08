@@ -226,9 +226,8 @@ impl Tab {
         // Output can arrive in thousands of tiny reads. Coalesce those checks,
         // but let the periodic service poll bypass this gate so it retains its
         // existing observation interval even after an early output check.
-        self.next_output_directory = now.saturating_add(
-            worminal_protocol::WORKSPACE_DIRECTORY_INTERVAL_NS as i64,
-        );
+        self.next_output_directory =
+            now.saturating_add(worminal_protocol::WORKSPACE_DIRECTORY_INTERVAL_NS as i64);
         let Some(terminal) = &mut self.terminal else {
             return;
         };
@@ -526,8 +525,10 @@ impl Tab {
 
     pub fn transport(&self) -> TransportState {
         let terminal = self.terminal.as_ref().unwrap();
-        let mut state = TransportState::default();
-        state.pending_bytes = terminal.pending.len() as i32;
+        let mut state = TransportState {
+            pending_bytes: terminal.pending.len() as i32,
+            ..Default::default()
+        };
         state.pending[..terminal.pending.len()].copy_from_slice(&terminal.pending);
         state.output_kind = terminal.printer.kind();
         state.remote_scroll = terminal.remote_scroll;

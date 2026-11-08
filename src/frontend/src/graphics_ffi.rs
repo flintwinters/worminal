@@ -81,21 +81,20 @@ pub fn font_pattern(value: &str) -> Option<FontPattern> {
             return None;
         }
         let mut family = std::ptr::null_mut();
-        let family =
-            if FcPatternGetString(pattern, b"family\0".as_ptr().cast(), 0, &mut family) == 0 {
-                Some(CStr::from_ptr(family.cast()).to_string_lossy().into_owned())
-            } else {
-                None
-            };
-        let mut size = 0.0;
-        let pixels = FcPatternGetDouble(pattern, b"pixelsize\0".as_ptr().cast(), 0, &mut size) == 0;
-        let size = if pixels
-            || FcPatternGetDouble(pattern, b"size\0".as_ptr().cast(), 0, &mut size) == 0
+        let family = if FcPatternGetString(pattern, c"family".as_ptr().cast(), 0, &mut family) == 0
         {
-            Some(size)
+            Some(CStr::from_ptr(family.cast()).to_string_lossy().into_owned())
         } else {
             None
         };
+        let mut size = 0.0;
+        let pixels = FcPatternGetDouble(pattern, c"pixelsize".as_ptr().cast(), 0, &mut size) == 0;
+        let size =
+            if pixels || FcPatternGetDouble(pattern, c"size".as_ptr().cast(), 0, &mut size) == 0 {
+                Some(size)
+            } else {
+                None
+            };
         FcPatternDestroy(pattern);
         Some(FontPattern {
             family,

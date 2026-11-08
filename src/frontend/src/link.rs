@@ -34,11 +34,7 @@ pub fn at(
     column: usize,
     row: usize,
 ) -> Option<(String, RangeInclusive<usize>)> {
-    let rows = if columns == 0 {
-        0
-    } else {
-        cells.len() / columns
-    };
+    let rows = cells.len().checked_div(columns).unwrap_or(0);
     if column >= columns || row >= rows {
         return None;
     }

@@ -6,3 +6,6 @@ publish.workspace = true
 
 [build-dependencies]
 bindgen.workspace = true
+
+[lints]
+workspace = true
