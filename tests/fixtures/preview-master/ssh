@@ -1,19 +1,10 @@
-#!/bin/sh
-# Exercise the production SSH bridge arguments without a remote host.
-case "$*" in
-  "-T -C -oConnectTimeout=10 preview-test worminald --bridge" | \
-  "-T -C -oConnectTimeout=10 wheel-test worminald --bridge" | \
-  "-T -C -oConnectTimeout=10 key-test worminald --bridge") ;;
-  *) exit 64 ;;
-esac
-if [ -n "${WORMINAL_TEST_REAL_MASTER:-}" ]; then
-  remote_daemon=${WORMINAL_TEST_REMOTE_DAEMON:-worminald}
-  case "$remote_daemon" in *[!a-zA-Z0-9_./-]* | "") exit 64 ;; esac
-  case "$WORMINAL_SHARED_SOCKET_SCOPE" in *[!a-zA-Z0-9_-]* | "") exit 64 ;; esac
-  exec /usr/bin/ssh -T -C -o BatchMode=yes -o ConnectTimeout=10 "$WORMINAL_TEST_REAL_MASTER" \
-    "env WORMINAL_SHARED_SOCKET_SCOPE=$WORMINAL_SHARED_SOCKET_SCOPE $remote_daemon --bridge"
-fi
-if [ -n "${WORMINAL_TEST_BRIDGE_DELAY:-}" ]; then
-  sleep "$WORMINAL_TEST_BRIDGE_DELAY"
-fi
-exec "$WORMINAL_TEST_DAEMON" --bridge
+#!/usr/bin/env python3
+"""Fake ssh for Production daemon tests: exercise the SSH bridge arguments without a remote host."""
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from fake_ssh import run  # noqa: E402
+
+run("worminald", ("preview-test", "wheel-test", "key-test"))

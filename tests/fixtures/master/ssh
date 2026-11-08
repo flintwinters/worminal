@@ -1,8 +1,10 @@
-#!/bin/sh
-# Exercise the real master socket/bridge path without an SSH server or desktop state.
-case "$*" in
-  "-T -C -oConnectTimeout=10 wheel-test worminald-x11 --bridge" | \
-  "-T -C -oConnectTimeout=10 key-test worminald-x11 --bridge") ;;
-  *) exit 64 ;;
-esac
-exec "$WORMINAL_TEST_DAEMON" --bridge
+#!/usr/bin/env python3
+"""Fake ssh for X11 daemon tests: exercise the real master socket/bridge path without an SSH server."""
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from fake_ssh import run  # noqa: E402
+
+run("worminald-x11", ("wheel-test", "key-test"))
