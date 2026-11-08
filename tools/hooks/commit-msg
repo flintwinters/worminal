@@ -1,6 +1,0 @@
-#!/usr/bin/env python3
-"""Git commit-msg hook: run the privacy check through manage.py."""
-import os
-import sys
-
-os.execv(sys.executable, [sys.executable, "manage.py", "check-privacy", "--staged", "--message-file", sys.argv[1]])

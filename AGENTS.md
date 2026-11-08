@@ -78,7 +78,8 @@ Cargo output and generated files belong in
 `build/`; native executables use `build/bin` and modules use `build/lib/worminal`, matching installed prefixes.
 `tools/paths.py` owns runtime/diagnostic path decisions. Diagnostics belong in `build/checks`; optional Python
 virtualenvs use `build/venv`. `clean` preserves diagnostics/virtualenvs while removing compiled output.
-Hooks and analysis/dependency configuration live under `tools`; management suppresses Python bytecode caches.
+Analysis/dependency configuration lives under `tools`; `privacy-setup` generates the Git privacy hooks from
+`manage.py` into the Git directory. Management suppresses Python bytecode caches.
 Never test under /tmp or inject test input into the desktop.
 Private test runtimes must outlive their GUI and service owners; await owner exit before removing their files.
 `manage.py` drops desktop display variables. `manage.py check` runs the full private-display suite. Native Wayland

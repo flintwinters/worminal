@@ -54,7 +54,11 @@ class PrivacyTests(unittest.TestCase):
                            env={**os.environ, "GIT_DIR": str(Path(directory) / ".git")})
             self.assertEqual(git("config", "user.name"), b"Configured Contributor")
             self.assertEqual(git("config", "user.email"), b"configured")
-            self.assertEqual(git("config", "core.hooksPath"), b"tools/hooks")
+            hooks = Path(directory) / ".git/hooks"
+            for name in ("pre-commit", "commit-msg", "pre-push"):
+                self.assertTrue(os.access(hooks / name, os.X_OK), name)
+            self.assertIn("check-privacy", (hooks / "commit-msg").read_text())
+            self.assertEqual(subprocess.run(["git", "-C", directory, "config", "core.hooksPath"]).returncode, 1)
 
     def test_forced_private_file_is_rejected_even_without_recognized_credentials(self):
         root = Path(__file__).resolve().parent.parent
