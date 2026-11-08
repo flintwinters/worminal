@@ -25,7 +25,7 @@ struct State {
     entries: RefCell<Vec<Tab>>,
     active: Cell<u32>,
     palette: RefCell<Option<Rc<RefCell<Palette>>>>,
-    /// Background tabs that rang the bell; never contains the active tab.
+    /// Tabs that rang the bell and have not received input since; selecting a tab keeps it.
     attention: RefCell<Vec<u32>>,
     /// Blink phase. The timer runs only while some tab needs attention.
     lit: Cell<bool>,
@@ -98,7 +98,7 @@ impl State {
             let selected = entry.id == self.active.get();
             let alert = self.lit.get() && self.attention.borrow().contains(&entry.id);
             if selected || alert {
-                paint::source(cr, &palette.color(if selected { FG } else { 3 }));
+                paint::source(cr, &palette.color(if alert { 3 } else { FG }));
                 cr.rectangle(
                     f64::from(x),
                     2.0,
@@ -204,10 +204,10 @@ impl Tabs {
                 glib::Propagation::Proceed
             }));
     }
-    /// Blink a background tab until it is selected; bells from the active tab are already visible.
+    /// Blink a tab until it receives input; a waiting agent is not answered by looking at it.
     pub fn alert(&self, id: u32) {
         let state = &self.0;
-        if id == state.active.get() || state.attention.borrow().contains(&id) {
+        if state.attention.borrow().contains(&id) {
             return;
         }
         state.attention.borrow_mut().push(id);
@@ -234,13 +234,21 @@ impl Tabs {
             },
         ));
     }
+    pub fn answer(&self, id: u32) {
+        let mut attention = self.0.attention.borrow_mut();
+        let count = attention.len();
+        attention.retain(|alert| *alert != id);
+        if attention.len() != count {
+            self.0.widget.queue_draw();
+        }
+    }
     pub fn update(&self, entries: Vec<Tab>, active: u32, palette: Option<Rc<RefCell<Palette>>>) {
         self.0.active.set(active);
-        // Selecting a tab answers its alert; closed tabs cannot be answered.
+        // Closed tabs can never be answered.
         self.0
             .attention
             .borrow_mut()
-            .retain(|id| *id != active && entries.iter().any(|entry| entry.id == *id));
+            .retain(|id| entries.iter().any(|entry| entry.id == *id));
         *self.0.palette.borrow_mut() = palette;
         let empty = entries.is_empty();
         *self.0.entries.borrow_mut() = entries;

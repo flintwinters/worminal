@@ -530,7 +530,13 @@ impl App {
     }
     fn action(self: &Rc<Self>, id: u32, action: Action) {
         match action {
-            Action::Send(kind, bytes) => self.send(id, kind, bytes),
+            Action::Send(kind, bytes) => {
+                // Keys, paste and mouse reports answer a bell; focus reports use WIRE_FOCUS_STATE.
+                if kind == WIRE_INPUT {
+                    self.tabstrip.answer(id);
+                }
+                self.send(id, kind, bytes)
+            }
             Action::Claim => self.activate(id),
             Action::Resized(cols, rows) if !self.syncing.get() && self.active.get() == id => {
                 if let Some(terminal) = self.terminal(id) {
