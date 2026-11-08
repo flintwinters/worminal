@@ -842,6 +842,12 @@ def master_perf(host: str):
     raise typer.Exit(run([sys.executable, "tests/master_perf.py", host]))
 
 
+@app.command("master-traffic")
+def master_traffic(host: str):
+    """Measure SSH -C wire KiB/s of hidden busy tabs on HOST's installed daemon, isolated scope (~1 min)."""
+    raise typer.Exit(run([sys.executable, "tests/master_traffic.py", host]))
+
+
 @app.command("codex-perf")
 def codex_perf(host: str, visible: bool = typer.Option(False, help="Observe real GTK pixels on private Xvfb.")):
     """Compare unsubmitted typing in real Codex through ordinary SSH and --master."""

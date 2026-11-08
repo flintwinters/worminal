@@ -52,9 +52,9 @@ def receive(process, deadline):
     return kind, tab, read_exact(process, length, deadline), 16 + length
 
 
-def launch(process, kind, command=None):
+def launch(process, kind, command=None, columns=120, rows=40):
     command = command or ["/bin/cat"]
-    payload = b"".join((number(120), number(40), number(1), number(len(command)), number(0),
+    payload = b"".join((number(columns), number(rows), number(1), number(len(command)), number(0),
                         string("master-perf"), string(""), string(""), string(""),
                         string(""), *(string(arg) for arg in command)))
     started = time.monotonic()
