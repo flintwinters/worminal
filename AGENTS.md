@@ -32,7 +32,7 @@ commands or restores processes/scrollback. Real shell startup must respect that 
 Rust owns bounded queues, controller checks and process identities. Queue complete frames before flushing;
 unchanged encoded rows/catalog state must not generate traffic. Negotiated row moves and cell spans preserve
 older peers; synchronized redraw retains its deadline behavior. SSH directions advance independently under
-congestion. Spawn local daemons and SSH without GUI fork hooks, after validating the display. A failed launch
+congestion. Spawn local daemons and SSH without GUI fork hooks, in their own sessions, after validating the display. A failed launch
 must not create orphan tabs. The same-user GUI broker authenticates peers before accepting launch data or
 descriptors.
 
@@ -103,7 +103,6 @@ public commit attribution is allowed.
 
 ## Current investigations
 
-Investigate intermittent local workspace loss after idle time and reported desktop freezes during master
-connections; neither root cause is confirmed. Treat remote Codex scrolling separately from tested wheel modes.
+Investigate intermittent local workspace loss after idle time; its root cause is not confirmed. Treat remote Codex scrolling separately from tested wheel modes.
 Daemon lifecycle/event-loop/fatal terminal errors go to syslog for diagnosis. Audit input, rendering, output delivery
 and view switching until further gains require correctness, resource or compatibility compromises.

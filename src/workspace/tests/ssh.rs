@@ -29,7 +29,8 @@ fn ssh_preserves_bridge_arguments_and_bidirectional_bytes_without_gui_fork_hooks
     let program = fixture.0.join("ssh");
     fs::write(
         &program,
-        b"#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$WORMINAL_TEST_SSH_ARGUMENTS\"\nexec /bin/cat\n",
+        b"#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$WORMINAL_TEST_SSH_ARGUMENTS\"\n\
+set -- $(cat /proc/$$/stat)\necho \"$1 $5 $6\" > \"$WORMINAL_TEST_SSH_ARGUMENTS.session\"\nexec /bin/cat\n",
     )
     .unwrap();
     fs::set_permissions(&program, fs::Permissions::from_mode(0o700)).unwrap();
@@ -62,6 +63,11 @@ fn ssh_preserves_bridge_arguments_and_bidirectional_bytes_without_gui_fork_hooks
         fs::read_to_string(arguments).unwrap(),
         "-T\n-C\n-oConnectTimeout=10\nuser@private\nworminald\n--bridge\n"
     );
+    // SSH must lead its own session: sharing the GUI's process group and terminal let an SSH
+    // prompt stop the whole desktop session with SIGTTOU/SIGTTIN (see ssh::connect).
+    let session = fs::read_to_string(fixture.0.join("arguments.session")).unwrap();
+    let ids: Vec<i32> = session.split_whitespace().map(|v| v.parse().unwrap()).collect();
+    assert_eq!(ids, [ids[0]; 3], "SSH shares the GUI session: pid pgrp sid = {session}");
     assert_eq!(
         FORKS.load(Ordering::Relaxed),
         0,

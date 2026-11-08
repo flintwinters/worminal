@@ -1,4 +1,5 @@
-//! Start SSH with posix_spawnp so GTK fork hooks do not run.
+//! Start SSH with posix_spawnp in its own session, so GTK fork hooks do not run and SSH cannot
+//! stop the GUI process group through a terminal.
 use std::{
     ffi::{CStr, CString, OsStr},
     io,
@@ -58,10 +59,15 @@ pub fn connect(master: &OsStr) -> io::Result<(UnixStream, Child)> {
     .into_iter()
     .map(CString::new)
     .collect::<Result<Vec<_>, _>>()?;
+    // SSH leads its own session, with no controlling terminal. The GUI owner inherits the
+    // desktop's terminal and process group (e.g. startx on tty1 shares one group with the window
+    // manager). An SSH host-key or password prompt then opened /dev/tty from a background group,
+    // and the kernel stopped that whole group with SIGTTOU/SIGTTIN, freezing the desktop.
+    // Detached, SSH cannot prompt on a terminal: it fails, or uses a configured SSH_ASKPASS.
     let pid = crate::spawn::start(
         &arguments,
         &[(remote.as_fd(), 0), (remote.as_fd(), 1)],
-        false,
+        true,
     )?;
     let descriptor = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
     if descriptor < 0 {
