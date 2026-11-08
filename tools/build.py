@@ -1,6 +1,7 @@
 """Native build, analysis, and installation; invoked through manage.py."""
 
 import json
+import tomllib
 import os
 from pathlib import Path
 import shlex
@@ -14,8 +15,7 @@ from tools.paths import runtime_binary
 ROOT = Path(__file__).resolve().parent.parent
 FONT_DIRECTORY = Path("assets/fonts/atkinson-hyperlegible-mono")
 FONT_FILES = ("AtkinsonHyperlegibleMono[wght].ttf", "AtkinsonHyperlegibleMono-Italic[wght].ttf", "OFL.txt")
-VERSION = next(line.split('"')[1] for line in (ROOT / "src/version.h").read_text().splitlines()
-               if line.startswith("#define WORMINAL_VERSION "))
+VERSION = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"]["version"]
 RUST_BROWSER_MODULE = next(line.split('"')[1]
                           for line in (ROOT / "src/gtk/rust_browser_module.h").read_text().splitlines()
                           if line.startswith("#define WORMINAL_RUST_BROWSER_FILE "))

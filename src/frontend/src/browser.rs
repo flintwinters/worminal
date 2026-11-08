@@ -33,17 +33,21 @@ struct Profile {
     object: glib::Object,
     _lock: File,
 }
+// Stable product data predates the Rust port. Candidate owners remain isolated until cutover.
+const WORMINAL_BROWSER_PROFILE_STABLE: &str = "worminal-preview";
+const WORMINAL_BROWSER_PROFILE_CANDIDATE: &str = "worminal-rust";
+const WORMINAL_BROWSER_PROFILE_LOCK: &str = "owner.lock";
 thread_local! {
     // Code remains resident for framework callbacks after the last view/context is released.
     static MODULES: RefCell<Vec<Rc<Module>>> = const { RefCell::new(Vec::new()) };
     static PROFILE: RefCell<Option<Profile>> = const { RefCell::new(None) };
-    static PROFILE_NAME: RefCell<&'static [u8]> = const { RefCell::new(WORMINAL_BROWSER_PROFILE_CANDIDATE) };
+    static PROFILE_NAME: RefCell<&'static str> = const { RefCell::new(WORMINAL_BROWSER_PROFILE_CANDIDATE) };
 }
 pub(crate) fn configure_profile(candidate: bool) -> io::Result<()> {
     let name = if candidate {
-        WORMINAL_BROWSER_PROFILE_CANDIDATE.as_slice()
+        WORMINAL_BROWSER_PROFILE_CANDIDATE
     } else {
-        WORMINAL_BROWSER_PROFILE_STABLE.as_slice()
+        WORMINAL_BROWSER_PROFILE_STABLE
     };
     PROFILE_NAME.with(|slot| {
         if *slot.borrow() != name && PROFILE.with(|profile| profile.borrow().is_some()) {
@@ -158,12 +162,7 @@ fn profile(module: &Module) -> io::Result<glib::Object> {
             return Ok(profile.object.clone());
         }
         // Launch policy fixes the profile once per owner; forwarded callers cannot change it.
-        let name = PROFILE_NAME.with(|slot| {
-            CStr::from_bytes_with_nul(*slot.borrow())
-                .unwrap()
-                .to_str()
-                .unwrap()
-        });
+        let name = PROFILE_NAME.with(|slot| *slot.borrow());
         let data = glib::user_data_dir().join(name);
         let cache = glib::user_cache_dir().join(name);
         for directory in [&data, &cache] {
@@ -180,10 +179,7 @@ fn profile(module: &Module) -> io::Result<glib::Object> {
             .mode(0o600)
             .open(
                 data.join(
-                    CStr::from_bytes_with_nul(WORMINAL_BROWSER_PROFILE_LOCK)
-                        .unwrap()
-                        .to_str()
-                        .unwrap(),
+                    WORMINAL_BROWSER_PROFILE_LOCK,
                 ),
             )?;
         if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {

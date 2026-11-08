@@ -1,5 +1,5 @@
-//! Generate module/protocol bindings and detect the available GTK backends.
-use std::{env, fs, path::PathBuf};
+//! Generate module bindings and detect the available GTK backends.
+use std::{env, path::PathBuf};
 
 fn main() {
     println!("cargo:rustc-check-cfg=cfg(worminal_gdk_x11)");
@@ -27,25 +27,4 @@ fn main() {
         .expect("frontend module bindings")
         .write_to_file(PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("frontend.rs"))
         .expect("write frontend module bindings");
-    let state = root.join("src/gtk/window_state_protocol.h");
-    println!("cargo:rerun-if-changed={}", state.display());
-    bindgen::Builder::default()
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .header(state.to_str().unwrap())
-        .allowlist_var("WORMINAL_STATE_.*")
-        .generate()
-        .expect("window-state protocol bindings")
-        .write_to_file(PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("window_state.rs"))
-        .expect("write window-state protocol");
-    let version = root.join("src/version.h");
-    println!("cargo:rerun-if-changed={}", version.display());
-    let version = fs::read_to_string(version).unwrap();
-    let version = version
-        .lines()
-        .find_map(|line| {
-            line.strip_prefix("#define WORMINAL_VERSION \"")
-                .and_then(|value| value.strip_suffix('"'))
-        })
-        .expect("product version header");
-    println!("cargo:rustc-env=WORMINAL_VERSION={version}");
 }

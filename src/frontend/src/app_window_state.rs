@@ -4,18 +4,13 @@ use glib::{prelude::*, Variant};
 use gtk::{gio, prelude::*};
 use std::{
     cell::{Cell, RefCell},
-    ffi::CStr,
     io,
     os::unix::ffi::OsStrExt,
 };
 
-mod protocol {
-    include!(concat!(env!("OUT_DIR"), "/window_state.rs"));
-}
+#[path = "window_state_protocol.rs"]
+mod protocol;
 use protocol::*;
-fn name(bytes: &'static [u8]) -> &'static str {
-    CStr::from_bytes_with_nul(bytes).unwrap().to_str().unwrap()
-}
 struct Bus {
     connection: gio::DBusConnection,
     registration: Option<gio::RegistrationId>,
@@ -75,7 +70,7 @@ fn snapshot() -> Variant {
     });
     let snapshot = rows.to_variant();
     // Check the D-Bus result type even when the window list is empty.
-    assert_eq!(snapshot.type_().as_str(), name(WORMINAL_STATE_WINDOWS));
+    assert_eq!(snapshot.type_().as_str(), WORMINAL_STATE_WINDOWS);
     Variant::tuple_from_iter([snapshot])
 }
 pub(super) fn changed() {
@@ -93,9 +88,9 @@ pub(super) fn changed() {
                 .connection
                 .emit_signal(
                     None,
-                    name(WORMINAL_STATE_PATH),
-                    name(WORMINAL_STATE_INTERFACE),
-                    name(WORMINAL_STATE_SIGNAL),
+                    WORMINAL_STATE_PATH,
+                    WORMINAL_STATE_INTERFACE,
+                    WORMINAL_STATE_SIGNAL,
                     Some(&snapshot),
                 )
                 .is_ok()
@@ -115,7 +110,7 @@ impl Drop for Owner {
     }
 }
 pub(super) fn start() -> Owner {
-    let instance = format!("{}{}", name(WORMINAL_STATE_PREFIX), std::process::id());
+    let instance = format!("{}{}", WORMINAL_STATE_PREFIX, std::process::id());
     // GIO invokes these closures in the initiating GTK thread's default main context.
     // They capture no GTK objects; thread-local state is accessed only in that context.
     Owner(Some(gio::bus_own_name(
@@ -123,16 +118,16 @@ pub(super) fn start() -> Owner {
         &instance,
         gio::BusNameOwnerFlags::NONE,
         |connection, _| {
-            let info = gio::DBusNodeInfo::for_xml(name(WORMINAL_STATE_XML))
-                .expect("window-state introspection");
+            let info =
+                gio::DBusNodeInfo::for_xml(&introspection()).expect("window-state introspection");
             let interface = info
-                .lookup_interface(name(WORMINAL_STATE_INTERFACE))
+                .lookup_interface(WORMINAL_STATE_INTERFACE)
                 .expect("window-state interface");
             let result = connection.register_object(
-                name(WORMINAL_STATE_PATH),
+                WORMINAL_STATE_PATH,
                 &interface,
                 |_, _, _, _, method, _, invocation| {
-                    if method == name(WORMINAL_STATE_METHOD) {
+                    if method == WORMINAL_STATE_METHOD {
                         invocation.return_value(Some(&snapshot()));
                     } else {
                         invocation.return_dbus_error(

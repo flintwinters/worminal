@@ -982,7 +982,7 @@ dependencies = [
 
 [[package]]
 name = "worminal-browser"
-version = "0.1.0"
+version = "0.9.3"
 dependencies = [
  "glib",
  "gtk",
@@ -995,18 +995,18 @@ dependencies = [
 
 [[package]]
 name = "worminal-browser-api"
-version = "0.1.0"
+version = "0.9.3"
 dependencies = [
  "bindgen",
 ]
 
 [[package]]
 name = "worminal-config"
-version = "0.1.0"
+version = "0.9.3"
 
 [[package]]
 name = "worminal-daemon"
-version = "0.1.0"
+version = "0.9.3"
 dependencies = [
  "libc",
  "worminal-config",
@@ -1017,21 +1017,21 @@ dependencies = [
 
 [[package]]
 name = "worminal-engine"
-version = "0.1.0"
+version = "0.9.3"
 dependencies = [
  "worminal-engine-sys",
 ]
 
 [[package]]
 name = "worminal-engine-sys"
-version = "0.1.0"
+version = "0.9.3"
 dependencies = [
  "bindgen",
 ]
 
 [[package]]
 name = "worminal-frontend"
-version = "0.1.0"
+version = "0.9.3"
 dependencies = [
  "bindgen",
  "cairo-rs",
@@ -1049,7 +1049,7 @@ dependencies = [
 
 [[package]]
 name = "worminal-launcher"
-version = "0.1.0"
+version = "0.9.3"
 dependencies = [
  "bindgen",
  "glib-sys",
@@ -1060,7 +1060,7 @@ dependencies = [
 
 [[package]]
 name = "worminal-platform"
-version = "0.1.0"
+version = "0.9.3"
 dependencies = [
  "cairo-rs",
  "glib",
@@ -1071,11 +1071,11 @@ dependencies = [
 
 [[package]]
 name = "worminal-protocol"
-version = "0.1.0"
+version = "0.9.3"
 
 [[package]]
 name = "worminal-workspace"
-version = "0.1.0"
+version = "0.9.3"
 dependencies = [
  "libc",
  "worminal-protocol",

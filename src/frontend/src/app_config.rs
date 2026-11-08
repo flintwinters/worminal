@@ -42,7 +42,7 @@ impl Config {
         } else {
             "worminal"
         };
-        let version = env!("WORMINAL_VERSION");
+        let version = env!("CARGO_PKG_VERSION");
         let mut config = Self {
             candidate,
             columns: 80,

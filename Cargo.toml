@@ -4,6 +4,8 @@ members = ["src/platform", "src/engine-sys", "src/engine", "src/protocol", "src/
            "src/launcher", "src/config", "src/daemon", "src/frontend", "src/browser-api", "src/browser"]
 
 [workspace.package]
+# Product version for every executable and module.
+version = "0.9.3"
 edition = "2021"
 publish = false
 

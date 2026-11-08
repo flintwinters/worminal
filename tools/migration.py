@@ -66,8 +66,8 @@ def inventory():
     names = subprocess.run(['busctl', '--user', '--no-legend', '--no-pager', 'list'],
                            capture_output=True, text=True, timeout=5)
     contract = {name: json.loads(value) for name, value in re.findall(
-        r'^#define WORMINAL_STATE_(PATH|INTERFACE|PREFIX|METHOD) ("[^"]*")$',
-        (ROOT / 'src/gtk/window_state_protocol.h').read_text(), re.MULTILINE)}
+        r'^pub const WORMINAL_STATE_(PATH|INTERFACE|PREFIX|METHOD): &str = ("[^"]*");$',
+        (ROOT / 'src/frontend/src/window_state_protocol.rs').read_text(), re.MULTILINE)}
     if names.returncode:
         report['window_bus_error'] = names.stderr.strip()
     else:

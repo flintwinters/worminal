@@ -1,7 +1,6 @@
 #ifndef WORMINAL_RUST_BROWSER_MODULE_H
 #define WORMINAL_RUST_BROWSER_MODULE_H
 #include <stdint.h>
-#include "browser_profile.h"
 
 /* Incompatible with the historical Page/App browser ABI. All operations run on
  * the GTK owner thread. Strings are borrowed only for the duration of a call.
