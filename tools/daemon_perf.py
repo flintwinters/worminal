@@ -2,12 +2,14 @@
 from contextlib import ExitStack
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import statistics
 import subprocess
 import sys
 import tempfile
+import zlib
 
 from tools import build
 from tools.paths import CHECKS
@@ -16,11 +18,24 @@ COMMAND = ["cargo", "test", "--locked", "--release", "--quiet", "-p", "worminal-
            "--lib", "perf_tests::hot_paths", "--", "--ignored", "--nocapture", "--test-threads=1"]
 
 
+def compressed(path):
+    """Estimate OpenSSH -C wire payload: one zlib level-6 stream, synced per recorded chunk."""
+    data, stream, total, offset = path.read_bytes(), zlib.compressobj(6), 0, 0
+    while offset < len(data):
+        length = int.from_bytes(data[offset:offset + 4], "big")
+        chunk = data[offset + 4:offset + 4 + length]
+        offset += 4 + length
+        total += len(stream.compress(chunk)) + len(stream.flush(zlib.Z_SYNC_FLUSH))
+    return total
+
+
 def sample(root, network=False):
     command = [part.replace("perf_tests::hot_paths", "service::network_tests::transport_model")
                for part in COMMAND] if network else COMMAND
-    result = subprocess.check_output(command, cwd=root, text=True)
-    values = {}
+    with tempfile.TemporaryDirectory(prefix="network-streams-", dir=CHECKS) as streams:
+        result = subprocess.check_output(command, cwd=root, text=True,
+                                         env=os.environ | {"WORMINAL_NETWORK_STREAMS": streams})
+        values = {f"{path.name}_zlib_bytes": compressed(path) for path in Path(streams).iterdir()}
     for line in result.splitlines():
         if network and line.startswith("NETWORK_PERF "):
             _, name, value = line.split()
@@ -90,8 +105,9 @@ def measure(label, trials, compare=None, *, network=False):
                        "Comparison uses identical current workloads, warmed builds and alternating owner order."}
     if network:
         report["notes"] = ("Deterministic service model: 120x40, 250 dense updates at virtual 16 ms intervals; "
-                           "4096 raw protocol bytes drained per interval (2.048 Mbps), no compression, "
-                           "RTT, kernel/SSH buffering or GTK presentation. Sparse: 100 counter updates. "
+                           "4096 raw protocol bytes drained per interval (2.048 Mbps) before compression, no "
+                           "RTT, kernel/SSH buffering or GTK presentation. *_zlib_bytes estimate SSH -C payload, "
+                           "excluding SSH/TCP/IP headers. Sparse: 100 counter updates. "
                            "Same workload on both revisions, capability negotiation selects supported encoding. "
                            "Frame age is virtual source-to-complete-frame age; tail is drain time after output stops.")
     destination = CHECKS / f"{entrypoint}-{label}.json"

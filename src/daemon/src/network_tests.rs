@@ -1,6 +1,32 @@
 //! Deterministic service/transport workloads, driven by manage.py network-perf and daemon checks.
 use super::*;
-use std::{io::Write, os::unix::net::UnixStream, thread, time::Duration};
+use std::{fs::File, io::Write, os::unix::net::UnixStream, path::Path, thread, time::Duration};
+
+/// manage.py network-perf sets this directory to estimate SSH-compressed wire bytes.
+const STREAMS: &str = "WORMINAL_NETWORK_STREAMS";
+
+/// Records each write as one length-prefixed chunk, approximating one SSH packet.
+struct Chunks(File);
+impl Write for Chunks {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0.write_all(&(bytes.len() as u32).to_be_bytes())?;
+        self.0.write_all(bytes)?;
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// The delivered protocol stream of workload `name`, retained only under network-perf.
+fn stream(name: &str) -> Box<dyn Write> {
+    match std::env::var_os(STREAMS) {
+        Some(directory) => Box::new(Chunks(
+            File::create(Path::new(&directory).join(name)).unwrap(),
+        )),
+        None => Box::new(io::sink()),
+    }
+}
 
 struct Fixture {
     service: Service,
@@ -160,8 +186,9 @@ fn idle_controlled_tabs(ticks: usize) -> (usize, bool) {
         fixture.service.send_frame(index, true, 1).unwrap();
     }
     let mut bytes = 0;
+    let mut wire = stream("idle_hidden_tabs");
     for tick in 1..=ticks {
-        bytes += fixture.output().flush(&mut io::sink(), 4096).unwrap();
+        bytes += fixture.output().flush(&mut wire, 4096).unwrap();
         fixture
             .service
             .resync(tick as i64 * 16_000_000 + 1)
@@ -209,6 +236,7 @@ fn hidden_busy_tab(features: u32, ticks: usize) -> (usize, usize) {
     focus(&mut fixture, 2);
     focus(&mut fixture, 1);
     let mut hidden = 0;
+    let mut wire = stream("hidden_busy_tab");
     // WIRE_FOCUS reads the service clock; the engine rejects time that moves backwards.
     for _ in 0..ticks {
         let now = fixture.service.now();
@@ -216,7 +244,7 @@ fn hidden_busy_tab(features: u32, ticks: usize) -> (usize, usize) {
             .feed(format!("\x1b[40H working {now:020}").as_bytes(), now)
             .unwrap();
         fixture.service.send_frame(1, false, now).unwrap();
-        hidden += fixture.output().flush(&mut io::sink(), usize::MAX).unwrap();
+        hidden += fixture.output().flush(&mut wire, usize::MAX).unwrap();
     }
     let revealed = focus(&mut fixture, 2);
     (hidden, revealed)
@@ -240,6 +268,7 @@ fn hidden_tabs_defer_frames_and_reveal_with_a_delta() {
 
 #[derive(Default)]
 struct Receiver {
+    stream: Option<Box<dyn Write>>,
     decoder: Decoder,
     cells: Vec<u8>,
     bytes: usize,
@@ -251,6 +280,9 @@ impl Write for Receiver {
     fn write(&mut self, mut bytes: &[u8]) -> io::Result<usize> {
         let count = bytes.len();
         self.bytes += count;
+        if let Some(stream) = &mut self.stream {
+            stream.write_all(bytes)?;
+        }
         self.cells.resize(120 * 40 * 16, 0);
         while !bytes.is_empty() {
             let (used, packet) = self.decoder.push(bytes)?;
@@ -312,6 +344,7 @@ fn transport_model() {
     fixture.send(0);
     let mut receiver = Receiver::default();
     fixture.output().flush(&mut receiver, usize::MAX).unwrap();
+    receiver.stream = Some(stream("sparse"));
     let mut sparse_bytes = 0;
     for tick in 1..=100 {
         fixture.feed(format!("\x1b[H{:08}", tick).as_bytes(), tick);
@@ -327,6 +360,7 @@ fn transport_model() {
     fixture.output().flush(&mut receiver, usize::MAX).unwrap();
     receiver.bytes = 0;
     receiver.frames = 0;
+    receiver.stream = Some(stream("congested"));
     let mut peak = 0;
     // 250 ticks of 16 ms; drain 4096 raw protocol bytes/tick (2.048 Mbps).
     // Dense unique rows avoid row-move savings. Time is virtual, not measured SSH/pixel latency.
