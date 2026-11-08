@@ -65,6 +65,9 @@ pub const WIRE_FEATURE_COPY_ROWS: u32 = 1 << 0;
 // Keep it reserved so those installed peers cannot negotiate the wrong message.
 pub const WIRE_FEATURE_SELECT_ALL: u32 = 1 << 2;
 pub const WIRE_FEATURE_ROW_SPAN: u32 = 1 << 3;
+// The client displays only the tab it last focused (or created). The daemon defers frames for its
+// other controlled tabs, retaining their baselines, and resumes them with a delta on focus.
+pub const WIRE_FEATURE_FOCUSED_FRAMES: u32 = 1 << 4;
 
 pub const WIRE_SELECTION_START: u32 = 0;
 pub const WIRE_SELECTION_NEXT: u32 = 1;

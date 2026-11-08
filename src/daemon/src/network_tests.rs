@@ -185,6 +185,59 @@ fn idle_controlled_tabs_settle_after_one_full_frame_each() {
     );
 }
 
+/// Two 120x40 tabs in one window; tab 2 animates a status line while tab 1 is displayed, then the
+/// window reveals tab 2. Drives only wire packets so network-perf can replay it on old revisions.
+/// Returns (bytes while hidden, bytes to reveal). Callers pass FOCUSED_FRAMES as the literal bit 16
+/// (bit 4), so network-perf replays the identical workload on revisions predating it.
+fn hidden_busy_tab(features: u32, ticks: usize) -> (usize, usize) {
+    let mut fixture = Fixture::sized(features, 120, 40, 2);
+    let focus = |fixture: &mut Fixture, tab: u32| {
+        let body = [120u32, 40].iter().flat_map(|v| v.to_be_bytes()).collect();
+        fixture
+            .service
+            .message(
+                1,
+                Packet {
+                    kind: WIRE_FOCUS,
+                    tab,
+                    body,
+                },
+            )
+            .unwrap();
+        fixture.output().flush(&mut io::sink(), usize::MAX).unwrap()
+    };
+    focus(&mut fixture, 2);
+    focus(&mut fixture, 1);
+    let mut hidden = 0;
+    // WIRE_FOCUS reads the service clock; the engine rejects time that moves backwards.
+    for _ in 0..ticks {
+        let now = fixture.service.now();
+        fixture.service.tabs[1]
+            .feed(format!("\x1b[40H working {now:020}").as_bytes(), now)
+            .unwrap();
+        fixture.service.send_frame(1, false, now).unwrap();
+        hidden += fixture.output().flush(&mut io::sink(), usize::MAX).unwrap();
+    }
+    let revealed = focus(&mut fixture, 2);
+    (hidden, revealed)
+}
+
+#[test]
+fn hidden_tabs_defer_frames_and_reveal_with_a_delta() {
+    let full = 40 * (120 * 16 + 4);
+    let (hidden, revealed) = hidden_busy_tab(9 | 16, 100);
+    assert_eq!(hidden, 0, "a hidden tab must not stream frames");
+    assert!(
+        revealed > 0 && revealed < full / 4,
+        "reveal must send a delta: {revealed} bytes"
+    );
+    let (hidden, _) = hidden_busy_tab(9, 100);
+    assert!(
+        hidden > 0,
+        "clients without the feature still receive every controlled tab"
+    );
+}
+
 #[derive(Default)]
 struct Receiver {
     decoder: Decoder,
@@ -333,6 +386,9 @@ fn transport_model() {
     metric("congested_frames", receiver.frames);
     // 3000 ticks of 16 ms at 4096 bytes/tick cap this at 12288000 bytes (link saturation).
     metric("idle_hidden_tabs_bytes", idle_controlled_tabs(3000).0);
+    let (hidden, revealed) = hidden_busy_tab(9 | 16, 1000);
+    metric("hidden_busy_tab_bytes", hidden);
+    metric("hidden_busy_reveal_bytes", revealed);
 }
 
 #[test]

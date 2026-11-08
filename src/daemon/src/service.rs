@@ -106,6 +106,15 @@ impl Service {
         }
     }
 
+    /// A client window displays one tab: mark it shown and every other tab it controls hidden.
+    pub fn show(&mut self, index: usize, client: ClientId) {
+        for (position, tab) in self.tabs.iter_mut().enumerate() {
+            if tab.controller == Some(client) {
+                tab.shown = position == index;
+            }
+        }
+    }
+
     pub fn drop_client(&mut self, client: ClientId) {
         self.clients.remove(&client);
         self.pending_replace.remove(&client);
@@ -148,6 +157,16 @@ impl Service {
             return Ok(false);
         };
         if !client.ready {
+            return Ok(false);
+        }
+        // A hidden tab keeps its baseline and engine damage; focusing it sends one delta. Hidden
+        // tabs that streamed every update cost remote links bandwidth no window displayed.
+        let hidden = client.features & WIRE_FEATURE_FOCUSED_FRAMES != 0 && !tab.shown;
+        if hidden {
+            if full {
+                tab.screen.bytes.clear();
+            }
+            tab.pending_frame = false;
             return Ok(false);
         }
         if client.needs_resync || client.output.len() >= WORKSPACE_FRAME_BACKLOG_BYTES as usize {

@@ -118,6 +118,8 @@ pub(crate) struct Tab {
     pub catalog_dirty: bool,
     pub pending_frame: bool,
     pub input_frame: bool,
+    /// Displayed by its controller; only Service::show changes it while controlled.
+    pub shown: bool,
     pub frame_reply: bool,
 }
 
@@ -193,6 +195,7 @@ impl Tab {
             catalog_dirty: true,
             pending_frame: false,
             input_frame: false,
+            shown: false,
             frame_reply: false,
         }
     }
@@ -205,6 +208,7 @@ impl Tab {
 
     pub fn release(&mut self) {
         self.controller = None;
+        self.shown = false;
         self.frame_reply = false;
         self.screen = Screen::default();
     }

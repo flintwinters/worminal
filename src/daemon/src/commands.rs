@@ -56,8 +56,10 @@ impl Service {
             WIRE_CAPABILITIES => {
                 if !ready && packet.tab == 0 {
                     if let Some(features) = integer(&packet.body) {
-                        self.clients.get_mut(&client).unwrap().features =
-                            features & (WIRE_FEATURE_COPY_ROWS | WIRE_FEATURE_ROW_SPAN);
+                        self.clients.get_mut(&client).unwrap().features = features
+                            & (WIRE_FEATURE_COPY_ROWS
+                                | WIRE_FEATURE_ROW_SPAN
+                                | WIRE_FEATURE_FOCUSED_FRAMES);
                         self.queue(
                             client,
                             WIRE_CAPABILITIES,
@@ -159,6 +161,8 @@ impl Service {
                 if reused {
                     self.send_catalog(client, now)?;
                 }
+                // The creating window displays its new tab.
+                self.show(index, client);
                 self.send_frame(index, true, now)?;
                 return Ok(());
             }
@@ -170,6 +174,8 @@ impl Service {
         if self.tabs[index].url.is_some() {
             if packet.kind == WIRE_CLOSE {
                 self.close(index);
+            } else if packet.kind == WIRE_FOCUS {
+                self.show(index, client);
             }
             return Ok(());
         }
@@ -259,10 +265,13 @@ impl Service {
                     return Ok(());
                 };
                 let claim = self.tabs[index].controller != Some(client);
+                let revealed = !self.tabs[index].shown;
                 self.take_control(index, client);
+                self.show(index, client);
                 let resized = self.resize(index, columns, rows, now)?;
-                if claim || resized {
-                    self.send_frame(index, true, now)?;
+                if claim || resized || revealed {
+                    // A revealed tab resumes from its retained baseline with a delta.
+                    self.send_frame(index, claim || resized, now)?;
                 }
             }
             WIRE_INPUT => {
