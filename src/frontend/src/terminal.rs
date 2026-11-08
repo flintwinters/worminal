@@ -773,7 +773,11 @@ impl Inner {
             if new == state.hover {
                 return;
             }
-            (std::mem::replace(&mut state.hover, new.clone()), new, columns)
+            (
+                std::mem::replace(&mut state.hover, new.clone()),
+                new,
+                columns,
+            )
         };
         let rows = [old, new]
             .into_iter()

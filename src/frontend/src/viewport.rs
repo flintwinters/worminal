@@ -43,7 +43,11 @@ impl Damage {
 }
 
 enum Operation {
-    Span { row: usize, column: usize, cells: Vec<Cell> },
+    Span {
+        row: usize,
+        column: usize,
+        cells: Vec<Cell>,
+    },
     Copy {
         source: usize,
         destination: usize,
@@ -178,8 +182,11 @@ impl Viewport {
                 let header = if span { 8 } else { 4 };
                 let length = packet.body.len().checked_sub(header).ok_or_else(invalid)?;
                 let count = length / WIRE_CELL_BYTES as usize;
-                if count == 0 || count > columns || column > columns - count
-                    || length % WIRE_CELL_BYTES as usize != 0 || (!span && count != columns)
+                if count == 0
+                    || count > columns
+                    || column > columns - count
+                    || length % WIRE_CELL_BYTES as usize != 0
+                    || (!span && count != columns)
                 {
                     return Err(invalid());
                 }

@@ -1,11 +1,24 @@
 // Keep the existing legacy-encoding workload callable unchanged on older Git baselines.
 impl Screen {
     pub(crate) fn replicate(
-        &mut self, engine: &mut Engine, output: &mut Queue, tab: u32,
-        full: bool, copy_rows: bool, reply: bool, now: i64,
+        &mut self,
+        engine: &mut Engine,
+        output: &mut Queue,
+        tab: u32,
+        full: bool,
+        copy_rows: bool,
+        reply: bool,
+        now: i64,
     ) -> io::Result<Outcome> {
-        self.replicate_encoded(engine, output, tab, full,
-            if copy_rows { WIRE_FEATURE_COPY_ROWS } else { 0 }, reply, now)
+        self.replicate_encoded(
+            engine,
+            output,
+            tab,
+            full,
+            if copy_rows { WIRE_FEATURE_COPY_ROWS } else { 0 },
+            reply,
+            now,
+        )
     }
 }
 
@@ -212,13 +225,22 @@ fn full_frame_matches_independently_encoded_cells_and_packet_order() {
     let frame = engine.frame(1).unwrap();
     let mut body = Buffer::default();
     for value in [
-        frame.columns, frame.rows, frame.cursor_x, frame.cursor_y, frame.scroll, frame.alternate,
+        frame.columns,
+        frame.rows,
+        frame.cursor_x,
+        frame.cursor_y,
+        frame.scroll,
+        frame.alternate,
     ] {
         body.put_u32(value as u32).unwrap();
     }
     let mut expected = Buffer::default();
     expected
-        .append_packet(&Packet { kind: WIRE_FRAME, tab: 7, body: body.into_bytes() })
+        .append_packet(&Packet {
+            kind: WIRE_FRAME,
+            tab: 7,
+            body: body.into_bytes(),
+        })
         .unwrap();
     let mut cells = Vec::new();
     for row in 0..frame.rows {
@@ -231,11 +253,19 @@ fn full_frame_matches_independently_encoded_cells_and_packet_order() {
             }
         }
         expected
-            .append_packet(&Packet { kind: WIRE_ROW, tab: 7, body: body.into_bytes() })
+            .append_packet(&Packet {
+                kind: WIRE_ROW,
+                tab: 7,
+                body: body.into_bytes(),
+            })
             .unwrap();
     }
     expected
-        .append_packet(&Packet { kind: WIRE_FRAME_FINISH, tab: 7, body: Vec::new() })
+        .append_packet(&Packet {
+            kind: WIRE_FRAME_FINISH,
+            tab: 7,
+            body: Vec::new(),
+        })
         .unwrap();
     let mut output = Queue::new(4096);
     Screen::default()
@@ -246,8 +276,12 @@ fn full_frame_matches_independently_encoded_cells_and_packet_order() {
 
 #[test]
 fn spans_and_moves_reconstruct_engine_cells_and_queue_rejection_keeps_the_baseline() {
-    for features in [0, WIRE_FEATURE_COPY_ROWS, WIRE_FEATURE_ROW_SPAN,
-                     WIRE_FEATURE_COPY_ROWS | WIRE_FEATURE_ROW_SPAN] {
+    for features in [
+        0,
+        WIRE_FEATURE_COPY_ROWS,
+        WIRE_FEATURE_ROW_SPAN,
+        WIRE_FEATURE_COPY_ROWS | WIRE_FEATURE_ROW_SPAN,
+    ] {
         let mut engine = Engine::new(8, 6).unwrap();
         let mut screen = Screen::default();
         let mut replica = Vec::new();
@@ -255,16 +289,25 @@ fn spans_and_moves_reconstruct_engine_cells_and_queue_rejection_keeps_the_baseli
             let text = if tick % 4 == 0 {
                 format!("\x1b[6;1H\r\nline{tick}")
             } else {
-                format!("\x1b[{};{}H\x1b[{}m界é", tick % 5 + 1, tick % 4 + 1, 30 + tick % 8)
+                format!(
+                    "\x1b[{};{}H\x1b[{}m界é",
+                    tick % 5 + 1,
+                    tick % 4 + 1,
+                    30 + tick % 8
+                )
             };
             feed(&mut engine, text.as_bytes(), tick);
             let old = screen.bytes.clone();
             let mut rejected = Queue::new(1);
-            assert!(screen.replicate_encoded(&mut engine, &mut rejected, 1, false, features, false, tick).is_err());
+            assert!(screen
+                .replicate_encoded(&mut engine, &mut rejected, 1, false, features, false, tick)
+                .is_err());
             assert_eq!(screen.bytes, old);
             assert!(rejected.is_empty());
             let mut output = Queue::new(8192);
-            screen.replicate_encoded(&mut engine, &mut output, 1, false, features, false, tick).unwrap();
+            screen
+                .replicate_encoded(&mut engine, &mut output, 1, false, features, false, tick)
+                .unwrap();
             apply(&mut replica, &packets(&output), 8, 6);
             let mut expected = Vec::new();
             let mut cells = Vec::new();

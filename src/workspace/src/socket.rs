@@ -31,8 +31,7 @@ pub fn peer_pid(fd: std::os::fd::RawFd) -> io::Result<libc::pid_t> {
 use worminal_protocol::WORKSPACE_ENDPOINT;
 
 fn address(uid: u32, scope: &[u8]) -> io::Result<SocketAddr> {
-    let endpoint =
-        WORKSPACE_ENDPOINT;
+    let endpoint = WORKSPACE_ENDPOINT;
     let mut name = endpoint.to_bytes().to_vec();
     name.extend_from_slice(format!("-{uid}-").as_bytes());
     name.extend_from_slice(scope);

@@ -66,8 +66,14 @@ set -- $(cat /proc/$$/stat)\necho \"$1 $5 $6\" > \"$WORMINAL_TEST_SSH_ARGUMENTS.
     // SSH must lead its own session: sharing the GUI's process group and terminal let an SSH
     // prompt stop the whole desktop session with SIGTTOU/SIGTTIN (see ssh::connect).
     let session = fs::read_to_string(fixture.0.join("arguments.session")).unwrap();
-    let ids: Vec<i32> = session.split_whitespace().map(|v| v.parse().unwrap()).collect();
-    assert_eq!(ids, [ids[0]; 3], "SSH shares the GUI session: pid pgrp sid = {session}");
+    let ids: Vec<i32> = session
+        .split_whitespace()
+        .map(|v| v.parse().unwrap())
+        .collect();
+    assert_eq!(
+        ids, [ids[0]; 3],
+        "SSH shares the GUI session: pid pgrp sid = {session}"
+    );
     assert_eq!(
         FORKS.load(Ordering::Relaxed),
         0,

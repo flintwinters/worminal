@@ -1,5 +1,5 @@
 use worminal_engine_sys::{
-    ATTR_WIDE, ATTR_WDUMMY, ATTR_WRAP, WORMINAL_DEFAULT_BACKGROUND, WORMINAL_DEFAULT_FOREGROUND,
+    ATTR_WDUMMY, ATTR_WIDE, ATTR_WRAP, WORMINAL_DEFAULT_BACKGROUND, WORMINAL_DEFAULT_FOREGROUND,
 };
 use worminal_frontend::viewport::Viewport;
 use worminal_protocol::*;
@@ -165,7 +165,12 @@ fn span(view: &mut Viewport, row: u32, column: u32, text: &str, attributes: u32)
 
 fn row_packet_cells(body: &mut Vec<u8>, text: &str, attributes: u32) {
     for rune in text.chars() {
-        for value in [u32::from(rune), attributes, WORMINAL_DEFAULT_FOREGROUND, WORMINAL_DEFAULT_BACKGROUND] {
+        for value in [
+            u32::from(rune),
+            attributes,
+            WORMINAL_DEFAULT_FOREGROUND,
+            WORMINAL_DEFAULT_BACKGROUND,
+        ] {
             body.extend_from_slice(&value.to_be_bytes());
         }
     }
@@ -184,7 +189,11 @@ fn spans_are_atomic_preserve_neighbors_and_follow_overlapping_moves() {
     span(&mut view, 1, 1, "界", ATTR_WIDE);
     span(&mut view, 1, 2, " ", ATTR_WDUMMY);
     span(&mut view, 2, 4, "é", ATTR_WRAP);
-    assert_eq!(text(&view, 1), "ABCDE", "spans must remain private until finish");
+    assert_eq!(
+        text(&view, 1),
+        "ABCDE",
+        "spans must remain private until finish"
+    );
     let damage = finish(&mut view);
     assert_eq!(damage.rows, [1, 2]);
     assert_eq!(text(&view, 1), "a界 de");

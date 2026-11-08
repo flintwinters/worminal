@@ -75,7 +75,8 @@ impl Queue {
             self.sent = 0;
         }
         let required = self.bytes.len() + bytes.len();
-        if required > self.bytes.capacity() && self.bytes.capacity().saturating_mul(2) > self.limit {
+        if required > self.bytes.capacity() && self.bytes.capacity().saturating_mul(2) > self.limit
+        {
             self.bytes.reserve_exact(bytes.len());
         }
         self.bytes.extend_from_slice(bytes);
@@ -206,5 +207,4 @@ mod tests {
         queue.append_owned(b"next".to_vec()).unwrap();
         assert_eq!(queue.pending(), b"next");
     }
-
 }

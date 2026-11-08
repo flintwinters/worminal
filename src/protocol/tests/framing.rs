@@ -124,14 +124,18 @@ fn fragmented_packet_bodies_match_contiguous_encoding_and_reject_atomically() {
         let mut output = Buffer::with_limit(expected.len());
         output.reserve(expected.len()).unwrap();
         assert!(output.as_bytes().is_empty());
-        output.append_packet_parts(packet.kind, packet.tab, &parts).unwrap();
+        output
+            .append_packet_parts(packet.kind, packet.tab, &parts)
+            .unwrap();
         assert_eq!(output.as_bytes(), expected);
         let before = output.as_bytes().to_vec();
         assert!(output.append_packet_parts(1, 0, &[]).is_err());
         assert_eq!(output.as_bytes(), before);
         let mut limited = Buffer::with_limit(expected.len() - 1);
         limited.put_u32(42).unwrap();
-        assert!(limited.append_packet_parts(packet.kind, packet.tab, &parts).is_err());
+        assert!(limited
+            .append_packet_parts(packet.kind, packet.tab, &parts)
+            .is_err());
         assert!(limited.reserve(expected.len()).is_err());
         assert_eq!(limited.as_bytes(), 42u32.to_be_bytes());
     }

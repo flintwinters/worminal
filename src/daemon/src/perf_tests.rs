@@ -8,7 +8,10 @@ use worminal_engine::Engine;
 
 fn cpu_ns() -> i64 {
     let mut time = MaybeUninit::<libc::timespec>::uninit();
-    assert_eq!(unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, time.as_mut_ptr()) }, 0);
+    assert_eq!(
+        unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, time.as_mut_ptr()) },
+        0
+    );
     let time = unsafe { time.assume_init() };
     time.tv_sec * 1_000_000_000 + time.tv_nsec
 }
@@ -44,7 +47,9 @@ fn hot_paths() {
     measure("cached_catalog_64_tabs", 200, || {
         let mut catalog = worminal_protocol::Buffer::with_limit(usize::MAX);
         for tab in &mut tabs {
-            catalog.put_bytes(tab.metadata(1).unwrap().as_ref()).unwrap();
+            catalog
+                .put_bytes(tab.metadata(1).unwrap().as_ref())
+                .unwrap();
         }
         black_box(catalog);
     });

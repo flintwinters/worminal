@@ -177,11 +177,7 @@ fn profile(module: &Module) -> io::Result<glib::Object> {
             .read(true)
             .write(true)
             .mode(0o600)
-            .open(
-                data.join(
-                    WORMINAL_BROWSER_PROFILE_LOCK,
-                ),
-            )?;
+            .open(data.join(WORMINAL_BROWSER_PROFILE_LOCK))?;
         if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
             return Err(io::Error::other(
                 "Rust browser profile is already open in another owner",

@@ -211,8 +211,11 @@ mod tests {
         keys.sort_by_key(|key| **key);
         keys.dedup();
         let modifiers = [
-            Mod::SHIFT_MASK, Mod::CONTROL_MASK, Mod::MOD1_MASK,
-            Mod::MOD4_MASK, Mod::MOD3_MASK,
+            Mod::SHIFT_MASK,
+            Mod::CONTROL_MASK,
+            Mod::MOD1_MASK,
+            Mod::MOD4_MASK,
+            Mod::MOD3_MASK,
         ];
         let mut hash = 0xcbf29ce484222325u64;
         let mut record = |byte: u8| {
@@ -226,7 +229,12 @@ mod tests {
                         state |= *modifier;
                     }
                 }
-                for mode in [0, MODE_APPKEYPAD, MODE_APPCURSOR, MODE_APPKEYPAD | MODE_APPCURSOR] {
+                for mode in [
+                    0,
+                    MODE_APPKEYPAD,
+                    MODE_APPCURSOR,
+                    MODE_APPKEYPAD | MODE_APPCURSOR,
+                ] {
                     for numlock in [false, true] {
                         for byte in (*value).to_le_bytes() {
                             record(byte);
@@ -242,6 +250,9 @@ mod tests {
                 }
             }
         }
-        assert_eq!(hash, 4_334_246_905_110_447_577, "keyboard behavior fingerprint changed");
+        assert_eq!(
+            hash, 4_334_246_905_110_447_577,
+            "keyboard behavior fingerprint changed"
+        );
     }
 }

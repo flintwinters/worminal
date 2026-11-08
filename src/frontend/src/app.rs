@@ -375,7 +375,9 @@ impl App {
         self.send(
             0,
             WIRE_CAPABILITIES,
-            (WIRE_FEATURE_COPY_ROWS | WIRE_FEATURE_ROW_SPAN).to_be_bytes().to_vec(),
+            (WIRE_FEATURE_COPY_ROWS | WIRE_FEATURE_ROW_SPAN)
+                .to_be_bytes()
+                .to_vec(),
         );
         if launch && self.config.browser_url.is_some() {
             self.open_browser(self.config.browser_url.as_deref().unwrap());

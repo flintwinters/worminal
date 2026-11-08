@@ -22,7 +22,10 @@ fn paste_rules_are_independent_of_chunk_boundaries() {
     ];
     for &(bracketed, input, expected) in cases {
         for split in 0..=input.len() {
-            assert_eq!(filtered(bracketed, &[&input[..split], b"", &input[split..]]), expected);
+            assert_eq!(
+                filtered(bracketed, &[&input[..split], b"", &input[split..]]),
+                expected
+            );
         }
         let bytes: Vec<_> = input.chunks(1).collect();
         assert_eq!(filtered(bracketed, &bytes), expected);

@@ -142,8 +142,10 @@ impl Screen {
             .map(|row| core(engine.row_dirty(row)))
             .collect::<io::Result<_>>()?;
         let dirty_count = dirty.iter().filter(|flag| **flag).count();
-        let search_move = !full && features & WIRE_FEATURE_COPY_ROWS != 0
-            && dirty_count >= 3 && dirty_count * 2 >= rows;
+        let search_move = !full
+            && features & WIRE_FEATURE_COPY_ROWS != 0
+            && dirty_count >= 3
+            && dirty_count * 2 >= rows;
         let mut current = Vec::with_capacity(rows);
         let mut cells: Vec<Cell> = Vec::new();
         for (row, dirty) in dirty.iter().enumerate() {
@@ -181,13 +183,22 @@ impl Screen {
             let span = if !full && features & WIRE_FEATURE_ROW_SPAN != 0 {
                 let baseline = &self.bytes[baseline_row * width..(baseline_row + 1) * width];
                 let cell = WIRE_CELL_BYTES as usize;
-                let first = bytes.chunks_exact(cell).zip(baseline.chunks_exact(cell))
-                    .position(|(a, b)| a != b).unwrap();
-                let last = bytes.chunks_exact(cell).zip(baseline.chunks_exact(cell))
-                    .rposition(|(a, b)| a != b).unwrap() + 1;
+                let first = bytes
+                    .chunks_exact(cell)
+                    .zip(baseline.chunks_exact(cell))
+                    .position(|(a, b)| a != b)
+                    .unwrap();
+                let last = bytes
+                    .chunks_exact(cell)
+                    .zip(baseline.chunks_exact(cell))
+                    .rposition(|(a, b)| a != b)
+                    .unwrap()
+                    + 1;
                 let range = first * cell..last * cell;
                 (range.len() + 4 < width).then_some(range)
-            } else { None };
+            } else {
+                None
+            };
             updates.push(Update { row, bytes, span });
         }
         if !full
@@ -208,17 +219,27 @@ impl Screen {
             frame.alternate,
         ]
         .map(|field| (field as u32).to_be_bytes());
-        let move_body = movement.map(|m| {
-            [m.source, m.destination, m.count].map(|field| (field as u32).to_be_bytes())
-        });
+        let move_body = movement
+            .map(|m| [m.source, m.destination, m.count].map(|field| (field as u32).to_be_bytes()));
         let mut output = Buffer::default();
         let row_bytes: usize = updates
             .iter()
-            .map(|update| HEADER_BYTES + 4 + update.span.as_ref().map_or(update.bytes.len(), |span| 4 + span.len()))
+            .map(|update| {
+                HEADER_BYTES
+                    + 4
+                    + update
+                        .span
+                        .as_ref()
+                        .map_or(update.bytes.len(), |span| 4 + span.len())
+            })
             .sum();
         output.reserve(
-            2 * HEADER_BYTES + header.as_flattened().len() + row_bytes
-                + move_body.as_ref().map_or(0, |fields| HEADER_BYTES + fields.as_flattened().len()),
+            2 * HEADER_BYTES
+                + header.as_flattened().len()
+                + row_bytes
+                + move_body
+                    .as_ref()
+                    .map_or(0, |fields| HEADER_BYTES + fields.as_flattened().len()),
         )?;
         output.append_packet_bytes(WIRE_FRAME, tab, header.as_flattened())?;
         if let Some(fields) = move_body {
@@ -228,7 +249,11 @@ impl Screen {
             let row = (update.row as u32).to_be_bytes();
             if let Some(span) = &update.span {
                 let column = (span.start as u32 / WIRE_CELL_BYTES).to_be_bytes();
-                output.append_packet_parts(WIRE_ROW_SPAN, tab, &[&row, &column, &update.bytes[span.clone()]])?;
+                output.append_packet_parts(
+                    WIRE_ROW_SPAN,
+                    tab,
+                    &[&row, &column, &update.bytes[span.clone()]],
+                )?;
             } else {
                 output.append_packet_parts(WIRE_ROW, tab, &[&row, &update.bytes])?;
             }
