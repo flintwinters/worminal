@@ -33,6 +33,16 @@ def compare(source, output):
             raise AssertionError(f"Rust pixels differ from C: {source}")
 
 
+def check_wrapped(output, row_height):
+    """Overflowing tabs continue on a second row instead of spilling past the window edge."""
+    with Image.open(output) as rendered:
+        image = rendered.convert("RGB")
+    background = image.getpixel((image.width - 1, image.height - 1))
+    row = image.crop((0, row_height, image.width, row_height * 2))
+    if row.getextrema() == tuple((value, value) for value in background):
+        raise AssertionError(f"Overflowing tabs did not wrap: {output}")
+
+
 def check(backend):
     prefix = ROOT / f"build/checks/rust-paint-{backend}"
     context = isolated_display if backend == "x11" else wayland_display
@@ -57,12 +67,18 @@ def check(backend):
             case = reference(env, tab_prefix, log, ("--tabs", str(count)))[0]
             source = Path(f"{tab_prefix}-tab_strip.png")
             output = source.with_name(source.stem + "-rust.png")
+            # The C strip scrolls overflowing tabs; Rust wraps them. Only one-row strips match C.
+            wraps = count > 2
             subprocess.run([str(ROOT / "build/cargo/release/worminal-render-check"), "--tabs",
-                            str(source.with_suffix(".wire")), str(output), str(case['cols']), str(case['rows'])],
+                            str(source.with_suffix(".wire")), str(output), str(case['cols']),
+                            str(case['rows'] * 4 if wraps else case['rows'])],
                            env=env, stdout=log, stderr=log, check=True, timeout=20)
-            compare(source, output)
+            if wraps:
+                check_wrapped(output, case['rows'])
+            else:
+                compare(source, output)
     print(f"Rust painter {backend}: {len(cases)} exact C pixel cases, "
-          "plus 5 tab-strip cases (browser colors, Unicode, zoom and oversized tabs).")
+          "plus 2 exact and 3 wrapping tab-strip cases (browser colors, Unicode, zoom and oversized tabs).")
 
 
 def main():

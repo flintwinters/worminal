@@ -1,4 +1,4 @@
-//! The one-cell Cairo strip shares terminal fonts/colors. Drawing and hit testing share the visible suffix.
+//! The one-cell Cairo strip shares terminal fonts/colors. Tabs wrap onto further rows in daemon order; drawing and hit testing share the row placement.
 use crate::{
     fonts::Fonts,
     graphics_ffi,
@@ -34,23 +34,21 @@ struct State {
 #[derive(Clone)]
 pub struct Tabs(Rc<State>);
 
-fn first_visible(
-    count: usize,
-    active: Option<usize>,
-    right: i32,
-    mut width: impl FnMut(usize) -> i32,
-) -> Option<usize> {
-    let mut first = active.or_else(|| count.checked_sub(1))?;
-    let mut total = 2 + width(first);
-    while first > 0 && total <= right {
-        let previous = width(first - 1);
-        if previous > right - total {
-            break;
-        }
-        total += previous;
-        first -= 1;
-    }
-    Some(first)
+/// Greedy wrap in tab order: `(row, x)` per tab. A tab wider than a row sits alone and is clipped.
+fn place(widths: &[i32], right: i32) -> Vec<(i32, i32)> {
+    let (mut row, mut x) = (0, 2);
+    widths
+        .iter()
+        .map(|&width| {
+            if x > 2 && x + width > right {
+                row += 1;
+                x = 2;
+            }
+            let at = (row, x);
+            x += width;
+            at
+        })
+        .collect()
 }
 fn width(layout: &pango::Layout, entry: &Tab, metrics: Metrics) -> i32 {
     layout.set_text(&entry.label);
@@ -71,37 +69,33 @@ impl State {
         };
         let palette = palette.borrow();
         let entries = self.entries.borrow();
-        let active = entries
+        let widths: Vec<i32> = entries
             .iter()
-            .position(|entry| entry.id == self.active.get());
-        let Some(first) = first_visible(entries.len(), active, right, |i| {
-            width(layout, &entries[i], metrics)
-        }) else {
-            return Ok(());
-        };
+            .map(|entry| width(layout, entry, metrics))
+            .collect();
         paint::source(cr, &palette.color(BG));
         cr.paint()?;
-        cr.rectangle(
-            2.0,
-            2.0,
-            f64::from((right - 2).max(0)),
-            f64::from(metrics.height),
-        );
-        cr.clip();
-        let baseline = 2 + (metrics.height - metrics.ink_height) / 2 + metrics.ascent;
-        let mut x = 2;
-        for entry in &entries[first..] {
-            if x >= right {
-                break;
-            }
-            let width = width(layout, entry, metrics);
+        for (i, (entry, (row, x))) in entries.iter().zip(place(&widths, right)).enumerate() {
+            let top = 2 + row * metrics.height;
+            let width = widths[i];
+            cr.save()?;
+            cr.rectangle(
+                2.0,
+                f64::from(top),
+                f64::from((right - 2).max(0)),
+                f64::from(metrics.height),
+            );
+            cr.clip();
+            // Measuring left the layout holding the last label.
+            layout.set_text(&entry.label);
+            let baseline = top + (metrics.height - metrics.ink_height) / 2 + metrics.ascent;
             let selected = entry.id == self.active.get();
             let alert = self.lit.get() && self.attention.borrow().contains(&entry.id);
             if selected || alert {
                 paint::source(cr, &palette.color(if alert { 3 } else { FG }));
                 cr.rectangle(
                     f64::from(x),
-                    2.0,
+                    f64::from(top),
                     f64::from(width.min(right - x)),
                     f64::from(metrics.height),
                 );
@@ -124,44 +118,57 @@ impl State {
             graphics_ffi::show_layout(cr, layout);
             cr.rectangle(
                 f64::from(x + metrics.width),
-                f64::from((baseline + 2).min(metrics.height)),
+                f64::from((baseline + 2).min(top - 2 + metrics.height)),
                 f64::from((width - 2 * metrics.width).max(0)),
                 1.0,
             );
             cr.fill()?;
-            x += width;
+            cr.restore()?;
         }
         Ok(())
     }
     fn hit(&self, x: f64, y: f64) -> Option<u32> {
         let metrics = self.metrics.get()?;
-        if y < 2.0 || y >= f64::from(2 + metrics.height) {
-            return None;
-        }
         let layout = self.layout.borrow();
         let layout = layout.as_ref()?;
         let entries = self.entries.borrow();
         let right = self.widget.allocated_width() - 2;
-        let first = first_visible(
-            entries.len(),
-            entries
-                .iter()
-                .position(|entry| entry.id == self.active.get()),
-            right,
-            |i| width(layout, &entries[i], metrics),
-        )?;
-        let mut left = 2;
-        for entry in &entries[first..] {
-            if left >= right {
-                break;
-            }
-            let width = width(layout, entry, metrics);
-            if x >= f64::from(left) && x < f64::from((left + width).min(right)) {
-                return Some(entry.id);
-            }
-            left += width;
+        let widths: Vec<i32> = entries
+            .iter()
+            .map(|entry| width(layout, entry, metrics))
+            .collect();
+        entries
+            .iter()
+            .zip(place(&widths, right))
+            .zip(&widths)
+            .find(|((_, (row, left)), width)| {
+                let top = 2 + row * metrics.height;
+                y >= f64::from(top)
+                    && y < f64::from(top + metrics.height)
+                    && x >= f64::from(*left)
+                    && x < f64::from((left + **width).min(right))
+            })
+            .map(|((entry, _), _)| entry.id)
+    }
+    /// Height follows the row count, which depends on the allocated width.
+    fn fit(&self) {
+        let (Some(metrics), Some(layout)) = (self.metrics.get(), self.layout.borrow().clone())
+        else {
+            return;
+        };
+        let widths: Vec<i32> = self
+            .entries
+            .borrow()
+            .iter()
+            .map(|entry| width(&layout, entry, metrics))
+            .collect();
+        let rows = place(&widths, self.widget.allocated_width() - 2)
+            .last()
+            .map_or(1, |(row, _)| row + 1);
+        let height = rows * metrics.height + 2;
+        if self.widget.size_request().1 != height {
+            self.widget.set_size_request(-1, height);
         }
-        None
     }
 }
 impl Tabs {
@@ -179,6 +186,9 @@ impl Tabs {
             blink: RefCell::new(None),
         });
         state.widget.add_events(gdk::EventMask::BUTTON_PRESS_MASK);
+        state
+            .widget
+            .connect_size_allocate(glib::clone!(@weak state => move |_, _| state.fit()));
         state.widget.connect_draw(
             glib::clone!(@weak state => @default-return glib::Propagation::Proceed,
                 move |widget, cr| {
@@ -193,13 +203,15 @@ impl Tabs {
     pub fn widget(&self) -> &gtk::DrawingArea {
         &self.0.widget
     }
-    pub fn connect_selected(&self, select: impl Fn(u32) + 'static) {
+    pub fn connect_selected(&self, select: impl Fn(u32) + 'static, close: impl Fn(u32) + 'static) {
         let state = self.0.clone();
         self.0.widget.connect_button_press_event(glib::clone!(@weak state
             => @default-return glib::Propagation::Proceed, move |_, event| {
                 let (x, y) = event.position();
-                if event.button() == 1 {
-                    if let Some(id) = state.hit(x, y) { select(id); return glib::Propagation::Stop; }
+                match event.button() {
+                    1 => if let Some(id) = state.hit(x, y) { select(id); return glib::Propagation::Stop; },
+                    2 => if let Some(id) = state.hit(x, y) { close(id); return glib::Propagation::Stop; },
+                    _ => {}
                 }
                 glib::Propagation::Proceed
             }));
@@ -253,11 +265,13 @@ impl Tabs {
         let empty = entries.is_empty();
         *self.0.entries.borrow_mut() = entries;
         if !empty {
-            let mut layout = self.0.layout.borrow_mut();
-            let layout = layout.get_or_insert_with(|| self.0.widget.create_pango_layout(None));
-            let metrics = self.0.fonts.borrow_mut().resolve(layout).metrics;
-            self.0.metrics.set(Some(metrics));
-            self.0.widget.set_size_request(-1, metrics.height + 2);
+            {
+                let mut layout = self.0.layout.borrow_mut();
+                let layout = layout.get_or_insert_with(|| self.0.widget.create_pango_layout(None));
+                let metrics = self.0.fonts.borrow_mut().resolve(layout).metrics;
+                self.0.metrics.set(Some(metrics));
+            }
+            self.0.fit();
         }
         self.0.widget.queue_draw();
     }
@@ -265,26 +279,12 @@ impl Tabs {
 
 #[cfg(test)]
 mod tests {
-    use super::first_visible;
+    use super::place;
     #[test]
-    fn visible_suffix_matches_independent_prefix_widths_and_clips_oversized_active_tab() {
-        let widths: Vec<i32> = (0..64)
-            .map(|i| if i == 31 { 3000 } else { 20 + i % 13 * 7 })
-            .collect();
-        for active in 0..64 {
-            for right in [0, 40, 320, 800, 4096] {
-                let mut first = 0;
-                let mut total = 2 + widths[..=active].iter().sum::<i32>();
-                while first < active && total > right {
-                    total -= widths[first];
-                    first += 1;
-                }
-                assert_eq!(
-                    first_visible(widths.len(), Some(active), right, |i| widths[i]),
-                    Some(first)
-                );
-            }
-        }
-        assert_eq!(first_visible(0, None, 320, |_| unreachable!()), None);
+    fn tabs_wrap_in_order_and_oversized_tab_sits_alone() {
+        assert_eq!(place(&[], 100), vec![]);
+        assert_eq!(place(&[30, 30, 30], 100), vec![(0, 2), (0, 32), (0, 62)]);
+        assert_eq!(place(&[40, 40, 40], 100), vec![(0, 2), (0, 42), (1, 2)]);
+        assert_eq!(place(&[500, 20, 20], 100), vec![(0, 2), (1, 2), (1, 22)]);
     }
 }

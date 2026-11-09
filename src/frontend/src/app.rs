@@ -280,8 +280,10 @@ impl App {
             pending_tabs: Cell::new(0),
             service_features: Cell::new(0),
         });
-        app.tabstrip
-            .connect_selected(glib::clone!(@weak app => move |id| app.select_id(id)));
+        app.tabstrip.connect_selected(
+            glib::clone!(@weak app => move |id| app.select_id(id)),
+            glib::clone!(@weak app => move |id| app.send(id, WIRE_CLOSE, Vec::new())),
+        );
         // GTK maps the new child in its default switch handler. Focus it afterwards.
         app.notebook.connect_local("switch-page", true, glib::clone!(@weak app => @default-return None, move |values| {
             if app.syncing.get() { return None; }
