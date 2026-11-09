@@ -151,8 +151,8 @@ def run_headless_checks():
     if code:
         return code
     patterns = ("test_build.py", "test_reference.py", "test_perf_metrics.py", "test_cli.py", "test_workspace.py",
-                "test_preview_workspace.py", "test_agent_api.py", "test_theme.py", "test_privacy.py", "test_handoff.py",
-                "test_restore.py", "test_upgrade.py")
+                "test_preview_workspace.py", "test_agent_api.py", "test_remote_install.py", "test_theme.py",
+                "test_privacy.py", "test_handoff.py", "test_restore.py", "test_upgrade.py")
     for pattern in patterns:
         code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                     "-p", pattern, "-q"])
@@ -300,12 +300,27 @@ def check_agent_api():
     code = run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-protocol",
                 "-p", "worminal-daemon", "--lib"])
     if not code:
+        code = run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-workspace", "--test", "devices"])
+    if not code:
+        # Registry publication shares the recovery writer; these existing boundary checks need no C oracle.
+        code = run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-workspace",
+                    "--test", "state", "invalid_"])
+    if not code:
         candidate = build_rust_daemon()
         code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                     "-p", "test_agent_api.py", "-q"],
                    env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate),
                         "WORMINAL_TEST_RUST_DAEMON": "1"})
     raise typer.Exit(code)
+
+
+@app.command("check-remote-install")
+def check_remote_install():
+    """Check native remote-install bootstrap against private mock-SSH targets, without root or live hosts."""
+    candidate = build_rust_daemon()
+    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                         "-p", "test_remote_install.py", "-q"],
+                        env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate)}))
 
 
 @app.command("check-rust-daemon")

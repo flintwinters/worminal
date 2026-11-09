@@ -1,0 +1,7 @@
+{
+  "man_dir": "share/man",
+  "files": [
+    {"role": "daemon", "source": "build/bin/worminald", "base": "prefix", "path": "bin/worminald", "mode": 493},
+    {"role": "manual", "source": "docs/man/worminal.1", "base": "man", "path": "man1/worminal.1", "mode": 420}
+  ]
+}

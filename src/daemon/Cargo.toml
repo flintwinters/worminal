@@ -10,6 +10,7 @@ worminal-protocol = { path = "../protocol" }
 worminal-workspace = { path = "../workspace" }
 worminal-config = { path = "../config" }
 libc.workspace = true
+serde_json = "1.0"
 
 [lints]
 workspace = true

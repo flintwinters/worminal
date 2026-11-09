@@ -66,6 +66,9 @@ pub const WIRE_WORP: u32 = 33;
 pub const WORP_LIST: u32 = 0;
 pub const WORP_READ: u32 = 1;
 pub const WORP_INPUT: u32 = 2;
+pub const WORP_DEVICES: u32 = 3;
+pub const WORP_ENROLL: u32 = 4;
+pub const WORP_FORGET: u32 = 5;
 
 // Advertise before HELLO/ATTACH. Older daemons ignore the optional packet;
 // unadvertised clients must continue receiving the original row encoding.

@@ -19,6 +19,16 @@ impl Handler for Echo {
 fn requests() -> Vec<Request> {
     vec![
         Request::List,
+        Request::Devices,
+        Request::Enroll {
+            device: devices::Device {
+                name: "bench".into(),
+                endpoint: "felix@bench".into(),
+            },
+        },
+        Request::Forget {
+            name: "bench".into(),
+        },
         Request::Read { tab: 12 },
         Request::Input {
             tab: 12,

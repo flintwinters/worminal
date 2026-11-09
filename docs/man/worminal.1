@@ -80,6 +80,25 @@ to carry the same Worp operations over SSH. The remote daemon must already be ru
 WORMINAL_SHARED_SOCKET_SCOPE selects the local workspace.
 Success returns a JSON object with ok=true and exit status 0; failures return ok=false and status 1.
 An input acknowledgement means queued for the PTY, not processed by the application.
+.B worminald api enroll NAME ENDPOINT
+explicitly enrolls an SSH route in the queried authority's per-user registry.
+.B worminald api devices
+lists enrollment and checks Worp reachability from the caller on demand;
+.B devices --no-check
+lists membership without probes.
+.B worminald api forget NAME
+removes enrollment only. All registry operations accept --master to use a shared authority.
+Names label SSH routes, not physical machines. Availability is a timestamped observation, not persistent online state.
+There are no heartbeats or automatic enrollment. Membership is saved under XDG_STATE_HOME/worminal/devices-v1.
+.SH REMOTE INSTALLATION
+.B worminald install-on-remote user@host
+installs this headless daemon and its manual into /usr/local on a new compatible Linux node over SSH.
+The target needs the same CPU architecture, Python 3 and non-interactive sudo.
+The staged candidate must pass an unprivileged runtime check before publication.
+Existing Worminal installations or active workspaces are refused; no existing files or sessions are replaced.
+No credentials, configuration or user state are copied. No daemon is started and no device is enrolled.
+Open a view afterward with worminal --master user@host; enroll the route explicitly if desired.
+Run worminald install-on-remote --help for details. SSH failure can leave the outcome uncertain; no retry occurs.
 .SH DAEMON UPGRADES
 The release v2 service watches its executable directory. Replacing its executable automatically starts a
 replacement daemon and transfers live tabs using the validated handoff transaction.

@@ -5,6 +5,7 @@ use std::{
     time::Duration,
 };
 use worminal_protocol::worp::{
+    devices::Device,
     stream::{self, Stream},
     Client, Handler, Reply, Request,
 };
@@ -36,6 +37,32 @@ fn command(arguments: &[OsString]) -> io::Result<Request> {
     let operation = arguments.first().and_then(|arg| arg.to_str()).unwrap_or("");
     let (is_read, tab, input) = match (operation, arguments.len()) {
         ("list", 1) => return Ok(Request::List),
+        ("devices", 1) => return Ok(Request::Devices),
+        ("devices", 2) if arguments[1] == "--no-check" => return Ok(Request::Devices),
+        ("enroll", 3) => {
+            let device = Device {
+                name: arguments[1]
+                    .to_str()
+                    .ok_or_else(|| invalid("NAME must be UTF-8."))?
+                    .to_owned(),
+                endpoint: arguments[2]
+                    .to_str()
+                    .ok_or_else(|| invalid("ENDPOINT must be UTF-8."))?
+                    .to_owned(),
+            };
+            device.validate()?;
+            return Ok(Request::Enroll { device });
+        }
+        ("forget", 2) => {
+            let request = Request::Forget {
+                name: arguments[1]
+                    .to_str()
+                    .ok_or_else(|| invalid("NAME must be UTF-8."))?
+                    .to_owned(),
+            };
+            request.validate()?;
+            return Ok(request);
+        }
         ("read", 2) | ("type", 3) | ("key", 3..) => {
             let tab = arguments[1]
                 .to_str()
@@ -85,6 +112,20 @@ fn command(arguments: &[OsString]) -> io::Result<Request> {
 }
 
 fn request(scope: &[u8], master: Option<&OsStr>, request: Request) -> io::Result<Reply> {
+    request_with_timeout(
+        scope,
+        master,
+        request,
+        if master.is_some() { 13 } else { 3 },
+    )
+}
+
+fn request_with_timeout(
+    scope: &[u8],
+    master: Option<&OsStr>,
+    request: Request,
+    seconds: u64,
+) -> io::Result<Reply> {
     let (socket, _ssh) = if let Some(master) = master {
         let (socket, child) = ssh::connect_worp(master)?;
         (socket, Some(child))
@@ -99,7 +140,7 @@ fn request(scope: &[u8], master: Option<&OsStr>, request: Request) -> io::Result
             None,
         )
     };
-    let timeout = Some(Duration::from_secs(if master.is_some() { 13 } else { 3 }));
+    let timeout = Some(Duration::from_secs(seconds));
     socket.set_read_timeout(timeout)?;
     socket.set_write_timeout(timeout)?;
     Client::new(Stream::new(socket.try_clone()?, socket)).request(request)
@@ -132,7 +173,24 @@ pub fn run(scope: &[u8], arguments: &[OsString]) -> io::Result<i32> {
     } else {
         (None, arguments)
     };
-    let result = command(arguments).and_then(|operation| request(scope, master, operation));
+    let result = command(arguments).and_then(|operation| {
+        let devices = matches!(operation, Request::Devices);
+        let mut reply = request(scope, master, operation)?;
+        if devices && reply.success {
+            let mut value: serde_json::Value = serde_json::from_str(&reply.json)
+                .map_err(|_| invalid("Invalid registry JSON reply."))?;
+            crate::device_probes::validate(&value)?;
+            value["registry_authority"] =
+                serde_json::json!(master.map_or("local".into(), |host| host.to_string_lossy()));
+            if arguments.len() == 1 {
+                crate::device_probes::check(&mut value, |endpoint| {
+                    request_with_timeout(scope, Some(OsStr::new(endpoint)), Request::List, 3)
+                })?;
+            }
+            reply.json = value.to_string();
+        }
+        Ok(reply)
+    });
     match result {
         Ok(reply) => {
             println!("{}", reply.json);

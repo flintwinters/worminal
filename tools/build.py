@@ -13,6 +13,7 @@ from tools.paths import runtime_binary
 
 
 ROOT = Path(__file__).resolve().parent.parent
+HEADLESS_INSTALL = json.loads((ROOT / "assets/headless-install.json").read_text())
 FONT_DIRECTORY = Path("assets/fonts/atkinson-hyperlegible-mono")
 FONT_FILES = ("AtkinsonHyperlegibleMono[wght].ttf", "AtkinsonHyperlegibleMono-Italic[wght].ttf", "OFL.txt")
 VERSION = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"]["version"]
@@ -257,13 +258,14 @@ def clean():
 
 def installation_files(prefix=None):
     prefix = Path(prefix if prefix is not None else os.environ.get("PREFIX", Path.home() / ".local"))
-    manprefix = Path(os.environ.get("MANPREFIX", str(prefix / "share/man")))
+    manprefix = Path(os.environ.get("MANPREFIX", str(prefix / HEADLESS_INSTALL["man_dir"])))
     if not prefix.is_absolute() or not manprefix.is_absolute():
         raise ValueError("PREFIX and MANPREFIX must be absolute paths")
     staging = Path(os.environ.get("DESTDIR", "/"))
     if headless():
-        return [(ROOT / "build/bin/worminald", staging / str(prefix / "bin/worminald").lstrip("/"), 0o755),
-                (ROOT / "docs/man/worminal.1", staging / str(manprefix / "man1/worminal.1").lstrip("/"), 0o644)]
+        bases = {"prefix": prefix, "man": manprefix}
+        return [(ROOT / item["source"], staging / str(bases[item["base"]] / item["path"]).lstrip("/"), item["mode"])
+                for item in HEADLESS_INSTALL["files"]]
     # Publish modules before a launcher that may immediately need them.
     files = [("build/lib/worminal/" + RUST_BROWSER_MODULE, prefix / "lib/worminal" / RUST_BROWSER_MODULE, 0o755),
              ("build/lib/worminal/" + RUST_FRONTEND_MODULE, prefix / "lib/worminal" / RUST_FRONTEND_MODULE, 0o755)]

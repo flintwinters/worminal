@@ -10,6 +10,10 @@ pub const HELP: &str = r#"Worp: Worminal automation API (version 1)
 Usage: worminald api [--master user@host] COMMAND
   help                 Show this command reference; needs no running daemon.
   list                 List tab IDs, titles, directories and shell PIDs as JSON.
+  enroll NAME ENDPOINT  Enroll a named SSH route; no contact with that device.
+  devices              List enrollment and check Worp reachability from this caller.
+  devices --no-check   List enrollment only; no network probes.
+  forget NAME          Remove enrollment; never stops the device or its sessions.
   read TAB             Read the current viewport as JSON, without taking control.
   type TAB TEXT        Send literal UTF-8 text; does not append Enter.
   key TAB KEY...       Send Enter, Tab, Escape, Backspace, or Ctrl-A through Ctrl-Z.
@@ -18,30 +22,20 @@ Examples:
   worminald api read 12
   worminald api type 12 'What are you working on?'
   worminald api key 12 Enter
+Registry authority: worminald api --master user@host devices
 Remote: worminald api --master user@host list
+Bootstrap a new node: worminald install-on-remote --help
 Worp transports: authenticated local socket or SSH; same operations and JSON replies.
 All operations connect to an existing daemon; none starts or restores a workspace.
 Input targets a tab, preserves its view/controller and size, and may execute commands.
 Input success means queued for the PTY, not that the application processed it.
 Tab IDs belong to the current daemon workspace; list again after a restart.
 WORMINAL_SHARED_SOCKET_SCOPE selects the same workspace as graphical clients.
+Enrollment is per authority user across scopes; no heartbeats or automatic enrollment.
 "#;
 
 pub fn quote(bytes: &[u8]) -> String {
-    let mut result = String::from("\"");
-    for ch in String::from_utf8_lossy(bytes).chars() {
-        match ch {
-            '"' => result.push_str("\\\""),
-            '\\' => result.push_str("\\\\"),
-            '\n' => result.push_str("\\n"),
-            '\r' => result.push_str("\\r"),
-            '\t' => result.push_str("\\t"),
-            ch if ch < ' ' => result.push_str(&format!("\\u{:04x}", ch as u32)),
-            ch => result.push(ch),
-        }
-    }
-    result.push('"');
-    result
+    serde_json::to_string(&String::from_utf8_lossy(bytes)).expect("UTF-8 strings serialize to JSON")
 }
 
 fn record(tab: &mut Tab, now: i64) -> String {
@@ -115,6 +109,39 @@ impl Handler for Service {
     fn handle(&mut self, request: Request) -> io::Result<Reply> {
         if let Err(error) = request.validate() {
             return Ok(failure(&error.to_string()));
+        }
+        match &request {
+            Request::Devices => {
+                let devices = match self.devices.list() {
+                    Ok(devices) => devices,
+                    Err(error) => return Ok(failure(&error.to_string())),
+                };
+                let devices: Vec<_> = devices.iter().map(|device| serde_json::json!({
+                    "name": device.name, "endpoint": device.endpoint, "availability": "unchecked"
+                })).collect();
+                return Ok(success(
+                    serde_json::json!({"ok": true, "devices": devices}).to_string(),
+                ));
+            }
+            Request::Enroll { device } => {
+                return Ok(match self.devices.enroll(device.clone()) {
+                    Ok(changed) => success(
+                        serde_json::json!({"ok":true, "enrolled": true,
+                        "name":device.name, "endpoint":device.endpoint, "changed":changed})
+                        .to_string(),
+                    ),
+                    Err(error) => failure(&error.to_string()),
+                });
+            }
+            Request::Forget { name } => {
+                return Ok(match self.devices.forget(name) {
+                    Ok(removed) => success(
+                        serde_json::json!({"ok":true, "name":name, "removed":removed}).to_string(),
+                    ),
+                    Err(error) => failure(&error.to_string()),
+                });
+            }
+            _ => {}
         }
         let now = self.now();
         if request == Request::List {

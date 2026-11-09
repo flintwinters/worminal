@@ -1,5 +1,5 @@
 //! Binding between Worp operations and the existing version-2 workspace envelope.
-use super::{Reply, Request};
+use super::{devices::Device, Reply, Request};
 use crate::*;
 use std::io;
 
@@ -14,9 +14,18 @@ pub fn encode_request(request: &Request) -> io::Result<Packet> {
         Request::List => WORP_LIST,
         Request::Read { .. } => WORP_READ,
         Request::Input { .. } => WORP_INPUT,
+        Request::Devices => WORP_DEVICES,
+        Request::Enroll { .. } => WORP_ENROLL,
+        Request::Forget { .. } => WORP_FORGET,
     })?;
-    if let Request::Input { bytes, .. } = request {
-        body.put_bytes(bytes)?;
+    match request {
+        Request::Input { bytes, .. } => body.put_bytes(bytes)?,
+        Request::Enroll { device } => {
+            body.put_string(device.name.as_bytes())?;
+            body.put_string(device.endpoint.as_bytes())?;
+        }
+        Request::Forget { name } => body.put_string(name.as_bytes())?,
+        _ => {}
     }
     Ok(Packet {
         kind: WIRE_WORP,
@@ -39,6 +48,25 @@ pub fn decode_request(packet: &Packet) -> io::Result<Request> {
             tab: packet.tab,
             bytes: bytes.to_vec(),
         },
+        WORP_DEVICES if packet.tab == 0 && bytes.is_empty() => Request::Devices,
+        WORP_ENROLL | WORP_FORGET if packet.tab == 0 => {
+            let mut fields = Payload::new(bytes);
+            let name = std::str::from_utf8(fields.string()?)
+                .map_err(|_| invalid("Device name must be UTF-8."))?
+                .to_owned();
+            let request = if operation == WORP_ENROLL {
+                let endpoint = std::str::from_utf8(fields.string()?)
+                    .map_err(|_| invalid("Device endpoint must be UTF-8."))?
+                    .to_owned();
+                Request::Enroll {
+                    device: Device { name, endpoint },
+                }
+            } else {
+                Request::Forget { name }
+            };
+            fields.finish()?;
+            request
+        }
         _ => return Err(invalid("Invalid Worp operation; run worminald api help.")),
     };
     request.validate()?;

@@ -5,6 +5,7 @@
 //! own delivery, authentication and deadlines. They must not silently retry input.
 use std::io;
 
+pub mod devices;
 pub mod stream;
 pub mod v2;
 
@@ -13,6 +14,9 @@ pub const MAX_INPUT_BYTES: usize = 65536;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
     List,
+    Devices,
+    Enroll { device: devices::Device },
+    Forget { name: String },
     Read { tab: u32 },
     Input { tab: u32, bytes: Vec<u8> },
 }
@@ -20,14 +24,19 @@ pub enum Request {
 impl Request {
     pub fn tab(&self) -> u32 {
         match self {
-            Self::List => 0,
+            Self::List | Self::Devices | Self::Enroll { .. } | Self::Forget { .. } => 0,
             Self::Read { tab } | Self::Input { tab, .. } => *tab,
         }
     }
 
     /// Validate at both delivery boundaries, before a handler can mutate state.
     pub fn validate(&self) -> io::Result<()> {
-        if !matches!(self, Self::List) && self.tab() == 0 {
+        match self {
+            Self::Enroll { device } => device.validate()?,
+            Self::Forget { name } => devices::validate_name(name)?,
+            _ => {}
+        }
+        if matches!(self, Self::Read { .. } | Self::Input { .. }) && self.tab() == 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Tab ID must be positive.",

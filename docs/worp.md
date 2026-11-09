@@ -5,7 +5,7 @@
 
 Worp owns **what a node asks another node to do**, independently of delivery:
 
-- `Request`: list tabs, read a terminal viewport, or send input to a tab.
+- `Request`: list tabs, read a terminal viewport, send input, or explicitly enroll/list/forget device routes.
 - `Reply`: operation status and the same JSON application document on every transport.
 - `Handler`: performs the request against a node's application state.
 - `Transport`: delivers a request and returns its reply.
@@ -13,6 +13,9 @@ Worp owns **what a node asks another node to do**, independently of delivery:
 
 These initial Worp operations cover the agent-facing API. GUI viewport replication continues to use its existing
 v2 messages alongside the Worp binding.
+
+Device membership is owned by the queried authority; see [the device registry](devices.md). Its availability
+observations run on demand in the caller, so network waits never block a terminal service.
 
 The daemon implements `Handler`; its terminal operations do not receive sockets, stream packet headers or SSH
 processes. The CLI constructs Worp requests and uses `Client`. Changing the communication medium replaces the

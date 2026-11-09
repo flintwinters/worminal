@@ -18,6 +18,7 @@ use std::{
 };
 use worminal_protocol::*;
 use worminal_workspace::{
+    devices::Registry,
     launch::Launch,
     recovery::{self, Recipe, Recovery},
     socket,
@@ -36,6 +37,7 @@ pub(crate) struct Service {
     pub handin: Option<(u64, crate::handoff_io::Listener)>,
     pub next_handin: u64,
     recovery: Recovery,
+    pub devices: Registry,
     published: Vec<u8>,
     pub closed: u32,
     pub fallback: u32,
@@ -495,6 +497,7 @@ fn create(scope: &[u8], listener: UnixListener) -> io::Result<(Service, io::Resu
         handin: None,
         next_handin: 1,
         recovery,
+        devices: Registry::new(root.join("worminal/devices-v1")),
         published: Vec::new(),
         closed: 0,
         fallback: 0,

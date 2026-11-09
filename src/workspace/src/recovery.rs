@@ -1,9 +1,8 @@
 use std::{
-    fs::{self, File, OpenOptions},
-    io::{self, Read, Write},
-    os::unix::fs::{DirBuilderExt, OpenOptionsExt},
+    fs::OpenOptions,
+    io::{self, Read},
+    os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
 };
 use worminal_protocol::{Buffer, Payload, WIRE_VERSION};
 
@@ -128,30 +127,12 @@ pub struct Recovery {
     cache: Cache,
 }
 
-static TEMPORARY_ID: AtomicU64 = AtomicU64::new(0);
-
-struct PendingFile(PathBuf);
-impl Drop for PendingFile {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
-    }
-}
-
-fn prepare_directory(path: &Path) -> io::Result<&Path> {
-    let parent = path.parent().ok_or_else(invalid)?;
-    fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(parent)?;
-    Ok(parent)
-}
-
 impl Recovery {
     /// The object always survives a read failure, with writes disabled. A caller cannot accidentally
     /// replace damaged or unrecognized recipes with the empty workspace used after recovery fails.
     pub fn open(path: PathBuf) -> (Self, io::Result<Vec<Recipe>>) {
         let read = || -> io::Result<(Vec<u8>, Vec<Recipe>)> {
-            prepare_directory(&path)?;
+            crate::statefile::prepare_directory(&path)?;
             let mut file = OpenOptions::new()
                 .read(true)
                 .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
@@ -203,41 +184,7 @@ impl Recovery {
         if matches!(&self.cache, Cache::Valid(saved) if *saved == bytes) {
             return Ok(false);
         }
-        let parent = prepare_directory(&self.path)?;
-        let mut file = None;
-        for _ in 0..64 {
-            let sequence = TEMPORARY_ID.fetch_add(1, Ordering::Relaxed);
-            let mut name = self.path.as_os_str().to_os_string();
-            name.push(format!(".{}.{}.pending", std::process::id(), sequence));
-            let candidate = PathBuf::from(name);
-            match OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(&candidate)
-            {
-                Ok(handle) => {
-                    file = Some((PendingFile(candidate), handle));
-                    break;
-                }
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(error),
-            }
-        }
-        let (pending, mut file) = file.ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                "cannot reserve recovery temporary file",
-            )
-        })?;
-        file.write_all(&bytes)?;
-        file.sync_all()?;
-        drop(file);
-        fs::rename(&pending.0, &self.path)?;
-        // Match the existing codec: fsync the containing directory when available after publishing.
-        if let Ok(directory) = File::open(parent) {
-            let _ = directory.sync_all();
-        }
+        crate::statefile::atomic_write(&self.path, &bytes)?;
         self.cache = Cache::Valid(bytes);
         Ok(true)
     }

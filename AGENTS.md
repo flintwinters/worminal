@@ -30,6 +30,10 @@ one viewport; they never parse terminal output or recompute history/reflow. Brow
 `worminald api` is the headless agent interface over Worp; see `docs/automation.md` and `docs/worp.md`.
 `src/protocol::worp` owns transport-independent requests/replies and handler/client contracts;
 local sockets and SSH bind them to the existing v2 stream protocol.
+Device enrollment is explicit per authority user, shared across scopes and persisted independently of tabs;
+`docs/devices.md` defines membership and caller-side availability. Never add heartbeats or block the daemon on probes.
+`worminald install-on-remote` bootstraps new compatible headless nodes over SSH; see `docs/remote-install.md`.
+It must refuse existing installations/workspaces and preserve state; never turn installation into an implicit upgrade.
 Inspection never takes control or starts a daemon; one-shot input preserves the existing view/controller.
 The daemon atomically saves ordered terminal directories and browser URLs, scoped by protocol/workspace under
 XDG_STATE_HOME. Restart recovery creates fresh shells with the one-shot WORMINAL_RESTORE=1 marker, never replays

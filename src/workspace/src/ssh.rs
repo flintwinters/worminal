@@ -47,6 +47,20 @@ pub fn connect_worp(master: &OsStr) -> io::Result<(UnixStream, Child)> {
 }
 
 fn connect_command(master: &OsStr, command: &[&[u8]]) -> io::Result<(UnixStream, Child)> {
+    connect_program(master, WORKSPACE_DAEMON.to_bytes(), command)
+}
+
+/// Fixed bootstrap command; user data is sent on stdin, never interpolated into a remote shell.
+pub fn connect_python(master: &OsStr, code: &str) -> io::Result<(UnixStream, Child)> {
+    let quoted = format!("'{}'", code.replace('\'', "'\\''"));
+    connect_program(master, b"python3", &[b"-c", quoted.as_bytes()])
+}
+
+fn connect_program(
+    master: &OsStr,
+    program: &[u8],
+    command: &[&[u8]],
+) -> io::Result<(UnixStream, Child)> {
     let bytes = master.as_bytes();
     if bytes.is_empty() || bytes[0] == b'-' || bytes.contains(&b'\n') {
         return Err(io::Error::new(
@@ -55,14 +69,13 @@ fn connect_command(master: &OsStr, command: &[&[u8]]) -> io::Result<(UnixStream,
         ));
     }
     let (parent, remote) = UnixStream::pair()?;
-    let daemon = WORKSPACE_DAEMON;
     let arguments = [
         b"ssh".as_slice(),
         b"-T",
         b"-C",
         b"-oConnectTimeout=10",
         bytes,
-        daemon.to_bytes(),
+        program,
     ]
     .into_iter()
     .chain(command.iter().copied())

@@ -1,4 +1,5 @@
 """Native agent commands against a private workspace, never a desktop session."""
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -6,6 +7,7 @@ import tempfile
 import subprocess
 import time
 import unittest
+from unittest.mock import patch
 
 import test_preview_workspace as workspace
 from workspace_protocol import number, send, wait_kind
@@ -13,6 +15,11 @@ from workspace_protocol import number, send, wait_kind
 
 class AgentApiTest(unittest.TestCase):
     def setUp(self):
+        state = tempfile.TemporaryDirectory(prefix='agent-state-', dir=workspace.CHECKS)
+        self.addCleanup(state.cleanup)
+        environment = patch.dict(os.environ, {'XDG_STATE_HOME': state.name})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.fixture = workspace.PreviewWorkspaceTest(methodName='runTest')
         self.fixture.setUp()
         self.addCleanup(self.fixture.doCleanups)
@@ -77,12 +84,15 @@ class AgentApiTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertFalse(json.loads(result.stdout)['ok'])
 
-    def test_worp_ssh_transport_uses_stdio_and_preserves_literal_input(self):
-        tab = self.fixture.launch('stty raw -echo; printf READY; exec cat')
+    @contextmanager
+    def ssh_transport(self):
         with tempfile.TemporaryDirectory(prefix='worp-ssh-', dir=workspace.CHECKS) as directory:
+            log = Path(directory) / 'calls'
             shim = Path(directory) / 'ssh'
             shim.write_text('#!/usr/bin/python3\nimport os,sys\n'
                             'assert sys.argv[-3:] == ["worminald", "api", "--stdio"]\n'
+                            f'with open({str(log)!r}, "a") as out: out.write(sys.argv[-4]+"\\n")\n'
+                            'if "offline-host" in sys.argv: sys.exit(255)\n'
                             'assert "fixture-host" in sys.argv\n'
                             f'os.execv({str(workspace.DAEMON)!r}, '
                             f'[{str(workspace.DAEMON)!r}, "api", "--stdio"])\n')
@@ -90,20 +100,66 @@ class AgentApiTest(unittest.TestCase):
             previous = self.fixture.env.get('PATH', '')
             self.fixture.env['PATH'] = directory + os.pathsep + previous
             try:
-                value = self.api('--master', 'fixture-host', 'list')
-                self.assertEqual(value['tabs'][0]['id'], tab)
-                # Text travels in the Worp request, never in SSH's shell command.
-                text = 'literal $HOME; "quoted"'
-                self.api('--master', 'fixture-host', 'type', tab, text)
-                self.api('--master', 'fixture-host', 'key', tab, 'Enter')
-                value = self.api('--master', 'fixture-host', 'read', tab)
-                self.assertIn(text, '\n'.join(value['lines']))
-                # Remote forwarding also must not create a workspace during discovery.
-                scope = self.fixture.env['WORMINAL_SHARED_SOCKET_SCOPE']
-                self.fixture.env['WORMINAL_SHARED_SOCKET_SCOPE'] = scope + '-absent'
-                try:
-                    self.api('--master', 'fixture-host', 'list', success=False)
-                finally:
-                    self.fixture.env['WORMINAL_SHARED_SOCKET_SCOPE'] = scope
+                yield log
             finally:
                 self.fixture.env['PATH'] = previous
+
+    def test_worp_ssh_transport_uses_stdio_and_preserves_literal_input(self):
+        tab = self.fixture.launch('stty raw -echo; printf READY; exec cat')
+        with self.ssh_transport():
+            value = self.api('--master', 'fixture-host', 'list')
+            self.assertEqual(value['tabs'][0]['id'], tab)
+            # Text travels in the Worp request, never in SSH's shell command.
+            text = 'literal $HOME; "quoted"'
+            self.api('--master', 'fixture-host', 'type', tab, text)
+            self.api('--master', 'fixture-host', 'key', tab, 'Enter')
+            value = self.api('--master', 'fixture-host', 'read', tab)
+            self.assertIn(text, '\n'.join(value['lines']))
+            # Remote forwarding also must not create a workspace during discovery.
+            scope = self.fixture.env['WORMINAL_SHARED_SOCKET_SCOPE']
+            self.fixture.env['WORMINAL_SHARED_SOCKET_SCOPE'] = scope + '-absent'
+            try:
+                self.api('--master', 'fixture-host', 'list', success=False)
+            finally:
+                self.fixture.env['WORMINAL_SHARED_SOCKET_SCOPE'] = scope
+
+    def test_explicit_registry_on_a_shared_authority_and_caller_availability(self):
+        with self.ssh_transport() as log:
+            def authority(*args, **kwargs):
+                return self.api('--master', 'fixture-host', *args, **kwargs)
+            self.assertEqual(authority('devices', '--no-check')['devices'], [])
+            enrolled = authority('enroll', 'bench', 'fixture-host')
+            self.assertTrue(enrolled['changed'])
+            self.assertFalse(authority('enroll', 'bench', 'fixture-host')['changed'])
+            authority('enroll', 'bench', 'another-host', success=False)
+            authority('enroll', 'alias', 'fixture-host', success=False)
+            authority('enroll', 'offline', 'offline-host')
+            calls = log.read_text().splitlines()
+            self.assertNotIn('offline-host', calls, 'enrollment must never contact the endpoint')
+            value = self.api('devices', '--no-check')
+            self.assertEqual(log.read_text().splitlines(), calls, 'membership inspection must not probe')
+            self.assertTrue(all(row['availability'] == 'unchecked' for row in value['devices']))
+            value = authority('devices')
+            rows = {row['name']: row for row in value['devices']}
+            self.assertEqual(rows['bench']['availability'], 'reachable')
+            self.assertEqual(rows['offline']['availability'], 'unavailable')
+            self.assertIsInstance(rows['offline']['checked_at_unix_ms'], int)
+            self.assertEqual(value['availability_vantage'], 'caller')
+            self.assertEqual(value['registry_authority'], 'fixture-host')
+            self.assertEqual(len(self.api('devices', '--no-check')['devices']), 2)
+            self.assertTrue(authority('forget', 'offline')['removed'])
+            self.assertFalse(authority('forget', 'offline')['removed'])
+            self.api('enroll', '../escape', 'host', success=False)
+            self.api('enroll', 'node', 'ssh://host', success=False)
+
+    def test_registry_survives_daemon_restart_without_auto_enrollment(self):
+        self.assertEqual(self.api('devices', '--no-check')['devices'], [])
+        self.api('enroll', 'bench', 'fixture-host')
+        self.fixture.peer.close()
+        self.fixture.stop()
+        self.fixture.daemon = subprocess.Popen([str(workspace.DAEMON), '--serve'], env=self.fixture.env,
+                                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        self.fixture.peer = self.fixture.connect()
+        self.addCleanup(self.fixture.peer.close)
+        rows = self.api('devices', '--no-check')['devices']
+        self.assertEqual([(row['name'], row['endpoint']) for row in rows], [('bench', 'fixture-host')])

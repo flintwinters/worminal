@@ -16,6 +16,9 @@ See [Worp architecture](docs/worp.md) for its application contracts and currentl
 
 Agents can discover and control existing terminal sessions with `worminald api help`;
 see [the agent interface](docs/automation.md) for listing tabs, reading screens and sending keystrokes.
+A small [explicit device registry](docs/devices.md) shares enrolled SSH routes through one authority, with
+on-demand availability checks and no heartbeats.
+Use [`worminald install-on-remote HOST`](docs/remote-install.md) to bootstrap a new compatible headless node over SSH.
 
 Installations include Atkinson Hyperlegible Mono as the default font, at 9 pt with a -3 pixel line offset.
 Explicit Alacritty font settings at build time and the `-f` command-line option override the defaults.

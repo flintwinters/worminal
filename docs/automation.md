@@ -3,6 +3,7 @@
 Run `worminald api` (or `worminald api help`) to discover the native command interface.
 It works on headless hosts and uses [Worp](worp.md), independently of the selected delivery transport.
 It never starts a daemon or restores shells as a side effect of inspection.
+[Install a new remote node](remote-install.md) with the separate native `install-on-remote` bootstrap command.
 
 ```sh
 worminald api list
@@ -10,6 +11,9 @@ worminald api read 12
 worminald api type 12 'What are you working on?'
 worminald api key 12 Enter
 ```
+
+[Device enrollment and availability](devices.md) use `enroll NAME ENDPOINT`, `devices`, and `forget NAME`,
+also through `--master` when sharing a registry authority. `devices --no-check` reads membership without probes.
 
 `list` returns ordered tabs with their IDs, kind, title, working directory, shell PID and browser URL.
 The PID belongs to the shell launched for the tab; it is not necessarily the foreground application.
@@ -53,6 +57,9 @@ while production TCP listeners and UDP/HTTP adapters are future work.
 Worp's stream adapter binds application requests to protocol v2 message 33 (`WIRE_WORP`) using the existing
 bounded workspace framing. Requests contain a big-endian
 operation u32 followed by optional input bytes. Operation 0 lists tabs (`tab=0`), 1 reads a terminal (`tab=id`,
-no input), and 2 queues input (`tab=id`, at most 65536 bytes). Replies use message 33 and the same tab ID, with
+no input), and 2 queues input (`tab=id`, at most 65536 bytes). Operations 3, 4 and 5 are devices, enroll and forget
+(all `tab=0`): enroll carries length-prefixed UTF-8 name/endpoint strings, forget carries one name string, and
+devices takes no fields. Registry responses carry membership with `availability: "unchecked"`; availability probes
+are a caller-side operation, outside the daemon loop. Replies use message 33 and the same tab ID, with
 a big-endian status u32 (1 success, 0 failure), followed by the UTF-8 JSON object. JSON `api_version` is currently
 1 in list replies. Unknown operations, missing tabs and browser-only targets return explicit errors.
