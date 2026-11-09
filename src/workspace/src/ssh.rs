@@ -38,6 +38,15 @@ fn reap(pid: libc::pid_t) {
 }
 
 pub fn connect(master: &OsStr) -> io::Result<(UnixStream, Child)> {
+    connect_command(master, &[b"--bridge"])
+}
+
+/// Worp inspection never starts a remote workspace as a side effect.
+pub fn connect_worp(master: &OsStr) -> io::Result<(UnixStream, Child)> {
+    connect_command(master, &[b"api", b"--stdio"])
+}
+
+fn connect_command(master: &OsStr, command: &[&[u8]]) -> io::Result<(UnixStream, Child)> {
     let bytes = master.as_bytes();
     if bytes.is_empty() || bytes[0] == b'-' || bytes.contains(&b'\n') {
         return Err(io::Error::new(
@@ -54,9 +63,9 @@ pub fn connect(master: &OsStr) -> io::Result<(UnixStream, Child)> {
         b"-oConnectTimeout=10",
         bytes,
         daemon.to_bytes(),
-        b"--bridge",
     ]
     .into_iter()
+    .chain(command.iter().copied())
     .map(CString::new)
     .collect::<Result<Vec<_>, _>>()?;
     // SSH leads its own session, with no controlling terminal. The GUI owner inherits the

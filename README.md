@@ -10,6 +10,13 @@ Its integrated browser lets a shell command turn the current terminal tab into a
 
 The aim is to make the terminal useful for more of your work while keeping the interface small and memory use low.
 
+Worp is Worminal's high-level protocol for abstracting away the communication medium. It is an API layer that allows
+Worminal nodes to not care about the underlying method used to send messages: TCP, UDP, SSH, HTTP, etc.
+See [Worp architecture](docs/worp.md) for its application contracts and currently supported transports.
+
+Agents can discover and control existing terminal sessions with `worminald api help`;
+see [the agent interface](docs/automation.md) for listing tabs, reading screens and sending keystrokes.
+
 Installations include Atkinson Hyperlegible Mono as the default font, at 9 pt with a -3 pixel line offset.
 Explicit Alacritty font settings at build time and the `-f` command-line option override the defaults.
 

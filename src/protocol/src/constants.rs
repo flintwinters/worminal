@@ -61,6 +61,12 @@ pub const WIRE_SELECT_ALL: u32 = 31;
 /// Row, first column, then one or more complete wire cells.
 pub const WIRE_ROW_SPAN: u32 = 32;
 
+/// Automation request: operation u32 followed by optional input bytes. Reply: success u32 and UTF-8 JSON.
+pub const WIRE_WORP: u32 = 33;
+pub const WORP_LIST: u32 = 0;
+pub const WORP_READ: u32 = 1;
+pub const WORP_INPUT: u32 = 2;
+
 // Advertise before HELLO/ATTACH. Older daemons ignore the optional packet;
 // unadvertised clients must continue receiving the original row encoding.
 pub const WIRE_FEATURE_COPY_ROWS: u32 = 1 << 0;

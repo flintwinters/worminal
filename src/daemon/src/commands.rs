@@ -5,7 +5,10 @@ use crate::{
 };
 use std::io;
 use worminal_engine::{MODE_FOCUS, WORMINAL_PRINT_SCREEN, WORMINAL_TOGGLE_PRINTER};
-use worminal_protocol::*;
+use worminal_protocol::{
+    worp::{v2, Handler},
+    *,
+};
 use worminal_workspace::launch::Launch;
 
 fn integer(bytes: &[u8]) -> Option<u32> {
@@ -44,6 +47,20 @@ impl Service {
         let peer_pid = peer.pid;
         let now = self.now();
         match packet.kind {
+            WIRE_WORP => {
+                let reply = match v2::decode_request(&packet) {
+                    Ok(request) => self.handle(request)?,
+                    Err(error) => crate::api::failure(&error.to_string()),
+                };
+                let reply = if reply.json.len() + 4 + HEADER_BYTES > crate::state::CLIENT_QUEUE {
+                    crate::api::failure("Worp reply exceeds the stream queue limit.")
+                } else {
+                    reply
+                };
+                let reply = v2::encode_reply(packet.tab, &reply)?;
+                self.queue(client, reply.kind, reply.tab, reply.body);
+                return Ok(());
+            }
             WIRE_SERVICE_INFO => {
                 self.queue(
                     client,

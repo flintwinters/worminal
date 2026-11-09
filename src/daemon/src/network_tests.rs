@@ -445,3 +445,110 @@ fn row_spans_require_negotiation_and_dense_rows_keep_legacy_encoding() {
         );
     }
 }
+
+#[test]
+fn automation_reads_and_types_without_replacing_the_controller() {
+    let mut fixture = Fixture::sized(0, 20, 4, 1);
+    let (stream, _agent_peer) = UnixStream::pair().unwrap();
+    fixture.service.clients.insert(
+        2,
+        Client {
+            id: 2,
+            socket: stream,
+            pid: 0,
+            ready: false,
+            features: 0,
+            decoder: Decoder::default(),
+            output: Queue::new(CLIENT_QUEUE),
+            needs_resync: false,
+            selection: None,
+        },
+    );
+    fixture.service.tabs[0]
+        .feed(b"\x1b[2J\x1b[Hhello\r\nworld", 1)
+        .unwrap();
+    let controller = fixture.service.tabs[0].controller;
+    for operation in [WORP_LIST, WORP_READ] {
+        let tab = u32::from(operation != WORP_LIST);
+        fixture
+            .service
+            .message(
+                2,
+                Packet {
+                    kind: WIRE_WORP,
+                    tab,
+                    body: operation.to_be_bytes().to_vec(),
+                },
+            )
+            .unwrap();
+    }
+    let mut body = WORP_INPUT.to_be_bytes().to_vec();
+    body.extend_from_slice(b"message");
+    fixture
+        .service
+        .message(
+            2,
+            Packet {
+                kind: WIRE_WORP,
+                tab: 1,
+                body,
+            },
+        )
+        .unwrap();
+    assert_eq!(fixture.service.tabs[0].controller, controller);
+    assert_eq!(
+        fixture.service.tabs[0]
+            .terminal
+            .as_ref()
+            .unwrap()
+            .input
+            .pending(),
+        b"message"
+    );
+    let mut decoder = Decoder::default();
+    let mut bytes = fixture.service.clients.get(&2).unwrap().output.pending();
+    let mut replies = Vec::new();
+    while !bytes.is_empty() {
+        let (used, packet) = decoder.push(bytes).unwrap();
+        bytes = &bytes[used..];
+        if let Some(packet) = packet.filter(|packet| packet.kind == WIRE_WORP) {
+            assert_eq!(&packet.body[..4], &1u32.to_be_bytes());
+            replies.push(String::from_utf8(packet.body[4..].to_vec()).unwrap());
+        }
+    }
+    assert!(replies[0].contains("\"id\":1"));
+    assert!(replies[1].contains("\"lines\":[\"hello\",\"world\""));
+    assert!(replies[2].contains("\"queued_bytes\":7"));
+}
+
+#[test]
+fn automation_queue_rejection_keeps_the_terminal_alive() {
+    let mut fixture = Fixture::sized(0, 20, 4, 1);
+    let terminal = fixture.service.tabs[0].terminal.as_mut().unwrap();
+    terminal
+        .input
+        .append(&vec![b'x'; terminal.input.remaining() - 1])
+        .unwrap();
+    let queued = terminal.input.len();
+    let mut body = WORP_INPUT.to_be_bytes().to_vec();
+    body.extend_from_slice(b"\r");
+    fixture
+        .service
+        .message(
+            1,
+            Packet {
+                kind: WIRE_WORP,
+                tab: 1,
+                body,
+            },
+        )
+        .unwrap();
+    let terminal = fixture.service.tabs[0].terminal.as_ref().unwrap();
+    assert_eq!(terminal.input.len(), queued);
+    assert!(terminal.pty.fd().is_some());
+    assert!(fixture
+        .output()
+        .pending()
+        .windows(15)
+        .any(|bytes| bytes == b"queue is full.\""));
+}

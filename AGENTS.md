@@ -27,6 +27,10 @@ and wrappers.
 The per-user v2 daemon owns ordered tabs, PTYs and bounded scrollback. Views connect locally or through SSH
 `--master user@host`. A terminal has one live painting view and can outlive every window. Frontend replicas import
 one viewport; they never parse terminal output or recompute history/reflow. Browser records have no PTY.
+`worminald api` is the headless agent interface over Worp; see `docs/automation.md` and `docs/worp.md`.
+`src/protocol::worp` owns transport-independent requests/replies and handler/client contracts;
+local sockets and SSH bind them to the existing v2 stream protocol.
+Inspection never takes control or starts a daemon; one-shot input preserves the existing view/controller.
 The daemon atomically saves ordered terminal directories and browser URLs, scoped by protocol/workspace under
 XDG_STATE_HOME. Restart recovery creates fresh shells with the one-shot WORMINAL_RESTORE=1 marker, never replays
 commands or restores processes/scrollback. Real shell startup must respect that marker.

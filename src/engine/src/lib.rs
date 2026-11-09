@@ -5,7 +5,7 @@ mod selection;
 pub use ffi::{Cell, Engine, Error, Event, Frame, TransportState};
 pub use paste::{paste_begin, paste_end, PasteFilter};
 pub use selection::{Selection, SelectionRange};
-pub use worminal_engine_sys::WORMINAL_PENDING_BYTES;
+pub use worminal_engine_sys::{ATTR_WDUMMY, WORMINAL_PENDING_BYTES};
 pub use worminal_engine_sys::{MODE_FOCUS, MODE_REVERSE};
 pub use worminal_engine_sys::{
     WORMINAL_BELL, WORMINAL_CLIPBOARD, WORMINAL_CURSOR, WORMINAL_DIAGNOSTIC, WORMINAL_ICON_TITLE,

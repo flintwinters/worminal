@@ -1,7 +1,9 @@
-//! Safe v2 framing. No native-layout structures are sent on the wire.
+//! Worp application protocol and safe v2 transport framing.
+//! No native-layout structures are sent on the wire.
 use std::{io, mem};
 
 mod constants;
+pub mod worp;
 pub use constants::*;
 
 pub const MAX_PAYLOAD: usize = WIRE_MAX_BYTES as usize;

@@ -60,6 +60,26 @@ to stop it and end its tabs.
 connects over SSH to a service on that host; the remote account needs
 .B worminald
 in its PATH. Further hosts can be reached with ordinary SSH inside a tab.
+.SH AUTOMATION
+Run
+.B worminald api help
+to discover the headless agent interface.
+.B worminald api list
+lists existing tabs as JSON.
+.B worminald api read TAB
+reads a terminal viewport without changing its view or terminal size.
+.B worminald api type TAB TEXT
+sends literal UTF-8 text without Enter; use
+.B worminald api key TAB Enter
+to submit it. Named keys also include Tab, Escape, Backspace and Ctrl-A through Ctrl-Z.
+Input preserves the graphical controller and can execute commands in the selected terminal.
+Commands connect to the existing workspace only; they never start a daemon or restore shells.
+Use
+.B worminald api --master user@host COMMAND
+to carry the same Worp operations over SSH. The remote daemon must already be running.
+WORMINAL_SHARED_SOCKET_SCOPE selects the local workspace.
+Success returns a JSON object with ok=true and exit status 0; failures return ok=false and status 1.
+An input acknowledgement means queued for the PTY, not processed by the application.
 .SH DAEMON UPGRADES
 The release v2 service watches its executable directory. Replacing its executable automatically starts a
 replacement daemon and transfers live tabs using the validated handoff transaction.

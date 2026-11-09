@@ -162,6 +162,18 @@ fn request(scope: &[u8], kind: u32, body: Vec<u8>) -> io::Result<i32> {
 pub fn run(arguments: &[OsString]) -> io::Result<i32> {
     let scope = std::env::var_os("WORMINAL_SHARED_SOCKET_SCOPE").unwrap_or_default();
     let scope = scope.as_os_str().as_bytes();
+    if arguments.get(1).is_some_and(|value| value == "api") {
+        return crate::api_cli::run(scope, &arguments[2..]);
+    }
+    if arguments.len() == 2 && matches!(arguments[1].to_str(), Some("--help" | "-h")) {
+        println!(
+            "worminald: persistent terminal workspace service\n\
+                  Run worminald api help for the automation API.\n\
+                  Service commands: --serve, --bridge, --stop, --handin NAME, --handoff NAME, \
+                  --new-browser-tab URL|FILE"
+        );
+        return Ok(0);
+    }
     if arguments.len() == 2 {
         match arguments[1].as_os_str().as_bytes() {
             b"--serve" => {
@@ -218,7 +230,11 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
             return result;
         }
     }
-    eprintln!("usage: worminald --serve|--bridge|--stop\n       worminald --handin NAME | --handoff NAME\n       \
-               worminald --new-browser-tab URL|FILE");
+    eprintln!(
+        "usage: worminald api [help|list|read|type|key] (agent-friendly JSON API)\n\
+               worminald --serve|--bridge|--stop\n\
+               worminald --handin NAME | --handoff NAME\n       \
+               worminald --new-browser-tab URL|FILE"
+    );
     Ok(2)
 }
