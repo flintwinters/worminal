@@ -46,8 +46,12 @@ fn ensure(scope: &[u8]) -> io::Result<(std::os::unix::net::UnixStream, Option<Ch
     }
 }
 
-fn bridge(scope: &[u8]) -> io::Result<()> {
-    let (mut socket, mut child) = ensure(scope)?;
+fn bridge(scope: &[u8], existing: bool) -> io::Result<()> {
+    let (mut socket, mut child) = if existing {
+        (connect(scope)?, None)
+    } else {
+        ensure(scope)?
+    };
     socket.set_nonblocking(true)?;
     let mut input = process::StdioDescriptor::new(0)?;
     let mut output = process::StdioDescriptor::new(1)?;
@@ -193,8 +197,8 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
                 crate::service::receive_upgrade(scope, arguments[1] == "--handoff-receiver")?;
                 return Ok(0);
             }
-            b"--bridge" => {
-                bridge(scope)?;
+            b"--bridge" | b"--bridge-existing" => {
+                bridge(scope, arguments[1] == "--bridge-existing")?;
                 return Ok(0);
             }
             b"--stop" => {

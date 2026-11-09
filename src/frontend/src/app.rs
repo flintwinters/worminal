@@ -32,8 +32,11 @@ use config::Config;
 mod broker;
 #[path = "app_config.rs"]
 mod config;
+#[path = "app_upgrade.rs"]
+mod upgrade;
 #[path = "app_window_state.rs"]
 mod window_state;
+pub(crate) use upgrade::prepare_runtime;
 
 fn scope() -> Vec<u8> {
     std::env::var_os("WORMINAL_SHARED_SOCKET_SCOPE")
@@ -89,9 +92,13 @@ struct Connection {
     bytes: usize,
 }
 impl Connection {
-    fn new(master: Option<&OsStr>) -> io::Result<Self> {
+    fn new(master: Option<&OsStr>, existing: bool) -> io::Result<Self> {
         let (socket, ssh) = if let Some(master) = master {
-            let (socket, child) = worminal_workspace::ssh::connect(master)?;
+            let (socket, child) = if existing {
+                worminal_workspace::ssh::connect_existing(master)?
+            } else {
+                worminal_workspace::ssh::connect(master)?
+            };
             (socket, Some(child))
         } else {
             (connect()?, None)
@@ -217,6 +224,9 @@ struct App {
     writer: RefCell<Option<glib::SourceId>>,
     reconnect: RefCell<Option<glib::SourceId>>,
     closing: Cell<bool>,
+    replacing: Cell<bool>,
+    replacement_frame: Cell<bool>,
+    defer_navigation: Cell<bool>,
     geometry_pending: Cell<bool>,
     early_keys: RefCell<VecDeque<gdk::EventKey>>,
     initial_claim: Cell<bool>,
@@ -230,11 +240,9 @@ impl App {
         output.flush()
     }
     fn open(config: Config) -> io::Result<Rc<Self>> {
-        // New launches may arrive in an existing GTK owner after service loss. The shared
-        // posix_spawn boundary can recover the service here without GUI-process fork hooks.
-        if config.master.is_none() {
-            ensure()?;
-        }
+        Self::open_mode(config, false)
+    }
+    fn replacement_window(config: &Config) -> gtk::Window {
         if let Some(class) = &config.class {
             gdk::set_program_class(class);
         }
@@ -245,12 +253,22 @@ impl App {
         window.set_title(&config.title);
         window.set_default_size(1000, 600);
         window.set_resizable(!config.fixed);
+        window
+    }
+    fn open_mode(config: Config, staged: bool) -> io::Result<Rc<Self>> {
+        // New launches may arrive in an existing GTK owner after service loss. The shared
+        // posix_spawn boundary can recover the service here without GUI-process fork hooks.
+        if config.master.is_none() && !staged {
+            ensure()?;
+        }
+        let window = Self::replacement_window(&config);
         let notebook = gtk::Notebook::new();
         notebook.set_show_tabs(false);
         notebook.set_show_border(false);
         let fonts = Rc::new(RefCell::new(Fonts::new(config.font.clone(), config.zoom)));
         let tabstrip = crate::tabs::Tabs::new(fonts.clone());
         let status = gtk::Label::new(None);
+        status.set_ellipsize(gtk::pango::EllipsizeMode::End);
         status.set_no_show_all(true);
         let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
         container.pack_start(tabstrip.widget(), false, false, 0);
@@ -274,6 +292,9 @@ impl App {
             writer: RefCell::new(None),
             reconnect: RefCell::new(None),
             closing: Cell::new(false),
+            replacing: Cell::new(staged),
+            replacement_frame: Cell::new(false),
+            defer_navigation: Cell::new(staged),
             geometry_pending: Cell::new(true),
             early_keys: RefCell::new(VecDeque::new()),
             initial_claim: Cell::new(true),
@@ -298,7 +319,7 @@ impl App {
         );
         app.window.connect_focus_in_event(glib::clone!(@weak app => @default-return glib::Propagation::Proceed,
             move |_, _| {
-                if app.pages.borrow().iter().any(|page| page.id == app.active.get() && page.browser) {
+                if !app.replacing.get() && app.pages.borrow().iter().any(|page| page.id == app.active.get() && page.browser) {
                     app.claim_browser(app.active.get());
                 }
                 glib::Propagation::Proceed
@@ -330,7 +351,9 @@ impl App {
         }
         WINDOWS.with(|windows| windows.borrow_mut().push(app.clone()));
         window_state::changed();
-        crate::graphics_ffi::show_window(&app.window);
+        if !staged {
+            crate::graphics_ffi::show_window(&app.window);
+        }
         Ok(app)
     }
     fn message(&self, message: Option<&str>) {
@@ -338,7 +361,7 @@ impl App {
         self.status.set_visible(message.is_some());
     }
     fn establish(self: &Rc<Self>, launch: bool) -> io::Result<()> {
-        let connection = Connection::new(self.config.master.as_deref())?;
+        let connection = Connection::new(self.config.master.as_deref(), self.replacing.get())?;
         let fd = connection.socket.as_raw_fd();
         *self.connection.borrow_mut() = Some(connection);
         self.initial_claim.set(true);
@@ -496,6 +519,11 @@ impl App {
         if let Some(title) = title {
             self.window.set_title(&title);
         }
+        if self.replacing.get() {
+            self.refresh_tabs();
+            window_state::changed();
+            return;
+        }
         if let Some(terminal) = self.terminal(id) {
             self.fit_geometry(&terminal);
             let (cols, rows) = terminal.dimensions();
@@ -533,6 +561,9 @@ impl App {
         }
     }
     fn action(self: &Rc<Self>, id: u32, action: Action) {
+        if self.replacing.get() {
+            return;
+        }
         match action {
             Action::Send(kind, bytes) => {
                 // Keys, paste and mouse reports answer a bell; focus reports use WIRE_FOCUS_STATE.
@@ -610,6 +641,9 @@ impl App {
             _ => {
                 if let Some(terminal) = self.terminal(packet.tab) {
                     terminal.packet(&packet)?;
+                    if packet.kind == WIRE_FRAME_FINISH && packet.tab == self.active.get() {
+                        self.replacement_frame.set(true);
+                    }
                 }
             }
         }
@@ -892,6 +926,9 @@ pub(crate) fn run_with_listener(
     listener: Option<std::os::unix::net::UnixListener>,
     candidate: bool,
 ) -> io::Result<()> {
+    if arguments.len() == 3 && arguments[1] == "--replace-owner" {
+        return upgrade::receive(&arguments[2], candidate);
+    }
     worminal_workspace::browser_target::command(&arguments)?;
     let request = worminal_workspace::broker::Request::capture(arguments)?;
     let Some(config) = Config::parse(&request, candidate)? else {
@@ -909,7 +946,8 @@ pub(crate) fn run_with_listener(
     gtk::init().map_err(|error| io::Error::other(format!("cannot open display: {error}")))?;
     let _window_state = window_state::start();
     App::open(config)?;
-    let _broker = broker::serve(listener, candidate)?;
+    let broker = broker::serve(listener, candidate)?;
+    let _updater = upgrade::watch(broker, candidate)?;
     gtk::main();
     Ok(())
 }

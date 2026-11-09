@@ -20,6 +20,7 @@ struct Module {
     api: &'static WorminalRustBrowser,
     identity: (u64, u64),
     _file: File,
+    transfer: WorminalBrowserProfileTransfer,
 }
 struct UnpublishedLibrary(*mut c_void);
 impl Drop for UnpublishedLibrary {
@@ -30,6 +31,7 @@ impl Drop for UnpublishedLibrary {
     }
 }
 struct Profile {
+    module: Rc<Module>,
     object: glib::Object,
     _lock: File,
 }
@@ -40,6 +42,9 @@ const WORMINAL_BROWSER_PROFILE_LOCK: &str = "owner.lock";
 thread_local! {
     // Code remains resident for framework callbacks after the last view/context is released.
     static MODULES: RefCell<Vec<Rc<Module>>> = const { RefCell::new(Vec::new()) };
+    static PINNED: RefCell<Option<Rc<Module>>> = const { RefCell::new(None) };
+    static LEASE: RefCell<Option<File>> = const { RefCell::new(None) };
+    static LIVE: RefCell<Vec<std::rc::Weak<Inner>>> = const { RefCell::new(Vec::new()) };
     static PROFILE: RefCell<Option<Profile>> = const { RefCell::new(None) };
     static PROFILE_NAME: RefCell<&'static str> = const { RefCell::new(WORMINAL_BROWSER_PROFILE_CANDIDATE) };
 }
@@ -97,6 +102,9 @@ fn loader_error() -> io::Error {
     })
 }
 fn module() -> io::Result<Rc<Module>> {
+    if let Some(module) = PINNED.with(|slot| slot.borrow().clone()) {
+        return Ok(module);
+    }
     let file = File::open(module_path()?)?;
     let info = file.metadata()?;
     let identity = (info.dev(), info.ino());
@@ -136,8 +144,16 @@ fn module() -> io::Result<Rc<Module>> {
         {
             return Err(io::Error::other("incomplete Rust browser module"));
         }
+        let pointer =
+            unsafe { libc::dlsym(handle, c"worminal_browser_profile_transfer_v1".as_ptr()) };
+        let transfer = if pointer.is_null() {
+            None
+        } else {
+            unsafe { std::mem::transmute::<*mut c_void, WorminalBrowserProfileTransfer>(pointer) }
+        };
         let module = Rc::new(Module {
             api,
+            transfer,
             identity,
             _file: file,
         });
@@ -156,7 +172,7 @@ fn module() -> io::Result<Rc<Module>> {
         Ok(module)
     })
 }
-fn profile(module: &Module) -> io::Result<glib::Object> {
+fn profile(module: &Rc<Module>) -> io::Result<glib::Object> {
     PROFILE.with(|slot| {
         if let Some(profile) = slot.borrow().as_ref() {
             return Ok(profile.object.clone());
@@ -171,13 +187,22 @@ fn profile(module: &Module) -> io::Result<glib::Object> {
                 .mode(0o700)
                 .create(directory)?;
         }
-        let lock = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .mode(0o600)
-            .open(data.join(WORMINAL_BROWSER_PROFILE_LOCK))?;
+        let lock = if let Some(lock) = LEASE.with(|slot| slot.borrow_mut().take()) {
+            let expected = std::fs::metadata(data.join(WORMINAL_BROWSER_PROFILE_LOCK))?;
+            let actual = lock.metadata()?;
+            if (expected.dev(), expected.ino()) != (actual.dev(), actual.ino()) {
+                return Err(io::Error::other("Browser profile lease identity changed"));
+            }
+            lock
+        } else {
+            OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .read(true)
+                .write(true)
+                .mode(0o600)
+                .open(data.join(WORMINAL_BROWSER_PROFILE_LOCK))?
+        };
         if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
             return Err(io::Error::other(
                 "Rust browser profile is already open in another owner",
@@ -193,6 +218,7 @@ fn profile(module: &Module) -> io::Result<glib::Object> {
         }
         let object: glib::Object = unsafe { from_glib_full(pointer.cast()) };
         *slot.borrow_mut() = Some(Profile {
+            module: module.clone(),
             object: object.clone(),
             _lock: lock,
         });
@@ -234,12 +260,14 @@ impl Browser {
             return Err(io::Error::other("browser returned no widget"));
         }
         let widget = unsafe { from_glib_none(pointer.cast::<gtk::ffi::GtkWidget>()) };
-        Ok(Self(Rc::new(Inner {
+        let inner = Rc::new(Inner {
             module,
             handle,
             widget,
             _callback: callback,
-        })))
+        });
+        LIVE.with(|live| live.borrow_mut().push(Rc::downgrade(&inner)));
+        Ok(Self(inner))
     }
     pub fn widget(&self) -> &gtk::Widget {
         &self.0.widget
@@ -280,5 +308,128 @@ impl Browser {
                 color.alpha(),
             );
         }
+    }
+}
+
+/// Retain the healthy generation for export and rollback even if the published module is broken.
+pub(crate) fn pin_for_update() {
+    let module = PROFILE.with(|slot| slot.borrow().as_ref().map(|profile| profile.module.clone()));
+    if let Some(module) = module {
+        PINNED.with(|slot| *slot.borrow_mut() = Some(module));
+    }
+}
+pub(crate) fn preflight() -> io::Result<()> {
+    module().map(|_| ())
+}
+pub(crate) fn lease() -> io::Result<Option<File>> {
+    PROFILE.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map(|profile| profile._lock.try_clone())
+            .transpose()
+    })
+}
+pub(crate) fn adopt(lock: File) -> io::Result<()> {
+    if PROFILE.with(|slot| slot.borrow().is_some()) {
+        return Err(io::Error::other("Browser profile already active"));
+    }
+    LEASE.with(|slot| *slot.borrow_mut() = Some(lock));
+    Ok(())
+}
+pub(crate) fn quiesce() -> io::Result<()> {
+    if LIVE.with(|live| live.borrow().iter().any(|view| view.strong_count() != 0)) {
+        return Err(io::Error::other("Browser views are still active"));
+    }
+    MODULES.with(|modules| {
+        for module in modules.borrow().iter() {
+            unsafe {
+                module.api.retire.unwrap()(1);
+            }
+        }
+    });
+    PROFILE.with(|slot| slot.borrow_mut().take());
+    Ok(())
+}
+
+type ProfileResult = Box<dyn FnOnce(io::Result<Vec<u8>>)>;
+unsafe extern "C" fn profile_reply(
+    context: *mut c_void,
+    status: i32,
+    bytes: *const u8,
+    length: u64,
+) {
+    let callback = unsafe { Box::from_raw(context.cast::<ProfileResult>()) };
+    let result = if status == 0
+        && length <= worminal_protocol::MAX_PAYLOAD as u64
+        && (length == 0 || !bytes.is_null())
+    {
+        Ok(if length == 0 {
+            Vec::new()
+        } else {
+            unsafe { std::slice::from_raw_parts(bytes, length as usize) }.to_vec()
+        })
+    } else {
+        Err(io::Error::other("Browser cookie transfer failed"))
+    };
+    // Drop the module's async profile references before a caller retires the profile.
+    glib::idle_add_local_once(move || callback(result));
+}
+pub(crate) fn cookies(
+    input: Option<&[u8]>,
+    callback: impl FnOnce(io::Result<Vec<u8>>) + 'static,
+) -> io::Result<()> {
+    let module = module()?;
+    let profile = if input.is_none() {
+        let profile =
+            PROFILE.with(|slot| slot.borrow().as_ref().map(|profile| profile.object.clone()));
+        let Some(profile) = profile else {
+            callback(Ok(Vec::new()));
+            return Ok(());
+        };
+        profile
+    } else {
+        profile(&module)?
+    };
+    let transfer = module
+        .transfer
+        .ok_or_else(|| io::Error::other("Browser module lacks cookie handoff support"))?;
+    let callback: Box<ProfileResult> = Box::new(Box::new(callback));
+    let pointer = Box::into_raw(callback);
+    let (bytes, size) = input.map_or((std::ptr::null(), 0), |bytes| {
+        (bytes.as_ptr(), bytes.len() as u64)
+    });
+    if unsafe {
+        transfer(
+            profile.as_ptr().cast(),
+            bytes,
+            size,
+            Some(profile_reply),
+            pointer.cast(),
+        )
+    } == 0
+    {
+        drop(unsafe { Box::from_raw(pointer) });
+        return Err(io::Error::other("WebKit lacks safe cookie handoff APIs"));
+    }
+    Ok(())
+}
+
+pub(crate) fn update_artifact() -> io::Result<Option<(PathBuf, File)>> {
+    let path = module_path()?;
+    if let Some(file) = MODULES
+        .with(|modules| {
+            modules
+                .borrow()
+                .last()
+                .map(|module| module._file.try_clone())
+        })
+        .transpose()?
+    {
+        return Ok(Some((path, file)));
+    }
+    match File::open(&path) {
+        Ok(file) => Ok(Some((path, file))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
     }
 }

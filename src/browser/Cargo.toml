@@ -9,6 +9,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 worminal-browser-api = { path = "../browser-api" }
+worminal-protocol = { path = "../protocol" }
 worminal-workspace = { path = "../workspace" }
 gtk.workspace = true
 glib.workspace = true

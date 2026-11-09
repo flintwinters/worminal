@@ -9,6 +9,9 @@ use worminal_protocol::{WIRE_CLOSE, WIRE_FEATURE_SELECT_ALL};
 impl App {
     #[expect(clippy::too_many_lines, reason = "one arm per keyboard shortcut")]
     pub(super) fn shortcut(self: &Rc<Self>, event: &gdk::EventKey) -> bool {
+        if self.replacing.get() {
+            return true;
+        }
         // Windows map before their initial catalog arrives. Preserve early keystrokes until a widget exists.
         if self.active.get() == 0
             && (self.initial_claim.get()

@@ -2,6 +2,7 @@
 pub mod broker;
 pub mod browser_target;
 pub mod devices;
+pub mod gui_handoff;
 pub mod handoff;
 pub mod launch;
 pub mod recovery;

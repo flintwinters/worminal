@@ -136,3 +136,17 @@ pub fn show_line(context: &cairo::Context, line: &pango::LayoutLine) {
         pango_cairo_show_layout_line(context.to_raw_none(), line);
     }
 }
+
+pub(crate) fn x11(window: &gtk::Window) -> bool {
+    use gtk::prelude::*;
+    #[cfg(worminal_gdk_x11)]
+    {
+        let kind: glib::Type = unsafe { glib::translate::from_glib(gdk_x11_display_get_type()) };
+        window.display().type_().is_a(kind)
+    }
+    #[cfg(not(worminal_gdk_x11))]
+    {
+        let _ = window;
+        false
+    }
+}

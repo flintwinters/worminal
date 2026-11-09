@@ -1,9 +1,10 @@
 //! GLib helpers and frontend module loading.
 use std::{
     ffi::{CStr, CString, OsString},
+    fs::File,
     io,
     os::{
-        fd::IntoRawFd,
+        fd::{AsRawFd, IntoRawFd},
         unix::{ffi::OsStrExt, net::UnixListener},
     },
     path::Path,
@@ -71,7 +72,12 @@ pub fn enter(
     let filename = CStr::from_bytes_with_nul(filename).unwrap();
     let filename = std::ffi::OsStr::from_bytes(filename.to_bytes());
     let path = directory.join("../lib/worminal").join(filename);
-    let path = CString::new(Path::new(&path).as_os_str().as_bytes()).map_err(io::Error::other)?;
+    let frontend = File::open(&path)?;
+    let executable_file = File::open("/proc/self/exe")?;
+    let source_path =
+        CString::new(Path::new(&path).as_os_str().as_bytes()).map_err(io::Error::other)?;
+    // Pin the same inode we load, avoiding dlopen's pathname cache and install-time replacement races.
+    let path = CString::new(format!("/proc/self/fd/{}", frontend.as_raw_fd())).unwrap();
     let entry = unsafe {
         let handle = libc::dlopen(path.as_ptr(), libc::RTLD_LAZY | libc::RTLD_LOCAL);
         if handle.is_null() {
@@ -82,6 +88,28 @@ pub fn enter(
             let error = loader_error();
             libc::dlclose(handle);
             return Err(error);
+        }
+        let runtime = libc::dlsym(
+            handle,
+            bindings::WORMINAL_RUST_FRONTEND_RUNTIME_SYMBOL
+                .as_ptr()
+                .cast(),
+        );
+        if !runtime.is_null() {
+            let runtime: bindings::WorminalRustFrontendRuntimeEntry = std::mem::transmute(runtime);
+            let executable_path =
+                CString::new(executable.as_os_str().as_bytes()).map_err(io::Error::other)?;
+            if runtime.unwrap()(
+                executable_file.as_raw_fd(),
+                frontend.as_raw_fd(),
+                executable_path.as_ptr(),
+                source_path.as_ptr(),
+            ) != 0
+            {
+                return Err(io::Error::other(
+                    "Cannot initialize frontend update identity",
+                ));
+            }
         }
         // Use the function type generated from the C header. Keep the library loaded for callbacks
         // until the process exits.

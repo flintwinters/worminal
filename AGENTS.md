@@ -57,7 +57,7 @@ versioned C module ABIs with opaque handles and explicit callbacks; no Rust cont
 view pins its creating generation; generations share a persistent profile manager. Keep code resident for async
 callbacks and release unused contexts. Never let concurrent owners write the same browser profile. Candidate
 owners/profiles are isolated from the stable installation. Browser moves preserve live DOM within the local owner;
-remote workspaces share saved URLs only. GTK/frontend updates require closing their old owners.
+remote workspaces share saved URLs only. Updated owners stage automatic window replacement; see `docs/window-updates.md`. Older owners need one manual restart.
 
 Painting preserves matching background runs, overlapping glyph/cursor damage, fractional-grid fallback and Unicode
 font fallback. Cache printable ASCII shaping only. Views defer unused buffers/layouts/input methods/timers.

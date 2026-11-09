@@ -55,7 +55,8 @@ fn run(candidate: bool) -> io::Result<()> {
         && ["-h", "--help", "-v", "--version"]
             .iter()
             .any(|flag| args[1] == *flag);
-    let listener = if local {
+    let replacing = args.len() == 3 && args[1] == "--replace-owner";
+    let listener = if local || replacing {
         None
     } else {
         let outcome = forward(&args, candidate);

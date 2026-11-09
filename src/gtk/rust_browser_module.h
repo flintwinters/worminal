@@ -25,4 +25,12 @@ typedef struct {
     void (*retire)(uint32_t); /* zero reactivates a restored compatible generation */
 } WorminalRustBrowser;
 const WorminalRustBrowser *worminal_rust_browser_module(uint32_t);
+/* Additive private update hook: null input exports cookies; nonnull input imports them.
+ * Reply data is borrowed only during the callback. Zero return means unsupported/error before callback. */
+typedef void (*WorminalBrowserProfileReply)(void *, int32_t, const uint8_t *, uint64_t);
+typedef int32_t (*WorminalBrowserProfileTransfer)(void *, const uint8_t *, uint64_t,
+                                                WorminalBrowserProfileReply, void *);
+int32_t worminal_browser_profile_transfer_v1(void *, const uint8_t *, uint64_t,
+                                            WorminalBrowserProfileReply, void *);
+
 #endif

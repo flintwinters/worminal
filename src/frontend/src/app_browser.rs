@@ -120,7 +120,7 @@ impl App {
                     view.zoom(self.fonts.borrow().zoom());
                     view.background(page.palette.borrow().color(259));
                     // New views start blank; moved views retain their current document and page state.
-                    if is_new {
+                    if is_new && !self.defer_navigation.get() {
                         view.navigate(&page.url);
                     }
                 }
@@ -152,7 +152,7 @@ impl App {
             page.url = record.url.clone();
             changed
         };
-        if changed {
+        if changed && !self.defer_navigation.get() {
             if let Some(view) = self.browser(record.id) {
                 view.navigate(&record.url);
             }
@@ -164,7 +164,9 @@ fn event(master: &Option<OsString>, id: u32, kind: u32, value: &str) {
         windows
             .borrow()
             .iter()
-            .filter(|app| !app.closing.get() && &app.config.master == master)
+            .filter(|app| {
+                !app.closing.get() && !app.replacing.get() && &app.config.master == master
+            })
             .cloned()
             .collect()
     });

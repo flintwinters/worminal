@@ -10,6 +10,11 @@
 #define WORMINAL_RUST_FRONTEND_SYMBOL "worminal_rust_frontend_v2"
 #define WORMINAL_RUST_FRONTEND_FILE "frontend-rust-v2.so"
 #define WORMINAL_RUST_FRONTEND_CANDIDATE 1
+/* Optional additive runtime identity hook. Paths and descriptors are borrowed during the call;
+ * the frontend duplicates descriptors to pin the exact loaded inodes for update detection. */
+#define WORMINAL_RUST_FRONTEND_RUNTIME_SYMBOL "worminal_frontend_runtime_v1"
+typedef int32_t (*WorminalRustFrontendRuntimeEntry)(int32_t, int32_t, const char *, const char *);
+int32_t worminal_frontend_runtime_v1(int32_t, int32_t, const char *, const char *);
 typedef int32_t (*WorminalRustFrontendEntry)(int32_t, const char *const *, int32_t, uint32_t);
 int32_t worminal_rust_frontend_v2(int32_t, const char *const *, int32_t, uint32_t);
 #endif

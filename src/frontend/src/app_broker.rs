@@ -128,3 +128,17 @@ pub(super) fn serve(listener: UnixListener, candidate: bool) -> io::Result<Rc<Se
     ));
     Ok(server)
 }
+
+impl Server {
+    pub(super) fn pause(&self) {
+        if let Some(reader) = self.reader.borrow_mut().take() {
+            reader.remove();
+        }
+    }
+    pub(super) fn listener(&self) -> io::Result<UnixListener> {
+        self.listener.try_clone()
+    }
+    pub(super) fn idle(&self) -> bool {
+        self.peers.borrow().is_empty()
+    }
+}

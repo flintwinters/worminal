@@ -19,7 +19,8 @@ starting another shell. The separate `worminal-rust` executable is for testing n
 
 The launcher, frontend and browser communicate through versioned C APIs. They pass handles and callbacks rather
 than Rust containers. Each browser view keeps using the module that created it. New views can use updated code
-while existing views keep their page state. Modules share a single browser profile manager.
+while existing views keep their page state within an owner. Modules share a single browser profile manager.
+Automatic owner replacement reloads browser pages while transferring cookies; see `window-updates.md`.
 
 ## Sessions and upgrades
 

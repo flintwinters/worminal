@@ -71,3 +71,27 @@ pub unsafe extern "C" fn worminal_rust_frontend_v2(
 }
 // Compile-time check against the C header's entrypoint type.
 const _: bindings::WorminalRustFrontendEntry = Some(worminal_rust_frontend_v2);
+
+/// Additive hook; descriptors and C strings remain owned by the launcher.
+#[no_mangle]
+pub unsafe extern "C" fn worminal_frontend_runtime_v1(
+    executable: i32,
+    frontend: i32,
+    executable_path: *const c_char,
+    frontend_path: *const c_char,
+) -> i32 {
+    let result = catch_unwind(AssertUnwindSafe(|| -> io::Result<()> {
+        if executable < 0 || frontend < 0 || executable_path.is_null() || frontend_path.is_null() {
+            return Err(io::Error::other("invalid frontend runtime identity"));
+        }
+        unsafe {
+            crate::app::prepare_runtime(
+                executable,
+                frontend,
+                CStr::from_ptr(executable_path),
+                CStr::from_ptr(frontend_path),
+            )
+        }
+    }));
+    i32::from(!matches!(result, Ok(Ok(()))))
+}

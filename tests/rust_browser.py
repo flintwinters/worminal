@@ -313,7 +313,7 @@ class RustBrowserTest(unittest.TestCase):
                 self.assertTrue(ready.wait(12), 'native Wayland browser did not run document frame callbacks')
                 self.assertIsNone(app.poll())
 
-    def test_module_replacement_pins_live_views_and_shares_only_profile_state(self):
+    def test_module_replacement_reloads_views_and_transfers_cookie_profile(self):
         class Handler(Fixture):
             def do_GET(self):
                 body = (b'<!doctype html><script>const shared=document.cookie.includes("shared=ok");'
@@ -336,18 +336,39 @@ class RustBrowserTest(unittest.TestCase):
                 subprocess.run(['xdotool', 'type', '--clearmodifiers', 'kept'], env=env, check=True)
                 title(env, 'Edited:kept', app)
                 original = module.stat().st_ino
+                healthy = module.read_bytes()
+                pending = module.with_suffix('.pending')
+                pending.write_bytes(b'not a shared library')
+                pending.replace(module)
+                time.sleep(2)
+                title(env, 'Edited:kept', app)
+                pending.write_bytes(healthy)
+                pending.replace(module)
+                original = module.stat().st_ino
                 shutil.copy2(module, module.with_suffix('.pending'))
                 module.with_suffix('.pending').replace(module)
                 self.assertNotEqual(original, module.stat().st_ino)
-                subprocess.run([executable, '--browser', url], env=env, check=True,
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=8)
-                title(env, 'Shared:new', app)
-                mappings = Path(f'/proc/{app.pid}/maps').read_text().splitlines()
-                generations = {line.split()[4] for line in mappings if RUST_BROWSER_MODULE in line}
-                self.assertEqual(len(generations), 2, 'new tabs did not load the newly published module inode')
-                subprocess.run(['xdotool', 'windowfocus', '--sync', first], env=env, check=True)
-                subprocess.run(['xdotool', 'type', '--clearmodifiers', '!'], env=env, check=True)
-                title(env, 'Edited:kept!', app)
+                replacement = None
+                try:
+                    deadline = time.monotonic() + 20
+                    while time.monotonic() < deadline:
+                        found = subprocess.run(['xdotool', 'search', '--onlyvisible', '--name', '^Shared:new$'],
+                                               env=env, capture_output=True, text=True)
+                        if found.returncode == 0:
+                            replacement = int(subprocess.check_output(
+                                ['xdotool', 'getwindowpid', found.stdout.splitlines()[0]], env=env, text=True))
+                            break
+                        time.sleep(.03)
+                    self.assertIsNotNone(replacement, 'Updated browser did not reload with its session cookie')
+                    self.assertNotEqual(replacement, app.pid)
+                    app.wait(timeout=5)
+                    mappings = Path(f'/proc/{replacement}/maps').read_text().splitlines()
+                    generations = {line.split()[4] for line in mappings if RUST_BROWSER_MODULE in line}
+                    self.assertEqual(generations, {str(module.stat().st_ino)})
+                finally:
+                    if replacement is not None:
+                        os.kill(replacement, signal.SIGTERM)
+                        time.sleep(.3)
 
     def test_owner_forwarding_navigation_live_dom_and_daemon_replacement(self):
         with isolated_display() as display, profile(display) as env, fixture() as url, service(env) as daemon:

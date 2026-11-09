@@ -7,7 +7,7 @@ fn main() {
     bindgen::Builder::default()
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .header(header.to_str().unwrap())
-        .allowlist_type("Worminal.*FrontendEntry")
+        .allowlist_type("Worminal.*Frontend.*Entry")
         .allowlist_var("WORMINAL_.*FRONTEND_.*")
         .generate()
         .expect("generate frontend module ABI")

@@ -3,6 +3,7 @@ mod boundary;
 mod chrome;
 mod local;
 mod policy;
+mod profile_transfer;
 
 use gtk::{gio, prelude::*};
 use std::{

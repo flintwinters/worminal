@@ -38,3 +38,20 @@ fn detached(arguments: &[CString]) -> io::Result<Receiver<io::Result<i32>>> {
         })?;
     Ok(receiver)
 }
+
+pub fn replacement(executable: &Path, token: &str) -> io::Result<worminal_workspace::spawn::Child> {
+    let null = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/null")?;
+    let pid = worminal_workspace::spawn::start(
+        &[
+            CString::new(executable.as_os_str().as_bytes())?,
+            CString::new("--replace-owner").unwrap(),
+            CString::new(token)?,
+        ],
+        &[(null.as_fd(), 0), (null.as_fd(), 1), (null.as_fd(), 2)],
+        true,
+    )?;
+    worminal_workspace::spawn::own(pid, "worminal-ui-replacement")
+}

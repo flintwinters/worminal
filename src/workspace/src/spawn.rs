@@ -131,3 +131,71 @@ pub fn wait(pid: libc::pid_t) -> io::Result<i32> {
         }
     }
 }
+
+/// A local child whose identity survives waiter reaping. Drop signals only this exact process.
+pub struct Child {
+    pid: libc::pid_t,
+    identity: OwnedFd,
+    exit: std::sync::mpsc::Receiver<io::Result<i32>>,
+}
+impl Child {
+    pub fn pid(&self) -> libc::pid_t {
+        self.pid
+    }
+    pub fn signal(&self, signal: libc::c_int) {
+        unsafe {
+            libc::syscall(
+                libc::SYS_pidfd_send_signal,
+                self.identity.as_raw_fd(),
+                signal,
+                std::ptr::null::<libc::siginfo_t>(),
+                0,
+            );
+        }
+    }
+    pub fn exited(&self) -> bool {
+        let mut poll = libc::pollfd {
+            fd: self.identity.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        !matches!(
+            self.exit.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ) || unsafe { libc::poll(&mut poll, 1, 0) } != 0
+    }
+}
+impl Drop for Child {
+    fn drop(&mut self) {
+        self.signal(libc::SIGTERM);
+    }
+}
+
+pub fn own(pid: libc::pid_t, name: &str) -> io::Result<Child> {
+    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
+    if fd < 0 {
+        let error = io::Error::last_os_error();
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
+        }
+        let _ = wait(pid);
+        return Err(error);
+    }
+    let (send, exit) = std::sync::mpsc::sync_channel(1);
+    let child = Child {
+        pid,
+        identity: unsafe { OwnedFd::from_raw_fd(fd as i32) },
+        exit,
+    };
+    if let Err(error) = std::thread::Builder::new()
+        .name(name.into())
+        .spawn(move || {
+            let _ = send.send(wait(pid));
+        })
+    {
+        child.signal(libc::SIGKILL);
+        let _ = wait(pid);
+        return Err(error);
+    }
+    Ok(child)
+}

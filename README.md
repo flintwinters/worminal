@@ -8,6 +8,9 @@ Worminal is a small Linux terminal that keeps your work independent of its windo
 
 Its integrated browser lets a shell command turn the current terminal tab into a web page or local HTML tool, putting graphical tools directly into your shell workflow. Local HTML tools can read files and list directories through a limited, read-only API, so something like a file explorer can live beside your shells as an ordinary web document you can edit and reload without rebuilding Worminal.
 
+Updates [replace open windows automatically](docs/window-updates.md) while keeping terminal processes alive.
+Browser pages reload with their profile and cookies retained.
+
 The aim is to make the terminal useful for more of your work while keeping the interface small and memory use low.
 
 Worp is Worminal's high-level protocol for abstracting away the communication medium. It is an API layer that allows

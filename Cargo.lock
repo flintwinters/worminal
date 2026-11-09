@@ -1009,6 +1009,7 @@ dependencies = [
  "soup3",
  "webkit2gtk",
  "worminal-browser-api",
+ "worminal-protocol",
  "worminal-workspace",
 ]
 

@@ -210,3 +210,54 @@ impl Config {
         Ok(output.into_bytes())
     }
 }
+
+impl Config {
+    pub(super) fn replacement_request(&self) -> io::Result<worminal_workspace::broker::Request> {
+        use std::os::unix::ffi::OsStringExt;
+        let mut args: Vec<OsString> = vec![
+            "worminal".into(),
+            "--attach".into(),
+            "-T".into(),
+            self.title.clone().into(),
+            "-g".into(),
+            format!("{}x{}", self.columns, self.rows).into(),
+        ];
+        if let Some(master) = &self.master {
+            args.extend(["--master".into(), master.clone()]);
+        }
+        for (flag, value) in [("-f", &self.font), ("-c", &self.class), ("-n", &self.name)] {
+            if let Some(value) = value {
+                args.extend([flag.into(), value.into()]);
+            }
+        }
+        if !self.alternate {
+            args.push("-a".into());
+        }
+        if self.fixed {
+            args.push("-i".into());
+        }
+        if self.output == "-" {
+            args.extend(["-o".into(), "-".into()]);
+        }
+        let environment = self
+            .environment
+            .iter()
+            .map(|(key, value)| {
+                let mut bytes = key.as_os_str().as_bytes().to_vec();
+                bytes.push(b'=');
+                bytes.extend_from_slice(value.as_os_str().as_bytes());
+                OsString::from_vec(bytes)
+            })
+            .collect();
+        Ok(worminal_workspace::broker::Request {
+            args,
+            directory: if self.cwd.is_absolute() {
+                self.cwd.clone()
+            } else {
+                "/".into()
+            },
+            environment,
+            output: self.stream.try_clone()?,
+        })
+    }
+}
