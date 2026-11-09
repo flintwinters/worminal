@@ -810,7 +810,10 @@ pub(super) fn receive(token: &OsStr, candidate: bool) -> io::Result<()> {
                 Err(_) => {
                     let _ = send(&mut connection.borrow_mut(), ABORT, Vec::new());
                     for app in windows() {
-                        app.window.close();
+                        // Hidden staged windows have never mapped: close() would not destroy them.
+                        unsafe {
+                            app.window.destroy();
+                        }
                     }
                     glib::MainContext::default().wakeup();
                     glib::ControlFlow::Break
