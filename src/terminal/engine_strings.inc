@@ -39,6 +39,9 @@ te_strhandle(TermEngine *session)
 			if (narg > 1)
 				te_xsettitle(session, strescseq.args[1]);
 			return;
+		case 8: /* hyperlink: OSC 8 ; params ; URI */
+			te_oschyperlink(session);
+			return;
 		case 52: /* manipulate selection data */
 			if (narg > 2) {
 				dec = base64dec(strescseq.args[2]);
@@ -631,6 +634,7 @@ check_control_code:
 			}
 			gp[1].u = '\0';
 			gp[1].mode = ATTR_WDUMMY;
+			gp[1].link = gp->link;
 		}
 	}
 	if (term.c.x+width < term.col) {

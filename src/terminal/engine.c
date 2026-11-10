@@ -49,6 +49,7 @@ worminal_engine_destroy(WorminalEngine *engine)
 	te_freegrid(engine);
 	te_freeevents(engine);
 	free(engine->strescseq.buf);
+	te_links_free(engine);
 	free(engine);
 }
 
@@ -239,6 +240,15 @@ worminal_engine_row(WorminalEngine *engine, int32_t row, WorminalCell *cells,
 	for (size_t x = 0; x < *required; x++)
 		cells[x] = (WorminalCell){source[x].u, source[x].mode, source[x].fg, source[x].bg};
 	return WORMINAL_OK;
+}
+
+const char *
+worminal_engine_link(WorminalEngine *engine, int32_t row, int32_t column)
+{
+	if (!engine || row < 0 || row >= engine->term.row || column < 0 || column >= engine->term.col)
+		return NULL;
+	uint16_t id = te_tline(engine, row)[column].link;
+	return id < engine->link_count ? engine->links[id] : NULL;
 }
 
 int

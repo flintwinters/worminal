@@ -132,6 +132,8 @@ int worminal_engine_selection(WorminalEngine *, uint8_t *, size_t, size_t *);
 int worminal_engine_all_text(WorminalEngine *, uint8_t *, size_t, size_t *);
 int worminal_engine_frame(WorminalEngine *, int64_t, WorminalFrame *);
 int worminal_engine_row(WorminalEngine *, int32_t, WorminalCell *, size_t, size_t *, int32_t *);
+/* URI of the OSC 8 hyperlink covering a visible cell, or NULL. Owned by the engine; valid until the next feed. */
+const char *worminal_engine_link(WorminalEngine *, int32_t row, int32_t column);
 int worminal_engine_clean(WorminalEngine *);
 /* CAPACITY reports the required payload size and leaves the event queued. */
 int worminal_engine_event(WorminalEngine *, WorminalEvent *, uint8_t *, size_t);
