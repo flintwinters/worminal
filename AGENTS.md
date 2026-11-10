@@ -17,8 +17,9 @@ The maintained application is Rust above a small C terminal engine, with GTK 3, 
 native Wayland and X11. `src/terminal/engine.h` defines the C API; Rust bindings generate from it.
 Each terminal has its own C instance. C handles parsing, cells, UTF-8, modes, scrollback/reflow, selection, redraw
 deadlines and serialization. It does not manage processes, descriptors, GUI objects or application policy.
-OSC 8 links are 16-bit cell ids into a bounded per-terminal URI table (not yet in snapshots, wire or frontend;
-imports drop ids). The Rust wrapper manages C handles and screen buffers, and normalizes clipboard paste in place.
+OSC 8 links are 16-bit cell ids into a bounded per-terminal URI table; ids never leave the daemon: ROW_LINKS
+packets carry each row's URIs inline, and snapshots drop them. Clicks open only http(s) or type `worminal://input`
+text (newline executes) into the same tab. The Rust wrapper manages C handles and screen buffers, and normalizes clipboard paste in place.
 The frontend owns its ordered keyboard mappings in Rust. Shell defaults live with Rust PTY creation;
 browser defaults live with Rust target resolution. C headers retain only engine snapshot and module ABIs:
 `src/protocol` owns wire constants and framing, `src/workspace` owns recovery/handoff formats, and `src/gtk`
