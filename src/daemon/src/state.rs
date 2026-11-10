@@ -96,6 +96,8 @@ pub(crate) struct Terminal {
 pub(crate) struct Screen {
     pub frame: Frame,
     pub bytes: Vec<u8>,
+    /// Encoded link runs of each row as queued to a peer that negotiated ROW_LINKS; empty = none.
+    pub links: Vec<Vec<u8>>,
 }
 
 pub(crate) struct Tab {

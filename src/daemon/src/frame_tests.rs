@@ -23,7 +23,7 @@ impl Screen {
 }
 
 use super::*;
-use worminal_protocol::{Decoder, Packet};
+use worminal_protocol::{decode_link_runs, Decoder, LinkRun, Packet, Payload};
 
 fn feed(engine: &mut Engine, mut bytes: &[u8], now: i64) {
     while !bytes.is_empty() {
@@ -322,5 +322,143 @@ fn spans_and_moves_reconstruct_engine_cells_and_queue_rejection_keeps_the_baseli
             assert_eq!(replica, expected, "features={features} tick={tick}");
             assert_eq!(screen.bytes, expected);
         }
+    }
+}
+
+const LINKED: u32 = WIRE_FEATURE_COPY_ROWS | WIRE_FEATURE_ROW_SPAN | WIRE_FEATURE_ROW_LINKS;
+
+fn send(engine: &mut Engine, screen: &mut Screen, features: u32, full: bool, now: i64) -> Queue {
+    let mut output = Queue::new(65536);
+    screen
+        .replicate_encoded(engine, &mut output, 1, full, features, false, now)
+        .unwrap();
+    output
+}
+
+/// (row, runs) of every ROW_LINKS packet, decoded with the shared validating decoder.
+fn link_rows(output: &Queue, columns: u32) -> Vec<(u32, Vec<LinkRun>)> {
+    packets(output)
+        .iter()
+        .filter(|packet| packet.kind == WIRE_ROW_LINKS)
+        .map(|packet| {
+            let mut body = Payload::new(&packet.body);
+            let row = body.u32().unwrap();
+            (row, decode_link_runs(body, columns).unwrap())
+        })
+        .collect()
+}
+
+fn run(column: u32, count: u32, uri: &str) -> LinkRun {
+    LinkRun {
+        column,
+        count,
+        uri: uri.into(),
+    }
+}
+
+#[test]
+fn links_ride_with_their_row_and_a_full_frame_names_every_row() {
+    let mut engine = Engine::new(8, 4).unwrap();
+    let mut screen = Screen::default();
+    feed(&mut engine, b"a\x1b]8;;http://a\x1b\\bc\x1b]8;;\x1b\\d", 1);
+    let full = link_rows(&send(&mut engine, &mut screen, LINKED, true, 1), 8);
+    assert_eq!(
+        full.iter().map(|(row, _)| *row).collect::<Vec<_>>(),
+        [0, 1, 2, 3]
+    );
+    assert_eq!(full[0].1, [run(1, 2, "http://a")]);
+    assert!(full[1..].iter().all(|(_, runs)| runs.is_empty()));
+    // Erasing the link clears it explicitly rather than leaving the view's copy behind.
+    feed(&mut engine, b"\x1b[1;1H\x1b[K", 2);
+    assert_eq!(
+        link_rows(&send(&mut engine, &mut screen, LINKED, false, 2), 8),
+        [(0, vec![])]
+    );
+}
+
+#[test]
+fn unchanged_rows_and_links_generate_no_traffic_and_link_only_changes_are_sent() {
+    let mut engine = Engine::new(8, 4).unwrap();
+    let mut screen = Screen::default();
+    feed(&mut engine, b"\x1b]8;;http://a\x1b\\A\x1b]8;;\x1b\\", 1);
+    send(&mut engine, &mut screen, LINKED, true, 1);
+    // Rewriting identical text and link damages the row but changes neither cells nor links.
+    feed(
+        &mut engine,
+        b"\x1b[1;1H\x1b]8;;http://a\x1b\\A\x1b]8;;\x1b\\",
+        2,
+    );
+    assert!(engine.row_dirty(0).unwrap());
+    let mut output = Queue::new(4096);
+    assert_eq!(
+        screen
+            .replicate_encoded(&mut engine, &mut output, 1, false, LINKED, false, 2)
+            .unwrap(),
+        Outcome::Unchanged
+    );
+    assert!(output.is_empty());
+    // Same text, new target: no cell differs, yet the link must be sent (and not as a ROW).
+    feed(
+        &mut engine,
+        b"\x1b[1;1H\x1b]8;;http://b\x1b\\A\x1b]8;;\x1b\\",
+        3,
+    );
+    let output = send(&mut engine, &mut screen, LINKED, false, 3);
+    assert_eq!(link_rows(&output, 8), [(0, vec![run(0, 1, "http://b")])]);
+    assert!(packets(&output)
+        .iter()
+        .all(|packet| packet.kind != WIRE_ROW && packet.kind != WIRE_ROW_SPAN));
+}
+
+#[test]
+fn a_scroll_encoded_as_a_move_does_not_resend_uris() {
+    let mut engine = Engine::new(8, 6).unwrap();
+    let mut screen = Screen::default();
+    feed(
+        &mut engine,
+        b"a\r\n\x1b]8;;http://moved\x1b\\b\x1b]8;;\x1b\\\r\nc\r\nd\r\ne\r\nf",
+        1,
+    );
+    send(&mut engine, &mut screen, LINKED, true, 1);
+    feed(&mut engine, b"\r\ng", 2);
+    let output = send(&mut engine, &mut screen, LINKED, false, 2);
+    assert!(packets(&output)
+        .iter()
+        .any(|packet| packet.kind == WIRE_COPY_ROWS));
+    assert!(link_rows(&output, 8).is_empty());
+    // The baseline moved with the cells: it equals what a fresh full frame would record.
+    let mut fresh = Screen::default();
+    send(&mut engine, &mut fresh, LINKED, true, 2);
+    assert_eq!(screen.links, fresh.links);
+    assert!(!fresh.links[0].is_empty());
+    feed(&mut engine, b"\x1b[1;1H\x1b[K", 3);
+    let output = send(&mut engine, &mut screen, LINKED, false, 3);
+    assert_eq!(link_rows(&output, 8), [(0, vec![])]);
+    let mut fresh = Screen::default();
+    send(&mut engine, &mut fresh, LINKED, true, 3);
+    assert_eq!(screen.links, fresh.links);
+    assert!(fresh.links[0].is_empty());
+}
+
+#[test]
+fn peers_without_row_links_receive_the_original_bytes() {
+    let plain = b"a\r\nb\r\nc";
+    let linked = b"a\r\n\x1b]8;;http://x\x1b\\b\x1b]8;;\x1b\\\r\nc";
+    for features in [0, WIRE_FEATURE_COPY_ROWS | WIRE_FEATURE_ROW_SPAN] {
+        let mut outputs = Vec::new();
+        for text in [&plain[..], &linked[..]] {
+            let mut engine = Engine::new(8, 4).unwrap();
+            let mut screen = Screen::default();
+            feed(&mut engine, text, 1);
+            let mut bytes = send(&mut engine, &mut screen, features, true, 1)
+                .pending()
+                .to_vec();
+            feed(&mut engine, b"\x1b[2;1H\x1b]8;;http://y\x1b\\b", 2);
+            bytes.extend_from_slice(send(&mut engine, &mut screen, features, false, 2).pending());
+            assert!(screen.links.is_empty());
+            outputs.push(bytes);
+        }
+        assert_eq!(outputs[0], outputs[1]);
+        assert!(!outputs[1].is_empty());
     }
 }

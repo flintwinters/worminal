@@ -63,6 +63,8 @@ pub const WIRE_ROW_SPAN: u32 = 32;
 
 /// Automation request: operation u32 followed by optional input bytes. Reply: success u32 and UTF-8 JSON.
 pub const WIRE_WORP: u32 = 33;
+/// Row, then zero or more link runs (column, count, URI) replacing that row's links; zero runs clear them.
+pub const WIRE_ROW_LINKS: u32 = 34;
 pub const WORP_LIST: u32 = 0;
 pub const WORP_READ: u32 = 1;
 pub const WORP_INPUT: u32 = 2;
@@ -83,6 +85,8 @@ pub const WIRE_FEATURE_ROW_SPAN: u32 = 1 << 3;
 // The client displays only the tab it last focused (or created). The daemon defers frames for its
 // other controlled tabs, retaining their baselines, and resumes them with a delta on focus.
 pub const WIRE_FEATURE_FOCUSED_FRAMES: u32 = 1 << 4;
+// ROW_LINKS packets follow a row's cells. Peers that did not negotiate it receive today's bytes exactly.
+pub const WIRE_FEATURE_ROW_LINKS: u32 = 1 << 5;
 
 pub const WIRE_SELECTION_START: u32 = 0;
 pub const WIRE_SELECTION_NEXT: u32 = 1;

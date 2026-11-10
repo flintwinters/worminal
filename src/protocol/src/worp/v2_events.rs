@@ -147,6 +147,16 @@ pub fn decode(packet: Packet) -> io::Result<Option<Event>> {
                 kind: EventKind::Row { row, column, cells },
             }));
         }
+        WIRE_ROW_LINKS => {
+            let row = body.u32()?;
+            if row >= WORKSPACE_MAX_ROWS {
+                return Err(invalid());
+            }
+            EventKind::Links {
+                row,
+                runs: decode_link_runs(body, WORKSPACE_MAX_COLS)?,
+            }
+        }
         WIRE_COPY_ROWS => {
             let source = body.u32()?;
             let destination = body.u32()?;
@@ -238,6 +248,17 @@ fn validate_copy(source: u32, destination: u32, count: u32) -> io::Result<()> {
     Ok(())
 }
 
+fn encode_links(row: u32, runs: &[LinkRun], body: &mut Buffer) -> io::Result<u32> {
+    if row >= WORKSPACE_MAX_ROWS {
+        return Err(invalid());
+    }
+    let bytes = encode_link_runs(runs)?;
+    decode_link_runs(Payload::new(&bytes), WORKSPACE_MAX_COLS)?;
+    body.put_u32(row)?;
+    body.put_bytes(&bytes)?;
+    Ok(WIRE_ROW_LINKS)
+}
+
 pub fn encode(event: &Event) -> io::Result<Packet> {
     if let EventKind::Reply(reply) = &event.kind {
         return v2::encode_reply(event.tab, reply);
@@ -293,6 +314,7 @@ pub fn encode(event: &Event) -> io::Result<Packet> {
             }
             WIRE_COPY_ROWS
         }
+        EventKind::Links { row, runs } => encode_links(*row, runs, &mut body)?,
         EventKind::FrameFinish => WIRE_FRAME_FINISH,
         EventKind::Clipboard(bytes) => {
             body.put_string(bytes)?;
@@ -386,6 +408,12 @@ pub fn append_frame(output: &mut Buffer, tab: u32, frame: FrameRef<'_>) -> io::R
             validate_copy(source, destination, count)?;
             let values = [source, destination, count].map(u32::to_be_bytes);
             output.append_packet_bytes(WIRE_COPY_ROWS, tab, values.as_flattened())
+        }
+        FrameRef::Links { row, runs } => {
+            if row >= WORKSPACE_MAX_ROWS {
+                return Err(invalid());
+            }
+            output.append_packet_parts(WIRE_ROW_LINKS, tab, &[&row.to_be_bytes(), runs])
         }
         FrameRef::Finish => output.append_packet_bytes(WIRE_FRAME_FINISH, tab, &[]),
     }

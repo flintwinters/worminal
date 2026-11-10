@@ -17,7 +17,9 @@ The maintained application is Rust above a small C terminal engine, with GTK 3, 
 native Wayland and X11. `src/terminal/engine.h` defines the C API; Rust bindings generate from it.
 Each terminal has its own C instance. C handles parsing, cells, UTF-8, modes, scrollback/reflow, selection, redraw
 deadlines and serialization. It does not manage processes, descriptors, GUI objects or application policy.
-The Rust wrapper manages C handles and screen buffers, and normalizes clipboard paste in place.
+OSC 8 links are 16-bit cell ids into a bounded per-terminal URI table; ids never leave the daemon: ROW_LINKS
+packets carry each row's URIs inline, and snapshots drop them. Clicks open only http(s) or type `worminal://input`
+text (newline executes) into the same tab. The Rust wrapper manages C handles and screen buffers, and normalizes clipboard paste in place.
 The frontend owns its ordered keyboard mappings in Rust. Shell defaults live with Rust PTY creation;
 browser defaults live with Rust target resolution. C headers retain only engine snapshot and module ABIs:
 `src/protocol` owns wire constants and framing, `src/workspace` owns recovery/handoff formats, and `src/gtk`
@@ -28,8 +30,8 @@ The per-user v2 daemon owns ordered tabs, PTYs and bounded scrollback. Views con
 `--master user@host`. A terminal has one live painting view and can outlive every window. Frontend replicas import
 one viewport; they never parse terminal output or recompute history/reflow. Browser records have no PTY.
 `worminald api` is the headless agent interface over Worp; see `docs/automation.md` and `docs/worp.md`.
-`src/protocol::worp` owns transport-independent requests/replies and handler/client contracts;
-local sockets and SSH bind them to the existing v2 stream protocol.
+`src/protocol::worp` owns shared transport-independent commands/events for every client, plus unary
+request/reply conveniences; local sockets and SSH bind them to the existing v2 stream protocol.
 Device enrollment is explicit per authority user, shared across scopes and persisted independently of tabs;
 `docs/devices.md` defines membership and caller-side availability. Never add heartbeats or block the daemon on probes.
 `worminald install-on-remote` bootstraps new compatible headless nodes over SSH; see `docs/remote-install.md`.

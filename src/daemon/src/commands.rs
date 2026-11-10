@@ -105,7 +105,8 @@ impl Service {
                     self.clients.get_mut(&client).unwrap().features = features
                         & (WIRE_FEATURE_COPY_ROWS
                             | WIRE_FEATURE_ROW_SPAN
-                            | WIRE_FEATURE_FOCUSED_FRAMES);
+                            | WIRE_FEATURE_FOCUSED_FRAMES
+                            | WIRE_FEATURE_ROW_LINKS);
                     self.emit(
                         client,
                         Event {
@@ -113,7 +114,8 @@ impl Service {
                             kind: EventKind::Capabilities(
                                 WIRE_FEATURE_COPY_ROWS
                                     | WIRE_FEATURE_SELECT_ALL
-                                    | WIRE_FEATURE_ROW_SPAN,
+                                    | WIRE_FEATURE_ROW_SPAN
+                                    | WIRE_FEATURE_ROW_LINKS,
                             ),
                         },
                     );

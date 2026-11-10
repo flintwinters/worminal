@@ -9,7 +9,9 @@ from tools.git_index import tracked_files
 
 # Exact public address approved for repository content.
 DEFAULT_EMAIL = "flintwinters.0@gmail.com"
-EMAIL_WHITELIST = frozenset({DEFAULT_EMAIL})
+# Public commit attribution is allowed; this is the co-author address of assistant trailers.
+ATTRIBUTION_EMAIL = "noreply@anthropic.com"
+EMAIL_WHITELIST = frozenset({DEFAULT_EMAIL, ATTRIBUTION_EMAIL})
 
 
 PATTERNS = {

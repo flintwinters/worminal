@@ -186,3 +186,54 @@ fn malformed_events_fail_before_publication_and_unknown_events_are_ignored() {
     )
     .is_err());
 }
+
+#[test]
+fn link_events_keep_runs_and_match_borrowed_frame_bytes() {
+    let runs = vec![LinkRun {
+        column: 2,
+        count: 3,
+        uri: "https://example.org/osc8".into(),
+    }];
+    roundtrip(EventKind::Links {
+        row: 4,
+        runs: runs.clone(),
+    });
+    roundtrip(EventKind::Links {
+        row: 4,
+        runs: vec![],
+    });
+    let encoded = encode_link_runs(&runs).unwrap();
+    let mut borrowed = Buffer::default();
+    append_frame(
+        &mut borrowed,
+        1,
+        FrameRef::Links {
+            row: 4,
+            runs: &encoded,
+        },
+    )
+    .unwrap();
+    let owned = encode(&Event {
+        tab: 1,
+        kind: EventKind::Links { row: 4, runs },
+    })
+    .unwrap();
+    assert_eq!(borrowed.into_bytes(), owned.encode().unwrap());
+    for values in [
+        [WORKSPACE_MAX_ROWS, 0, 1],
+        [0, WORKSPACE_MAX_COLS, 1],
+        [0, 0, 0],
+    ] {
+        let mut body = Buffer::default();
+        for value in values {
+            body.put_u32(value).unwrap();
+        }
+        body.put_string(b"uri").unwrap();
+        assert!(decode(Packet {
+            kind: WIRE_ROW_LINKS,
+            tab: 1,
+            body: body.into_bytes()
+        })
+        .is_err());
+    }
+}

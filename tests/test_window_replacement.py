@@ -149,6 +149,7 @@ class ReplacementTest(unittest.TestCase):
                 return found.stdout.splitlines() if found.returncode==0 else []
             def owner():
                 windows = visible()
+                # Replacement can destroy the listed window before its PID is read.
                 if not windows: return None
                 result = subprocess.run(['xdotool','getwindowpid',windows[0]],env=env,capture_output=True,text=True)
                 return result.stdout.strip() if result.returncode == 0 else None

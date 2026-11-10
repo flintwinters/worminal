@@ -112,6 +112,7 @@ te_import_compat(EngineSnapshotIO *fd, WorminalTransportState *transport)
 	transport->pending_bytes = h.ttybuflen; transport->remote_scroll = h.remote_scroll;
 	transport->output_kind = h.output_kind;
 	memcpy(s->saved, h.saved, sizeof(h.saved));
+	t->c.attr.link = s->saved[0].attr.link = s->saved[1].attr.link = 0;
 	memcpy(t->trantbl, h.trantbl, sizeof(h.trantbl));
 	memcpy(transport->pending, h.ttybuf, sizeof(h.ttybuf));
 	s->strescseq.type = h.str_type;
@@ -131,6 +132,8 @@ te_import_compat(EngineSnapshotIO *fd, WorminalTransportState *transport)
 		else if (i < t->row * 2) row = t->alt[i - t->row];
 		else row = t->hist[i - 2 * t->row] = te_alloc(t->col * sizeof(Glyph));
 		if (!transfer(fd, row, t->col * sizeof(Glyph), 0)) goto fail;
+		/* The URI table is not part of the snapshot: ids (and padding from older owners) are meaningless here. */
+		for (int x = 0; x < t->col; x++) row[x].link = 0;
 	}
 	t->histlen = h.histlen; t->histi = theme_history_size ? h.histlen % theme_history_size : 0;
 	t->scr = h.scr;

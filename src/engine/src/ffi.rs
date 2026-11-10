@@ -211,6 +211,30 @@ impl Engine {
         })
     }
 
+    /// Fill reusable storage with the row's link ids; true if any is nonzero. Ids never leave this process.
+    pub fn row_link_ids(&mut self, row: i32, ids: &mut Vec<u16>) -> Result<bool, Error> {
+        let (required, _) = self.row_status(row)?;
+        ids.resize(required, 0);
+        let mut used = 0;
+        check(unsafe {
+            sys::worminal_engine_row_links(
+                self.handle.as_ptr(),
+                row,
+                ids.as_mut_ptr(),
+                ids.len(),
+                &mut used,
+            )
+        })?;
+        Ok(ids.iter().any(|id| *id != 0))
+    }
+
+    /// URI bytes of a nonzero link id; valid until the engine is next fed.
+    pub fn link_uri(&self, id: u16) -> Option<&[u8]> {
+        let uri = unsafe { sys::worminal_engine_link_uri(self.handle.as_ptr(), id) };
+        // C owns NUL-terminated storage that lives at least as long as this shared borrow.
+        (!uri.is_null()).then(|| unsafe { std::ffi::CStr::from_ptr(uri) }.to_bytes())
+    }
+
     /// A replication owner acknowledges damage only after committing its complete queued frame.
     pub fn clean(&mut self) -> Result<(), Error> {
         check(unsafe { sys::worminal_engine_clean(self.handle.as_ptr()) })

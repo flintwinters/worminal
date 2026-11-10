@@ -79,7 +79,10 @@ impl App {
             index,
             0,
             CommandKind::Capabilities(
-                WIRE_FEATURE_COPY_ROWS | WIRE_FEATURE_ROW_SPAN | WIRE_FEATURE_FOCUSED_FRAMES,
+                WIRE_FEATURE_COPY_ROWS
+                    | WIRE_FEATURE_ROW_SPAN
+                    | WIRE_FEATURE_FOCUSED_FRAMES
+                    | WIRE_FEATURE_ROW_LINKS,
             ),
         );
         if launch && index == 0 && config.browser_url.is_some() {

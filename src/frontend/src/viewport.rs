@@ -1,5 +1,5 @@
 //! One imported viewport. Frame deltas remain bounded and private until FRAME_FINISH.
-use std::io;
+use std::{io, ops::RangeInclusive, rc::Rc};
 use worminal_engine::{Cell, Frame, Selection, SelectionRange};
 use worminal_engine_sys::{
     ATTR_WIDE, ATTR_WRAP, WORMINAL_DEFAULT_BACKGROUND, WORMINAL_DEFAULT_FOREGROUND,
@@ -55,6 +55,10 @@ enum Operation {
         destination: usize,
         count: usize,
     },
+    Links {
+        row: usize,
+        runs: Rc<[LinkRun]>,
+    },
 }
 struct Pending {
     frame: Frame,
@@ -62,6 +66,35 @@ struct Pending {
     bytes: usize,
 }
 impl Pending {
+    fn row_links(&mut self, row: u32, runs: &[LinkRun]) -> io::Result<()> {
+        let row = row as usize;
+        if row >= self.frame.rows as usize {
+            return Err(invalid());
+        }
+        let mut next = 0;
+        for run in runs {
+            if run.column < next
+                || run.count == 0
+                || run.column >= self.frame.columns as u32
+                || run.count > self.frame.columns as u32 - run.column
+                || !(1..=LINK_URI_MAX).contains(&run.uri.len())
+            {
+                return Err(invalid());
+            }
+            next = run.column + run.count;
+        }
+        let payload = runs
+            .iter()
+            .map(|run| std::mem::size_of::<LinkRun>() + run.uri.len())
+            .sum();
+        self.push(
+            Operation::Links {
+                row,
+                runs: runs.into(),
+            },
+            payload,
+        )
+    }
     fn push(&mut self, operation: Operation, payload: usize) -> io::Result<()> {
         let bytes = self
             .bytes
@@ -79,6 +112,8 @@ impl Pending {
 pub struct Viewport {
     frame: Frame,
     cells: Vec<Cell>,
+    /// Link runs per row, allocated when the first non-empty run list arrives. Rc keeps row copies cheap.
+    links: Vec<Rc<[LinkRun]>>,
     pending: Option<Pending>,
     live: bool,
     selection: Option<Selection>,
@@ -95,6 +130,7 @@ impl Viewport {
                 ..Frame::default()
             },
             cells: Vec::new(),
+            links: Vec::new(),
             pending: None,
             live: false,
             selection: None,
@@ -122,9 +158,19 @@ impl Viewport {
             .get(row)
             .is_some_and(|range| column >= range.first as usize && column < range.end as usize)
     }
+    /// Explicit OSC 8 target under a cell and the row-major cells its run covers.
+    pub fn link_at(&self, column: usize, row: usize) -> Option<(&str, RangeInclusive<usize>)> {
+        let columns = self.frame.columns as usize;
+        let run = self.links.get(row)?.iter().find(|run| {
+            (run.column as usize..(run.column + run.count) as usize).contains(&column)
+        })?;
+        let first = row * columns + run.column as usize;
+        Some((&run.uri, first..=first + run.count as usize - 1))
+    }
     pub fn release(&mut self) {
         self.live = false;
         self.pending = None;
+        self.links.clear();
     }
 
     /// Compatibility entry point for consumers of the version-2 binding.
@@ -229,6 +275,11 @@ impl Viewport {
                     count * pending.frame.columns as usize * std::mem::size_of::<Cell>(),
                 )?;
             }
+            EventKind::Links { row, runs } => self
+                .pending
+                .as_mut()
+                .ok_or_else(invalid)?
+                .row_links(*row, runs)?,
             EventKind::FrameFinish => return self.finish().map(Some),
             _ => {}
         }
@@ -267,6 +318,7 @@ impl Viewport {
                 }
             }
             self.cells = resized;
+            self.links.clear();
         }
         let mut damage = vec![false; rows];
         if old.cursor_x != frame.cursor_x || old.cursor_y != frame.cursor_y {
@@ -296,6 +348,20 @@ impl Viewport {
                         destination * columns,
                     );
                     damage[destination..destination + count].fill(true);
+                    if !self.links.is_empty() {
+                        let moved = self.links[source..source + count].to_vec();
+                        self.links[destination..destination + count].clone_from_slice(&moved);
+                    }
+                }
+                Operation::Links { row, runs } => {
+                    let current = self.links.get(row).map_or(&[][..], |runs| &runs[..]);
+                    if *current != *runs {
+                        if self.links.is_empty() {
+                            self.links = vec![Rc::from([]); rows];
+                        }
+                        self.links[row] = runs;
+                        damage[row] = true;
+                    }
                 }
             }
         }

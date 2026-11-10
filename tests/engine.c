@@ -1,5 +1,6 @@
 /* Public-boundary invariants; linked without any application, PTY, clock, or GUI adapters. */
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "engine.h"
@@ -257,6 +258,71 @@ borrowed_selection(void)
 	worminal_engine_destroy(owner);
 }
 
+/* URI under a visible cell through the row-at-a-time API, or NULL. */
+static const char *
+link_at(WorminalEngine *engine, int32_t row, int32_t column)
+{
+	uint16_t ids[64];
+	size_t required;
+	if (worminal_engine_row_links(engine, row, ids, 64, &required) != WORMINAL_OK || column < 0 ||
+	    (size_t)column >= required) return NULL;
+	return worminal_engine_link_uri(engine, ids[column]);
+}
+
+static void
+hyperlinks(void)
+{
+	WorminalEngine *engine, *copy;
+	uint16_t ids[12];
+	size_t required;
+	assert(worminal_engine_create(12, 3, &engine) == WORMINAL_OK);
+	/* Semicolons inside the target are part of it; params and BEL/ST terminators are accepted. */
+	feed(engine, "a\033]8;id=1;worminal://input?text=x;y\033\\bc\033]8;;\007d", 1);
+	assert(!link_at(engine, 0, 0));
+	assert(!strcmp(link_at(engine, 0, 1), "worminal://input?text=x;y"));
+	assert(link_at(engine, 0, 2) == link_at(engine, 0, 1));
+	assert(!link_at(engine, 0, 3));
+	/* Status codes follow worminal_engine_row; id 0 and unknown ids have no URI. */
+	assert(worminal_engine_row_links(engine, 0, ids, 1, &required) == WORMINAL_CAPACITY && required == 12);
+	assert(worminal_engine_row_links(engine, 3, ids, 12, &required) == WORMINAL_INVALID);
+	assert(worminal_engine_row_links(engine, 0, NULL, 1, &required) == WORMINAL_INVALID);
+	assert(!worminal_engine_link_uri(engine, 0) && !worminal_engine_link_uri(engine, 65535));
+	/* Erasing and SGR reset neither keep nor end a link. */
+	feed(engine, "\033]8;;http://e\033\\\033[0mz\033[1;1H\033[K", 1);
+	assert(!link_at(engine, 0, 1));
+	feed(engine, "\033[2;1Hq", 1);
+	assert(!strcmp(link_at(engine, 1, 0), "http://e"));
+	/* Links survive scrolling; a snapshot drops ids because the URI table is not transferred. */
+	feed(engine, "\r\n\n", 1);
+	assert(!strcmp(link_at(engine, 0, 0), "http://e"));
+	/* Rows follow the scroll position into history. */
+	feed(engine, "\n\n", 1);
+	assert(!link_at(engine, 0, 0));
+	assert(worminal_engine_scroll(engine, 1, 2) == WORMINAL_OK);
+	assert(!strcmp(link_at(engine, 0, 0), "http://e"));
+	assert(worminal_engine_scroll(engine, 0, 2) == WORMINAL_OK);
+	feed(engine, "\033[1;1H\033]8;;http://e\033\\q", 1);
+	WorminalTransportState transport = {0}, imported;
+	size_t bytes;
+	assert(worminal_engine_export(engine, &transport, NULL, 0, &bytes) == WORMINAL_CAPACITY);
+	uint8_t *data = malloc(bytes);
+	assert(data && worminal_engine_export(engine, &transport, data, bytes, &bytes) == WORMINAL_OK);
+	assert(worminal_engine_import(data, bytes, &copy, &imported) == WORMINAL_OK);
+	free(data);
+	assert(!link_at(copy, 0, 0));
+	feed(copy, "\033[1;1H\033]8;;http://other\033\\Q", 1);
+	assert(!strcmp(link_at(copy, 0, 0), "http://other"));
+	worminal_engine_destroy(copy);
+	/* Unreferenced ids are reclaimed, so distinct links never exhaust the table while visible. */
+	for (int i = 0; i < 70000; i++) {
+		char text[96];
+		snprintf(text, sizeof(text), "\033[1;1H\033]8;;http://h/%d\033\\k", i);
+		feed(engine, text, 1);
+	}
+	assert(!strcmp(link_at(engine, 0, 0), "http://h/69999"));
+	worminal_engine_destroy(engine);
+}
+
 int
 main(void)
 {
@@ -267,5 +333,6 @@ main(void)
 	snapshot_validation();
 	clear_scrollback();
 	borrowed_selection();
+	hyperlinks();
 	return 0;
 }

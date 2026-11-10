@@ -71,6 +71,10 @@ struct WorminalEngine {
 	CSIEscape csiescseq;
 	STREscape strescseq;
 	int altscreen_allowed;
+	/* OSC 8 URI table indexed by Glyph.link; slot 0 and reclaimed slots are NULL. */
+	char **links;
+	uint16_t link_count;
+	size_t link_bytes;
 	int64_t now, render_sync_deadline;
 	int render_sync_expired;
 	TCursor saved[2];
@@ -88,6 +92,7 @@ void te_setsync(TermEngine *, int);
 int64_t te_renderdelay(TermEngine *, int64_t);
 void te_freegrid(TermEngine *);
 void te_freeevents(TermEngine *);
+void te_links_free(TermEngine *);
 void te_diagnostic(TermEngine *, const char *, ...);
 void te_emit(TermEngine *, uint32_t, int32_t, uint32_t, const void *, size_t);
 int te_dimensions(int32_t, int32_t);

@@ -117,6 +117,7 @@ te_tclearregion(TermEngine *session, int x1, int y1, int x2, int y2)
 			gp->fg = term.c.attr.fg;
 			gp->bg = term.c.attr.bg;
 			gp->mode = 0;
+			gp->link = 0;
 			gp->u = ' ';
 		}
 	}

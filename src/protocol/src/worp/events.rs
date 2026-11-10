@@ -1,6 +1,6 @@
 //! Worp state changes and viewport deltas, independent of framing and communication medium.
 use super::Reply;
-use crate::{WIRE_CELL_BYTES, WORKSPACE_MAX_COLS, WORKSPACE_MAX_ROWS};
+use crate::{LinkRun, WIRE_CELL_BYTES, WORKSPACE_MAX_COLS, WORKSPACE_MAX_ROWS};
 use std::{fmt, io};
 
 pub const MAX_CATALOG_TABS: usize = 4096;
@@ -25,6 +25,10 @@ pub enum EventKind {
         source: u32,
         destination: u32,
         count: u32,
+    },
+    Links {
+        row: u32,
+        runs: Vec<LinkRun>,
     },
     FrameFinish,
     Clipboard(Vec<u8>),
@@ -182,6 +186,10 @@ pub enum FrameRef<'a> {
         source: u32,
         destination: u32,
         count: u32,
+    },
+    Links {
+        row: u32,
+        runs: &'a [u8],
     },
     Finish,
 }
