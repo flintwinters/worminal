@@ -14,9 +14,9 @@ impl App {
         }
         // Windows map before their initial catalog arrives. Preserve early keystrokes until a widget exists.
         if self.active.get() == 0
-            && (self.initial_claim.get()
-                || self.pending_tabs.get() != 0
-                || self.requested.get() != 0)
+            && (self.primary.initial_claim.get()
+                || self.primary.pending_tabs.get() != 0
+                || self.primary.requested.get() != 0)
         {
             let mut early = self.early_keys.borrow_mut();
             if early.len() < 256 {
@@ -39,7 +39,7 @@ impl App {
             .any(|page| page.id == self.active.get() && page.browser);
         if state == control_shift && value == key::a {
             if let Some(terminal) = self.terminal(self.active.get()) {
-                if self.service_features.get() & WIRE_FEATURE_SELECT_ALL == 0 {
+                if self.features(self.active.get()) & WIRE_FEATURE_SELECT_ALL == 0 {
                     self.message(Some("Select all requires an updated workspace service."));
                 } else {
                     terminal.select_all();

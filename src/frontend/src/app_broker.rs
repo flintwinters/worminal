@@ -103,7 +103,7 @@ pub(super) fn serve(listener: UnixListener, candidate: bool) -> io::Result<Rc<Se
                             result => {
                                 let result = result.and_then(|request| {
                                     match Config::parse(&request.expect("complete launch"), candidate)? {
-                                        Some(config) => App::open(config).map(|_| ()), None => Ok(()),
+                                        Some(config) => App::launch(config).map(|_| ()), None => Ok(()),
                                     }
                                 });
                                 if let Err(error) = &result { eprintln!("worminal-rust: forwarded launch: {error}"); }

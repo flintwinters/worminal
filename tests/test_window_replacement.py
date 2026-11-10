@@ -9,7 +9,7 @@ import tempfile
 import time
 import unittest
 from preview import profile, service, fixture, Fixture
-from runtime import CHECKS, copy_runtime, module_path, RUST_FRONTEND_MODULE, RUST_BROWSER_MODULE
+from runtime import CHECKS, copy_runtime, module_path, runtime_binary, RUST_FRONTEND_MODULE, RUST_BROWSER_MODULE
 from x11 import isolated_display
 
 
@@ -123,6 +123,61 @@ class ReplacementTest(unittest.TestCase):
                     if owner.poll() is None: owner.terminate()
                     owner.wait(timeout=5)
                     stop_fixture(env)
+
+    def test_multihost_links_and_selected_remote_tab_survive_replacement(self):
+        with isolated_display() as display, profile(display) as env, service(env), \
+                tempfile.TemporaryDirectory(prefix='replacement-links-', dir=CHECKS) as directory:
+            executable = copy_runtime(directory, browser=True)
+            base = Path(directory)
+            scopes = {host: env['WORMINAL_SHARED_SOCKET_SCOPE']+'-'+host for host in ('remotea', 'remoteb')}
+            ssh = base/'ssh'
+            daemon = str(runtime_binary('worminald'))
+            ssh.write_text('#!/usr/bin/python3\nimport os,sys\n'
+                'assert sys.argv[1:4]==["-T","-C","-oConnectTimeout=10"]\n'
+                f'scopes={scopes!r}\n'
+                'assert sys.argv[4] in scopes and sys.argv[-1] in ("--bridge","--bridge-existing")\n'
+                'os.environ["WORMINAL_SHARED_SOCKET_SCOPE"]=scopes[sys.argv[4]]\n'
+                f'os.execv({daemon!r},[{daemon!r},sys.argv[-1]])\n')
+            ssh.chmod(0o700)
+            env = {**env, 'GDK_BACKEND': 'x11', 'PATH': str(base)+os.pathsep+env['PATH']}
+            env.pop('DBUS_SESSION_BUS_ADDRESS', None)
+            remotea = {**env, 'WORMINAL_SHARED_SOCKET_SCOPE': scopes['remotea']}
+            remoteb = {**env, 'WORMINAL_SHARED_SOCKET_SCOPE': scopes['remoteb']}
+            def visible():
+                found = subprocess.run(['xdotool','search','--onlyvisible','--class','MultiHostFixture'],
+                                       env=env,capture_output=True,text=True)
+                return found.stdout.splitlines() if found.returncode==0 else []
+            def owner():
+                windows = visible()
+                return subprocess.check_output(['xdotool','getwindowpid',windows[0]],env=env,text=True).strip() if windows else None
+            with service(remotea), service(remoteb), (base/'owner.log').open('wb') as log:
+                process = None
+                try:
+                    for host in ('local', 'remotea', 'remoteb'):
+                        marker = base/host
+                        command = [str(executable),'-c','MultiHostFixture','-T',host,
+                                   *([] if host=='local' else ['--master',host]),
+                                   '-e','/bin/sh','-c',f'echo $$ > {marker}; exec cat']
+                        launch = subprocess.Popen(command,env=env,stdout=log,stderr=log)
+                        if host=='local': process = launch
+                        else: self.assertEqual(launch.wait(timeout=5),0)
+                        wait(marker.exists,'Host tab did not launch: '+host)
+                    wait(lambda: len(visible())==1,'Remote hosts opened extra windows')
+                    previous = owner()
+                    identities = {host:(base/host).read_text().strip() for host in ('local','remotea','remoteb')}
+                    pending = module_path(RUST_FRONTEND_MODULE,prefix=base).with_suffix('.pending')
+                    shutil.copy2(module_path(RUST_FRONTEND_MODULE,prefix=base),pending)
+                    pending.replace(module_path(RUST_FRONTEND_MODULE,prefix=base))
+                    wait(lambda: owner() and owner()!=previous,'Multi-host window did not replace')
+                    self.assertEqual(len(visible()),1)
+                    name = subprocess.check_output(['xdotool','getwindowname',visible()[0]],env=env,text=True).strip()
+                    self.assertEqual(name,'remoteb','Selected remote tab was not restored')
+                    for host, pid in identities.items():
+                        os.kill(int(pid),0)
+                        self.assertEqual((base/host).read_text().strip(),pid,'Update replayed remote launch')
+                finally:
+                    stop_fixture(env)
+                    if process is not None: process.wait(timeout=5)
 
     def test_terminal_windows_replace_without_restarting_shells(self):
         with isolated_display() as display, profile(display) as env, service(env), \

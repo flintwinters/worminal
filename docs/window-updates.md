@@ -5,6 +5,10 @@ replacement opens the updated owner with the same windows, selected tabs, font z
 the old windows after the replacement is ready. On X11 it restores window position and size. On Wayland the
 compositor controls placement; size and selected tabs are restored, but coordinates cannot be guaranteed.
 
+Windows containing multiple daemon hosts transfer each link and retain their selected local or remote tab.
+The bounded handoff supports 16 additional hosts per window and 128 descriptors across all windows; exceeding
+these limits postpones replacement while existing windows and sessions remain available.
+
 Terminal processes remain in the daemon. The replacement attaches to existing tabs and never replays shell
 commands. Remote windows require a daemon supporting `--bridge-existing`; an older or missing remote service
 postpones the update rather than restoring shells. The first upgrade from an owner predating this feature still

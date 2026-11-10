@@ -30,6 +30,7 @@ fn tabs(args: &[String]) {
         .map(|_| Tab {
             id: body.u32().unwrap(),
             browser: body.u32().unwrap() != 0,
+            remote: false,
             label: String::from_utf8(body.string().unwrap().to_vec()).unwrap(),
         })
         .collect();

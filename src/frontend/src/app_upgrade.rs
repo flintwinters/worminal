@@ -23,7 +23,7 @@ use std::{
 };
 use worminal_protocol::{Packet, WORKSPACE_CLIENT_QUEUE_BYTES};
 use worminal_workspace::{
-    gui_handoff::{self, Window},
+    gui_handoff::{self, Link, Window},
     socket, spawn,
 };
 
@@ -109,15 +109,7 @@ fn snapshot() -> io::Result<Vec<Window>> {
     windows()
         .into_iter()
         .map(|app| {
-            if app.connection.borrow().is_none()
-                || app.initial_claim.get()
-                || app.pending_tabs.get() != 0
-                || app
-                    .connection
-                    .borrow()
-                    .as_ref()
-                    .is_some_and(|connection| !connection.output.is_empty())
-            {
+            if !app.links().iter().all(|link| link.settled()) {
                 return Err(io::Error::other(
                     "Windows are reconnecting or have pending input",
                 ));
@@ -135,6 +127,17 @@ fn snapshot() -> io::Result<Vec<Window>> {
             let zoom = app.fonts.borrow().zoom();
             Ok(Window {
                 request: app.config.replacement_request()?,
+                links: app
+                    .remotes
+                    .borrow()
+                    .iter()
+                    .map(|remote| {
+                        Ok(Link {
+                            index: remote.index,
+                            request: remote.config.replacement_request()?,
+                        })
+                    })
+                    .collect::<io::Result<Vec<_>>>()?,
                 selected: app.active.get(),
                 geometry: [x, y, width, height],
                 flags,
@@ -647,6 +650,7 @@ pub(super) fn receive(token: &OsStr, candidate: bool) -> io::Result<()> {
     gtk::init().map_err(io::Error::other)?;
     let _state = super::window_state::start();
     let mut focus = None;
+    let mut selections = Vec::new();
     for state in states {
         let Some(mut config) = Config::parse(&state.request, candidate)? else {
             return Err(io::Error::other("Invalid update launch"));
@@ -656,7 +660,16 @@ pub(super) fn receive(token: &OsStr, candidate: bool) -> io::Result<()> {
         config.browser_url = None;
         config.zoom = state.zoom;
         let app = App::open_mode(config, true)?;
-        app.requested.set(state.selected);
+        for link in state.links {
+            let Some(mut config) = Config::parse(&link.request, candidate)? else {
+                return Err(io::Error::other("Invalid remote update launch"));
+            };
+            config.attach = true;
+            config.command.clear();
+            config.browser_url = None;
+            app.restore_remote(link.index, config)?;
+        }
+        selections.push((app.clone(), state.selected));
         app.geometry_pending.set(false);
         app.window
             .set_default_size(state.geometry[2], state.geometry[3]);
@@ -739,16 +752,20 @@ pub(super) fn receive(token: &OsStr, candidate: bool) -> io::Result<()> {
                     }
                 }
                 if phase.get() == 0
-                    && windows().iter().all(|app| {
-                        !app.initial_claim.get()
-                            && (app.active.get() == 0
-                                || app
-                                    .pages
-                                    .borrow()
-                                    .iter()
-                                    .any(|page| page.id == app.active.get()))
-                    })
+                    && windows()
+                        .iter()
+                        .all(|app| app.links().iter().all(|link| link.settled()))
                 {
+                    for (app, selected) in &selections {
+                        if *selected != 0
+                            && !app.pages.borrow().iter().any(|page| page.id == *selected)
+                        {
+                            return Err(io::Error::other("Selected tab disappeared during update"));
+                        }
+                        if *selected != 0 {
+                            app.select_id(*selected);
+                        }
+                    }
                     if windows()
                         .iter()
                         .any(|app| app.pages.borrow().iter().any(|page| page.browser))

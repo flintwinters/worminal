@@ -38,6 +38,7 @@ impl App {
                     id: page.id,
                     label,
                     browser: page.browser,
+                    remote: self.master_of(page.id).is_some(),
                 }
             })
             .collect();
