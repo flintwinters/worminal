@@ -8,7 +8,7 @@ use gtk::{gdk, prelude::*};
 use std::{
     cell::{Cell, RefCell},
     collections::VecDeque,
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     io::{self, Read, Write},
     os::{fd::AsRawFd, unix::net::UnixStream},
     path::PathBuf,
@@ -171,6 +171,49 @@ impl Connection {
         Ok(result)
     }
 }
+/// Tab ids are global to the window: the high byte names the link that owns the tab, so ids from
+/// different daemons never collide. Link 0 is the window's own connection; wire ids stay below `1 << LINK_SHIFT`.
+const LINK_SHIFT: u32 = 24;
+/// One daemon connection of a window plus the handshake state that belongs to it.
+struct Link {
+    connection: RefCell<Option<Connection>>,
+    reader: RefCell<Option<glib::SourceId>>,
+    writer: RefCell<Option<glib::SourceId>>,
+    reconnect: RefCell<Option<glib::SourceId>>,
+    initial_claim: Cell<bool>,
+    pending_tabs: Cell<u32>,
+    requested: Cell<u32>,
+    features: Cell<u32>,
+}
+impl Link {
+    fn new() -> Rc<Self> {
+        Rc::new(Self {
+            connection: RefCell::new(None),
+            reader: RefCell::new(None),
+            writer: RefCell::new(None),
+            reconnect: RefCell::new(None),
+            initial_claim: Cell::new(true),
+            pending_tabs: Cell::new(0),
+            requested: Cell::new(0),
+            features: Cell::new(0),
+        })
+    }
+    fn clear(&self) {
+        for source in [&self.reader, &self.writer, &self.reconnect] {
+            if let Some(source) = source.borrow_mut().take() {
+                source.remove();
+            }
+        }
+        self.connection.borrow_mut().take();
+    }
+}
+/// Another `--master` host whose tabs are shown in this window beside its own.
+struct Remote {
+    index: u32,
+    master: OsString,
+    config: Config,
+    link: Rc<Link>,
+}
 #[derive(Clone)]
 struct Page {
     id: u32,
@@ -210,24 +253,37 @@ struct App {
     fonts: Rc<RefCell<Fonts>>,
     pages: RefCell<Vec<Page>>,
     active: Cell<u32>,
-    requested: Cell<u32>,
     syncing: Cell<bool>,
-    connection: RefCell<Option<Connection>>,
-    reader: RefCell<Option<glib::SourceId>>,
-    writer: RefCell<Option<glib::SourceId>>,
-    reconnect: RefCell<Option<glib::SourceId>>,
+    primary: Rc<Link>,
+    remotes: RefCell<Vec<Rc<Remote>>>,
+    next_link: Cell<u32>,
     closing: Cell<bool>,
     geometry_pending: Cell<bool>,
     early_keys: RefCell<VecDeque<gdk::EventKey>>,
-    initial_claim: Cell<bool>,
-    pending_tabs: Cell<u32>,
-    service_features: Cell<u32>,
 }
 impl App {
     fn print(&self, bytes: &[u8]) -> io::Result<()> {
         let mut output = &*self.config.stream;
         output.write_all(bytes)?;
         output.flush()
+    }
+    /// A forwarded `--master` launch joins the active window instead of opening another.
+    fn launch(config: Config) -> io::Result<Rc<Self>> {
+        if config.master.is_some() {
+            let target = WINDOWS.with(|windows| {
+                let windows = windows.borrow();
+                windows
+                    .iter()
+                    .find(|app| !app.closing.get() && app.window.is_active())
+                    .or_else(|| windows.iter().rev().find(|app| !app.closing.get()))
+                    .cloned()
+            });
+            if let Some(target) = target {
+                target.add_remote(config)?;
+                return Ok(target);
+            }
+        }
+        Self::open(config)
     }
     fn open(config: Config) -> io::Result<Rc<Self>> {
         // New launches may arrive in an existing GTK owner after service loss. The shared
@@ -267,18 +323,13 @@ impl App {
             status,
             pages: RefCell::new(Vec::new()),
             active: Cell::new(0),
-            requested: Cell::new(0),
             syncing: Cell::new(false),
-            connection: RefCell::new(None),
-            reader: RefCell::new(None),
-            writer: RefCell::new(None),
-            reconnect: RefCell::new(None),
+            primary: Link::new(),
+            remotes: RefCell::new(Vec::new()),
+            next_link: Cell::new(1),
             closing: Cell::new(false),
             geometry_pending: Cell::new(true),
             early_keys: RefCell::new(VecDeque::new()),
-            initial_claim: Cell::new(true),
-            pending_tabs: Cell::new(0),
-            service_features: Cell::new(0),
         });
         app.tabstrip.connect_selected(
             glib::clone!(@weak app => move |id| app.select_id(id)),
@@ -317,14 +368,13 @@ impl App {
         app.window
             .connect_destroy(glib::clone!(@weak app => move |_| {
                 app.closing.set(true); app.clear_connection();
-                if let Some(source) = app.reconnect.borrow_mut().take() { source.remove(); }
                 WINDOWS.with(|windows| { let mut windows = windows.borrow_mut();
                     let previous = windows.len();
                     windows.retain(|owner| !Rc::ptr_eq(owner, &app));
                     if windows.len() != previous && windows.is_empty() { gtk::main_quit(); } });
                 window_state::changed();
             }));
-        if let Err(error) = app.establish(!app.config.attach) {
+        if let Err(error) = app.establish(0, !app.config.attach) {
             app.window.close();
             return Err(error);
         }
@@ -337,94 +387,174 @@ impl App {
         self.status.set_text(message.unwrap_or(""));
         self.status.set_visible(message.is_some());
     }
-    fn establish(self: &Rc<Self>, launch: bool) -> io::Result<()> {
-        let connection = Connection::new(self.config.master.as_deref())?;
-        let fd = connection.socket.as_raw_fd();
-        *self.connection.borrow_mut() = Some(connection);
-        self.initial_claim.set(true);
-        let weak = Rc::downgrade(self);
-        *self.reader.borrow_mut() = Some(glib::source::unix_fd_add_local(
-            fd,
-            glib::IOCondition::IN | glib::IOCondition::HUP | glib::IOCondition::ERR,
-            move |_, _| {
-                let Some(app) = weak.upgrade() else {
-                    return glib::ControlFlow::Break;
-                };
-                let packets = app.connection.borrow_mut().as_mut().map(Connection::read);
-                match packets {
-                    Some(Ok(packets)) => {
-                        for packet in packets {
-                            if app.closing.get() {
-                                return glib::ControlFlow::Break;
-                            }
-                            if let Err(error) = app.packet(packet) {
-                                app.lost(&error.to_string());
-                                return glib::ControlFlow::Break;
-                            }
-                        }
-                        glib::ControlFlow::Continue
-                    }
-                    Some(Err(error)) => {
-                        app.lost(&error.to_string());
-                        glib::ControlFlow::Break
-                    }
-                    None => glib::ControlFlow::Break,
-                }
-            },
-        ));
+    fn link(&self, index: u32) -> Option<Rc<Link>> {
+        if index == 0 {
+            return Some(self.primary.clone());
+        }
+        self.remotes
+            .borrow()
+            .iter()
+            .find(|remote| remote.index == index)
+            .map(|remote| remote.link.clone())
+    }
+    /// The launch configuration of one link: the window's own, or the one its `--master` was opened with.
+    fn config_for(&self, index: u32) -> Config {
+        self.remotes
+            .borrow()
+            .iter()
+            .find(|remote| remote.index == index)
+            .map_or_else(|| self.config.clone(), |remote| remote.config.clone())
+    }
+    /// Daemon host of a tab, or `None` for this machine.
+    fn master_of(&self, id: u32) -> Option<OsString> {
+        self.config_for(id >> LINK_SHIFT).master
+    }
+    fn features(&self, id: u32) -> u32 {
+        self.link(id >> LINK_SHIFT)
+            .map_or(0, |link| link.features.get())
+    }
+    fn establish(self: &Rc<Self>, index: u32, launch: bool) -> io::Result<()> {
+        let config = self.config_for(index);
+        let link = self
+            .link(index)
+            .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
+        let connection = Connection::new(config.master.as_deref())?;
+        *link.connection.borrow_mut() = Some(connection);
+        link.initial_claim.set(true);
+        self.watch(index, &link);
         self.message(None);
-        self.service_features.set(0);
-        self.send(
+        link.features.set(0);
+        self.send_link(
+            index,
             0,
             WIRE_CAPABILITIES,
             (WIRE_FEATURE_COPY_ROWS | WIRE_FEATURE_ROW_SPAN | WIRE_FEATURE_FOCUSED_FRAMES)
                 .to_be_bytes()
                 .to_vec(),
         );
-        if launch && self.config.browser_url.is_some() {
-            self.open_browser(self.config.browser_url.as_deref().unwrap());
+        if launch && index == 0 && config.browser_url.is_some() {
+            self.open_browser(config.browser_url.as_deref().unwrap());
         } else if launch {
-            self.send(0, WIRE_HELLO, self.config.launch()?);
+            self.send_link(index, 0, WIRE_HELLO, config.launch()?);
         } else {
-            self.send(0, WIRE_ATTACH, Vec::new());
+            self.send_link(index, 0, WIRE_ATTACH, Vec::new());
         }
-        if self.connection.borrow().is_none() {
+        if link.connection.borrow().is_none() {
             return Err(io::ErrorKind::BrokenPipe.into());
         }
         Ok(())
     }
-    fn clear_connection(&self) {
-        if let Some(source) = self.reader.borrow_mut().take() {
-            source.remove();
-        }
-        if let Some(source) = self.writer.borrow_mut().take() {
-            source.remove();
-        }
-        self.connection.borrow_mut().take();
+    fn watch(self: &Rc<Self>, index: u32, link: &Rc<Link>) {
+        let fd = link
+            .connection
+            .borrow()
+            .as_ref()
+            .map(|connection| connection.socket.as_raw_fd());
+        let Some(fd) = fd else { return };
+        let weak = Rc::downgrade(self);
+        let link_weak = Rc::downgrade(link);
+        *link.reader.borrow_mut() = Some(glib::source::unix_fd_add_local(
+            fd,
+            glib::IOCondition::IN | glib::IOCondition::HUP | glib::IOCondition::ERR,
+            move |_, _| {
+                let (Some(app), Some(link)) = (weak.upgrade(), link_weak.upgrade()) else {
+                    return glib::ControlFlow::Break;
+                };
+                let packets = link.connection.borrow_mut().as_mut().map(Connection::read);
+                match packets {
+                    Some(Ok(packets)) => {
+                        for packet in packets {
+                            // A catalog can retire this link while later packets are still queued.
+                            if app.closing.get() || link.connection.borrow().is_none() {
+                                return glib::ControlFlow::Break;
+                            }
+                            if let Err(error) = app.packet(index, packet) {
+                                app.lost(index, &error.to_string());
+                                return glib::ControlFlow::Break;
+                            }
+                        }
+                        glib::ControlFlow::Continue
+                    }
+                    Some(Err(error)) => {
+                        app.lost(index, &error.to_string());
+                        glib::ControlFlow::Break
+                    }
+                    None => glib::ControlFlow::Break,
+                }
+            },
+        ));
     }
-    fn lost(self: &Rc<Self>, error: &str) {
+    fn clear_connection(&self) {
+        self.primary.clear();
+        for remote in self.remotes.borrow().iter() {
+            remote.link.clear();
+        }
+    }
+    /// Show another daemon's tabs in this window. `--master` hosts already present are only raised.
+    fn add_remote(self: &Rc<Self>, config: Config) -> io::Result<()> {
+        let master = config.master.clone().expect("remote launch has a master");
+        let known = self.config.master.as_ref() == Some(&master)
+            || self
+                .remotes
+                .borrow()
+                .iter()
+                .any(|remote| remote.master == master);
+        if !known {
+            let index = self.next_link.get();
+            if index >= 1 << (32 - LINK_SHIFT) {
+                return Err(io::Error::other("too many remote hosts in one window"));
+            }
+            self.next_link.set(index + 1);
+            let launch = !config.attach;
+            self.remotes.borrow_mut().push(Rc::new(Remote {
+                index,
+                master,
+                config,
+                link: Link::new(),
+            }));
+            if let Err(error) = self.establish(index, launch) {
+                self.drop_remote(index);
+                return Err(error);
+            }
+        }
+        self.window.present();
+        Ok(())
+    }
+    fn drop_remote(&self, index: u32) {
+        if let Some(link) = self.link(index).filter(|_| index != 0) {
+            link.clear();
+        }
+        self.remotes
+            .borrow_mut()
+            .retain(|remote| remote.index != index);
+    }
+    fn lost(self: &Rc<Self>, index: u32, error: &str) {
         if self.closing.get() {
             return;
         }
-        self.clear_connection();
-        self.pending_tabs.set(0);
+        let Some(link) = self.link(index) else { return };
+        link.clear();
+        link.pending_tabs.set(0);
         for page in self.pages.borrow().iter() {
-            if let Some(terminal) = &page.terminal {
-                terminal.release();
+            if page.id >> LINK_SHIFT == index {
+                if let Some(terminal) = &page.terminal {
+                    terminal.release();
+                }
             }
         }
         self.message(Some(&format!("Disconnected: {error}. Reconnecting…")));
         window_state::changed();
-        if self.reconnect.borrow().is_none() {
+        if link.reconnect.borrow().is_none() {
             let weak = Rc::downgrade(self);
-            *self.reconnect.borrow_mut() = Some(glib::timeout_add_local(
+            let link_weak = Rc::downgrade(&link);
+            *link.reconnect.borrow_mut() = Some(glib::timeout_add_local(
                 Duration::from_millis(250),
                 move || {
-                    let Some(app) = weak.upgrade() else {
+                    let (Some(app), Some(link)) = (weak.upgrade(), link_weak.upgrade()) else {
                         return glib::ControlFlow::Break;
                     };
-                    if app.establish(false).is_ok() {
-                        app.reconnect.borrow_mut().take();
+                    if app.establish(index, false).is_ok() {
+                        link.reconnect.borrow_mut().take();
                         glib::ControlFlow::Break
                     } else {
                         glib::ControlFlow::Continue
@@ -434,42 +564,47 @@ impl App {
         }
     }
     fn send(self: &Rc<Self>, tab: u32, kind: u32, body: Vec<u8>) {
-        let result = self
+        self.send_link(tab >> LINK_SHIFT, tab & ((1 << LINK_SHIFT) - 1), kind, body);
+    }
+    fn send_link(self: &Rc<Self>, index: u32, tab: u32, kind: u32, body: Vec<u8>) {
+        let Some(link) = self.link(index) else { return };
+        let result = link
             .connection
             .borrow_mut()
             .as_mut()
             .map(|connection| connection.queue(Packet { kind, tab, body }));
         if let Some(Err(error)) = result {
-            self.lost(&error.to_string());
+            self.lost(index, &error.to_string());
             return;
         }
-        let fd = self
+        let fd = link
             .connection
             .borrow()
             .as_ref()
             .filter(|connection| !connection.output.is_empty())
             .map(|connection| connection.socket.as_raw_fd());
-        if self.writer.borrow().is_none() {
+        if link.writer.borrow().is_none() {
             if let Some(fd) = fd {
                 let weak = Rc::downgrade(self);
-                *self.writer.borrow_mut() = Some(glib::source::unix_fd_add_local(
+                let link_weak = Rc::downgrade(&link);
+                *link.writer.borrow_mut() = Some(glib::source::unix_fd_add_local(
                     fd,
                     glib::IOCondition::OUT | glib::IOCondition::HUP | glib::IOCondition::ERR,
                     move |_, _| {
-                        let Some(app) = weak.upgrade() else {
+                        let (Some(app), Some(link)) = (weak.upgrade(), link_weak.upgrade()) else {
                             return glib::ControlFlow::Break;
                         };
-                        let result = app.connection.borrow_mut().as_mut().map(|connection| {
+                        let result = link.connection.borrow_mut().as_mut().map(|connection| {
                             connection.flush().map(|_| connection.output.is_empty())
                         });
                         match result {
                             Some(Ok(false)) => glib::ControlFlow::Continue,
                             Some(Err(error)) => {
-                                app.lost(&error.to_string());
+                                app.lost(index, &error.to_string());
                                 glib::ControlFlow::Break
                             }
                             _ => {
-                                app.writer.borrow_mut().take();
+                                link.writer.borrow_mut().take();
                                 glib::ControlFlow::Break
                             }
                         }
@@ -569,18 +704,27 @@ impl App {
             _ => {}
         }
     }
-    fn packet(self: &Rc<Self>, packet: Packet) -> io::Result<()> {
+    fn packet(self: &Rc<Self>, index: u32, mut packet: Packet) -> io::Result<()> {
+        let Some(link) = self.link(index) else {
+            return Ok(());
+        };
+        if packet.tab >= 1 << LINK_SHIFT {
+            return Err(io::Error::other("invalid tab id"));
+        }
+        if packet.tab != 0 {
+            packet.tab |= index << LINK_SHIFT;
+        }
         match packet.kind {
             WIRE_CAPABILITIES => {
                 let mut body = Payload::new(&packet.body);
-                self.service_features.set(body.u32()?);
+                link.features.set(body.u32()?);
                 body.finish()?;
             }
-            WIRE_CATALOG => self.catalog(&packet.body)?,
+            WIRE_CATALOG => self.catalog(index, &packet.body)?,
             WIRE_CREATED => {
-                self.requested.set(packet.tab);
-                self.pending_tabs
-                    .set(self.pending_tabs.get().saturating_sub(1));
+                link.requested.set(packet.tab);
+                link.pending_tabs
+                    .set(link.pending_tabs.get().saturating_sub(1));
             }
             WIRE_ERROR => self.message(Some(&text(&mut Payload::new(&packet.body))?)),
             WIRE_RELEASE => {
@@ -619,7 +763,10 @@ impl App {
         clippy::too_many_lines,
         reason = "catalog import applies tab, focus and title changes in one pass"
     )]
-    fn catalog(self: &Rc<Self>, bytes: &[u8]) -> io::Result<()> {
+    fn catalog(self: &Rc<Self>, index: u32, bytes: &[u8]) -> io::Result<()> {
+        let link = self
+            .link(index)
+            .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
         let mut body = Payload::new(bytes);
         let count = body.u32()?;
         if count > 4096 {
@@ -631,6 +778,8 @@ impl App {
         for _ in 0..count {
             let id = body.u32()?;
             let kind = body.u32()?;
+            let wire_id = id;
+            let id = id | index << LINK_SHIFT;
             let url = text(&mut body)?;
             let mode = body.u32()?;
             let cursor = body.u32()?;
@@ -643,7 +792,8 @@ impl App {
                 PathBuf::from(std::ffi::OsString::from_vec(bytes.to_vec()))
             };
             let colors = body.u32()?;
-            if id == 0
+            if wire_id == 0
+                || wire_id >= 1 << LINK_SHIFT
                 || kind > 1
                 || colors > worminal_config::COLOR_NAMES.len() as u32
                 || records.iter().any(|record: &Record| record.id == id)
@@ -653,6 +803,10 @@ impl App {
             let mut palette = Vec::new();
             for _ in 0..colors {
                 palette.push(text(&mut body)?);
+            }
+            // Browser views stay with the window's own daemon.
+            if index != 0 && kind != 0 {
+                continue;
             }
             records.push(Record {
                 id,
@@ -666,7 +820,7 @@ impl App {
             });
         }
         body.finish()?;
-        let initial_claim = self.initial_claim.replace(false);
+        let initial_claim = link.initial_claim.replace(false);
         let mut replaced_active = false;
         self.syncing.set(true);
         let obsolete: Vec<_> = self
@@ -674,9 +828,10 @@ impl App {
             .borrow()
             .iter()
             .filter(|page| {
-                !records
-                    .iter()
-                    .any(|record| record.id == page.id && record.browser == page.browser)
+                page.id >> LINK_SHIFT == index
+                    && !records
+                        .iter()
+                        .any(|record| record.id == page.id && record.browser == page.browser)
             })
             .cloned()
             .collect();
@@ -689,7 +844,7 @@ impl App {
                 self.notebook.remove_page(Some(index));
             }
         }
-        for (index, record) in records.iter().enumerate() {
+        for record in &records {
             let existing = self
                 .pages
                 .borrow()
@@ -772,8 +927,6 @@ impl App {
             } else {
                 None
             });
-            self.notebook
-                .reorder_child(&page.widget, Some(index as u32));
             if let Some(page) = self
                 .pages
                 .borrow_mut()
@@ -788,31 +941,40 @@ impl App {
         }
         {
             let mut pages = self.pages.borrow_mut();
-            // The catalog owns tab order; update the collection before painting or hit testing it.
-            if !pages
+            // Each daemon's catalog owns the order of its tabs; links stay grouped in connection order.
+            // Update the collection before painting or hit testing it.
+            let order: std::collections::HashMap<_, _> = records
                 .iter()
-                .map(|page| page.id)
-                .eq(records.iter().map(|record| record.id))
-            {
-                let order: std::collections::HashMap<_, _> = records
-                    .iter()
-                    .enumerate()
-                    .map(|(index, record)| (record.id, index))
-                    .collect();
-                pages.sort_by_key(|page| order[&page.id]);
+                .enumerate()
+                .map(|(position, record)| (record.id, position))
+                .collect();
+            pages.sort_by_key(|page| (page.id >> LINK_SHIFT, order.get(&page.id).copied()));
+            for (position, page) in pages.iter().enumerate() {
+                self.notebook
+                    .reorder_child(&page.widget, Some(position as u32));
             }
         }
         self.syncing.set(false);
-        let requested = self.requested.replace(0);
-        let chosen = if requested != 0 {
+        let requested = link.requested.replace(0);
+        let active = self.active.get();
+        let fallback = fallback | index << LINK_SHIFT;
+        let mut chosen = if requested != 0 {
             requested
-        } else if records.iter().any(|record| record.id == self.active.get()) {
-            self.active.get()
-        } else if records.iter().any(|record| record.id == fallback) {
-            fallback
+        } else if records.iter().any(|record| record.id == active) {
+            active
+        } else if active >> LINK_SHIFT == index || active == 0 || (initial_claim && index != 0) {
+            // Only this link's own tab losing focus, or a newly opened host, moves the selection.
+            if records.iter().any(|record| record.id == fallback) {
+                fallback
+            } else {
+                records.first().map_or(0, |record| record.id)
+            }
         } else {
-            records.first().map_or(0, |record| record.id)
+            active
         };
+        if chosen == 0 {
+            chosen = self.pages.borrow().first().map_or(0, |page| page.id);
+        }
         let page = self
             .pages
             .borrow()
@@ -826,7 +988,9 @@ impl App {
             let changed = self.active.get() != chosen
                 || requested != 0
                 || replaced_active
-                || (initial_claim && (!page.browser || page.view.borrow().is_some()));
+                || (initial_claim
+                    && page.id >> LINK_SHIFT == index
+                    && (!page.browser || page.view.borrow().is_some()));
             self.syncing.set(true);
             self.notebook
                 .set_current_page(self.notebook.page_num(&page.widget));
@@ -836,10 +1000,13 @@ impl App {
             } else {
                 self.window.set_title(&page.title);
             }
-        } else if closed != 0 {
+        } else if closed != 0 && index == 0 {
             self.window.close();
         } else {
             self.message(Some("No tabs. Ctrl+Shift+T opens a terminal."));
+        }
+        if index != 0 && records.is_empty() {
+            self.drop_remote(index);
         }
         let early: Vec<_> = self.early_keys.borrow_mut().drain(..).collect();
         for event in early {
@@ -857,7 +1024,9 @@ impl App {
         Ok(())
     }
     fn new_tab(self: &Rc<Self>) {
-        let mut config = self.config.clone();
+        // A new tab opens on the host of the tab being viewed.
+        let index = self.active.get() >> LINK_SHIFT;
+        let mut config = self.config_for(index);
         config.command.clear();
         config.title = "Worminal".into();
         config.output.clear();
@@ -875,9 +1044,11 @@ impl App {
         }
         match config.launch() {
             Ok(bytes) => {
-                self.pending_tabs
-                    .set(self.pending_tabs.get().saturating_add(1));
-                self.send(0, WIRE_NEW, bytes);
+                if let Some(link) = self.link(index) {
+                    link.pending_tabs
+                        .set(link.pending_tabs.get().saturating_add(1));
+                }
+                self.send_link(index, 0, WIRE_NEW, bytes);
             }
             Err(error) => self.message(Some(&error.to_string())),
         }
@@ -908,7 +1079,7 @@ pub(crate) fn run_with_listener(
     glib::set_prgname(Some("worminal"));
     gtk::init().map_err(|error| io::Error::other(format!("cannot open display: {error}")))?;
     let _window_state = window_state::start();
-    App::open(config)?;
+    App::launch(config)?;
     let _broker = broker::serve(listener, candidate)?;
     gtk::main();
     Ok(())

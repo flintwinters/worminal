@@ -26,7 +26,7 @@ The result has D-Bus type `a(ubbays)`: an array of window records. Each record c
 | Focused | `b` | Whether the window currently has desktop focus. |
 | Available | `b` | Whether its selected tab has a known terminal working directory. |
 | Working directory | `ay` | Full absolute filesystem path as bytes, with no trailing NUL. |
-| Master | `s` | Original `--master` SSH destination, or empty for local sessions. |
+| Master | `s` | SSH destination of the active tab's host (a `--master` joins the active window), or empty for local tabs. |
 
 Byte arrays preserve spaces, Unicode, and non-UTF-8 filenames exactly. An unavailable
 directory is an empty array with `Available=false`: this includes browser tabs, initial

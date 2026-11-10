@@ -16,6 +16,8 @@ pub struct Tab {
     pub id: u32,
     pub label: String,
     pub browser: bool,
+    /// Shown by a daemon on another host.
+    pub remote: bool,
 }
 struct State {
     widget: gtk::DrawingArea,
@@ -107,6 +109,8 @@ impl State {
                     BG
                 } else if entry.browser {
                     1
+                } else if entry.remote {
+                    2
                 } else {
                     7
                 }),
