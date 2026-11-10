@@ -226,3 +226,94 @@ fn malformed_spans_discard_the_entire_pending_frame() {
     assert!(view.packet(&truncated).is_err());
     assert_eq!(text(&view, 0), "old");
 }
+
+fn links(
+    view: &mut Viewport,
+    row: u32,
+    runs: &[LinkRun],
+) -> std::io::Result<Option<worminal_frontend::viewport::Damage>> {
+    let mut update = packet(WIRE_ROW_LINKS, &[row]);
+    update.body.extend(encode_link_runs(runs).unwrap());
+    view.packet(&update)
+}
+fn run(column: u32, count: u32, uri: &str) -> LinkRun {
+    LinkRun {
+        column,
+        count,
+        uri: uri.into(),
+    }
+}
+
+#[test]
+fn links_apply_at_finish_follow_row_copies_and_clear_with_geometry() {
+    let mut view = Viewport::new(6, 3).unwrap();
+    header(&mut view, 6, 3);
+    for (index, line) in ["aaaaaa", "bbbbbb", "cccccc"].iter().enumerate() {
+        row(&mut view, index as u32, line, 0);
+    }
+    assert!(links(&mut view, 1, &[run(1, 2, "http://b")])
+        .unwrap()
+        .is_none());
+    assert!(view.link_at(1, 1).is_none(), "private until FRAME_FINISH");
+    assert_eq!(finish(&mut view).rows, [0, 1, 2]);
+    assert_eq!(view.link_at(2, 1), Some(("http://b", 7..=8)));
+    assert!(view.link_at(0, 1).is_none() && view.link_at(3, 1).is_none());
+    assert!(view.link_at(2, 0).is_none() && view.link_at(9, 9).is_none());
+    // A move carries link rows with cell rows (overlapping, downward) without resending URIs.
+    header(&mut view, 6, 3);
+    assert!(view
+        .packet(&packet(WIRE_COPY_ROWS, &[1, 2, 1]))
+        .unwrap()
+        .is_none());
+    assert_eq!(finish(&mut view).rows, [2]);
+    assert_eq!(view.link_at(1, 2), Some(("http://b", 13..=14)));
+    // An identical list is not damage; an empty list clears.
+    header(&mut view, 6, 3);
+    links(&mut view, 2, &[run(1, 2, "http://b")]).unwrap();
+    assert!(finish(&mut view).rows.is_empty());
+    header(&mut view, 6, 3);
+    links(&mut view, 2, &[]).unwrap();
+    assert_eq!(finish(&mut view).rows, [2]);
+    assert!(view.link_at(1, 2).is_none() && view.link_at(1, 1).is_some());
+    header(&mut view, 7, 3);
+    finish(&mut view);
+    assert!(view.link_at(1, 1).is_none());
+    header(&mut view, 7, 3);
+    links(&mut view, 0, &[run(0, 1, "http://a")]).unwrap();
+    finish(&mut view);
+    view.release();
+    assert!(view.link_at(0, 0).is_none());
+}
+
+#[test]
+fn malformed_links_discard_the_pending_frame_and_keep_the_last_one() {
+    let mut view = Viewport::new(4, 2).unwrap();
+    header(&mut view, 4, 2);
+    row(&mut view, 0, "abcd", 0);
+    row(&mut view, 1, "efgh", 0);
+    links(&mut view, 0, &[run(0, 2, "http://ok")]).unwrap();
+    finish(&mut view);
+    let mut bad = packet(WIRE_ROW_LINKS, &[0]);
+    bad.body.extend(raw_run(3, 2));
+    for update in [
+        packet(WIRE_ROW_LINKS, &[2]),
+        bad,
+        packet(WIRE_ROW_LINKS, &[0, 0]),
+    ] {
+        header(&mut view, 4, 2);
+        row(&mut view, 0, "zzzz", 0);
+        assert!(view.packet(&update).is_err());
+        assert_eq!(text(&view, 0), "abcd");
+        assert_eq!(view.link_at(1, 0), Some(("http://ok", 0..=1)));
+    }
+    // Link packets outside a frame are rejected too.
+    assert!(links(&mut view, 0, &[]).is_err());
+}
+fn raw_run(column: u32, count: u32) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for value in [column, count, 1] {
+        bytes.extend_from_slice(&value.to_be_bytes());
+    }
+    bytes.push(b'x');
+    bytes
+}

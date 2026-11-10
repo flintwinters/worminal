@@ -76,14 +76,16 @@ impl Service {
                         self.clients.get_mut(&client).unwrap().features = features
                             & (WIRE_FEATURE_COPY_ROWS
                                 | WIRE_FEATURE_ROW_SPAN
-                                | WIRE_FEATURE_FOCUSED_FRAMES);
+                                | WIRE_FEATURE_FOCUSED_FRAMES
+                                | WIRE_FEATURE_ROW_LINKS);
                         self.queue(
                             client,
                             WIRE_CAPABILITIES,
                             0,
                             (WIRE_FEATURE_COPY_ROWS
                                 | WIRE_FEATURE_SELECT_ALL
-                                | WIRE_FEATURE_ROW_SPAN)
+                                | WIRE_FEATURE_ROW_SPAN
+                                | WIRE_FEATURE_ROW_LINKS)
                                 .to_be_bytes(),
                         );
                     }

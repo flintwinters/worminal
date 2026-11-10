@@ -6,8 +6,9 @@ use crate::{
 use std::io;
 use worminal_engine::{Cell, Engine, Frame};
 use worminal_protocol::{
-    Buffer, HEADER_BYTES, WIRE_CELL_BYTES, WIRE_COPY_ROWS, WIRE_FEATURE_COPY_ROWS,
-    WIRE_FEATURE_ROW_SPAN, WIRE_FRAME, WIRE_FRAME_FINISH, WIRE_ROW, WIRE_ROW_SPAN,
+    encode_link_runs, link_runs, Buffer, HEADER_BYTES, WIRE_CELL_BYTES, WIRE_COPY_ROWS,
+    WIRE_FEATURE_COPY_ROWS, WIRE_FEATURE_ROW_LINKS, WIRE_FEATURE_ROW_SPAN, WIRE_FRAME,
+    WIRE_FRAME_FINISH, WIRE_ROW, WIRE_ROW_LINKS, WIRE_ROW_SPAN,
 };
 
 fn same_frame(a: Frame, b: Frame) -> bool {
@@ -106,6 +107,8 @@ struct Plan {
     full: bool,
     movement: Option<Move>,
     updates: Vec<Update>,
+    /// Rows whose encoded link runs differ from the baseline (after the move); empty = clear.
+    links: Option<Vec<(usize, Vec<u8>)>>,
     bytes: Vec<u8>,
 }
 
@@ -141,7 +144,11 @@ impl Screen {
         }
         let width = frame.columns as usize * WIRE_CELL_BYTES as usize;
         let rows = frame.rows as usize;
-        let full = full || self.frame.columns != frame.columns || self.bytes.len() != width * rows;
+        let links = features & WIRE_FEATURE_ROW_LINKS != 0;
+        let full = full
+            || self.frame.columns != frame.columns
+            || self.bytes.len() != width * rows
+            || (links && self.links.len() != rows);
         let dirty: Vec<_> = (0..frame.rows)
             .map(|row| core(engine.row_dirty(row)))
             .collect::<io::Result<_>>()?;
@@ -152,9 +159,11 @@ impl Screen {
             && dirty_count * 2 >= rows;
         let mut current = Vec::with_capacity(rows);
         let mut cells: Vec<Cell> = Vec::new();
+        let (mut ids, mut current_links) = (Vec::new(), Vec::new());
         for (row, dirty) in dirty.iter().enumerate() {
             if !full && !search_move && !dirty {
                 current.push(None);
+                current_links.push(None);
                 continue;
             }
             core(engine.row(row as i32, &mut cells))?;
@@ -166,11 +175,23 @@ impl Screen {
                 encoded.put_bytes(fields.as_flattened())?;
             }
             current.push(Some(encoded.into_bytes()));
+            if links {
+                let any = core(engine.row_link_ids(row as i32, &mut ids))?;
+                let runs = if any {
+                    link_runs(&ids, |id| engine.link_uri(id))
+                } else {
+                    Vec::new()
+                };
+                current_links.push(Some(encode_link_runs(&runs)?));
+            } else {
+                current_links.push(None);
+            }
         }
         let movement = search_move
             .then(|| find_move(&self.bytes, &current, width))
             .flatten();
         let mut updates = Vec::new();
+        let mut link_updates = Vec::new();
         for (row, bytes) in current.into_iter().enumerate() {
             if !full && !dirty[row] {
                 continue;
@@ -179,6 +200,14 @@ impl Screen {
             let baseline_row = movement
                 .filter(|m| (m.destination..m.destination + m.count).contains(&row))
                 .map_or(row, |m| m.source + row - m.destination);
+            // Links are compared with the same moved baseline as cells: the view copies link rows
+            // with cell rows, so a scroll resends no URIs. A link-only change keeps its own list
+            // because it has no differing cell for the span code below.
+            if let Some(runs) = current_links[row].take() {
+                if full || runs != self.links[baseline_row] {
+                    link_updates.push((row, runs));
+                }
+            }
             if !full && bytes == self.bytes[baseline_row * width..(baseline_row + 1) * width] {
                 continue;
             }
@@ -208,6 +237,7 @@ impl Screen {
         if !full
             && movement.is_none()
             && updates.is_empty()
+            && link_updates.is_empty()
             && same_frame(frame, self.frame)
             && !reply
         {
@@ -237,8 +267,13 @@ impl Screen {
                         .map_or(update.bytes.len(), |span| 4 + span.len())
             })
             .sum();
+        let link_bytes: usize = link_updates
+            .iter()
+            .map(|(_, runs)| HEADER_BYTES + 4 + runs.len())
+            .sum();
         output.reserve(
             2 * HEADER_BYTES
+                + link_bytes
                 + header.as_flattened().len()
                 + row_bytes
                 + move_body
@@ -262,12 +297,20 @@ impl Screen {
                 output.append_packet_parts(WIRE_ROW, tab, &[&row, &update.bytes])?;
             }
         }
+        for (row, runs) in &link_updates {
+            output.append_packet_parts(
+                WIRE_ROW_LINKS,
+                tab,
+                &[&(*row as u32).to_be_bytes(), runs],
+            )?;
+        }
         output.append_packet_bytes(WIRE_FRAME_FINISH, tab, &[])?;
         Ok(Prepared::Changed(Plan {
             frame,
             full,
             movement,
             updates,
+            links: links.then_some(link_updates),
             bytes: output.into_bytes(),
         }))
     }
@@ -289,6 +332,18 @@ impl Screen {
         for update in plan.updates {
             self.bytes[update.row * width..(update.row + 1) * width].copy_from_slice(&update.bytes);
         }
+        if let Some(updates) = plan.links {
+            if plan.full {
+                self.links = vec![Vec::new(); plan.frame.rows as usize];
+            }
+            if let Some(m) = plan.movement {
+                let moved = self.links[m.source..m.source + m.count].to_vec();
+                self.links[m.destination..m.destination + m.count].clone_from_slice(&moved);
+            }
+            for (row, runs) in updates {
+                self.links[row] = runs;
+            }
+        }
         self.frame = plan.frame;
         core(engine.clean())
     }
@@ -307,6 +362,7 @@ impl Screen {
             Prepared::Held => {
                 if full {
                     self.bytes.clear();
+                    self.links.clear();
                 }
                 Ok(Outcome::Held)
             }

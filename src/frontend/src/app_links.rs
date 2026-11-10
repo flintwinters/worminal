@@ -74,7 +74,10 @@ impl App {
             index,
             0,
             WIRE_CAPABILITIES,
-            (WIRE_FEATURE_COPY_ROWS | WIRE_FEATURE_ROW_SPAN | WIRE_FEATURE_FOCUSED_FRAMES)
+            (WIRE_FEATURE_COPY_ROWS
+                | WIRE_FEATURE_ROW_SPAN
+                | WIRE_FEATURE_FOCUSED_FRAMES
+                | WIRE_FEATURE_ROW_LINKS)
                 .to_be_bytes()
                 .to_vec(),
         );

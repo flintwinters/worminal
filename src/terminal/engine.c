@@ -242,13 +242,23 @@ worminal_engine_row(WorminalEngine *engine, int32_t row, WorminalCell *cells,
 	return WORMINAL_OK;
 }
 
-const char *
-worminal_engine_link(WorminalEngine *engine, int32_t row, int32_t column)
+int
+worminal_engine_row_links(WorminalEngine *engine, int32_t row, uint16_t *ids, size_t capacity,
+				   size_t *required)
 {
-	if (!engine || row < 0 || row >= engine->term.row || column < 0 || column >= engine->term.col)
-		return NULL;
-	uint16_t id = te_tline(engine, row)[column].link;
-	return id < engine->link_count ? engine->links[id] : NULL;
+	if (!engine || row < 0 || row >= engine->term.row || !required || (!ids && capacity))
+		return WORMINAL_INVALID;
+	*required = engine->term.col;
+	if (capacity < *required) return WORMINAL_CAPACITY;
+	Line source = te_tline(engine, row);
+	for (size_t x = 0; x < *required; x++) ids[x] = source[x].link;
+	return WORMINAL_OK;
+}
+
+const char *
+worminal_engine_link_uri(WorminalEngine *engine, uint16_t id)
+{
+	return engine && id && id < engine->link_count ? engine->links[id] : NULL;
 }
 
 int

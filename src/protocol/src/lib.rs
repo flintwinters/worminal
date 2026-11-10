@@ -3,8 +3,10 @@
 use std::{io, mem};
 
 mod constants;
+mod links;
 pub mod worp;
 pub use constants::*;
+pub use links::*;
 
 pub const MAX_PAYLOAD: usize = WIRE_MAX_BYTES as usize;
 pub const HEADER_BYTES: usize = 4 * mem::size_of::<u32>();
@@ -139,6 +141,10 @@ impl<'a> Payload<'a> {
     pub fn string(&mut self) -> io::Result<&'a [u8]> {
         let length = self.u32()? as usize;
         self.take(length)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
     }
 
     pub fn finish(self) -> io::Result<()> {
