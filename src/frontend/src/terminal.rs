@@ -774,7 +774,7 @@ impl Inner {
     }
     /// Underline the link under the pointer, redrawing only the rows of a changed span.
     fn hover(&self) {
-        let (old, new, columns) = {
+        let (tooltip, spans, columns) = {
             let mut state = self.state.borrow_mut();
             let columns = state.viewport.frame().columns as usize;
             let target = state
@@ -785,18 +785,20 @@ impl Inner {
                 .filter(|target| target.explicit)
                 .map(|target| target.uri.clone());
             let new = target.map(|target| target.span);
-            if tooltip != state.tooltip {
-                self.widget.set_tooltip_text(tooltip.as_deref());
-                state.tooltip = tooltip;
-            }
-            if new == state.hover {
-                return;
-            }
-            (
-                std::mem::replace(&mut state.hover, new.clone()),
-                new,
-                columns,
-            )
+            let tooltip = (tooltip != state.tooltip).then(|| {
+                state.tooltip.clone_from(&tooltip);
+                tooltip
+            });
+            let spans = (new != state.hover)
+                .then(|| (std::mem::replace(&mut state.hover, new.clone()), new));
+            (tooltip, spans, columns)
+        };
+        // Set outside the state borrow: GTK property changes can reenter this widget's handlers.
+        if let Some(tooltip) = tooltip {
+            self.widget.set_tooltip_text(tooltip.as_deref());
+        }
+        let Some((old, new)) = spans else {
+            return;
         };
         let rows = [old, new]
             .into_iter()
