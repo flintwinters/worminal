@@ -256,13 +256,13 @@ def clean():
         (ROOT / name).unlink(missing_ok=True)
 
 
-def installation_files(prefix=None):
+def installation_files(prefix=None, *, headless_only=None):
     prefix = Path(prefix if prefix is not None else os.environ.get("PREFIX", Path.home() / ".local"))
     manprefix = Path(os.environ.get("MANPREFIX", str(prefix / HEADLESS_INSTALL["man_dir"])))
     if not prefix.is_absolute() or not manprefix.is_absolute():
         raise ValueError("PREFIX and MANPREFIX must be absolute paths")
     staging = Path(os.environ.get("DESTDIR", "/"))
-    if headless():
+    if (headless() if headless_only is None else headless_only):
         bases = {"prefix": prefix, "man": manprefix}
         return [(ROOT / item["source"], staging / str(bases[item["base"]] / item["path"]).lstrip("/"), item["mode"])
                 for item in HEADLESS_INSTALL["files"]]

@@ -3,30 +3,34 @@
 [The README](../README.md) defines Worp. Its maintained implementation is the public
 `worminal_protocol::worp` module, above the existing workspace framing.
 
-Worp owns **what a node asks another node to do**, independently of delivery:
+Worp defines commands and events for every client, independently of delivery. `Command` covers tab
+lifecycle, terminal input, focus, resizing, scrolling, selection, browser operations and subscription.
+`Event` carries catalog updates, viewport frames and cell data, and other state changes. Any client can
+use these operations; the protocol does not classify clients as windows or agents.
 
-- `Request`: list tabs, read a terminal viewport, send input, or explicitly enroll/list/forget device routes.
-- `Reply`: operation status and the same JSON application document on every transport.
-- `Handler`: performs the request against a node's application state.
-- `Transport`: delivers a request and returns its reply.
-- `Client`: validates requests and talks to a chosen transport.
+Open and input commands express their policies explicitly: `Subscribe`, `Detached` and `ReuseRestored`
+control opening; `Acquire` and `Preserve` control input ownership. A `Request` and `Reply` provide a
+one-shot JSON convenience for inspection, tab operations and device enrollment. The same commands and
+events are available through `session::Session`, an ordered `Read`/`Write` adapter. Callers own
+subscription, authentication and deadlines. A successful input receipt means bytes were queued, not
+that an application processed them; uncertain mutations are never retried automatically.
 
-These initial Worp operations cover the agent-facing API. GUI viewport replication continues to use its existing
-v2 messages alongside the Worp binding.
-
-Device membership is owned by the queried authority; see [the device registry](devices.md). Its availability
+The daemon owns the state; transports deliver the same contract without deciding the client's purpose.
+Device membership is owned by the queried authority; see [the device registry](devices.md). Availability
 observations run on demand in the caller, so network waits never block a terminal service.
-
-The daemon implements `Handler`; its terminal operations do not receive sockets, stream packet headers or SSH
-processes. The CLI constructs Worp requests and uses `Client`. Changing the communication medium replaces the
-transport adapter without changing those requests or terminal operations. `Direct` delivers to a local handler
-without serialization, demonstrating that the high-level protocol itself needs no byte stream.
 
 ## Delivery adapters
 
-The `stream` adapter carries Worp over an ordered, reliable `Read`/`Write` stream. Its `v2` binding maps Worp
-requests and replies to the existing bounded workspace envelope. This keeps the established per-user service
-and its GUI protocol intact. Application operations and the stream envelope are separate contracts.
+The session and one-shot adapters carry Worp over ordered, reliable `Read`/`Write` streams. The v2
+binding maps commands and events to the existing bounded envelope and preserves deployed message IDs.
+Existing v2 peers remain compatible; the full detached launch uses a new operation (9). Application
+semantics and stream framing are separate contracts.
+
+A persistent endpoint is `worminald api --session`: stdin receives v2-bound Worp commands and stdout emits
+Worp events. It bridges to an existing daemon without starting or restoring one. Over SSH use
+`ssh user@host worminald api --session`; the stream contents and semantic contract are identical.
+Normal terminal windows send `Command` and consume `Event` through this same binding. The private local
+GUI-owner upgrade/descriptor handoff channel is separate internal IPC and is not a node operation.
 
 Production entry points currently support:
 
@@ -42,7 +46,7 @@ Raw UDP and HTTP adapters are not implemented. They can implement `Transport` an
 `Handler`; they must supply their own authentication, message boundaries, deadlines and reply correlation.
 A datagram adapter must also account for loss, duplication and reordering before it is suitable for input.
 
-Neither Worp nor its adapters automatically retry uncertain input delivery. A successful input reply means queued
+Neither Worp nor its adapters automatically retry uncertain mutation delivery (open, close or input). A successful input reply means queued
 for the PTY, not processed by an application. These semantics stay the same across delivery methods.
 
 See [the agent interface](automation.md) for commands and the v2 stream binding.

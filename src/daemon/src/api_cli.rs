@@ -11,6 +11,9 @@ use worminal_protocol::worp::{
 };
 use worminal_workspace::{socket, ssh};
 
+#[path = "api_open.rs"]
+mod open;
+
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message.to_owned())
 }
@@ -37,6 +40,16 @@ fn command(arguments: &[OsString]) -> io::Result<Request> {
     let operation = arguments.first().and_then(|arg| arg.to_str()).unwrap_or("");
     let (is_read, tab, input) = match (operation, arguments.len()) {
         ("list", 1) => return Ok(Request::List),
+        ("open", _) => return open::parse(&arguments[1..]),
+        ("close", 2) => {
+            let tab = arguments[1]
+                .to_str()
+                .and_then(|id| id.parse::<u32>().ok())
+                .ok_or_else(|| invalid("TAB must be a positive ID from worminald api list."))?;
+            let request = Request::Close { tab };
+            request.validate()?;
+            return Ok(request);
+        }
         ("devices", 1) => return Ok(Request::Devices),
         ("devices", 2) if arguments[1] == "--no-check" => return Ok(Request::Devices),
         ("enroll", 3) => {
@@ -161,6 +174,10 @@ pub fn run(scope: &[u8], arguments: &[OsString]) -> io::Result<i32> {
         print!("{HELP}");
         return Ok(0);
     }
+    if arguments.len() == 1 && arguments[0] == "--session" {
+        crate::cli::bridge(scope, true)?;
+        return Ok(0);
+    }
     if arguments.len() == 1 && arguments[0] == "--stdio" {
         stream::serve_once(io::stdin().lock(), io::stdout().lock(), &mut Local(scope))?;
         return Ok(0);
@@ -238,6 +255,37 @@ mod tests {
             vec!["key", "1", "Unknown"],
             vec!["read", "1", "extra"],
             vec!["list", "extra"],
+        ] {
+            assert!(command(&args(&values)).is_err());
+        }
+    }
+
+    #[test]
+    fn open_and_close_are_explicit_and_preserve_argv() {
+        let Request::OpenTerminal { options } = command(&args(&[
+            "open",
+            "--cwd",
+            "/target",
+            "--",
+            "/bin/echo",
+            "literal ; $HOME",
+        ]))
+        .unwrap() else {
+            panic!("terminal expected");
+        };
+        assert_eq!(options.directory, "/target");
+        assert_eq!(options.command, ["/bin/echo", "literal ; $HOME"]);
+        assert!(matches!(
+            command(&args(&["close", "9"])).unwrap(),
+            Request::Close { tab: 9 }
+        ));
+        for values in [
+            vec!["open", "--cwd", "relative"],
+            vec!["open", "--"],
+            vec!["open", "--rows", "0"],
+            vec!["open", "--browser", "relative.html"],
+            vec!["open", "--title", "a", "--title", "b"],
+            vec!["close", "0"],
         ] {
             assert!(command(&args(&values)).is_err());
         }

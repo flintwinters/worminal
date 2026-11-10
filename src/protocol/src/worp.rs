@@ -1,19 +1,28 @@
-//! Worp application requests are independent of their communication medium.
-//!
-//! A transport delivers one request and its reply. A handler owns application state;
-//! neither knows about socket addresses, SSH processes, or packet framing. Adapters
-//! own delivery, authentication and deadlines. They must not silently retry input.
+//! Worp commands and events are independent of their communication medium and client interface.
+//! A persistent session carries subscriptions, viewport deltas, input and lifecycle operations.
+//! Request/Reply is the unary convenience form of the same operations. Delivery adapters own
+//! authentication and deadlines; they never silently retry mutations.
 use std::io;
 
+pub mod commands;
 pub mod devices;
+pub mod events;
+pub mod launch;
+pub mod session;
 pub mod stream;
+pub mod tabs;
 pub mod v2;
+pub mod v2_commands;
+pub mod v2_events;
 
 pub const MAX_INPUT_BYTES: usize = 65536;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
     List,
+    OpenTerminal { options: tabs::TerminalOptions },
+    OpenBrowser { url: String },
+    Close { tab: u32 },
     Devices,
     Enroll { device: devices::Device },
     Forget { name: String },
@@ -24,19 +33,30 @@ pub enum Request {
 impl Request {
     pub fn tab(&self) -> u32 {
         match self {
-            Self::List | Self::Devices | Self::Enroll { .. } | Self::Forget { .. } => 0,
-            Self::Read { tab } | Self::Input { tab, .. } => *tab,
+            Self::List
+            | Self::OpenTerminal { .. }
+            | Self::OpenBrowser { .. }
+            | Self::Devices
+            | Self::Enroll { .. }
+            | Self::Forget { .. } => 0,
+            Self::Read { tab } | Self::Input { tab, .. } | Self::Close { tab } => *tab,
         }
     }
 
     /// Validate at both delivery boundaries, before a handler can mutate state.
     pub fn validate(&self) -> io::Result<()> {
         match self {
+            Self::OpenTerminal { options } => options.validate()?,
+            Self::OpenBrowser { url } => tabs::validate_url(url)?,
             Self::Enroll { device } => device.validate()?,
             Self::Forget { name } => devices::validate_name(name)?,
             _ => {}
         }
-        if matches!(self, Self::Read { .. } | Self::Input { .. }) && self.tab() == 0 {
+        if matches!(
+            self,
+            Self::Read { .. } | Self::Input { .. } | Self::Close { .. }
+        ) && self.tab() == 0
+        {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Tab ID must be positive.",
@@ -95,3 +115,6 @@ impl<T: Handler> Transport for Direct<T> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod command_tests;

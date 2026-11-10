@@ -5,10 +5,15 @@ use crate::{
 };
 use std::io;
 use worminal_engine::{Cell, Engine, Frame};
-use worminal_protocol::{
-    Buffer, HEADER_BYTES, WIRE_CELL_BYTES, WIRE_COPY_ROWS, WIRE_FEATURE_COPY_ROWS,
-    WIRE_FEATURE_ROW_SPAN, WIRE_FRAME, WIRE_FRAME_FINISH, WIRE_ROW, WIRE_ROW_SPAN,
+use worminal_protocol::worp::{
+    events::{FrameRef, FrameState},
+    v2_events,
 };
+use worminal_protocol::{
+    Buffer, HEADER_BYTES, WIRE_CELL_BYTES, WIRE_FEATURE_COPY_ROWS, WIRE_FEATURE_ROW_SPAN,
+};
+#[cfg(test)]
+use worminal_protocol::{WIRE_COPY_ROWS, WIRE_FRAME, WIRE_FRAME_FINISH, WIRE_ROW, WIRE_ROW_SPAN};
 
 fn same_frame(a: Frame, b: Frame) -> bool {
     (
@@ -214,17 +219,6 @@ impl Screen {
             core(engine.clean())?;
             return Ok(Prepared::Unchanged);
         }
-        let header = [
-            frame.columns,
-            frame.rows,
-            frame.cursor_x,
-            frame.cursor_y,
-            frame.scroll,
-            frame.alternate,
-        ]
-        .map(|field| (field as u32).to_be_bytes());
-        let move_body = movement
-            .map(|m| [m.source, m.destination, m.count].map(|field| (field as u32).to_be_bytes()));
         let mut output = Buffer::default();
         let row_bytes: usize = updates
             .iter()
@@ -238,31 +232,50 @@ impl Screen {
             })
             .sum();
         output.reserve(
-            2 * HEADER_BYTES
-                + header.as_flattened().len()
-                + row_bytes
-                + move_body
-                    .as_ref()
-                    .map_or(0, |fields| HEADER_BYTES + fields.as_flattened().len()),
+            2 * HEADER_BYTES + 24 + row_bytes + movement.as_ref().map_or(0, |_| HEADER_BYTES + 12),
         )?;
-        output.append_packet_bytes(WIRE_FRAME, tab, header.as_flattened())?;
-        if let Some(fields) = move_body {
-            output.append_packet_bytes(WIRE_COPY_ROWS, tab, fields.as_flattened())?;
+        v2_events::append_frame(
+            &mut output,
+            tab,
+            FrameRef::Start(FrameState {
+                columns: frame.columns as u32,
+                rows: frame.rows as u32,
+                cursor_x: frame.cursor_x as u32,
+                cursor_y: frame.cursor_y as u32,
+                scroll: frame.scroll as u32,
+                alternate: frame.alternate != 0,
+            }),
+        )?;
+        if let Some(movement) = movement {
+            v2_events::append_frame(
+                &mut output,
+                tab,
+                FrameRef::CopyRows {
+                    source: movement.source as u32,
+                    destination: movement.destination as u32,
+                    count: movement.count as u32,
+                },
+            )?;
         }
         for update in &updates {
-            let row = (update.row as u32).to_be_bytes();
-            if let Some(span) = &update.span {
-                let column = (span.start as u32 / WIRE_CELL_BYTES).to_be_bytes();
-                output.append_packet_parts(
-                    WIRE_ROW_SPAN,
-                    tab,
-                    &[&row, &column, &update.bytes[span.clone()]],
-                )?;
-            } else {
-                output.append_packet_parts(WIRE_ROW, tab, &[&row, &update.bytes])?;
-            }
+            let (column, cells) = match &update.span {
+                Some(span) => (
+                    Some(span.start as u32 / WIRE_CELL_BYTES),
+                    &update.bytes[span.clone()],
+                ),
+                None => (None, update.bytes.as_slice()),
+            };
+            v2_events::append_frame(
+                &mut output,
+                tab,
+                FrameRef::Row {
+                    row: update.row as u32,
+                    column,
+                    cells,
+                },
+            )?;
         }
-        output.append_packet_bytes(WIRE_FRAME_FINISH, tab, &[])?;
+        v2_events::append_frame(&mut output, tab, FrameRef::Finish)?;
         Ok(Prepared::Changed(Plan {
             frame,
             full,

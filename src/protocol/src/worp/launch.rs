@@ -1,0 +1,167 @@
+use crate::{
+    Payload, WORKSPACE_MAX_ARGS, WORKSPACE_MAX_COLS, WORKSPACE_MAX_ENV, WORKSPACE_MAX_ROWS,
+};
+use std::{ffi::OsString, io, os::unix::ffi::OsStringExt};
+
+pub const RESTORE_COLUMNS: u32 = 80;
+pub const RESTORE_ROWS: u32 = 24;
+pub const RESTORE_ENV_NAME: &std::ffi::CStr = c"WORMINAL_RESTORE";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Launch {
+    pub columns: u32,
+    pub rows: u32,
+    pub allow_alternate: bool,
+    pub title: Vec<u8>,
+    pub directory: Vec<u8>,
+    pub line: Vec<u8>,
+    pub output: Vec<u8>,
+    pub window_id: Vec<u8>,
+    pub arguments: Vec<OsString>,
+    pub environment: Option<Vec<(OsString, OsString)>>,
+}
+
+fn c_string(payload: &mut Payload<'_>) -> io::Result<Vec<u8>> {
+    // C launch fields are length-delimited C strings. Preserve their historical prefix interpretation.
+    Ok(payload
+        .string()?
+        .split(|byte| *byte == 0)
+        .next()
+        .unwrap()
+        .to_vec())
+}
+
+impl Launch {
+    pub fn from_options(options: &super::tabs::TerminalOptions) -> Self {
+        let mut launch = Self::restore(options.directory.as_bytes().to_vec());
+        launch.columns = options.columns;
+        launch.rows = options.rows;
+        launch.title = options.title.as_bytes().to_vec();
+        launch.arguments = options.command.iter().map(OsString::from).collect();
+        launch
+    }
+
+    pub fn restore(directory: Vec<u8>) -> Self {
+        Self {
+            columns: RESTORE_COLUMNS,
+            rows: RESTORE_ROWS,
+            allow_alternate: true,
+            title: Vec::new(),
+            directory,
+            line: Vec::new(),
+            output: Vec::new(),
+            window_id: Vec::new(),
+            arguments: Vec::new(),
+            environment: None,
+        }
+    }
+
+    pub fn environment_for_restore(&self) -> Vec<(OsString, OsString)> {
+        let marker = RESTORE_ENV_NAME;
+        let marker = OsString::from_vec(marker.to_bytes().to_vec());
+        let mut environment = self
+            .environment
+            .clone()
+            .unwrap_or_else(|| std::env::vars_os().collect());
+        environment.retain(|(key, _)| *key != marker);
+        environment.push((marker, OsString::from("1")));
+        environment
+    }
+
+    pub fn encode(&self) -> io::Result<Vec<u8>> {
+        use std::os::unix::ffi::OsStrExt;
+        let mut body = crate::Buffer::default();
+        for value in [
+            self.columns,
+            self.rows,
+            u32::from(self.allow_alternate),
+            self.arguments.len().try_into().map_err(io::Error::other)?,
+            self.environment
+                .as_ref()
+                .map_or(0, Vec::len)
+                .try_into()
+                .map_err(io::Error::other)?,
+        ] {
+            body.put_u32(value)?;
+        }
+        for value in [
+            &self.title,
+            &self.directory,
+            &self.line,
+            &self.output,
+            &self.window_id,
+        ] {
+            body.put_string(value)?;
+        }
+        for value in &self.arguments {
+            body.put_string(value.as_bytes())?;
+        }
+        if let Some(environment) = &self.environment {
+            for (key, value) in environment {
+                let mut entry = key.as_bytes().to_vec();
+                entry.push(b'=');
+                entry.extend(value.as_bytes());
+                body.put_string(&entry)?;
+            }
+        }
+        let bytes = body.into_bytes();
+        Self::decode(&bytes)?;
+        Ok(bytes)
+    }
+
+    pub fn decode(bytes: &[u8]) -> io::Result<Self> {
+        let mut payload = Payload::new(bytes);
+        let columns = payload.u32()?;
+        let rows = payload.u32()?;
+        let allow_alternate = payload.u32()? != 0;
+        let argument_count = payload.u32()?;
+        let environment_count = payload.u32()?;
+        if columns == 0
+            || columns > WORKSPACE_MAX_COLS
+            || rows == 0
+            || rows > WORKSPACE_MAX_ROWS
+            || argument_count > WORKSPACE_MAX_ARGS
+            || environment_count > WORKSPACE_MAX_ENV
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid workspace launch bounds",
+            ));
+        }
+        let title = c_string(&mut payload)?;
+        let directory = c_string(&mut payload)?;
+        let line = c_string(&mut payload)?;
+        let output = c_string(&mut payload)?;
+        let window_id = c_string(&mut payload)?;
+        let mut arguments = Vec::with_capacity(argument_count as usize);
+        for _ in 0..argument_count {
+            arguments.push(OsString::from_vec(c_string(&mut payload)?));
+        }
+        // No supplied environment means inherit the daemon, rather than launch with an empty environment.
+        let mut environment = (environment_count != 0).then(Vec::new);
+        for _ in 0..environment_count {
+            let entry = c_string(&mut payload)?;
+            if let Some(separator) = entry.iter().position(|byte| *byte == b'=') {
+                if separator != 0 {
+                    environment.as_mut().unwrap().push((
+                        OsString::from_vec(entry[..separator].to_vec()),
+                        OsString::from_vec(entry[separator + 1..].to_vec()),
+                    ));
+                }
+            }
+        }
+        payload.finish()?;
+        Ok(Self {
+            columns,
+            rows,
+            allow_alternate,
+            title,
+            directory,
+            line,
+            output,
+            window_id,
+            arguments,
+            environment,
+        })
+    }
+}

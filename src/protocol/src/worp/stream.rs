@@ -16,7 +16,7 @@ impl<R: Read, W: Write> Stream<R, W> {
     }
 }
 
-fn read_packet(reader: &mut impl Read) -> io::Result<Packet> {
+pub(super) fn read_packet(reader: &mut impl Read) -> io::Result<Packet> {
     let mut header = [0u8; HEADER_BYTES];
     reader.read_exact(&mut header).map_err(|error| {
         io::Error::new(
@@ -29,7 +29,7 @@ fn read_packet(reader: &mut impl Read) -> io::Result<Packet> {
     let kind = header.u32()?;
     let tab = header.u32()?;
     let size = header.u32()? as usize;
-    if version != WIRE_VERSION || !(4..=MAX_PAYLOAD).contains(&size) {
+    if version != WIRE_VERSION || size > MAX_PAYLOAD {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "Invalid Worp stream envelope.",

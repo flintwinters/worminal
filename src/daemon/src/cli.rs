@@ -5,11 +5,16 @@ use crate::{
 };
 use std::{
     ffi::OsString,
-    io::{self, Read, Write},
+    io::{self, Read},
     os::{fd::AsRawFd, unix::ffi::OsStrExt},
     process::Child,
     thread,
     time::{Duration, Instant},
+};
+use worminal_protocol::worp::{
+    commands::{Command, CommandKind},
+    events::EventKind,
+    session::Session,
 };
 use worminal_protocol::*;
 use worminal_workspace::{browser_target, socket};
@@ -46,7 +51,7 @@ fn ensure(scope: &[u8]) -> io::Result<(std::os::unix::net::UnixStream, Option<Ch
     }
 }
 
-fn bridge(scope: &[u8], existing: bool) -> io::Result<()> {
+pub(crate) fn bridge(scope: &[u8], existing: bool) -> io::Result<()> {
     let (mut socket, mut child) = if existing {
         (connect(scope)?, None)
     } else {
@@ -117,32 +122,10 @@ fn bridge(scope: &[u8], existing: bool) -> io::Result<()> {
     result
 }
 
-fn reply(socket: &mut std::os::unix::net::UnixStream) -> io::Result<Packet> {
-    let mut decoder = Decoder::default();
-    let mut bytes = [0u8; 4096];
-    loop {
-        let count = socket.read(&mut bytes)?;
-        if count == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "workspace closed its reply",
-            ));
-        }
-        let mut bytes = &bytes[..count];
-        while !bytes.is_empty() {
-            let (used, packet) = decoder.push(bytes)?;
-            if let Some(packet) = packet {
-                return Ok(packet);
-            }
-            bytes = &bytes[used..];
-        }
-    }
-}
-
-fn request(scope: &[u8], kind: u32, body: Vec<u8>) -> io::Result<i32> {
-    let mut socket =
+fn request(scope: &[u8], kind: CommandKind) -> io::Result<i32> {
+    let socket =
         connect(scope).map_err(|_| io::Error::other("No preview workspace service is running."))?;
-    let handoff = matches!(kind, WIRE_HANDIN | WIRE_HANDOFF);
+    let handoff = matches!(kind, CommandKind::Transfer { .. });
     let timeout = if handoff {
         u64::from(worminal_workspace::handoff::HANDOFF_TIMEOUT_SECONDS)
     } else {
@@ -150,15 +133,16 @@ fn request(scope: &[u8], kind: u32, body: Vec<u8>) -> io::Result<i32> {
     };
     socket.set_read_timeout(Some(Duration::from_secs(timeout)))?;
     socket.set_write_timeout(Some(Duration::from_secs(timeout)))?;
-    socket.write_all(&Packet { kind, tab: 0, body }.encode()?)?;
-    let packet = reply(&mut socket)?;
-    if packet.kind == WIRE_COMMAND_DONE {
+    let mut session = Session::new(socket.try_clone()?, socket);
+    session.send(&Command::new(0, kind))?;
+    let event = session.receive()?;
+    if matches!(event.kind, EventKind::CommandDone) {
         return Ok(0);
     }
-    let error = (packet.kind == WIRE_ERROR)
-        .then(|| Payload::new(&packet.body).string().map(Vec::from))
-        .transpose()?
-        .unwrap_or_else(|| b"Preview service rejected the command.".to_vec());
+    let error = match event.kind {
+        EventKind::Error(bytes) => bytes,
+        _ => b"Preview service rejected the command.".to_vec(),
+    };
     eprintln!("{}", String::from_utf8_lossy(&error));
     Ok(1)
 }
@@ -202,15 +186,9 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
                 return Ok(0);
             }
             b"--stop" => {
-                let mut socket = connect(scope)?;
-                socket.write_all(
-                    &Packet {
-                        kind: WIRE_STOP,
-                        tab: 0,
-                        body: Vec::new(),
-                    }
-                    .encode()?,
-                )?;
+                let socket = connect(scope)?;
+                Session::new(socket.try_clone()?, socket)
+                    .send(&Command::new(0, CommandKind::Stop))?;
                 return Ok(0);
             }
             _ => {}
@@ -230,9 +208,15 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
             } else {
                 arguments[2].as_os_str().as_bytes().to_vec()
             };
-            let mut body = Buffer::default();
-            body.put_string(&value)?;
-            let result = request(scope, kind, body.into_bytes());
+            let command = if kind == WIRE_BROWSER_REPLACE {
+                CommandKind::ReplaceBrowser(value)
+            } else {
+                CommandKind::Transfer {
+                    outbound: kind == WIRE_HANDOFF,
+                    token: value,
+                }
+            };
+            let result = request(scope, command);
             if kind != WIRE_BROWSER_REPLACE && !matches!(&result, Ok(0)) {
                 eprintln!(
                     "Handoff unavailable or rejected; no automatic daemon restart was attempted."

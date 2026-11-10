@@ -4,7 +4,7 @@ use crate::browser::Browser;
 use gtk::prelude::*;
 use std::{ffi::OsString, rc::Rc};
 use worminal_browser_api::*;
-use worminal_protocol::*;
+use worminal_protocol::worp::commands::CommandKind;
 
 impl App {
     pub(super) fn release_browsers(self: &Rc<Self>) {
@@ -47,11 +47,13 @@ impl App {
             .clone()
     }
     pub(super) fn open_browser(self: &Rc<Self>, url: &str) {
-        let mut body = Buffer::default();
-        match body.put_string(url.as_bytes()) {
-            Ok(()) => self.send(0, WIRE_BROWSER, body.into_bytes()),
-            Err(error) => self.message(Some(&error.to_string())),
-        }
+        self.send(
+            0,
+            CommandKind::Browser {
+                url: url.as_bytes().to_vec(),
+                subscribe: true,
+            },
+        );
     }
     pub(super) fn claim_browser(self: &Rc<Self>, id: u32) {
         let Some(page) = self
@@ -135,11 +137,10 @@ impl App {
         }
         self.send(
             id,
-            WIRE_FOCUS,
-            [self.config.columns, self.config.rows]
-                .into_iter()
-                .flat_map(u32::to_be_bytes)
-                .collect(),
+            CommandKind::Focus {
+                columns: self.config.columns,
+                rows: self.config.rows,
+            },
         );
     }
     pub(super) fn browser_metadata(self: &Rc<Self>, record: &Record) {
@@ -191,7 +192,7 @@ fn event(master: &Option<OsString>, id: u32, kind: u32, value: &str) {
         if kind == WORMINAL_BROWSER_OPEN {
             app.open_browser(value);
         } else if kind == WORMINAL_BROWSER_CLOSE {
-            app.send(id, WIRE_CLOSE, Vec::new());
+            app.send(id, CommandKind::Close { receipt: false });
         } else if kind == WORMINAL_BROWSER_NAVIGATE && !value.is_empty() {
             let mut changed = false;
             for peer in &owners {
@@ -206,10 +207,7 @@ fn event(master: &Option<OsString>, id: u32, kind: u32, value: &str) {
                 }
             }
             if changed {
-                let mut body = Buffer::default();
-                if body.put_string(value.as_bytes()).is_ok() {
-                    app.send(id, WIRE_BROWSER_NAVIGATE, body.into_bytes());
-                }
+                app.send(id, CommandKind::Navigate(value.as_bytes().to_vec()));
             }
         }
     }

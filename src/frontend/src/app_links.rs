@@ -2,6 +2,11 @@
 use super::{window_state, App, Config, Connection, Link, Remote, LINK_SHIFT};
 use gtk::{glib, prelude::*};
 use std::{ffi::OsString, io, os::fd::AsRawFd, rc::Rc, time::Duration};
+use worminal_protocol::worp::{
+    commands::{Command, CommandKind, OpenMode},
+    launch::Launch,
+    v2_commands, v2_events,
+};
 use worminal_protocol::*;
 
 impl App {
@@ -73,17 +78,23 @@ impl App {
         self.send_link(
             index,
             0,
-            WIRE_CAPABILITIES,
-            (WIRE_FEATURE_COPY_ROWS | WIRE_FEATURE_ROW_SPAN | WIRE_FEATURE_FOCUSED_FRAMES)
-                .to_be_bytes()
-                .to_vec(),
+            CommandKind::Capabilities(
+                WIRE_FEATURE_COPY_ROWS | WIRE_FEATURE_ROW_SPAN | WIRE_FEATURE_FOCUSED_FRAMES,
+            ),
         );
         if launch && index == 0 && config.browser_url.is_some() {
             self.open_browser(config.browser_url.as_deref().unwrap());
         } else if launch {
-            self.send_link(index, 0, WIRE_HELLO, config.launch()?);
+            self.send_link(
+                index,
+                0,
+                CommandKind::Open {
+                    launch: Launch::decode(&config.launch()?)?,
+                    mode: OpenMode::ReuseRestored,
+                },
+            );
         } else {
-            self.send_link(index, 0, WIRE_ATTACH, Vec::new());
+            self.send_link(index, 0, CommandKind::Subscribe);
         }
         if link.connection.borrow().is_none() {
             return Err(io::ErrorKind::BrokenPipe.into());
@@ -114,7 +125,12 @@ impl App {
                             if app.closing.get() || link.connection.borrow().is_none() {
                                 return glib::ControlFlow::Break;
                             }
-                            if let Err(error) = app.packet(index, packet) {
+                            if let Err(error) =
+                                v2_events::decode(packet).and_then(|event| match event {
+                                    Some(event) => app.event(index, event),
+                                    None => Ok(()),
+                                })
+                            {
                                 app.lost(index, &error.to_string());
                                 return glib::ControlFlow::Break;
                             }
@@ -209,17 +225,19 @@ impl App {
             ));
         }
     }
-    pub(super) fn send(self: &Rc<Self>, tab: u32, kind: u32, body: Vec<u8>) {
-        self.send_link(tab >> LINK_SHIFT, tab & ((1 << LINK_SHIFT) - 1), kind, body);
+    pub(super) fn send(self: &Rc<Self>, tab: u32, kind: CommandKind) {
+        self.send_link(tab >> LINK_SHIFT, tab & ((1 << LINK_SHIFT) - 1), kind);
     }
-    pub(super) fn send_link(self: &Rc<Self>, index: u32, tab: u32, kind: u32, body: Vec<u8>) {
+    pub(super) fn send_link(self: &Rc<Self>, index: u32, tab: u32, kind: CommandKind) {
         let Some(link) = self.link(index) else { return };
-        let result = link
-            .connection
-            .borrow_mut()
-            .as_mut()
-            .map(|connection| connection.queue(Packet { kind, tab, body }));
-        if let Some(Err(error)) = result {
+        let result = v2_commands::encode(&Command { tab, kind }).and_then(|packet| {
+            link.connection
+                .borrow_mut()
+                .as_mut()
+                .map(|connection| connection.queue(packet))
+                .transpose()
+        });
+        if let Err(error) = result {
             self.lost(index, &error.to_string());
             return;
         }

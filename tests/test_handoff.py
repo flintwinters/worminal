@@ -15,7 +15,7 @@ import time
 import unittest
 import uuid
 
-from workspace_protocol import number, string, send, wait_kind, catalog_records, rust_daemon
+from workspace_protocol import number, string, send, wait_kind, catalog_records, rust_daemon, stop_workspace
 
 ROOT = Path(__file__).resolve().parent.parent
 BINARIES = {1: runtime_binary("worminald-x11"),
@@ -37,8 +37,9 @@ class HandoffFixture:
             peer.close()
         # Stop through the protocol so the service hangs up owned shells and closes PTYs.
         for service, version, env in reversed(self.services):
-            subprocess.run([str(BINARIES[version]), "--stop"], env=env, timeout=3,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Transfers can replace the tracked Popen owner. Await the accepting owner before
+            # deleting mapped fixture binaries; --stop alone only queues the stop request.
+            stop_workspace(env, version=version)
             try:
                 service.communicate(timeout=3)
             except subprocess.TimeoutExpired:

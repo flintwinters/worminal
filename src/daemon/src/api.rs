@@ -1,4 +1,4 @@
-//! Headless, same-user automation over the existing workspace connection.
+//! Unary convenience commands over the shared, same-user Worp session.
 use crate::{
     service::Service,
     state::{core, Tab},
@@ -6,10 +6,19 @@ use crate::{
 use std::io;
 use worminal_protocol::worp::{Handler, Reply, Request};
 
-pub const HELP: &str = r#"Worp: Worminal automation API (version 1)
+#[path = "api_tabs.rs"]
+mod tabs;
+
+pub const HELP: &str = r#"Worp: Worminal command and event API (version 1)
 Usage: worminald api [--master user@host] COMMAND
   help                 Show this command reference; needs no running daemon.
+  --session            Duplex binary Worp command/event session to the existing daemon.
+                       Supports catalog, frames, input, focus/resize, selection and lifecycle.
   list                 List tab IDs, titles, directories and shell PIDs as JSON.
+  open [OPTIONS] [-- PROGRAM ARG...]  Create a terminal; default is the target user's shell.
+    --cwd /ABS/PATH --title TITLE --columns N --rows N  (default size: 80x24)
+  open --browser URL   Create a browser record; use an explicit URL, including file:/// paths.
+  close TAB            Close a terminal/browser tab. Terminal close hangs up its running programs.
   enroll NAME ENDPOINT  Enroll a named SSH route; no contact with that device.
   devices              List enrollment and check Worp reachability from this caller.
   devices --no-check   List enrollment only; no network probes.
@@ -19,14 +28,24 @@ Usage: worminald api [--master user@host] COMMAND
   key TAB KEY...       Send Enter, Tab, Escape, Backspace, or Ctrl-A through Ctrl-Z.
 Examples:
   worminald api list
+  worminald api open --cwd /home/user/project -- /bin/sh
+  worminald api open --browser https://example.org/
+  worminald api close 12
   worminald api read 12
   worminald api type 12 'What are you working on?'
   worminald api key 12 Enter
 Registry authority: worminald api --master user@host devices
 Remote: worminald api --master user@host list
 Bootstrap a new node: worminald install-on-remote --help
-Worp transports: authenticated local socket or SSH; same operations and JSON replies.
+Worp transports: authenticated local socket or SSH; identical semantic commands and events.
+Persistent session: worminald api --session, or ssh user@host worminald api --session.
+Rust contract: worminal_protocol::worp::{commands,events,session}; v2 framing is one binding.
+Unary commands below are a JSON request/reply convenience; session clients may use them too.
 All operations connect to an existing daemon; none starts or restores a workspace.
+Open does not open a GUI window or take control. Paths, argv and environment belong to the target daemon.
+Command arguments are passed literally; no implicit shell interpretation or caller environment forwarding.
+Browser records load only when displayed. Close removes the tab and initiates terminal hangup, without confirmation.
+Open/close are mutations; do not automatically retry uncertain replies. List again to inspect the outcome.
 Input targets a tab, preserves its view/controller and size, and may execute commands.
 Input success means queued for the PTY, not that the application processed it.
 Tab IDs belong to the current daemon workspace; list again after a restart.
@@ -110,6 +129,9 @@ impl Handler for Service {
         if let Err(error) = request.validate() {
             return Ok(failure(&error.to_string()));
         }
+        if let Some(reply) = self.tab_operation(&request, self.now())? {
+            return Ok(reply);
+        }
         match &request {
             Request::Devices => {
                 let devices = match self.devices.list() {
@@ -156,25 +178,47 @@ impl Handler for Service {
         let Some(index) = self.index(tab) else {
             return Ok(failure("Tab not found; run worminald api list."));
         };
-        let Some(terminal) = self.tabs[index].terminal.as_ref() else {
+        let Some(_) = self.tabs[index].terminal.as_ref() else {
             return Ok(failure("This operation requires a terminal tab."));
         };
         let Request::Input { bytes, .. } = request else {
             return Ok(success(read(&mut self.tabs[index], now)?));
         };
-        // Engine LNM can expand each CR into CRLF. Reject before engine input owns any
-        // mutation: overflowing Tab::effects otherwise stops the shell to bound memory.
-        if bytes.len() * 2 > terminal.input.remaining() {
+        self.input_operation(tab, &bytes, None, now)
+    }
+}
+
+impl Service {
+    pub(crate) fn input_operation(
+        &mut self,
+        tab: u32,
+        bytes: &[u8],
+        owner: Option<crate::state::ClientId>,
+        now: i64,
+    ) -> io::Result<Reply> {
+        let Some(index) = self.index(tab) else {
+            return Ok(failure("Tab not found; run worminald api list."));
+        };
+        let Some(terminal) = self.tabs[index].terminal.as_ref() else {
+            return Ok(failure("This operation requires a terminal tab."));
+        };
+        // Engine LNM can double CR bytes. Detached writers reject overflow before mutation;
+        // a controlling stream retains the established overload error/affected-tab stop policy.
+        if bytes.len() > worminal_protocol::worp::MAX_INPUT_BYTES
+            || (owner.is_none() && bytes.len() * 2 > terminal.input.remaining())
+        {
             return Ok(failure(
                 "Input exceeds 65536 bytes or the PTY queue is full.",
             ));
         }
-        if terminal.pty.fd().is_none() {
+        if owner.is_none() && terminal.pty.fd().is_none() {
             return Ok(failure("Terminal process has exited."));
         }
-        // Unlike a graphical input source, one-shot automation must not steal the live
-        // controller: disconnecting would otherwise leave its painting view detached.
-        let notices = self.tabs[index].input(&bytes, true, now)?;
+        // Acquiring control is explicit; detached input preserves the current viewport.
+        if let Some(owner) = owner {
+            self.take_control(index, owner);
+        }
+        let notices = self.tabs[index].input(bytes, true, now)?;
         self.notices(tab, notices);
         self.send_frame(index, false, now)?;
         Ok(success(format!(

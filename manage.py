@@ -83,7 +83,7 @@ def check_file_limits():
         raise typer.Exit(1)
 
 
-def run_checks(match=None):
+def run_checks(match=None, jobs=None):
     if check_privacy(ROOT):
         return 1
     native_build.build_targets(
@@ -97,8 +97,8 @@ def run_checks(match=None):
     code = run_native_checks()
     if code:
         return code
-    code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-q",
-                *(["-k", match] if match else [])])
+    from tools.test_runner import run_python
+    code = run_python(jobs=jobs, match=match)
     if code or match:
         return code
     code = preview_checks("x11")
@@ -151,7 +151,7 @@ def run_headless_checks():
     if code:
         return code
     patterns = ("test_build.py", "test_reference.py", "test_perf_metrics.py", "test_cli.py", "test_workspace.py",
-                "test_preview_workspace.py", "test_agent_api.py", "test_remote_install.py", "test_theme.py",
+                "test_preview_workspace.py", "test_agent_api.py", "test_remote_install.py", "test_remote_upgrade.py", "test_theme.py",
                 "test_privacy.py", "test_handoff.py", "test_restore.py", "test_upgrade.py")
     for pattern in patterns:
         code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
@@ -323,6 +323,15 @@ def check_remote_install():
                         env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate)}))
 
 
+@app.command("check-remote-upgrade")
+def check_remote_upgrade():
+    """Check private mock-SSH upgrades, publication rollback and live daemon session preservation."""
+    candidate = build_rust_daemon()
+    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                         "-p", "test_remote_upgrade.py", "-q"],
+                        env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate)}))
+
+
 @app.command("check-rust-daemon")
 def check_rust_daemon():
     """Check the Rust service with existing C v2 clients, ownership, output and recovery fixtures."""
@@ -470,9 +479,20 @@ def check_preview_qtile():
 
 
 @app.command()
-def check(match: str = typer.Option(None, help="Run matching Python checks; full suite is the default.")):
+def check(match: str = typer.Option(None, help="Run matching Python checks; full suite is the default."),
+          jobs: int = typer.Option(None, min=1, show_default="available CPUs // 2 + 1",
+                                   help="Independent Python workers; --jobs 1 runs serially.")):
     """Run the local native and private-display regression suite."""
-    raise typer.Exit(run_checks(match))
+    raise typer.Exit(run_checks(match, jobs))
+
+
+@app.command("check-python")
+def check_python(jobs: int = typer.Option(None, min=1, show_default="available CPUs // 2 + 1"),
+                 match: str = typer.Option(None),
+                 module: list[str] = typer.Option(None, help="Top-level module; repeat to select several.")):
+    """Run Python checks against existing build artifacts; use check to build prerequisites first."""
+    from tools.test_runner import run_python
+    raise typer.Exit(run_python(jobs=jobs, match=match, modules=module or ()))
 
 
 @app.command("check-privacy")
@@ -534,6 +554,21 @@ def check_upgrade():
     native_build.build_targets("worminald-x11", "worminald-preview")
     raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                          "-p", "test_upgrade.py", "-q"]))
+
+
+@app.command("upgrade")
+def upgrade_device(target: str = typer.Argument(..., help="Existing device's SSH host or user@host."),
+                   source_prefix: Path = typer.Option(Path("/usr/local"), help="Current installed source prefix.")):
+    """Copy this device's installed Worminal release to an existing compatible device over SSH."""
+    from tools.remote_upgrade import upgrade
+    try:
+        receipt = upgrade(target, source_prefix)
+    except (OSError, ValueError, RuntimeError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(1) from error
+    typer.echo(json.dumps(receipt))
+    if not receipt["active"]:
+        raise typer.Exit(1)
 
 
 @app.command("upgrade-daemon")

@@ -149,7 +149,9 @@ class ReplacementTest(unittest.TestCase):
                 return found.stdout.splitlines() if found.returncode==0 else []
             def owner():
                 windows = visible()
-                return subprocess.check_output(['xdotool','getwindowpid',windows[0]],env=env,text=True).strip() if windows else None
+                if not windows: return None
+                result = subprocess.run(['xdotool','getwindowpid',windows[0]],env=env,capture_output=True,text=True)
+                return result.stdout.strip() if result.returncode == 0 else None
             with service(remotea), service(remoteb), (base/'owner.log').open('wb') as log:
                 process = None
                 try:
@@ -168,7 +170,10 @@ class ReplacementTest(unittest.TestCase):
                     pending = module_path(RUST_FRONTEND_MODULE,prefix=base).with_suffix('.pending')
                     shutil.copy2(module_path(RUST_FRONTEND_MODULE,prefix=base),pending)
                     pending.replace(module_path(RUST_FRONTEND_MODULE,prefix=base))
-                    wait(lambda: owner() and owner()!=previous,'Multi-host window did not replace')
+                    def replacement_owner():
+                        current = owner()
+                        return current if current and current != previous else None
+                    wait(replacement_owner,'Multi-host window did not replace')
                     self.assertEqual(len(visible()),1)
                     name = subprocess.check_output(['xdotool','getwindowname',visible()[0]],env=env,text=True).strip()
                     self.assertEqual(name,'remoteb','Selected remote tab was not restored')
@@ -192,7 +197,8 @@ class ReplacementTest(unittest.TestCase):
                                         env=env, capture_output=True, text=True)
                 return result.stdout.splitlines() if result.returncode == 0 else []
             def pid(window):
-                return subprocess.check_output(['xdotool', 'getwindowpid', window], env=env, text=True).strip()
+                result = subprocess.run(['xdotool', 'getwindowpid', window], env=env,capture_output=True,text=True)
+                return result.stdout.strip() if result.returncode == 0 else None
             try:
                 with log_path.open('wb') as log:
                     for index in range(2):
@@ -227,14 +233,15 @@ class ReplacementTest(unittest.TestCase):
                     replacement = module.with_suffix('.pending')
                     shutil.copy2(module, replacement)
                     replacement.replace(module)
-                    wait(lambda: len(windows()) == 2 and all(pid(window) != owner for window in windows()),
+                    wait(lambda: len(windows()) == 2 and all(
+                            (current := pid(window)) and current != owner for window in windows()),
                          'Owner did not replace: ' + log_path.read_text(errors='replace'))
                     self.assertEqual(geometry, state(), 'Window positions, sizes or selected tab titles changed')
                     for shell in shell_pids:
                         os.kill(int(shell), 0)
                     self.assertEqual(shell_pids, [(Path(directory) / f'shell-{i}').read_text().strip() for i in range(2)])
             finally:
-                for identity in {pid(window) for window in windows()}:
+                for identity in {value for window in windows() if (value := pid(window))}:
                     os.kill(int(identity), 15)
                 for process in processes:
                     if process.poll() is None:

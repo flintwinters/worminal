@@ -6,6 +6,10 @@ import select
 import shutil
 import subprocess
 import time
+import tempfile
+from pathlib import Path
+
+from runtime import CHECKS
 import uuid
 
 from workspace_protocol import stop_workspace
@@ -38,12 +42,14 @@ def isolated_display():
     read_fd, write_fd = os.pipe()
     server = None
     workspace_env = None
+    CHECKS.mkdir(parents=True, exist_ok=True)
+    errors = tempfile.NamedTemporaryFile(prefix="xvfb-", suffix=".log", dir=CHECKS, delete=False)
     try:
         server = subprocess.Popen(
             ["Xvfb", "-displayfd", str(write_fd), "-screen", "0", "1024x768x24", "-nolisten", "tcp"],
             pass_fds=(write_fd,),
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
+            stderr=errors,
         )
         os.close(write_fd)
         write_fd = -1
@@ -52,7 +58,8 @@ def isolated_display():
         if not number.isdigit():
             detail = server.poll()
             server.terminate()
-            _, stderr = server.communicate(timeout=5)
+            server.communicate(timeout=5)
+            stderr = Path(errors.name).read_bytes()
             raise RuntimeError(
                 f"Xvfb did not start a private display (exit status: {detail}): "
                 f"{stderr.decode(errors='replace')[-500:]}")
@@ -91,3 +98,4 @@ def isolated_display():
                 except subprocess.TimeoutExpired:
                     server.kill()
                     server.communicate()
+            errors.close()

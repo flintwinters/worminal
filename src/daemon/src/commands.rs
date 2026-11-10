@@ -1,103 +1,133 @@
 use crate::{
     process,
     service::Service,
-    state::{core, ClientId, Tab},
+    state::{core, ClientId},
 };
 use std::io;
 use worminal_engine::{MODE_FOCUS, WORMINAL_PRINT_SCREEN, WORMINAL_TOGGLE_PRINTER};
 use worminal_protocol::{
-    worp::{v2, Handler},
+    worp::{
+        commands::*,
+        events::{Event, EventKind},
+        v2_commands, Handler,
+    },
     *,
 };
-use worminal_workspace::launch::Launch;
-
-fn integer(bytes: &[u8]) -> Option<u32> {
-    (bytes.len() == 4).then(|| u32::from_be_bytes(bytes.try_into().unwrap()))
-}
-
-fn pair(bytes: &[u8]) -> Option<(u32, u32)> {
-    (bytes.len() == 8).then(|| (integer(&bytes[..4]).unwrap(), integer(&bytes[4..]).unwrap()))
-}
-
-fn url(bytes: &[u8]) -> Option<Vec<u8>> {
-    let mut payload = Payload::new(bytes);
-    // Legacy length-delimited strings retain their C-string prefix interpretation.
-    let value = payload.string().ok()?.split(|byte| *byte == 0).next()?;
-    payload.finish().ok()?;
-    (!value.is_empty() && value.len() <= 65536).then(|| value.to_vec())
-}
 
 impl Service {
     fn error(&mut self, client: ClientId, message: &[u8]) -> io::Result<()> {
-        let mut body = Buffer::default();
-        body.put_string(message)?;
-        self.queue(client, WIRE_ERROR, 0, body.into_bytes());
+        self.emit(
+            client,
+            Event {
+                tab: 0,
+                kind: EventKind::Error(message.to_vec()),
+            },
+        );
         Ok(())
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one arm per wire message type; splitting scatters the dispatch"
-    )]
     pub fn message(&mut self, client: ClientId, packet: Packet) -> io::Result<()> {
+        let unary = packet.kind == WIRE_WORP;
+        let tab = packet.tab;
+        let launch = matches!(packet.kind, WIRE_HELLO | WIRE_NEW);
+        let replacement = packet.kind == WIRE_BROWSER_REPLACE;
+        match v2_commands::decode(packet) {
+            Ok(Some(command)) => self.command(client, command),
+            Ok(None) => Ok(()),
+            Err(error) if unary => {
+                self.reply(client, tab, crate::api::failure(&error.to_string()));
+                Ok(())
+            }
+            Err(error) if launch => Err(error),
+            Err(_) if replacement => self.error(
+                client,
+                b"Invalid browser URL: supply one nonempty URL up to 65536 bytes.",
+            ),
+            Err(_) => Ok(()),
+        }
+    }
+
+    pub fn reply(&mut self, client: ClientId, tab: u32, reply: worminal_protocol::worp::Reply) {
+        let reply = if reply.json.len() + 4 + HEADER_BYTES > crate::state::CLIENT_QUEUE {
+            crate::api::failure("Worp reply exceeds the stream queue limit.")
+        } else {
+            reply
+        };
+        self.emit(
+            client,
+            Event {
+                tab,
+                kind: EventKind::Reply(reply),
+            },
+        );
+    }
+
+    #[expect(clippy::too_many_lines, reason = "one arm per semantic Worp command")]
+    pub fn command(&mut self, client: ClientId, command: Command) -> io::Result<()> {
         let Some(peer) = self.clients.get(&client) else {
             return Ok(());
         };
         let ready = peer.ready;
         let peer_pid = peer.pid;
         let now = self.now();
-        match packet.kind {
-            WIRE_WORP => {
-                let reply = match v2::decode_request(&packet) {
-                    Ok(request) => self.handle(request)?,
-                    Err(error) => crate::api::failure(&error.to_string()),
-                };
-                let reply = if reply.json.len() + 4 + HEADER_BYTES > crate::state::CLIENT_QUEUE {
-                    crate::api::failure("Worp reply exceeds the stream queue limit.")
-                } else {
-                    reply
-                };
-                let reply = v2::encode_reply(packet.tab, &reply)?;
-                self.queue(client, reply.kind, reply.tab, reply.body);
+        match command.kind {
+            CommandKind::Call(request) => {
+                let reply = self.handle(request)?;
+                self.reply(client, command.tab, reply);
                 return Ok(());
             }
-            WIRE_SERVICE_INFO => {
-                self.queue(
+            CommandKind::Input {
+                ref bytes,
+                control: Control::Preserve,
+            } => {
+                let reply = self.input_operation(command.tab, bytes, None, now)?;
+                self.reply(client, command.tab, reply);
+                return Ok(());
+            }
+            CommandKind::Close { receipt: true } => {
+                let reply =
+                    self.handle(worminal_protocol::worp::Request::Close { tab: command.tab })?;
+                self.reply(client, command.tab, reply);
+                return Ok(());
+            }
+            CommandKind::ServiceInfo => {
+                self.emit(
                     client,
-                    WIRE_SERVICE_INFO,
-                    0,
-                    std::process::id().to_be_bytes(),
+                    Event {
+                        tab: 0,
+                        kind: EventKind::ServiceInfo(std::process::id()),
+                    },
                 );
                 return Ok(());
             }
-            WIRE_CAPABILITIES => {
-                if !ready && packet.tab == 0 {
-                    if let Some(features) = integer(&packet.body) {
-                        self.clients.get_mut(&client).unwrap().features = features
-                            & (WIRE_FEATURE_COPY_ROWS
-                                | WIRE_FEATURE_ROW_SPAN
-                                | WIRE_FEATURE_FOCUSED_FRAMES);
-                        self.queue(
-                            client,
-                            WIRE_CAPABILITIES,
-                            0,
-                            (WIRE_FEATURE_COPY_ROWS
-                                | WIRE_FEATURE_SELECT_ALL
-                                | WIRE_FEATURE_ROW_SPAN)
-                                .to_be_bytes(),
-                        );
-                    }
+            CommandKind::Capabilities(features) => {
+                if !ready && command.tab == 0 {
+                    self.clients.get_mut(&client).unwrap().features = features
+                        & (WIRE_FEATURE_COPY_ROWS
+                            | WIRE_FEATURE_ROW_SPAN
+                            | WIRE_FEATURE_FOCUSED_FRAMES);
+                    self.emit(
+                        client,
+                        Event {
+                            tab: 0,
+                            kind: EventKind::Capabilities(
+                                WIRE_FEATURE_COPY_ROWS
+                                    | WIRE_FEATURE_SELECT_ALL
+                                    | WIRE_FEATURE_ROW_SPAN,
+                            ),
+                        },
+                    );
                 }
                 return Ok(());
             }
-            WIRE_STOP => {
+            CommandKind::Stop => {
                 self.running = false;
                 return Ok(());
             }
-            WIRE_HANDIN | WIRE_HANDOFF => {
-                return self.handoff_command(client, packet.kind, &packet.body);
+            CommandKind::Transfer { outbound, token } => {
+                return self.handoff_command(client, outbound, &token);
             }
-            WIRE_BROWSER_REPLACE => {
+            CommandKind::ReplaceBrowser(url) => {
                 let session = process::session_of(peer_pid).unwrap_or(0);
                 let index = self.tabs.iter_mut().position(|tab| {
                     tab.terminal
@@ -109,37 +139,55 @@ impl Service {
                         "Open worminal and run the command there; keep WORMINAL_SHARED_SOCKET_SCOPE unchanged.")
                         .as_bytes());
                 };
-                let Some(url) = url(&packet.body) else {
-                    return self.error(
-                        client,
-                        b"Invalid browser URL: supply one nonempty URL up to 65536 bytes.",
-                    );
-                };
+                if url.is_empty() || url.len() > 65536 {
+                    return Ok(());
+                }
                 if self.pending_replace.contains_key(&client) {
                     return Ok(());
                 }
                 let id = self.tabs[index].id;
                 self.pending_replace.insert(client, (id, url));
-                self.queue(client, WIRE_COMMAND_DONE, id, Vec::new());
+                self.emit(
+                    client,
+                    Event {
+                        tab: id,
+                        kind: EventKind::CommandDone,
+                    },
+                );
                 self.client_flush(client);
                 return Ok(());
             }
-            WIRE_ATTACH => {
+            CommandKind::Subscribe => {
                 self.restored_launch = false;
                 self.clients.get_mut(&client).unwrap().ready = true;
                 return self.send_catalog(client, now);
             }
-            WIRE_BROWSER | WIRE_BROWSER_NAVIGATE => {
-                let Some(url) = url(&packet.body) else {
+            CommandKind::Browser { url, subscribe } => {
+                if url.is_empty() || url.len() > 65536 {
                     return Ok(());
-                };
-                if packet.kind == WIRE_BROWSER {
-                    self.restored_launch = false;
-                    let id = self.new_id()?;
-                    self.tabs.push(Tab::browser(id, url));
-                    self.clients.get_mut(&client).unwrap().ready = true;
-                    self.queue(client, WIRE_CREATED, id, Vec::new());
-                } else if let Some(index) = self.index(packet.tab) {
+                }
+                let id = self.open_browser(url)?;
+                if !subscribe {
+                    let index = self.index(id).unwrap();
+                    let reply = self.created_reply(index, now)?;
+                    self.reply(client, command.tab, reply);
+                    return Ok(());
+                }
+                self.clients.get_mut(&client).unwrap().ready = true;
+                self.emit(
+                    client,
+                    Event {
+                        tab: id,
+                        kind: EventKind::Created,
+                    },
+                );
+                return self.publish(now);
+            }
+            CommandKind::Navigate(url) => {
+                if url.is_empty() || url.len() > 65536 {
+                    return Ok(());
+                }
+                if let Some(index) = self.index(command.tab) {
                     if !ready || self.tabs[index].url.is_none() {
                         return Ok(());
                     }
@@ -148,12 +196,16 @@ impl Service {
                 }
                 return self.publish(now);
             }
-            WIRE_HELLO | WIRE_NEW => {
-                let launch = Launch::decode(&packet.body)?;
+            CommandKind::Open { launch, mode } => {
+                if mode == OpenMode::Detached {
+                    let reply = self.open_detached(&launch, now)?;
+                    self.reply(client, command.tab, reply);
+                    return Ok(());
+                }
                 self.clients.get_mut(&client).unwrap().ready = true;
                 let reused = self.restored_launch
                     && !self.tabs.is_empty()
-                    && packet.kind == WIRE_HELLO
+                    && mode == OpenMode::ReuseRestored
                     && launch.arguments.is_empty()
                     && launch.line.is_empty();
                 let index = if reused {
@@ -162,18 +214,16 @@ impl Service {
                     }
                     0
                 } else {
-                    let id = self.new_id()?;
-                    self.tabs.push(Tab::shell(
-                        id,
-                        &launch,
-                        false,
-                        Some(client),
-                        self.reaper.clone(),
-                    )?);
-                    self.tabs.len() - 1
+                    self.open_terminal(&launch, Some(client))?
                 };
                 self.restored_launch = false;
-                self.queue(client, WIRE_CREATED, self.tabs[index].id, Vec::new());
+                self.emit(
+                    client,
+                    Event {
+                        tab: self.tabs[index].id,
+                        kind: EventKind::Created,
+                    },
+                );
                 self.publish(now)?;
                 if reused {
                     self.send_catalog(client, now)?;
@@ -185,23 +235,23 @@ impl Service {
             }
             _ => {}
         }
-        let Some(index) = self.index(packet.tab).filter(|_| ready) else {
+        let Some(index) = self.index(command.tab).filter(|_| ready) else {
             return Ok(());
         };
         if self.tabs[index].url.is_some() {
-            if packet.kind == WIRE_CLOSE {
+            if matches!(command.kind, CommandKind::Close { .. }) {
                 self.close(index);
-            } else if packet.kind == WIRE_FOCUS {
+            } else if matches!(command.kind, CommandKind::Focus { .. }) {
                 self.show(index, client);
             }
             return Ok(());
         }
-        match packet.kind {
-            WIRE_SELECT_ALL => {
-                let Some((generation, operation)) = pair(&packet.body) else {
-                    return Ok(());
-                };
-                if operation == WIRE_SELECTION_START {
+        match command.kind {
+            CommandKind::Selection {
+                generation,
+                operation,
+            } => {
+                if operation == SelectionOperation::Start {
                     let text = core(
                         self.tabs[index]
                             .terminal
@@ -211,76 +261,86 @@ impl Service {
                             .all_text(),
                     )?;
                     self.clients.get_mut(&client).unwrap().selection =
-                        Some((packet.tab, generation, text, 0));
+                        Some((command.tab, generation, text, 0));
                 }
                 let peer = self.clients.get_mut(&client).unwrap();
                 let Some((tab, current, text, offset)) = peer.selection.as_mut() else {
                     return Ok(());
                 };
-                if *tab != packet.tab || *current != generation {
+                if *tab != command.tab || *current != generation {
                     return Ok(());
                 }
-                if operation == WIRE_SELECTION_CANCEL {
+                if operation == SelectionOperation::Cancel {
                     peer.selection = None;
                     return Ok(());
                 }
-                if operation != WIRE_SELECTION_START && operation != WIRE_SELECTION_NEXT {
+                if operation != SelectionOperation::Start && operation != SelectionOperation::Next {
                     return Ok(());
                 }
                 let end = (*offset + 65536).min(text.len());
                 let done = end == text.len();
-                let mut body = Buffer::default();
-                body.put_u32(generation)?;
-                body.put_u32(u32::from(done))?;
-                body.put_bytes(&text[*offset..end])?;
+                let text = text[*offset..end].to_vec();
                 *offset = end;
                 if done {
                     peer.selection = None;
                 }
-                self.queue(client, WIRE_SELECT_ALL, packet.tab, body.into_bytes());
+                self.emit(
+                    client,
+                    Event {
+                        tab: command.tab,
+                        kind: EventKind::Selection {
+                            generation,
+                            done,
+                            text,
+                        },
+                    },
+                );
             }
-            WIRE_CONTROL => {
-                let Some(direction) = integer(&packet.body).filter(|value| *value <= 2) else {
-                    return Ok(());
-                };
+            CommandKind::Control(action) => {
                 self.take_control(index, client);
                 self.tabs[index].print_client = Some(client);
                 let terminal = self.tabs[index].terminal.as_mut().unwrap();
-                if direction == 2 {
+                if action == ControlAction::Break {
                     terminal.pty.send_break()?;
                 } else {
-                    let effects = core(terminal.engine.control(if direction == 0 {
-                        WORMINAL_TOGGLE_PRINTER
-                    } else {
-                        WORMINAL_PRINT_SCREEN
-                    }))?;
+                    let effects = core(terminal.engine.control(
+                        if action == ControlAction::TogglePrinter {
+                            WORMINAL_TOGGLE_PRINTER
+                        } else {
+                            WORMINAL_PRINT_SCREEN
+                        },
+                    ))?;
                     let notices = self.tabs[index].effects(effects, now)?;
-                    self.notices(packet.tab, notices);
+                    self.notices(command.tab, notices);
                 }
             }
-            WIRE_FOCUS_STATE => {
+            CommandKind::FocusState(focused) => {
                 if self.tabs[index].controller == Some(client)
                     && self.tabs[index].mode & MODE_FOCUS != 0
                 {
-                    if let Some(direction) = integer(&packet.body).filter(|value| *value <= 1) {
+                    {
                         let notices = self.tabs[index].input(
-                            if direction == 1 { b"\x1b[I" } else { b"\x1b[O" },
+                            if focused { b"\x1b[I" } else { b"\x1b[O" },
                             false,
                             now,
                         )?;
-                        self.notices(packet.tab, notices);
+                        self.notices(command.tab, notices);
                     }
                 }
             }
-            WIRE_FOCUS | WIRE_RESIZE => {
-                if packet.kind == WIRE_RESIZE && self.tabs[index].controller != Some(client) {
+            CommandKind::Focus { columns, rows } | CommandKind::Resize { columns, rows } => {
+                if matches!(command.kind, CommandKind::Resize { .. })
+                    && self.tabs[index].controller != Some(client)
+                {
                     return Ok(());
                 }
-                let Some((columns, rows)) = pair(&packet.body).filter(|&(c, r)| {
-                    c > 0 && c <= WORKSPACE_MAX_COLS && r > 0 && r <= WORKSPACE_MAX_ROWS
-                }) else {
+                if columns == 0
+                    || columns > WORKSPACE_MAX_COLS
+                    || rows == 0
+                    || rows > WORKSPACE_MAX_ROWS
+                {
                     return Ok(());
-                };
+                }
                 let claim = self.tabs[index].controller != Some(client);
                 let revealed = !self.tabs[index].shown;
                 self.take_control(index, client);
@@ -291,28 +351,16 @@ impl Service {
                     self.send_frame(index, claim || resized, now)?;
                 }
             }
-            WIRE_INPUT => {
-                if packet.body.len() > 65536 {
-                    return Ok(());
-                }
-                self.take_control(index, client);
-                let notices = self.tabs[index].input(&packet.body, true, now)?;
-                self.notices(packet.tab, notices);
-                // Unchanged local echo must not consume the first actual PTY response allowance.
-                self.send_frame(index, false, now)?;
+            CommandKind::Input { bytes, .. } => {
+                self.input_operation(command.tab, &bytes, Some(client), now)?;
             }
-            WIRE_RELEASE => {
+            CommandKind::Release => {
                 if self.tabs[index].controller == Some(client) {
                     self.release(index);
                 }
             }
-            WIRE_CLOSE => self.close(index),
-            WIRE_SCROLL => {
-                let Some((direction, amount)) =
-                    pair(&packet.body).filter(|&(direction, _)| direction <= 1)
-                else {
-                    return Ok(());
-                };
+            CommandKind::Close { .. } => self.close(index),
+            CommandKind::Scroll { up, amount } => {
                 self.take_control(index, client);
                 core(
                     self.tabs[index]
@@ -320,7 +368,7 @@ impl Service {
                         .as_mut()
                         .unwrap()
                         .engine
-                        .scroll(direction != 0, amount as i32),
+                        .scroll(up, amount as i32),
                 )?;
                 self.tabs[index].frame_reply = true;
                 self.send_frame(index, false, now)?;

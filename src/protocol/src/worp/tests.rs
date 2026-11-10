@@ -19,6 +19,18 @@ impl Handler for Echo {
 fn requests() -> Vec<Request> {
     vec![
         Request::List,
+        Request::OpenTerminal {
+            options: tabs::TerminalOptions {
+                directory: "/target".into(),
+                title: "quoted tab".into(),
+                command: vec!["/bin/echo".into(), "literal ; $HOME".into()],
+                ..Default::default()
+            },
+        },
+        Request::OpenBrowser {
+            url: "https://example.test/".into(),
+        },
+        Request::Close { tab: 12 },
         Request::Devices,
         Request::Enroll {
             device: devices::Device {
@@ -97,20 +109,54 @@ fn v2_binding_roundtrips_and_validates_before_dispatch() {
 }
 
 #[test]
-fn uncertain_stream_delivery_never_retries_input() {
-    let request = Request::Input {
-        tab: 1,
-        bytes: b"run\r".to_vec(),
-    };
-    let mut written = Vec::new();
-    let result = Client::new(stream::Stream::new(
-        Cursor::new(Vec::<u8>::new()),
-        &mut written,
-    ))
-    .request(request.clone());
-    assert!(result.is_err());
-    assert_eq!(
-        written,
-        v2::encode_request(&request).unwrap().encode().unwrap()
-    );
+fn uncertain_stream_delivery_never_retries_mutations() {
+    for request in [
+        Request::Input {
+            tab: 1,
+            bytes: b"run\r".to_vec(),
+        },
+        Request::OpenTerminal {
+            options: Default::default(),
+        },
+        Request::OpenBrowser {
+            url: "about:blank".into(),
+        },
+        Request::Close { tab: 1 },
+    ] {
+        let mut written = Vec::new();
+        let result = Client::new(stream::Stream::new(
+            Cursor::new(Vec::<u8>::new()),
+            &mut written,
+        ))
+        .request(request.clone());
+        assert!(result.is_err());
+        assert_eq!(
+            written,
+            v2::encode_request(&request).unwrap().encode().unwrap()
+        );
+    }
+}
+
+#[test]
+fn lifecycle_validation_rejects_ambiguous_or_unbounded_targets() {
+    assert!(Request::Close { tab: 0 }.validate().is_err());
+    for url in ["", "relative.html", "https://host/\0hidden"] {
+        assert!(Request::OpenBrowser { url: url.into() }.validate().is_err());
+    }
+    for options in [
+        tabs::TerminalOptions {
+            directory: "relative".into(),
+            ..Default::default()
+        },
+        tabs::TerminalOptions {
+            columns: 0,
+            ..Default::default()
+        },
+        tabs::TerminalOptions {
+            command: vec!["/bin/sh\0hidden".into()],
+            ..Default::default()
+        },
+    ] {
+        assert!(Request::OpenTerminal { options }.validate().is_err());
+    }
 }

@@ -1,19 +1,21 @@
 use crate::{handoff, handoff_io::Listener, process, service::Service, state::ClientId};
 use std::io;
-use worminal_protocol::{Buffer, Payload, WIRE_COMMAND_DONE, WIRE_ERROR, WIRE_HANDIN};
+use worminal_protocol::worp::events::{Event, EventKind};
 
 impl Service {
-    pub fn handoff_command(&mut self, client: ClientId, kind: u32, bytes: &[u8]) -> io::Result<()> {
+    pub fn handoff_command(
+        &mut self,
+        client: ClientId,
+        outbound: bool,
+        name: &[u8],
+    ) -> io::Result<()> {
         let mut operation = || -> io::Result<()> {
-            let mut payload = Payload::new(bytes);
-            let name = payload.string()?.split(|byte| *byte == 0).next().unwrap();
-            payload.finish()?;
             if !self.pending_replace.is_empty() {
                 return Err(io::Error::other(
                     "browser conversion acknowledgement is still pending",
                 ));
             }
-            if kind == WIRE_HANDIN {
+            if !outbound {
                 if self.handin.is_some() {
                     return Err(io::Error::other("handoff listener already exists"));
                 }
@@ -31,24 +33,21 @@ impl Service {
             Ok(())
         };
         let result = operation();
-        let mut reply = Buffer::default();
         if let Err(error) = &result {
             process::diagnostic(&format!("Handoff rejected before commit: {error}"));
         }
-        reply.put_string(if result.is_ok() {
-            b""
-        } else {
-            b"Transfer failed before commit; donor sessions retained."
-        })?;
-        self.queue(
+        self.emit(
             client,
-            if result.is_ok() {
-                WIRE_COMMAND_DONE
-            } else {
-                WIRE_ERROR
+            Event {
+                tab: 0,
+                kind: if result.is_ok() {
+                    EventKind::CommandDone
+                } else {
+                    EventKind::Error(
+                        b"Transfer failed before commit; donor sessions retained.".to_vec(),
+                    )
+                },
             },
-            0,
-            reply.into_bytes(),
         );
         Ok(())
     }

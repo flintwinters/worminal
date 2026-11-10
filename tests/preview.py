@@ -16,9 +16,9 @@ import ssl
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 
+from http_fixture import serving
 from x11 import isolated_display
 from workspace_protocol import send as wire_send, wait_kind as wire_wait, service_pid
 
@@ -65,14 +65,8 @@ def fixture(tls=False, handler=Fixture):
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(cert, key)
         server.socket = context.wrap_socket(server.socket, server_side=True)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
+    with serving(server):
         yield f"{'https' if tls else 'http'}://127.0.0.1:{server.server_port}"
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join()
 
 
 @contextmanager

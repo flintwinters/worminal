@@ -10,7 +10,6 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
-import threading
 import time
 
 from Xlib import X, XK, display
@@ -19,6 +18,7 @@ from rich.table import Table
 
 from perf_metrics import descendants, memory, startup_usage, workspace_processes
 from browser_profile import collect as collect_cpu
+from http_fixture import serving
 from preview import profile
 from visible_latency import (image_bytes, capture_failure, find_window, ready, snapshot, snapshot_revision,
                              stop, summarize, wait_for)
@@ -55,14 +55,8 @@ def local_app_target():
 @contextmanager
 def canvas():
     server = ThreadingHTTPServer(("127.0.0.1", 0), Canvas)
-    worker = threading.Thread(target=server.serve_forever, daemon=True)
-    worker.start()
-    try:
+    with serving(server):
         yield f"http://127.0.0.1:{server.server_port}/"
-    finally:
-        server.shutdown()
-        server.server_close()
-        worker.join()
 
 
 @contextmanager

@@ -114,6 +114,7 @@ pub(crate) struct Tab {
     pub print_client: Option<ClientId>,
     pub screen: Screen,
     pub catalog: Vec<u8>,
+    catalog_record: Option<worminal_protocol::worp::events::TabRecord>,
     pub catalog_pending: bool,
     pub catalog_dirty: bool,
     pub pending_frame: bool,
@@ -124,7 +125,7 @@ pub(crate) struct Tab {
 }
 
 pub(crate) enum Notice {
-    Packet(ClientId, u32, Vec<u8>),
+    Event(ClientId, worminal_protocol::worp::events::EventKind),
     Diagnostic(Vec<u8>),
 }
 
@@ -191,6 +192,7 @@ impl Tab {
             print_client: None,
             screen: Screen::default(),
             catalog: Vec::new(),
+            catalog_record: None,
             catalog_pending: false,
             catalog_dirty: true,
             pending_frame: false,
@@ -262,31 +264,47 @@ impl Tab {
         }
         // Native handoff metadata can expand when default palette strings are restored. Keep
         // packet/queue limits in the transport owner: oversized catalogs must not kill PTY owners.
-        let mut buffer = Buffer::with_limit(usize::MAX);
-        buffer.put_u32(self.id)?;
-        buffer.put_u32(u32::from(self.url.is_some()))?;
-        buffer.put_string(self.url.as_deref().unwrap_or_default())?;
-        buffer.put_u32(self.mode)?;
-        buffer.put_u32(self.cursor)?;
-        buffer.put_string(&self.title)?;
-        buffer.put_string(&self.directory)?;
-        // Only palette overrides set by the tab's applications travel; each view supplies its own
-        // theme for the rest. Entries run through the last override, with empty meaning default, so
-        // a tab without overrides sends none. This replaced a full 270-entry table per tab, which
-        // every catalog change resent for every tab.
+        use worminal_protocol::worp::{
+            events::{TabKind, TabRecord},
+            v2_events,
+        };
         let overrides = self.colors.as_deref().unwrap_or_default();
         let count = overrides
             .iter()
             .rposition(Option::is_some)
             .map_or(0, |last| last + 1);
-        buffer.put_u32(count as u32)?;
-        for color in &overrides[..count] {
-            buffer.put_string(color.as_deref().unwrap_or_default())?;
-        }
+        let record = TabRecord {
+            id: self.id,
+            kind: if self.url.is_some() {
+                TabKind::Browser
+            } else {
+                TabKind::Terminal
+            },
+            url: self.url.clone().unwrap_or_default(),
+            mode: self.mode,
+            cursor: self.cursor,
+            title: self.title.clone(),
+            directory: self.directory.clone(),
+            colors: overrides[..count]
+                .iter()
+                .map(|color| color.clone().unwrap_or_default())
+                .collect(),
+        };
+        let mut buffer = Buffer::with_limit(usize::MAX);
+        v2_events::encode_tab_record(&record, &mut buffer)?;
         self.catalog = buffer.into_bytes();
+        self.catalog_record = Some(record);
         self.catalog_pending = false;
         self.catalog_dirty = false;
         Ok(&self.catalog)
+    }
+
+    pub fn metadata_record(
+        &mut self,
+        now: i64,
+    ) -> io::Result<&worminal_protocol::worp::events::TabRecord> {
+        self.metadata(now)?;
+        Ok(self.catalog_record.as_ref().unwrap())
     }
 
     pub fn feed(&mut self, bytes: &[u8], now: i64) -> io::Result<Vec<Notice>> {
@@ -381,12 +399,11 @@ impl Tab {
                     let terminal = self.terminal.as_mut().unwrap();
                     if terminal.input.append(&event.data).is_err() {
                         if let Some(client) = self.controller {
-                            let mut error = Buffer::default();
-                            error.put_string(b"PTY input queue exceeded 1 MiB; tab stopped")?;
-                            notices.push(Notice::Packet(
+                            notices.push(Notice::Event(
                                 client,
-                                worminal_protocol::WIRE_ERROR,
-                                error.into_bytes(),
+                                worminal_protocol::worp::events::EventKind::Error(
+                                    b"PTY input queue exceeded 1 MiB; tab stopped".to_vec(),
+                                ),
                             ));
                         }
                         terminal.pty.stop();
@@ -463,21 +480,19 @@ impl Tab {
                 terminal::WORMINAL_CLIPBOARD => {
                     self.clipboard = event.data;
                     if let Some(client) = self.controller {
-                        let mut body = Buffer::default();
-                        body.put_string(&self.clipboard)?;
-                        notices.push(Notice::Packet(
+                        notices.push(Notice::Event(
                             client,
-                            worminal_protocol::WIRE_CLIPBOARD,
-                            body.into_bytes(),
+                            worminal_protocol::worp::events::EventKind::Clipboard(
+                                self.clipboard.clone(),
+                            ),
                         ));
                     }
                 }
                 terminal::WORMINAL_BELL => {
                     if let Some(client) = self.controller {
-                        notices.push(Notice::Packet(
+                        notices.push(Notice::Event(
                             client,
-                            worminal_protocol::WIRE_BELL,
-                            Vec::new(),
+                            worminal_protocol::worp::events::EventKind::Bell,
                         ));
                     }
                 }
@@ -486,10 +501,9 @@ impl Tab {
                     match &mut terminal.printer {
                         Printer::Client => {
                             if let Some(client) = self.print_client {
-                                notices.push(Notice::Packet(
+                                notices.push(Notice::Event(
                                     client,
-                                    worminal_protocol::WIRE_PRINT,
-                                    event.data,
+                                    worminal_protocol::worp::events::EventKind::Print(event.data),
                                 ));
                             }
                         }

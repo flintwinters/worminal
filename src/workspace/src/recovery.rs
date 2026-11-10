@@ -11,12 +11,9 @@ const RESTORE_VERSION: u32 = 1;
 const RESTORE_LIMIT: u32 = 8 * 1024 * 1024;
 const RESTORE_TABS: u32 = 4096;
 const RESTORE_URL_LIMIT: u32 = 65536;
-/// Initial size of a recovered shell before a view reports its own.
-pub(crate) const RESTORE_COLUMNS: u32 = 80;
-pub(crate) const RESTORE_ROWS: u32 = 24;
 const RESTORE_DIRECTORY_LIMIT: usize = libc::PATH_MAX as usize;
 /// One-shot marker telling a recovered shell that it replaces a saved terminal.
-pub const RESTORE_ENV_NAME: &std::ffi::CStr = c"WORMINAL_RESTORE";
+pub use worminal_protocol::worp::launch::RESTORE_ENV_NAME;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Recipe {

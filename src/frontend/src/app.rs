@@ -1,4 +1,4 @@
-//! Native Rust terminal application over the existing v2 workspace. Closing views leaves shells running.
+//! Native Rust terminal application using the shared Worp contract. Closing views leaves shells running.
 use crate::{
     fonts::Fonts,
     paint::Palette,
@@ -15,6 +15,11 @@ use std::{
     rc::Rc,
     thread,
     time::{Duration, Instant},
+};
+use worminal_protocol::worp::{
+    commands::{CommandKind, OpenMode},
+    events::{Catalog, Event, EventKind, TabKind},
+    launch::Launch,
 };
 use worminal_protocol::*;
 use worminal_workspace::socket;
@@ -255,11 +260,8 @@ struct Record {
     directory: PathBuf,
     colors: Vec<String>,
 }
-fn text(body: &mut Payload<'_>) -> io::Result<String> {
-    Ok(
-        String::from_utf8_lossy(body.string()?.split(|byte| *byte == 0).next().unwrap())
-            .into_owned(),
-    )
+fn text(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes.split(|byte| *byte == 0).next().unwrap()).into_owned()
 }
 struct App {
     state_id: u32,
@@ -365,7 +367,7 @@ impl App {
         });
         app.tabstrip.connect_selected(
             glib::clone!(@weak app => move |id| app.select_id(id)),
-            glib::clone!(@weak app => move |id| app.send(id, WIRE_CLOSE, Vec::new())),
+            glib::clone!(@weak app => move |id| app.send(id, CommandKind::Close { receipt: false })),
         );
         // GTK maps the new child in its default switch handler. Focus it afterwards.
         app.notebook.connect_local("switch-page", true, glib::clone!(@weak app => @default-return None, move |values| {
@@ -449,11 +451,10 @@ impl App {
             let (cols, rows) = terminal.dimensions();
             self.send(
                 id,
-                WIRE_FOCUS,
-                [cols, rows]
-                    .iter()
-                    .flat_map(|value| value.to_be_bytes())
-                    .collect(),
+                CommandKind::Focus {
+                    columns: cols,
+                    rows,
+                },
             );
             terminal.select();
             terminal.widget().grab_focus();
@@ -485,12 +486,12 @@ impl App {
             return;
         }
         match action {
-            Action::Send(kind, bytes) => {
-                // Keys, paste and mouse reports answer a bell; focus reports use WIRE_FOCUS_STATE.
-                if kind == WIRE_INPUT {
+            Action::Send(kind) => {
+                // Keys, paste and mouse reports answer a bell; focus reports use FocusState.
+                if matches!(kind, CommandKind::Input { .. }) {
                     self.tabstrip.answer(id);
                 }
-                self.send(id, kind, bytes)
+                self.send(id, kind)
             }
             Action::Claim => self.activate(id),
             Action::Resized(cols, rows) if !self.syncing.get() && self.active.get() == id => {
@@ -503,11 +504,10 @@ impl App {
                 {
                     self.send(
                         id,
-                        WIRE_RESIZE,
-                        [cols, rows]
-                            .iter()
-                            .flat_map(|value| value.to_be_bytes())
-                            .collect(),
+                        CommandKind::Resize {
+                            columns: cols,
+                            rows,
+                        },
                     );
                 }
             }
@@ -520,57 +520,52 @@ impl App {
             _ => {}
         }
     }
-    fn packet(self: &Rc<Self>, index: u32, mut packet: Packet) -> io::Result<()> {
+    fn event(self: &Rc<Self>, index: u32, mut event: Event) -> io::Result<()> {
         let Some(link) = self.link(index) else {
             return Ok(());
         };
-        if packet.tab >= 1 << LINK_SHIFT {
+        if event.tab >= 1 << LINK_SHIFT {
             return Err(io::Error::other("invalid tab id"));
         }
-        if packet.tab != 0 {
-            packet.tab |= index << LINK_SHIFT;
+        if event.tab != 0 {
+            event.tab |= index << LINK_SHIFT;
         }
-        match packet.kind {
-            WIRE_CAPABILITIES => {
-                let mut body = Payload::new(&packet.body);
-                link.features.set(body.u32()?);
-                body.finish()?;
-            }
-            WIRE_CATALOG => self.catalog(index, &packet.body)?,
-            WIRE_CREATED => {
-                link.requested.set(packet.tab);
+        match &event.kind {
+            EventKind::Capabilities(bits) => link.features.set(*bits),
+            EventKind::Catalog(catalog) => self.catalog(index, catalog)?,
+            EventKind::Created => {
+                link.requested.set(event.tab);
                 link.pending_tabs
                     .set(link.pending_tabs.get().saturating_sub(1));
             }
-            WIRE_ERROR => self.message(Some(&text(&mut Payload::new(&packet.body))?)),
-            WIRE_RELEASE => {
-                if let Some(terminal) = self.terminal(packet.tab) {
+            EventKind::Error(bytes) => self.message(Some(&text(bytes))),
+            EventKind::Released => {
+                if let Some(terminal) = self.terminal(event.tab) {
                     terminal.release();
                 }
             }
-            WIRE_BELL => {
+            EventKind::Bell => {
                 self.window.error_bell();
-                self.tabstrip.alert(packet.tab);
+                self.tabstrip.alert(event.tab);
                 if !self.window.is_active() {
                     self.window.set_urgency_hint(true);
                 }
             }
-            WIRE_PRINT => {
-                self.print(&packet.body)?;
-            }
-            WIRE_CLIPBOARD => {
+            EventKind::Print(bytes) => self.print(bytes)?,
+            EventKind::Clipboard(bytes) => {
                 if self
-                    .terminal(packet.tab)
+                    .terminal(event.tab)
                     .is_some_and(|terminal| terminal.live())
                 {
-                    gtk::Clipboard::get(&gdk::SELECTION_CLIPBOARD)
-                        .set_text(&text(&mut Payload::new(&packet.body))?);
+                    gtk::Clipboard::get(&gdk::SELECTION_CLIPBOARD).set_text(&text(bytes));
                 }
             }
             _ => {
-                if let Some(terminal) = self.terminal(packet.tab) {
-                    terminal.packet(&packet)?;
-                    if packet.kind == WIRE_FRAME_FINISH && packet.tab == self.active.get() {
+                if let Some(terminal) = self.terminal(event.tab) {
+                    terminal.event(&event)?;
+                    if matches!(event.kind, EventKind::FrameFinish)
+                        && event.tab == self.active.get()
+                    {
                         self.replacement_frame.set(true);
                     }
                 }
@@ -582,63 +577,39 @@ impl App {
         clippy::too_many_lines,
         reason = "catalog import applies tab, focus and title changes in one pass"
     )]
-    fn catalog(self: &Rc<Self>, index: u32, bytes: &[u8]) -> io::Result<()> {
+    fn catalog(self: &Rc<Self>, index: u32, catalog: &Catalog) -> io::Result<()> {
         let link = self
             .link(index)
             .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
-        let mut body = Payload::new(bytes);
-        let count = body.u32()?;
-        if count > 4096 {
-            return Err(io::Error::other("invalid catalog count"));
-        }
-        let closed = body.u32()?;
-        let fallback = body.u32()?;
+        let closed = catalog.closed;
+        let fallback = catalog.fallback;
         let mut records = Vec::new();
-        for _ in 0..count {
-            let id = body.u32()?;
-            let kind = body.u32()?;
-            let wire_id = id;
-            let id = id | index << LINK_SHIFT;
-            let url = text(&mut body)?;
-            let mode = body.u32()?;
-            let cursor = body.u32()?;
-            let title = text(&mut body)?;
-            let directory = {
-                // Filesystem paths stay as protocol bytes; only their painted labels use lossy Unicode.
-                // New-shell cwd and the public D-Bus byte array must retain the original filename.
-                use std::os::unix::ffi::OsStringExt;
-                let bytes = body.string()?.split(|byte| *byte == 0).next().unwrap();
-                PathBuf::from(std::ffi::OsString::from_vec(bytes.to_vec()))
-            };
-            let colors = body.u32()?;
-            if wire_id == 0
-                || wire_id >= 1 << LINK_SHIFT
-                || kind > 1
-                || colors > worminal_config::COLOR_NAMES.len() as u32
-                || records.iter().any(|record: &Record| record.id == id)
-            {
-                return Err(io::Error::other("invalid catalog entry"));
+        for tab in &catalog.tabs {
+            if tab.id >= 1 << LINK_SHIFT {
+                return Err(io::Error::other("invalid catalog tab id"));
             }
-            let mut palette = Vec::new();
-            for _ in 0..colors {
-                palette.push(text(&mut body)?);
-            }
-            // Browser views stay with the window's own daemon.
-            if index != 0 && kind != 0 {
+            if index != 0 && tab.kind == TabKind::Browser {
                 continue;
             }
+            // Paths preserve raw filename bytes; painted labels alone use lossy Unicode.
+            use std::os::unix::ffi::OsStringExt;
+            let directory = tab
+                .directory
+                .split(|byte| *byte == 0)
+                .next()
+                .unwrap()
+                .to_vec();
             records.push(Record {
-                id,
-                browser: kind != 0,
-                url,
-                mode,
-                cursor,
-                title,
-                directory,
-                colors: palette,
+                id: tab.id | index << LINK_SHIFT,
+                browser: tab.kind == TabKind::Browser,
+                url: text(&tab.url),
+                mode: tab.mode,
+                cursor: tab.cursor,
+                title: text(&tab.title),
+                directory: PathBuf::from(OsString::from_vec(directory)),
+                colors: tab.colors.iter().map(|color| text(color)).collect(),
             });
         }
-        body.finish()?;
         let initial_claim = link.initial_claim.replace(false);
         let mut replaced_active = false;
         self.syncing.set(true);
@@ -861,13 +832,20 @@ impl App {
                 config.cwd = page.directory.clone();
             }
         }
-        match config.launch() {
-            Ok(bytes) => {
+        match config.launch().and_then(|bytes| Launch::decode(&bytes)) {
+            Ok(launch) => {
                 if let Some(link) = self.link(index) {
                     link.pending_tabs
                         .set(link.pending_tabs.get().saturating_add(1));
                 }
-                self.send_link(index, 0, WIRE_NEW, bytes);
+                self.send_link(
+                    index,
+                    0,
+                    CommandKind::Open {
+                        launch,
+                        mode: OpenMode::Subscribe,
+                    },
+                );
             }
             Err(error) => self.message(Some(&error.to_string())),
         }

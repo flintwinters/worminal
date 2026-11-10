@@ -4,7 +4,8 @@ use gtk::{
     prelude::*,
 };
 use std::rc::Rc;
-use worminal_protocol::{WIRE_CLOSE, WIRE_FEATURE_SELECT_ALL};
+use worminal_protocol::worp::commands::CommandKind;
+use worminal_protocol::WIRE_FEATURE_SELECT_ALL;
 
 impl App {
     #[expect(clippy::too_many_lines, reason = "one arm per keyboard shortcut")]
@@ -62,7 +63,7 @@ impl App {
                     self.new_tab();
                 }
             } else {
-                self.send(self.active.get(), WIRE_CLOSE, Vec::new());
+                self.send(self.active.get(), CommandKind::Close { receipt: false });
             }
             return true;
         }
@@ -107,7 +108,7 @@ impl App {
                     return true;
                 }
                 key::w => {
-                    self.send(self.active.get(), WIRE_CLOSE, Vec::new());
+                    self.send(self.active.get(), CommandKind::Close { receipt: false });
                     return true;
                 }
                 key::c | key::v | key::y => {

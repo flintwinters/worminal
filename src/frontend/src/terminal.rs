@@ -9,11 +9,15 @@ use gtk::{gdk, prelude::*};
 use std::{cell::RefCell, io, rc::Rc, time::Duration};
 use worminal_engine::{paste_begin, paste_end, PasteFilter};
 use worminal_engine_sys::*;
-use worminal_protocol::*;
+use worminal_protocol::worp::{
+    commands::{CommandKind, Control, ControlAction, SelectionOperation},
+    events::{Event, EventKind},
+};
+use worminal_protocol::{WORKSPACE_MAX_COLS, WORKSPACE_MAX_ROWS};
 
 #[derive(Debug)]
 pub enum Action {
-    Send(u32, Vec<u8>),
+    Send(CommandKind),
     Claim,
     Resized(u32, u32),
     Print(Vec<u8>),
@@ -201,9 +205,14 @@ impl Terminal {
         };
         self.0.damage(&damage);
     }
-    pub fn packet(&self, packet: &Packet) -> io::Result<()> {
-        if packet.kind == WIRE_SELECT_ALL {
-            return self.0.all_packet(packet);
+    pub fn event(&self, event: &Event) -> io::Result<()> {
+        if let EventKind::Selection {
+            generation,
+            done,
+            text,
+        } = &event.kind
+        {
+            return self.0.all_event(*generation, *done, text);
         }
         let (damage, immediate, clear_all) = {
             let mut state = self.0.state.borrow_mut();
@@ -211,7 +220,7 @@ impl Terminal {
                 return Ok(());
             }
             let old_alternate = state.viewport.frame().alternate;
-            let damage = state.viewport.packet(packet)?;
+            let damage = state.viewport.event(event)?;
             let frame = state.viewport.frame();
             let clear_all = old_alternate != frame.alternate && state.all_text.is_some();
             if !clear_all && state.all_text.is_some() && damage.as_ref().is_some_and(|d| d.full) {
@@ -287,8 +296,10 @@ impl Terminal {
                 return;
             }
         }
-        self.0
-            .send(WIRE_SELECT_ALL, &[generation, WIRE_SELECTION_START]);
+        self.0.send(CommandKind::Selection {
+            generation,
+            operation: SelectionOperation::Start,
+        });
     }
     pub fn copy(&self, atom: gdk::Atom) {
         self.0.copy(atom);
@@ -330,14 +341,8 @@ impl Inner {
     fn error(&self, error: impl std::fmt::Display) {
         self.emit(Action::Error(error.to_string()));
     }
-    fn send(&self, kind: u32, values: &[u32]) {
-        self.emit(Action::Send(
-            kind,
-            values
-                .iter()
-                .flat_map(|value| value.to_be_bytes())
-                .collect(),
-        ));
+    fn send(&self, kind: CommandKind) {
+        self.emit(Action::Send(kind));
     }
     fn prepare(self: &Rc<Self>) {
         if self.state.borrow().painter.is_some() || self.state.borrow().destroyed {
@@ -500,7 +505,10 @@ impl Inner {
         if claim {
             self.emit(Action::Claim);
         }
-        self.emit(Action::Send(WIRE_INPUT, bytes.to_vec()));
+        self.send(CommandKind::Input {
+            bytes: bytes.to_vec(),
+            control: Control::Acquire,
+        });
     }
     fn key(self: &Rc<Self>, event: &gdk::EventKey) -> bool {
         self.prepare();
@@ -519,8 +527,12 @@ impl Inner {
         match action {
             KeyAction::Bytes(bytes) => self.input(&bytes),
             KeyAction::PastePrimary => self.paste(gdk::SELECTION_PRIMARY),
-            KeyAction::Scroll { up, rows } => self.send(WIRE_SCROLL, &[u32::from(up), rows]),
-            KeyAction::Control(value) => self.send(WIRE_CONTROL, &[value]),
+            KeyAction::Scroll { up, rows } => self.send(CommandKind::Scroll { up, amount: rows }),
+            KeyAction::Control(value) => self.send(CommandKind::Control(match value {
+                0 => ControlAction::TogglePrinter,
+                1 => ControlAction::PrintScreen,
+                _ => ControlAction::Break,
+            })),
             KeyAction::PrintSelection => {
                 let text = self.state.borrow_mut().viewport.selection_text();
                 match text {
@@ -553,35 +565,31 @@ impl Inner {
             cancel
         };
         if let Some(generation) = cancel {
-            self.send(WIRE_SELECT_ALL, &[generation, WIRE_SELECTION_CANCEL]);
+            self.send(CommandKind::Selection {
+                generation,
+                operation: SelectionOperation::Cancel,
+            });
         }
     }
-    fn all_packet(&self, packet: &Packet) -> io::Result<()> {
-        let mut body = Payload::new(&packet.body);
-        let generation = body.u32()?;
-        let done = body.u32()?;
-        if done > 1 {
-            return Err(io::Error::other("invalid selection completion"));
-        }
+    fn all_event(&self, generation: u32, done: bool, text: &[u8]) -> io::Result<()> {
         let copy = {
             let mut state = self.state.borrow_mut();
             if !state.all_pending || generation != state.all_generation {
                 return Ok(());
             }
-            state
-                .all_text
-                .as_mut()
-                .unwrap()
-                .extend_from_slice(&packet.body[8..]);
-            if done == 1 {
+            state.all_text.as_mut().unwrap().extend_from_slice(text);
+            if done {
                 state.all_pending = false;
                 state.all_copy.take()
             } else {
                 None
             }
         };
-        if done == 0 {
-            self.send(WIRE_SELECT_ALL, &[generation, WIRE_SELECTION_NEXT]);
+        if !done {
+            self.send(CommandKind::Selection {
+                generation,
+                operation: SelectionOperation::Next,
+            });
         } else {
             self.copy(gdk::SELECTION_PRIMARY);
             if let Some(atom) = copy {
@@ -648,7 +656,7 @@ impl Inner {
             }
         }
         if self.state.borrow().mode & MODE_FOCUS != 0 {
-            self.send(WIRE_FOCUS_STATE, &[u32::from(focused)]);
+            self.send(CommandKind::FocusState(focused));
         }
         let row = self.state.borrow().viewport.frame().cursor_y as usize;
         self.damage(&Damage {
@@ -879,10 +887,10 @@ impl Inner {
                 (false, false) => b"\x1b[B",
             });
         } else {
-            self.send(
-                WIRE_SCROLL,
-                &[u32::from(up), worminal_config::SCROLL_MULTIPLIER as u32],
-            );
+            self.send(CommandKind::Scroll {
+                up,
+                amount: worminal_config::SCROLL_MULTIPLIER as u32,
+            });
         }
     }
 }

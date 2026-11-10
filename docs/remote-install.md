@@ -41,8 +41,8 @@ headless installation in `assets/headless-install.json`.
 
 Success prints a JSON receipt with `installed: true`, `started: false`, hashes, and the next product command.
 Failure prints `ok: false` and a diagnostic. Lost SSH replies can make the outcome uncertain; there is no automatic
-retry. Inspect the target before retrying—an existing installation will be refused. Use the established guarded
-upgrade workflow for nodes that already have Worminal.
+retry. Inspect the target before retrying—an existing installation will be refused.
+Use [`python3 manage.py upgrade HOST`](remote-upgrade.md) for nodes that already have Worminal.
 
 Run `python3 manage.py check-remote-install` for private mock-SSH/bootstrap and no-overwrite publication checks.
 It uses neither root nor live remote hosts.

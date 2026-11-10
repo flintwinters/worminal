@@ -15,13 +15,15 @@ The aim is to make the terminal useful for more of your work while keeping the i
 
 Worp is Worminal's high-level protocol for abstracting away the communication medium. It is an API layer that allows
 Worminal nodes to not care about the underlying method used to send messages: TCP, UDP, SSH, HTTP, etc.
-See [Worp architecture](docs/worp.md) for its application contracts and currently supported transports.
+See [Worp architecture](docs/worp.md) for its shared command/event contract and currently supported transports.
+Native windows and other clients use the same Worp operations, including catalog/frame subscriptions, input and tab lifecycle.
 
 Agents can discover and control existing terminal sessions with `worminald api help`;
 see [the agent interface](docs/automation.md) for listing tabs, reading screens and sending keystrokes.
 A small [explicit device registry](docs/devices.md) shares enrolled SSH routes through one authority, with
 on-demand availability checks and no heartbeats.
 Use [`worminald install-on-remote HOST`](docs/remote-install.md) to bootstrap a new compatible headless node over SSH.
+For existing devices, [`python3 manage.py upgrade HOST`](docs/remote-upgrade.md) copies this device’s installed release.
 
 Installations include Atkinson Hyperlegible Mono as the default font, at 9 pt with a -3 pixel line offset.
 Explicit Alacritty font settings at build time and the `-f` command-line option override the defaults.

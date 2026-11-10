@@ -69,6 +69,9 @@ pub const WORP_INPUT: u32 = 2;
 pub const WORP_DEVICES: u32 = 3;
 pub const WORP_ENROLL: u32 = 4;
 pub const WORP_FORGET: u32 = 5;
+pub const WORP_OPEN_TERMINAL: u32 = 6;
+pub const WORP_OPEN_BROWSER: u32 = 7;
+pub const WORP_CLOSE: u32 = 8;
 
 // Advertise before HELLO/ATTACH. Older daemons ignore the optional packet;
 // unadvertised clients must continue receiving the original row encoding.
@@ -84,3 +87,6 @@ pub const WIRE_FEATURE_FOCUSED_FRAMES: u32 = 1 << 4;
 pub const WIRE_SELECTION_START: u32 = 0;
 pub const WIRE_SELECTION_NEXT: u32 = 1;
 pub const WIRE_SELECTION_CANCEL: u32 = 2;
+
+/// Complete byte-preserving detached launch in the existing Worp envelope.
+pub const WORP_OPEN_DETACHED: u32 = 9;

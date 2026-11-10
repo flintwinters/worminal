@@ -521,6 +521,11 @@ impl Pty {
         self.master.as_ref().map(AsRawFd::as_raw_fd)
     }
 
+    /// Unlike live_pid, a successful short-lived exec still has its original child identity.
+    pub fn launch_succeeded(&self) -> bool {
+        !matches!(&self.identity, Identity::None)
+    }
+
     pub fn live_pid(&mut self) -> libc::pid_t {
         match &mut self.identity {
             Identity::Local(child) => {

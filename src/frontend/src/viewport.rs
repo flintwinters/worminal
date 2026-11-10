@@ -4,6 +4,8 @@ use worminal_engine::{Cell, Frame, Selection, SelectionRange};
 use worminal_engine_sys::{
     ATTR_WIDE, ATTR_WRAP, WORMINAL_DEFAULT_BACKGROUND, WORMINAL_DEFAULT_FOREGROUND,
 };
+use worminal_protocol::worp::events::{Event, EventKind};
+use worminal_protocol::worp::v2_events;
 use worminal_protocol::*;
 
 fn invalid() -> io::Error {
@@ -125,8 +127,25 @@ impl Viewport {
         self.pending = None;
     }
 
+    /// Compatibility entry point for consumers of the version-2 binding.
     pub fn packet(&mut self, packet: &Packet) -> io::Result<Option<Damage>> {
-        let result = self.apply(packet);
+        let decoded = v2_events::decode(Packet {
+            kind: packet.kind,
+            tab: packet.tab,
+            body: packet.body.clone(),
+        });
+        match decoded {
+            Ok(Some(event)) => self.event(&event),
+            Ok(None) => Ok(None),
+            Err(error) => {
+                self.pending = None;
+                Err(error)
+            }
+        }
+    }
+
+    pub fn event(&mut self, event: &Event) -> io::Result<Option<Damage>> {
+        let result = self.apply(event);
         // Malformed/incomplete deltas can never corrupt the last completely imported frame.
         if result.is_err() {
             self.pending = None;
@@ -134,83 +153,67 @@ impl Viewport {
         result
     }
 
-    fn apply(&mut self, packet: &Packet) -> io::Result<Option<Damage>> {
-        let mut body = Payload::new(&packet.body);
-        match packet.kind {
-            WIRE_FRAME => {
+    fn apply(&mut self, event: &Event) -> io::Result<Option<Damage>> {
+        match &event.kind {
+            EventKind::FrameStart(frame) => {
                 if self.pending.is_some() {
                     return Err(invalid());
                 }
-                let columns = body.u32()?;
-                let rows = body.u32()?;
-                dimensions(columns, rows)?;
-                let cursor_x = body.u32()?;
-                let cursor_y = body.u32()?;
-                let scroll = body.u32()?;
-                let alternate = body.u32()?;
-                body.finish()?;
-                if cursor_x >= columns
-                    || cursor_y >= rows
-                    || scroll > i32::MAX as u32
-                    || alternate > 1
-                {
-                    return Err(invalid());
-                }
+                frame.validate()?;
                 self.pending = Some(Pending {
                     frame: Frame {
-                        columns: columns as i32,
-                        rows: rows as i32,
-                        cursor_x: cursor_x as i32,
-                        cursor_y: cursor_y as i32,
-                        scroll: scroll as i32,
-                        alternate: alternate as i32,
+                        columns: frame.columns as i32,
+                        rows: frame.rows as i32,
+                        cursor_x: frame.cursor_x as i32,
+                        cursor_y: frame.cursor_y as i32,
+                        scroll: frame.scroll as i32,
+                        alternate: i32::from(frame.alternate),
                         redraw_deadline: 0,
                     },
                     operations: Vec::new(),
                     bytes: 0,
                 });
             }
-            WIRE_ROW | WIRE_ROW_SPAN => {
+            EventKind::Row { row, column, cells } => {
                 let pending = self.pending.as_mut().ok_or_else(invalid)?;
-                let row = body.u32()? as usize;
-                if row >= pending.frame.rows as usize {
-                    return Err(invalid());
-                }
+                let row = *row as usize;
                 let columns = pending.frame.columns as usize;
-                let span = packet.kind == WIRE_ROW_SPAN;
-                let column = if span { body.u32()? as usize } else { 0 };
-                let header = if span { 8 } else { 4 };
-                let length = packet.body.len().checked_sub(header).ok_or_else(invalid)?;
-                let count = length / WIRE_CELL_BYTES as usize;
-                if count == 0
+                let first = column.unwrap_or(0) as usize;
+                let count = cells.len();
+                if row >= pending.frame.rows as usize
+                    || count == 0
                     || count > columns
-                    || column > columns - count
-                    || length % WIRE_CELL_BYTES as usize != 0
-                    || (!span && count != columns)
+                    || first > columns - count
+                    || (column.is_none() && count != columns)
                 {
                     return Err(invalid());
                 }
-                let mut cells = Vec::with_capacity(count);
-                for _ in 0..count {
-                    cells.push(Cell {
-                        rune: body.u32()?,
-                        attributes: body.u32()? & u32::from(u16::MAX),
-                        foreground: body.u32()?,
-                        background: body.u32()?,
-                    });
-                }
-                body.finish()?;
+                let cells = cells
+                    .iter()
+                    .map(|cell| Cell {
+                        rune: cell.rune,
+                        attributes: cell.attributes & u32::from(u16::MAX),
+                        foreground: cell.foreground,
+                        background: cell.background,
+                    })
+                    .collect();
                 pending.push(
-                    Operation::Span { row, column, cells },
+                    Operation::Span {
+                        row,
+                        column: first,
+                        cells,
+                    },
                     count * std::mem::size_of::<Cell>(),
                 )?;
             }
-            WIRE_COPY_ROWS => {
+            EventKind::CopyRows {
+                source,
+                destination,
+                count,
+            } => {
                 let pending = self.pending.as_mut().ok_or_else(invalid)?;
-                let source = body.u32()? as usize;
-                let destination = body.u32()? as usize;
-                let count = body.u32()? as usize;
-                body.finish()?;
+                let (source, destination, count) =
+                    (*source as usize, *destination as usize, *count as usize);
                 let rows = pending.frame.rows as usize;
                 if count == 0 || count > rows || source > rows - count || destination > rows - count
                 {
@@ -222,15 +225,11 @@ impl Viewport {
                         destination,
                         count,
                     },
-                    // Bound work as well as storage. Tiny move packets must not defer hundreds
-                    // of gigabytes of copying into one GTK callback at FRAME_FINISH.
+                    // Bound work as well as storage: tiny moves must not defer unbounded copying.
                     count * pending.frame.columns as usize * std::mem::size_of::<Cell>(),
                 )?;
             }
-            WIRE_FRAME_FINISH => {
-                body.finish()?;
-                return self.finish().map(Some);
-            }
+            EventKind::FrameFinish => return self.finish().map(Some),
             _ => {}
         }
         Ok(None)

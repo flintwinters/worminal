@@ -16,6 +16,7 @@ use std::{
     path::PathBuf,
     time::Instant,
 };
+use worminal_protocol::worp::events::{Catalog, Event, EventKind};
 use worminal_protocol::*;
 use worminal_workspace::{
     devices::Registry,
@@ -38,7 +39,7 @@ pub(crate) struct Service {
     pub next_handin: u64,
     recovery: Recovery,
     pub devices: Registry,
-    published: Vec<u8>,
+    published: Option<Catalog>,
     pub closed: u32,
     pub fallback: u32,
     epoch: Instant,
@@ -72,6 +73,13 @@ impl Service {
         Ok(id)
     }
 
+    pub fn emit(&mut self, client: ClientId, event: worp::events::Event) {
+        match worp::v2_events::encode(&event) {
+            Ok(packet) => self.queue(client, packet.kind, packet.tab, packet.body),
+            Err(_) => self.drop_client(client),
+        }
+    }
+
     pub fn queue(&mut self, client: ClientId, kind: u32, tab: u32, body: impl AsRef<[u8]>) {
         if self
             .clients
@@ -85,7 +93,7 @@ impl Service {
     pub fn notices(&mut self, tab: u32, notices: Vec<Notice>) {
         for notice in notices {
             match notice {
-                Notice::Packet(client, kind, body) => self.queue(client, kind, tab, body),
+                Notice::Event(client, kind) => self.emit(client, Event { tab, kind }),
                 Notice::Diagnostic(bytes) => process::diagnostic(&String::from_utf8_lossy(&bytes)),
             }
         }
@@ -103,7 +111,13 @@ impl Service {
                 self.tabs[index].controller = Some(client);
             }
             if let Some(previous) = previous {
-                self.queue(previous, WIRE_RELEASE, self.tabs[index].id, Vec::new());
+                self.emit(
+                    previous,
+                    Event {
+                        tab: self.tabs[index].id,
+                        kind: EventKind::Released,
+                    },
+                );
             }
         }
     }
@@ -128,6 +142,30 @@ impl Service {
                 tab.print_client = None;
             }
         }
+    }
+
+    pub fn open_terminal(
+        &mut self,
+        launch: &worminal_workspace::launch::Launch,
+        client: Option<ClientId>,
+    ) -> io::Result<usize> {
+        let id = self.new_id()?;
+        let tab = Tab::shell(id, launch, false, client, self.reaper.clone())?;
+        if client.is_none() && !tab.terminal.as_ref().unwrap().pty.launch_succeeded() {
+            return Err(io::Error::other(
+                "Program or working directory could not be opened.",
+            ));
+        }
+        self.tabs.push(tab);
+        self.restored_launch = false;
+        Ok(self.tabs.len() - 1)
+    }
+
+    pub fn open_browser(&mut self, url: Vec<u8>) -> io::Result<u32> {
+        let id = self.new_id()?;
+        self.tabs.push(Tab::browser(id, url));
+        self.restored_launch = false;
+        Ok(id)
     }
 
     pub fn close(&mut self, index: usize) {
@@ -210,15 +248,16 @@ impl Service {
         }
     }
 
-    fn catalog(&mut self, now: i64) -> io::Result<Vec<u8>> {
-        let mut bytes = Buffer::with_limit(usize::MAX);
-        for value in [self.tabs.len() as u32, self.closed, self.fallback] {
-            bytes.put_u32(value)?;
-        }
-        for tab in &mut self.tabs {
-            bytes.put_bytes(tab.metadata(now)?)?;
-        }
-        Ok(bytes.into_bytes())
+    fn catalog(&mut self, now: i64) -> io::Result<Catalog> {
+        Ok(Catalog {
+            closed: self.closed,
+            fallback: self.fallback,
+            tabs: self
+                .tabs
+                .iter_mut()
+                .map(|tab| tab.metadata_record(now).cloned())
+                .collect::<io::Result<_>>()?,
+        })
     }
 
     pub fn send_catalog(&mut self, client: ClientId, now: i64) -> io::Result<()> {
@@ -228,7 +267,13 @@ impl Service {
             }
         }
         let bytes = self.catalog(now)?;
-        self.queue(client, WIRE_CATALOG, 0, bytes);
+        self.emit(
+            client,
+            Event {
+                tab: 0,
+                kind: EventKind::Catalog(bytes),
+            },
+        );
         Ok(())
     }
 
@@ -254,7 +299,7 @@ impl Service {
 
     pub fn publish(&mut self, now: i64) -> io::Result<()> {
         let mut bytes = self.catalog(now)?;
-        if bytes == self.published {
+        if self.published.as_ref() == Some(&bytes) {
             return Ok(());
         }
         // Corresponding frames precede changed modes/titles. A gated tab retains its prior catalog entry.
@@ -270,10 +315,17 @@ impl Service {
             .map(|c| c.id)
             .collect();
         for client in clients {
-            self.queue(client, WIRE_CATALOG, 0, &bytes);
+            self.emit(
+                client,
+                Event {
+                    tab: 0,
+                    kind: EventKind::Catalog(bytes.clone()),
+                },
+            );
         }
-        bytes[4..12].fill(0);
-        self.published = bytes;
+        bytes.closed = 0;
+        bytes.fallback = 0;
+        self.published = Some(bytes);
         self.closed = 0;
         self.fallback = 0;
         self.save();
@@ -425,7 +477,7 @@ impl Service {
                 .tabs
                 .iter()
                 .any(|tab| tab.catalog_dirty || tab.catalog_pending)
-            || self.published.is_empty()
+            || self.published.is_none()
         {
             self.publish(now)?;
         }
@@ -498,7 +550,7 @@ fn create(scope: &[u8], listener: UnixListener) -> io::Result<(Service, io::Resu
         next_handin: 1,
         recovery,
         devices: Registry::new(root.join("worminal/devices-v1")),
-        published: Vec::new(),
+        published: None,
         closed: 0,
         fallback: 0,
         epoch: Instant::now(),
