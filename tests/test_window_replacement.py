@@ -149,7 +149,9 @@ class ReplacementTest(unittest.TestCase):
                 return found.stdout.splitlines() if found.returncode==0 else []
             def owner():
                 windows = visible()
-                return subprocess.check_output(['xdotool','getwindowpid',windows[0]],env=env,text=True).strip() if windows else None
+                # A listed window can be destroyed by the replacement before its pid is read.
+                found = subprocess.run(['xdotool','getwindowpid',windows[0]],env=env,capture_output=True,text=True) if windows else None
+                return found.stdout.strip() if found and found.returncode==0 else None
             with service(remotea), service(remoteb), (base/'owner.log').open('wb') as log:
                 process = None
                 try:

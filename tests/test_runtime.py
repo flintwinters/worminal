@@ -93,7 +93,9 @@ class RuntimeCleanupTest(unittest.TestCase):
             finally:
                 os.kill(process.pid, signal.SIGCONT)
             stop_workspace(env)
-            self.assertTrue(select.select([identity], [], [], 0)[0])
+            # The first stop request was already delivered to the paused owner. Once resumed it may close
+            # its listener before exiting, so a refused second stop cannot name a pid to await: wait here.
+            self.assertTrue(select.select([identity], [], [], 5)[0])
 
 
 def prove_cleanup():
