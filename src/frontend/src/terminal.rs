@@ -2,6 +2,7 @@
 use crate::{
     fonts::Fonts,
     input::{self, KeyAction, Keyboard, Mouse},
+    link_action,
     paint::{Painter, Palette, Style},
     viewport::{Damage, Viewport},
 };
@@ -32,6 +33,8 @@ struct State {
     selecting: bool,
     /// URL pressed with plain button 1; it opens only if released on the same cell.
     link: Option<(String, i32, i32)>,
+    /// Full target shown for an explicit link, whose label may differ from it.
+    tooltip: Option<String>,
     /// Pointer cell while inside the terminal, and the underlined link under it.
     pointer: Option<(i32, i32)>,
     hover: Option<std::ops::RangeInclusive<usize>>,
@@ -80,6 +83,7 @@ impl Terminal {
                 blink: false,
                 selecting: false,
                 link: None,
+                tooltip: None,
                 pointer: None,
                 hover: None,
                 preedit: String::new(),
@@ -686,17 +690,24 @@ impl Inner {
                 if let Some((url, column, row)) = state.link.take() {
                     drop(state);
                     if (column, row) == (x, y) {
-                        if let Err(error) = crate::startup::open_url(&url) {
-                            eprintln!("worminal: open {url}: {error}");
+                        match link_action::resolve(&url) {
+                            Some(link_action::Action::Open(url)) => {
+                                if let Err(error) = crate::startup::open_url(&url) {
+                                    eprintln!("worminal: open {url}: {error}");
+                                }
+                            }
+                            // Keyboard path on purpose: bracketed paste would suppress execution.
+                            Some(link_action::Action::Input(bytes)) => self.input(&bytes),
+                            None => {}
                         }
                     }
                     return;
                 }
             } else {
-                let columns = state.viewport.frame().columns as usize;
-                let url = crate::link::at(state.viewport.cells(), columns, x as usize, y as usize);
-                if let Some((url, _)) = url {
-                    state.link = Some((url, x, y));
+                if let Some(target) =
+                    link_action::target_at(&state.viewport, x as usize, y as usize)
+                {
+                    state.link = Some((target.uri, x, y));
                     return;
                 }
             }
@@ -766,10 +777,18 @@ impl Inner {
         let (old, new, columns) = {
             let mut state = self.state.borrow_mut();
             let columns = state.viewport.frame().columns as usize;
-            let new = state.pointer.and_then(|(x, y)| {
-                crate::link::at(state.viewport.cells(), columns, x as usize, y as usize)
-                    .map(|(_, span)| span)
-            });
+            let target = state
+                .pointer
+                .and_then(|(x, y)| link_action::target_at(&state.viewport, x as usize, y as usize));
+            let tooltip = target
+                .as_ref()
+                .filter(|target| target.explicit)
+                .map(|target| target.uri.clone());
+            let new = target.map(|target| target.span);
+            if tooltip != state.tooltip {
+                self.widget.set_tooltip_text(tooltip.as_deref());
+                state.tooltip = tooltip;
+            }
             if new == state.hover {
                 return;
             }
