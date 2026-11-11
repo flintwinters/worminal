@@ -28,7 +28,7 @@ Usage: worminald api [--master user@host] COMMAND
   key TAB KEY...       Send Enter, Tab, Escape, Backspace, or Ctrl-A through Ctrl-Z.
 Examples:
   worminald api list
-  worminald api open --cwd /home/user/project -- /bin/sh
+  worminald api open --cwd /path/to/project -- /bin/sh
   worminald api open --browser https://example.org/
   worminald api close 12
   worminald api read 12
