@@ -9,13 +9,16 @@ import os
 from pathlib import Path
 import shlex
 import shutil
+import socket
 import subprocess
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 from x11 import close_window, isolated_display
 from preview import profile
+from workspace_protocol import stop_workspace
 
 ROOT = Path(__file__).resolve().parent.parent
 FRONTEND = runtime_binary(os.environ.get("WORMINAL_FRONTEND", "worminal"))
@@ -56,6 +59,7 @@ class WindowStateTest(unittest.TestCase):
                     self.wait_for(exact_directory, "unmodified non-UTF-8 directory bytes")
                 finally:
                     app.terminate(); app.wait(timeout=5)
+                    stop_workspace(env)
 
     def wait_for(self, callback, description):
         deadline = time.monotonic() + 8
@@ -167,3 +171,60 @@ class WindowStateTest(unittest.TestCase):
                     if app.poll() is None:
                         app.terminate()
                     app.wait(timeout=5)
+                    # A disconnected window can restart its daemon after the intentional --stop.
+                    # Reap that scoped owner while profile/cache paths still exist: outer display
+                    # cleanup runs after profile deletion, too late for mapped NFS .nfs files.
+                    stop_workspace(env)
+
+    def test_reconnected_owner_exits_before_profile_cleanup(self):
+        original_profile = profile
+
+        @contextmanager
+        def checked_profile(session):
+            with original_profile(session) as env:
+                try:
+                    yield env
+                finally:
+                    try:
+                        self.assertTrue(Path(env["XDG_RUNTIME_DIR"]).is_dir())
+                        with socket.socket(socket.AF_UNIX) as peer:
+                            endpoint = f"\0worminal-workspace-v2-{os.getuid()}-{env['WORMINAL_SHARED_SOCKET_SCOPE']}"
+                            with self.assertRaises(ConnectionRefusedError,
+                                                   msg="fixture owner survived until profile deletion"):
+                                peer.connect(endpoint)
+                    finally:
+                        # Keep a deliberately broken cleanup mutation from racing rmtree itself.
+                        stop_workspace(env)
+
+        real_popen = subprocess.Popen
+        owners = []
+
+        def spawn(*args, **kwargs):
+            process = real_popen(*args, **kwargs)
+            if args[0][:2] == [str(FRONTEND), "-T"]:
+                original_wait = process.wait
+
+                def wait(*wait_args, **wait_kwargs):
+                    result = original_wait(*wait_args, **wait_kwargs)
+                    # Force the reconnect owner to exist at GUI exit rather than depending on
+                    # its timer winning the race with fixture teardown.
+                    owner = real_popen([str(runtime_binary("worminald")), "--serve"], env=kwargs["env"],
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    owners.append(owner)
+                    endpoint = f"\0worminal-workspace-v2-{os.getuid()}-{kwargs['env']['WORMINAL_SHARED_SOCKET_SCOPE']}"
+                    def listening():
+                        with socket.socket(socket.AF_UNIX) as peer:
+                            try: peer.connect(endpoint)
+                            except ConnectionRefusedError: return False
+                            return True
+                    self.wait_for(listening, "reconnected fixture daemon")
+                    return result
+                process.wait = wait
+            return process
+
+        try:
+            with patch(__name__ + ".profile", checked_profile), patch.object(subprocess, "Popen", spawn):
+                self.test_directory_selection_focus_unavailability_and_signals()
+        finally:
+            for owner in owners:
+                owner.wait(timeout=5)
