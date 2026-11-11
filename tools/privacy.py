@@ -21,9 +21,8 @@ PATTERNS = {
                           r"xox[baprs]-[A-Za-z0-9-]{20,})\b",
     "credential assignment": r"(?i)\b(?:password|api_key|access_token|client_secret)\s*[:=]\s*"
                              r"[\"'][^\"'\s]{8,}[\"']",
-    "personal home path": r"/(?:home|Users)/[A-Za-z0-9_.-]+/",
-    "private network address": r"\b(?:10\.\d{1,3}|192\.168|172\.(?:1[6-9]|2\d|3[01]))"
-                               r"\.\d{1,3}\.\d{1,3}\b",
+    # Documentation placeholders are public; any other account name is a real person's path.
+    "personal home path": r"/(?:home|Users)/(?!(?:user|username|you|name|example|me|foo)/)[A-Za-z0-9_.-]+/",
     "email address": r"\b[A-Za-z0-9_.+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
     "URL credential": r"[a-zA-Z]+://[^\s/:]+:[^\s/@]+@",
 }

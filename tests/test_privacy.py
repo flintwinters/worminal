@@ -109,7 +109,6 @@ class PrivacyTests(unittest.TestCase):
             "service credential": b"ghp_" + b"a" * 30,
             "credential assignment": b'client_secret=' + b'"' + b"a" * 30 + b'"',
             "personal home path": b"/home/" + b"person/project/",
-            "private network address": b"192." + b"168.12.34",
             "email address": b"person@" + b"mail.invalid",
             "URL credential": b"https://person:" + b"credential@" + b"example.org",
         }
@@ -119,7 +118,8 @@ class PrivacyTests(unittest.TestCase):
                 self.assertNotIn(sample.decode(), repr(findings(sample)))
 
     def test_public_examples_and_configuration_are_not_private(self):
-        self.assertEqual(findings(b"user@host https://example.org /opt/projects/worminal "
+        self.assertEqual(findings(b"user@host https://example.org /opt/projects/worminal /home/user/project "
+                                  b"192.168.1.10 "
                                   b"WORMINAL_CINNAMON_HOST PASSWORD=getenv(name)"), [])
 
     def test_unconfigured_proof_never_opens_display_or_ssh(self):

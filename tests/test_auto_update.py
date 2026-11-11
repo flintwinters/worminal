@@ -11,7 +11,7 @@ from tools.paths import CHECKS
 
 
 def git(*args, cwd):
-    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t.invalid", *args], cwd=cwd, check=True,
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=test", *args], cwd=cwd, check=True,
                    capture_output=True)
 
 
