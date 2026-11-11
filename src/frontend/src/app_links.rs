@@ -70,6 +70,10 @@ impl App {
             .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
         let connection = Connection::new(config.master.as_deref(), self.replacing.get())?;
         *link.connection.borrow_mut() = Some(connection);
+        if let (Some(master), false) = (config.master.as_deref(), self.replacing.get()) {
+            // Best effort: a failed helper must never affect the connection itself.
+            let _ = crate::startup::sync_versions(master);
+        }
         link.initial_claim.set(true);
         self.watch(index, &link);
 

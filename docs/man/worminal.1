@@ -99,6 +99,10 @@ Existing Worminal installations or active workspaces are refused; no existing fi
 No credentials, configuration or user state are copied. No daemon is started and no device is enrolled.
 Open a view afterward with worminal --master user@host; enroll the route explicitly if desired.
 Run worminald install-on-remote --help for details. SSH failure can leave the outcome uncertain; no retry occurs.
+.B worminald upgrade-remote user@host
+runs automatically when a view connects with --master. Whichever of this node and the host has the older
+daemon version is updated from the newer one (pushed or pulled), with the same CPU, Python 3, sudo and /usr/local
+requirements. Running shells are handed to the new file, not restarted. Active v1 workspaces are never touched.
 .SH DAEMON UPGRADES
 The release v2 service watches its executable directory. Replacing its executable automatically starts a
 replacement daemon and transfers live tabs using the validated handoff transaction.

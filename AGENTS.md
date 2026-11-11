@@ -35,7 +35,10 @@ request/reply conveniences; local sockets and SSH bind them to the existing v2 s
 Device enrollment is explicit per authority user, shared across scopes and persisted independently of tabs;
 `docs/devices.md` defines membership and caller-side availability. Never add heartbeats or block the daemon on probes.
 `worminald install-on-remote` bootstraps new compatible headless nodes over SSH; see `docs/remote-install.md`.
-It must refuse existing installations/workspaces and preserve state; never turn installation into an implicit upgrade.
+It must refuse existing installations/workspaces and preserve state. Version sync is the separate
+`worminald upgrade-remote`: views run it once per host when they connect, and it updates whichever side has the older
+Cargo version, pushing or pulling the daemon with atomic replacement so the running daemon's watch hands live shells to
+the new file. It needs the same CPU, sudo and /usr/local on both sides, and never touches a v1 workspace.
 Inspection never takes control or starts a daemon; one-shot input preserves the existing view/controller.
 The daemon atomically saves ordered terminal directories and browser URLs, scoped by protocol/workspace under
 XDG_STATE_HOME. Restart recovery creates fresh shells with the one-shot WORMINAL_RESTORE=1 marker, never replays
@@ -106,6 +109,10 @@ and creates temporary source links for those tests. It removes the files and lin
 Normal builds do not use this code. `manage.py clean` removes links left by interrupted tests.
 Keep behavior checks when changing tests. Some tests check fixes by removing them and requiring a failure.
 Keep user profiles and diagnostic records when cleaning up code.
+
+`manage.py auto-update --timer install` schedules a daily 03:00 systemd user timer: it builds and checks the tip of
+`origin/main` in a private clone under `build/auto-update`, installs to /usr/local only if everything passes, and
+skips unchanged tips. It needs passwordless sudo for the install step.
 
 The active installation is `/usr/local/bin/worminal`, with modules in `/usr/local/lib/worminal`. Install a tested
 regular-user build with `sudo -n python3 manage.py install --prefix /usr/local --skip-build`; do not install fixes

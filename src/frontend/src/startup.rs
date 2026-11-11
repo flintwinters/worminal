@@ -1,12 +1,15 @@
 //! Detached helpers (the local daemon, link openers) start through the shared GUI-safe spawn
 //! boundary: own session, /dev/null stdio, and a reaper thread.
 use std::{
-    ffi::CString,
+    ffi::{CString, OsStr, OsString},
     fs::OpenOptions,
     io,
     os::{fd::AsFd, unix::ffi::OsStrExt},
     path::Path,
-    sync::mpsc::{self, Receiver},
+    sync::{
+        mpsc::{self, Receiver},
+        Mutex,
+    },
     thread,
 };
 
@@ -54,4 +57,22 @@ pub fn replacement(executable: &Path, token: &str) -> io::Result<worminal_worksp
         true,
     )?;
     worminal_workspace::spawn::own(pid, "worminal-ui-replacement")
+}
+
+/// Sync the daemon versions of this machine and a connected master, once per host per owner.
+/// The helper runs `worminald upgrade-remote`, which updates whichever side is older and logs the outcome.
+pub fn sync_versions(master: &OsStr) -> io::Result<()> {
+    static CHECKED: Mutex<Vec<OsString>> = Mutex::new(Vec::new());
+    let mut checked = CHECKED.lock().unwrap();
+    if checked.iter().any(|host| host == master) {
+        return Ok(());
+    }
+    checked.push(master.to_owned());
+    let daemon = std::env::current_exe()?.with_file_name("worminald");
+    detached(&[
+        CString::new(daemon.as_os_str().as_bytes())?,
+        CString::new("upgrade-remote").unwrap(),
+        CString::new(master.as_bytes())?,
+    ])
+    .map(drop)
 }

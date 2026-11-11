@@ -44,5 +44,23 @@ Failure prints `ok: false` and a diagnostic. Lost SSH replies can make the outco
 retry. Inspect the target before retrying—an existing installation will be refused.
 Use [`python3 manage.py upgrade HOST`](remote-upgrade.md) for nodes that already have Worminal.
 
+## Keeping nodes in step
+
+```sh
+worminald upgrade-remote felix@disciple
+```
+
+Views run this automatically, once per host per window owner, when they connect to a `--master`. It is symmetric:
+the node with the older Cargo version is updated from the newer one. A newer local daemon is pushed over the same
+bootstrap as `install-on-remote`; a newer remote daemon is pulled through that bootstrap run locally. A daemon that
+predates `--version` counts as older. Equal versions change nothing.
+
+Only the daemon and manual in `/usr/local` are replaced (graphical modules are not). Replacement is a same-directory
+atomic rename after the same staging, checksum, run check and non-interactive sudo steps as installation, and both
+sides must be Linux on the same CPU. The running daemon sees its executable change and hands its shells to the new
+file without restarting them; connected views reconnect. A daemon too old to watch its executable keeps running
+until its next restart. An active v1 workspace, a missing installation or failed sudo leaves everything unchanged.
+Outcomes other than "already current" are logged to syslog.
+
 Run `python3 manage.py check-remote-install` for private mock-SSH/bootstrap and no-overwrite publication checks.
 It uses neither root nor live remote hosts.

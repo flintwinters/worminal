@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import platform
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -62,8 +63,26 @@ def refuse_existing(layout):
         raise ValueError('An existing Worminal workspace is active. Nothing was replaced or stopped.')
 
 
-def payload(layout, stream):
-    value = header(stream)
+def legacy_workspace():
+    # A v1 workspace must never be disturbed; its prefix lacks the v2 marker.
+    prefix = f'@worminal-workspace-{os.getuid()}-'
+    return any(prefix in line for line in Path('/proc/net/unix').read_text().splitlines())
+
+
+def installed_version(layout):
+    """Version reported by the managed daemon; None when it predates `--version` or cannot run."""
+    daemon = next(path for item, path in destinations(layout) if item['role'] == 'daemon')
+    if not stat.S_ISREG(os.lstat(daemon).st_mode):
+        raise ValueError('The installed daemon is not a regular file; nothing was replaced.')
+    try:
+        result = subprocess.run([str(daemon), '--version'], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
+
+
+def payload(layout, stream, value=None):
+    value = value or header(stream)
     records = value.get('files')
     if not isinstance(records, list) or len(records) != len(layout['files']):
         raise ValueError('Incomplete installation payload.')
@@ -104,7 +123,7 @@ def private_parent(path):
         raise
 
 
-def publish(layout, stream):
+def publish(layout, stream, replace=False):
     records = payload(layout, stream)
     staged, published = [], []
     try:
@@ -115,8 +134,12 @@ def publish(layout, stream):
                 fd = private_parent(path)
                 parents.append((item, path, fd))
                 try:
-                    os.stat(path.name, dir_fd=fd, follow_symlinks=False)
+                    info = os.stat(path.name, dir_fd=fd, follow_symlinks=False)
                 except FileNotFoundError:
+                    if replace and item['role'] == 'daemon':
+                        raise ValueError('Worminal is not installed here. Nothing was replaced.')
+                    continue
+                if replace and stat.S_ISREG(info.st_mode):
                     continue
                 raise ValueError('Installation destination appeared concurrently. Nothing was replaced.')
             for record, (item, path, fd) in zip(records, parents):
@@ -134,11 +157,19 @@ def publish(layout, stream):
                     os.fsync(output.fileno())
                 if digest.hexdigest() != record['sha256']:
                     raise ValueError('Payload checksum changed; no installation was published.')
-            for (fd, name), (_, path, _) in zip(staged, parents):
-                # link is atomic and refuses replacement, including a concurrent symlink.
-                os.link(name, path.name, src_dir_fd=fd, dst_dir_fd=fd, follow_symlinks=False)
-                published.append((fd, path.name, os.stat(name, dir_fd=fd, follow_symlinks=False).st_ino))
-                os.fsync(fd)
+            if replace:
+                # rename swaps the inode atomically, so the running daemon keeps its mapped code and its
+                # executable watch hands live shells to the new file. The daemon goes last: an interruption
+                # can leave a newer manual, never a half-written daemon.
+                for (fd, name), (_, path, _) in reversed(list(zip(staged, parents))):
+                    os.rename(name, path.name, src_dir_fd=fd, dst_dir_fd=fd)
+                    os.fsync(fd)
+            else:
+                for (fd, name), (_, path, _) in zip(staged, parents):
+                    # link is atomic and refuses replacement, including a concurrent symlink.
+                    os.link(name, path.name, src_dir_fd=fd, dst_dir_fd=fd, follow_symlinks=False)
+                    published.append((fd, path.name, os.stat(name, dir_fd=fd, follow_symlinks=False).st_ino))
+                    os.fsync(fd)
         finally:
             for fd, name in staged:
                 try:
@@ -158,16 +189,48 @@ def publish(layout, stream):
         raise
 
 
-def root_command(layout, source):
-    code = f'LAYOUT={layout!r}\nSOURCE={source!r}\n' + source
+def root_command(layout, source, replace):
+    code = f'LAYOUT={layout!r}\nMODE={"upgrade" if replace else "install"!r}\nSOURCE={source!r}\n' + source
     command = [sys.executable, '-c', code, '--publish']
     return command if os.geteuid() == 0 else ['sudo', '-n', *command]
 
 
-def bootstrap(layout, source):
-    message({'ready': True, 'system': platform.system(), 'machine': platform.machine()})
-    records = payload(layout, sys.stdin.buffer)
-    refuse_existing(layout)
+def send(layout):
+    """Stream the installed files to an out-of-date peer that asked for them (the pull direction)."""
+    files = []
+    try:
+        for item, path in destinations(layout):
+            handle = open(path, 'rb')
+            files.append((item['role'], handle, os.fstat(handle.fileno()).st_size))
+        message({'files': [{'role': role, 'size': size} for role, _, size in files]})
+        for _, handle, size in files:
+            for data in exact(handle, size):
+                sys.stdout.buffer.write(data)
+        sys.stdout.buffer.flush()
+    finally:
+        for _, handle, _ in files:
+            handle.close()
+    return {'ok': True, 'sent': True}
+
+
+def bootstrap(layout, source, replace=False):
+    ready = {'ready': True, 'system': platform.system(), 'machine': platform.machine()}
+    first = None
+    if replace:
+        ready['version'] = installed_version(layout)
+    message(ready)
+    if replace:
+        # The controller compares versions: cancel (same), send (this node is newer) or files (older).
+        first = header(sys.stdin.buffer)
+        if first.get('cancel'):
+            return {'ok': True, 'installed': False, 'current': True}
+        if first.get('send'):
+            return send(layout)
+        if legacy_workspace():
+            raise ValueError('A v1 Worminal workspace is active; it is never upgraded implicitly. Nothing was replaced.')
+    records = payload(layout, sys.stdin.buffer, first)
+    if not replace:
+        refuse_existing(layout)
     if os.geteuid() != 0:
         if subprocess.run(['sudo', '-n', 'true'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode:
             raise ValueError('Non-interactive sudo is required on the target; nothing was installed.')
@@ -194,9 +257,10 @@ def bootstrap(layout, source):
                              'Nothing was installed.') from error
         if result.returncode or b'Worp' not in result.stdout:
             raise ValueError('The staged daemon cannot run here (runtime/libc incompatibility). Nothing was installed.')
-        refuse_existing(layout)
+        if not replace:
+            refuse_existing(layout)
         # The privileged publisher consumes bytes from stdin, never user-controlled source paths.
-        process = subprocess.Popen(root_command(layout, source), stdin=subprocess.PIPE,
+        process = subprocess.Popen(root_command(layout, source, replace), stdin=subprocess.PIPE,
                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         try:
             process.stdin.write((json.dumps({'files': records})+'\n').encode())
@@ -214,17 +278,18 @@ def bootstrap(layout, source):
             if process.poll() is None:
                 process.kill()
                 process.wait()
-    return {'ok': True, 'installed': True, 'started': False, 'prefix': str(PREFIX),
+    return {'ok': True, 'installed': True, 'upgraded': replace, 'started': False, 'prefix': str(PREFIX),
             'files': [{'role': row['role'], 'sha256': row['sha256']} for row in records]}
 
 
 def main(layout, source):
     try:
+        replace = globals().get('MODE', 'install') == 'upgrade'
         if sys.argv[-1] == '--publish':
-            publish(layout, sys.stdin.buffer)
+            publish(layout, sys.stdin.buffer, replace)
             message({'ok': True})
         else:
-            message(bootstrap(layout, source))
+            message(bootstrap(layout, source, replace))
     except Exception as error:
         # No tracebacks, credential files, environment dumps or subprocess output in responses.
         detail = str(error) if isinstance(error, ValueError) else f'Installation failed ({type(error).__name__}).'

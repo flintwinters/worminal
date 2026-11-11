@@ -154,7 +154,17 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
         .get(1)
         .is_some_and(|value| value == "install-on-remote")
     {
-        return crate::remote_install::run(&arguments[2..]);
+        return crate::remote_install::run(&arguments[2..], false);
+    }
+    if arguments
+        .get(1)
+        .is_some_and(|value| value == "upgrade-remote")
+    {
+        return crate::remote_install::run(&arguments[2..], true);
+    }
+    if arguments.len() == 2 && arguments[1] == "--version" {
+        println!("worminald {}", env!("CARGO_PKG_VERSION"));
+        return Ok(0);
     }
     if arguments.get(1).is_some_and(|value| value == "api") {
         return crate::api_cli::run(scope, &arguments[2..]);
@@ -164,6 +174,7 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
             "worminald: persistent terminal workspace service\n\
                   Run worminald api help for the automation API.\n\
                   Run worminald install-on-remote --help to bootstrap a new node over SSH.\n\
+                  Run worminald upgrade-remote --help to sync an older node with a newer peer.\n\
                   Service commands: --serve, --bridge, --stop, --handin NAME, --handoff NAME, \
                   --new-browser-tab URL|FILE"
         );
