@@ -12,6 +12,7 @@ sys.dont_write_bytecode = True
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
 try:
+    import click
     import typer
 except ModuleNotFoundError as error:
     raise SystemExit("Install Typer to use manage.py: python3 -m pip install typer") from error
@@ -756,6 +757,14 @@ def install(prefix: Path = typer.Option(None, help="Installation prefix (default
             skip_build: bool = typer.Option(False, help="Publish an existing user build without rebuilding.")):
     """Build and install binaries, manual, desktop launcher, and icon; supports DESTDIR staging."""
     native_build.install(prefix, skip_build=skip_build)
+
+
+@app.command("auto-update")
+def auto_update(timer: str = typer.Option(None, click_type=click.Choice(["install", "remove"]),
+                                          help="Manage the daily 03:00 systemd user timer instead of updating.")):
+    """Update /usr/local from the tip of main if it changed and passes build and check."""
+    from tools import auto_update as updates
+    raise typer.Exit(updates.update() if timer is None else updates.schedule(timer == "remove") or 0)
 
 
 @app.command()
