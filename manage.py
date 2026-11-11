@@ -88,7 +88,7 @@ def run_checks(match=None, jobs=None):
     if check_privacy(ROOT):
         return 1
     native_build.build_targets(
-        "worminal-x11", "worminald-x11", "worminald-preview", "build/key_injector",
+        "worminal-rust", "worminal-x11", "worminald-x11", "worminald-preview", "build/key_injector",
         "build/placement_wm", "build/compact-worminal",
         "build/overlap_probe",
         "build/border_probe", "build/icon_probe", "build/view_state_test",
@@ -104,7 +104,7 @@ def run_checks(match=None, jobs=None):
         return code
     code = preview_checks("x11")
     if not code:
-        native_build.build_targets("worminal-rust", "build/worminald-c-v2", "build/gui-peer.so")
+        native_build.build_targets("build/worminald-c-v2", "build/gui-peer.so")
         code = run([sys.executable, "tests/rust_app.py"])
     return code or run([sys.executable, "tests/rust_browser.py"])
 
