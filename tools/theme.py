@@ -190,9 +190,14 @@ def theme_values(config):
                              config.get("draw_bold_text_with_bright_colors", False))
     if type(bold_bright) is not bool:
         raise ValueError("colors.draw_bold_text_with_bright_colors must be boolean")
+    worminal = config.get("worminal", {})
+    notifications = worminal.get("update_notifications", False) if isinstance(worminal, dict) else None
+    if type(notifications) is not bool:
+        raise ValueError("worminal.update_notifications must be boolean")
     return {"font_offset_y": line_offset, "glyph_offset_y": glyph_offset_y, "font_size": float(font_size),
             "font_family": family, "history_size": history, "scroll_multiplier": multiplier,
-            "bold_bright": int(bold_bright)}, palette
+            "bold_bright": int(bold_bright),
+            "update_notifications": int(notifications)}, palette
 
 
 def render_header(settings, palette):

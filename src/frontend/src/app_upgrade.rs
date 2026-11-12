@@ -100,8 +100,17 @@ fn windows() -> Vec<Rc<App>> {
             .collect()
     })
 }
+/// Update status appears in every window and, when configured, once on the desktop.
 fn notice(text: &str) {
-    for app in windows() {
+    let apps = windows();
+    if let Some(app) = apps
+        .first()
+        .filter(|_| worminal_config::UPDATE_NOTIFICATIONS != 0)
+    {
+        app.notification_desktop
+            .show(super::notifications::Message::update(text), |_| {});
+    }
+    for app in apps {
         app.message(Some(text));
     }
 }

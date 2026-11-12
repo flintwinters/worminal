@@ -63,6 +63,10 @@ class ThemeTest(unittest.TestCase):
         self.assertIn('[261] = "#0f0f0f"', header)
         self.assertIn('[269] = "#8e8e8e"', header)
         self.assertIn("theme_bold_bright = 0", header)
+        self.assertIn("theme_update_notifications = 0", header)
+        self.assertIn("theme_update_notifications = 1", theme_header({"worminal": {"update_notifications": True}}))
+        with self.assertRaises(ValueError):
+            theme_header({"worminal": {"update_notifications": "yes"}})
         self.assertIn("theme_font_offset_y = -3", header)
         self.assertIn("theme_glyph_offset_y = 0", header)
         self.assertIn("theme_font_size = 9.0", header)

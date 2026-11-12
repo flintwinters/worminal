@@ -27,6 +27,16 @@ impl Default for Message {
         }
     }
 }
+impl Message {
+    /// Application-originated notice; it has no tab to focus, so it offers no activation action.
+    pub(super) fn update(body: &str) -> Self {
+        Self {
+            title: "Worminal update".into(),
+            body: body.into(),
+            focus: false,
+        }
+    }
+}
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Outcome {
     Show(Message),
