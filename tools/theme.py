@@ -6,6 +6,7 @@ asks it for the answer and adapts the result for the explorer build and the hist
 
 import ctypes
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -14,12 +15,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def settings(defaults=False):
-    """Resolved configuration; `defaults` ignores every file and reports the built-in values."""
+def settings(defaults=False, environment=None):
+    """Resolved configuration; `defaults` ignores every file and reports the built-in values.
+
+    `environment` overlays variables for the resolver, e.g. to select one Alacritty file."""
     from tools.build import Builder
     daemon = Builder().rust_artifact("worminal-daemon")
     arguments = [str(daemon), "config", "--json", *(["--defaults"] if defaults else [])]
-    result = subprocess.run(arguments, capture_output=True, text=True, check=False)
+    result = subprocess.run(arguments, capture_output=True, text=True, check=False,
+                            env={**os.environ, **(environment or {})})
     if result.returncode:
         raise ValueError(result.stderr.strip() or "worminald config failed")
     return json.loads(result.stdout)
@@ -38,6 +42,14 @@ def legacy_header(values):
     lines += [f"\t[{index}] = {json.dumps(color)}," for index, color in enumerate(values["colors"]) if color]
     lines += ["};", ""]
     return "\n".join(lines)
+
+
+def legacy_fixture_header(alacritty, output):
+    """Write the historical header for one Alacritty fixture, ignoring the user's own configuration."""
+    isolated = ROOT / "build/config-isolated"
+    isolated.mkdir(parents=True, exist_ok=True)
+    values = settings(environment={"XDG_CONFIG_HOME": str(isolated), "WORMINAL_ALACRITTY_CONFIG": str(alacritty)})
+    Path(output).write_text(legacy_header(values))
 
 
 def explorer_font():

@@ -57,6 +57,13 @@ def extract(revision, destination, paths=('src', 'tests', 'tools/build.py', 'ass
                 target.write_bytes(data)
 
 
+def _historical_theme(*paths):
+    """The historical builder's generator: bare calls are covered by target(); fixtures get their header."""
+    from tools import theme
+    if paths:
+        theme.legacy_fixture_header(*paths)
+
+
 def module():
     global _module, _directory
     if _module is not None:
@@ -83,7 +90,14 @@ def module():
             _links[target] = source
     specification = importlib.util.spec_from_file_location('worminal_historical_build', root / 'tools/build.py')
     _module = importlib.util.module_from_spec(specification)
-    specification.loader.exec_module(_module)
+    # The historical builder imports a generator that no longer exists: appearance resolves at run time
+    # now, and target() writes the default compile-time header. Fixture headers come from the same resolver.
+    from tools import theme
+    theme.generate_theme = _historical_theme
+    try:
+        specification.loader.exec_module(_module)
+    finally:
+        del theme.generate_theme
     return _module
 
 

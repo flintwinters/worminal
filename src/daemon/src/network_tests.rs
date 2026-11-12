@@ -319,7 +319,7 @@ fn move_command_reorders_tabs_and_publishes_the_new_order() {
     send(&mut fixture, 77, 0);
     assert_eq!(ids(&fixture), [1, 3, 2], "unknown tabs are ignored");
     assert!(
-        fixture.service.clients[&1].output.len() > 0,
+        !fixture.service.clients[&1].output.is_empty(),
         "the new order reaches ready views as a catalog"
     );
 }
