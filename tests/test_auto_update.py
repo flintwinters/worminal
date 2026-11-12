@@ -1,6 +1,7 @@
 """Daily auto-update: installs a changed tip once, never installs a failing one, schedules 03:00."""
 
 from pathlib import Path
+from contextlib import contextmanager
 import subprocess
 import tempfile
 import unittest
@@ -90,6 +91,25 @@ class PublishTests(unittest.TestCase):
                     auto_update, "manage", side_effect=[0] * failed + [7]) as manage:
                 self.assertEqual(auto_update.publish(), 7)
                 self.assertEqual(manage.call_count, failed + 1)
+
+
+class ManageTests(unittest.TestCase):
+    def test_standalone_owners_retire_before_verification_storage_is_released(self):
+        events = []
+        directory = Path('/project/build/checks/private')
+
+        @contextmanager
+        def environment(cwd):
+            yield {"WORMINAL_TEST_CHECKS_DIR": str(directory)}
+            events.append("released")
+
+        with patch("tools.update_storage.verification_environment", environment), patch(
+                "tools.auto_update.subprocess.Popen") as spawn, patch(
+                "tools.test_runner.retire_worker", side_effect=lambda *args: events.append("retired")) as retire:
+            spawn.return_value.wait.return_value = 7
+            self.assertEqual(auto_update.manage("check", cwd=Path('/project')), 7)
+            retire.assert_called_once_with(spawn.return_value, directory)
+        self.assertEqual(events, ["retired", "released"])
 
 
 if __name__ == "__main__":

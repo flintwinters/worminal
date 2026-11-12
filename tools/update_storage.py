@@ -13,8 +13,7 @@ def verification_environment(cwd):
     checks.mkdir(parents=True, exist_ok=True)
     directory = Path(tempfile.mkdtemp(prefix="update-posix-", dir=checks))
     if directory.stat().st_uid == os.geteuid():
-        directory.rmdir()
-        yield os.environ.copy()
+        yield {**os.environ, "WORMINAL_TEST_CHECKS_DIR": str(directory)}
         return
     # NFS can map every newly created file to a different uid. Publication tests must
     # exercise the real ownership checks, so give them real Unix storage, never mocks.

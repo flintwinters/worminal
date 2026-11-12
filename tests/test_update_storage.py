@@ -16,13 +16,16 @@ class StorageTests(unittest.TestCase):
         self.root = Path(directory.name)
         self.uid = self.root.stat().st_uid
 
-    def test_matching_ownership_needs_no_mount_or_environment_override(self):
+    def test_matching_ownership_needs_no_mount_and_tags_private_verification(self):
         with patch("tools.update_storage.os.geteuid", return_value=self.uid), patch(
                 "tools.update_storage.subprocess.run") as run:
             with verification_environment(self.root) as env:
-                self.assertEqual(env, dict(os.environ))
+                path = Path(env.pop("WORMINAL_TEST_CHECKS_DIR"))
+                self.assertTrue(path.is_relative_to(self.root / "build/checks"))
+                self.assertEqual(env, {key: value for key, value in os.environ.items()
+                                       if key != "WORMINAL_TEST_CHECKS_DIR"})
         run.assert_not_called()
-        self.assertEqual(list((self.root / "build/checks").iterdir()), [])
+        self.assertTrue(path.is_dir())
 
     def test_remapped_storage_mounts_and_preserves_diagnostics_before_unmount(self):
         def command(args, **kwargs):

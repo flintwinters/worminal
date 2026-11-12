@@ -24,15 +24,20 @@ def git(*args, cwd=CLONE):
 
 def manage(*args, cwd=CLONE, sudo=False):
     if args[0] in ("check", "check-install"):
+        from tools.test_runner import retire_worker
         from tools.update_storage import verification_environment
         with verification_environment(cwd) as env:
-            return subprocess.run([sys.executable, "manage.py", *args], cwd=cwd, env=env).returncode
+            process = subprocess.Popen([sys.executable, "manage.py", *args], cwd=cwd, env=env)
+            try:
+                return process.wait()
+            finally:
+                retire_worker(process, Path(env["WORMINAL_TEST_CHECKS_DIR"]))
     return subprocess.run([*(["sudo", "-n"] if sudo else []), sys.executable, "manage.py", *args],
                           cwd=cwd).returncode
 
 
 def publish(cwd=ROOT, prefix=PREFIX):
-    """Build and validate as the user; elevate only publication and verify the result."""
+    """Build and validate as the user, publish, and verify the installed result."""
     steps = (("build",), ("setup-check-runtime",), ("check",),
              ("install", "--prefix", prefix, "--skip-build"))
     if prefix == PREFIX:
