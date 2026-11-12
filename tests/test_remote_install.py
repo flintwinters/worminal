@@ -27,6 +27,11 @@ class PublicationTest(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory(prefix='remote-publish-', dir=CHECKS)
         self.addCleanup(self.directory.cleanup)
         self.prefix = Path(self.directory.name)
+        # NFS can map newly created fixture files to another UID. Model the publisher as
+        # their owner; do not relax the real owner/mode checks or any filesystem operation.
+        identity = patch.object(remote_install.os, 'geteuid', return_value=self.prefix.stat().st_uid)
+        identity.start()
+        self.addCleanup(identity.stop)
         context = patch.object(remote_install, 'PREFIX', self.prefix)
         context.start()
         self.addCleanup(context.stop)
@@ -44,6 +49,19 @@ class PublicationTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             remote_install.publish(self.layout, io.BytesIO(payload(self.files)))
         self.assertEqual(self.targets()[0].read_bytes(), self.files[0][1])
+
+    def test_wrong_owner_and_writable_prefix_are_rejected_without_publication(self):
+        with patch.object(remote_install.os, 'geteuid', return_value=self.prefix.stat().st_uid + 1):
+            with self.assertRaisesRegex(ValueError, 'Installation prefix'):
+                remote_install.publish(self.layout, io.BytesIO(payload(self.files)))
+        self.prefix.chmod(0o777)
+        try:
+            with self.assertRaisesRegex(ValueError, 'Installation prefix'):
+                remote_install.publish(self.layout, io.BytesIO(payload(self.files)))
+        finally:
+            self.prefix.chmod(0o700)
+        self.assertTrue(all(not path.exists() for path in self.targets()))
+        self.assertEqual(list(self.prefix.rglob('.worminal-install-*')), [])
 
     def test_truncated_or_corrupt_transfers_publish_nothing(self):
         for data in (payload(self.files)[:-1], payload(self.files).replace(b'candidate-daemon', b'changed!!-daemon')):
