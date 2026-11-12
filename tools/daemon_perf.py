@@ -54,7 +54,6 @@ def measure(label, trials, compare=None, *, network=False):
     workload_hash = hashlib.sha256((build.ROOT / workload).read_bytes()).hexdigest()
     if not label or Path(label).name != label or label in (".", ".."):
         raise ValueError("Choose a single filename component as the measurement label")
-    build.generate_theme()
     build.Builder().target("build/libworminal_engine.a")
     with ExitStack() as stack:
         roots = {"current": build.ROOT}

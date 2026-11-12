@@ -105,7 +105,7 @@ fn notice(text: &str) {
     let apps = windows();
     if let Some(app) = apps
         .first()
-        .filter(|_| worminal_config::UPDATE_NOTIFICATIONS != 0)
+        .filter(|_| worminal_config::get().update_notifications)
     {
         app.notification_desktop
             .show(super::notifications::Message::update(text), |_| {});

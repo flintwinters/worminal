@@ -38,7 +38,7 @@ te_links_collect(TermEngine *session)
 			te_links_mark(term.alt[y], term.col, used);
 	}
 	if (term.hist)
-		for (int y = 0; y < theme_history_size; y++)
+		for (int y = 0; y < te_history_size; y++)
 			te_links_mark(term.hist[y], term.col, used);
 	used[term.c.attr.link] = used[session->saved[0].attr.link] = used[session->saved[1].attr.link] = 1;
 	for (uint16_t i = 1; i < session->link_count; i++) {

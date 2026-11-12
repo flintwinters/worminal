@@ -114,6 +114,12 @@ enum worminal_event_type {
 };
 enum worminal_control { WORMINAL_TOGGLE_PRINTER = 0, WORMINAL_PRINT_SCREEN = 1 };
 
+/* Indexed colors plus cursor, default and dim slots; palette events and defaults use these indices. */
+#define WORMINAL_COLOR_COUNT 270
+/* Process-wide scrollback capacity (0..100000 lines) and lines per wheel step. History arrays are sized
+ * from the capacity, so it can change only before the first engine is created; later calls that would
+ * change it return WORMINAL_INVALID. */
+int worminal_engine_configure(int32_t, int32_t);
 int worminal_engine_create(int32_t, int32_t, WorminalEngine **);
 void worminal_engine_destroy(WorminalEngine *);
 /* Stop at effects so callers apply them before parsing later bytes. An incomplete UTF-8 suffix

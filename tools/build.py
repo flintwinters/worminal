@@ -8,7 +8,6 @@ import shlex
 import shutil
 import subprocess
 
-from tools.theme import generate_theme
 from tools.paths import runtime_binary
 
 
@@ -218,7 +217,6 @@ def __getattr__(name):
 
 
 def build_targets(*targets):
-    generate_theme()
     builder = Builder()
     core = ("worminald",) if headless() else ("worminal", "worminald")
     for target in dict.fromkeys((*core, *targets)):
@@ -294,7 +292,7 @@ def retired_installation_files(prefix=None):
 
 def install(prefix=None, *, skip_build=False):
     files = installation_files(prefix)
-    # Build before sudo so the result uses the user's theme.
+    # Build before sudo (the theme itself is read at runtime).
     if not skip_build:
         build_targets()
     for source, destination, mode in files:

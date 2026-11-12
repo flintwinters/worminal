@@ -27,6 +27,6 @@ Use [`worminald install-on-remote HOST`](docs/remote-install.md) to bootstrap a 
 For existing devices, [`python3 manage.py upgrade HOST`](docs/remote-upgrade.md) copies this device’s installed release.
 
 Installations include Atkinson Hyperlegible Mono as the default font, at 9 pt with a -3 pixel line offset.
-Explicit Alacritty font settings at build time and the `-f` command-line option override the defaults.
+Font settings in `worminal.yaml` or an Alacritty config (see [docs/config.md](docs/config.md)) and the `-f` command-line option override the defaults.
 
 Built with Rust, GTK, WebKitGTK, and a terminal engine derived from [st](https://git.suckless.org/st/); see [LICENSE](LICENSE).

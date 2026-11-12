@@ -1,157 +1,69 @@
-"""Alacritty import and palette compilation checks."""
+"""Runtime configuration as seen by tools: the `worminald config` resolver, explorer font and C reference header.
 
-from pathlib import Path
+Resolution rules themselves are unit-tested in src/config; these checks cover the CLI contract and adapters.
+"""
+
 import json
 import os
-import re
+import subprocess
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
-from tools.theme import explorer_font, find_config, font_height, read_config, render_header, render_rust, theme_header
-from tools.theme import theme_values
-
+from tools import theme
+from tools.build import Builder
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "alacritty"
 
 
+def config_json(*extra, **environment):
+    daemon = Builder().rust_artifact("worminal-daemon")
+    env = {**os.environ, "HOME": str(FIXTURES), "XDG_CONFIG_HOME": str(FIXTURES / "none"), **environment}
+    return subprocess.run([str(daemon), "config", *extra], env=env, capture_output=True, text=True)
+
+
 class ThemeTest(unittest.TestCase):
-    def test_c_and_rust_share_all_palette_and_font_inputs(self):
-        settings, palette = theme_values({"font": {"normal": {"family": 'Aé "Font" \\ family'}, "size": 13.5,
-                                                  "offset": {"y": -3}}})
-        c_header, rust = render_header(settings, palette), render_rust(settings, palette)
-        indexed = {int(index): json.loads(value) for index, value in re.findall(r'\[(\d+)\] = ("[^"]+")', c_header)}
-        c_colors = [indexed.get(index) for index in range(max(indexed) + 1)]
-        rust_colors = []
-        for line in rust.splitlines():
-            if line.startswith("    "):
-                literal = line.strip().removesuffix(",")
-                rust_colors.append(None if literal == "None" else json.loads(literal[5:-1]))
-        self.assertEqual(c_colors, rust_colors)
-        self.assertEqual(len(c_colors), 270)
-        self.assertIn('FONT_OFFSET_Y: i32 = -3;', rust)
-        self.assertIn('FONT_SIZE: f64 = 13.5;', rust)
-        font = re.search(r'FONT_FAMILY: Option<&str> = Some\((.*)\);', rust)[1]
-        self.assertEqual(json.loads(font), settings["font_family"])
+    def test_worminal_yaml_layers_over_alacritty_config(self):
+        result = config_json("--json", WORMINAL_ALACRITTY_CONFIG=str(FIXTURES / "main.toml"),
+                             WORMINAL_CONFIG=str(FIXTURES / "worminal.yaml"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        values = json.loads(result.stdout)
+        self.assertEqual((values["font_family"], values["font_size"], values["history_size"]),
+                         ("Iosevka Term", 11.0, 64))
+        self.assertTrue(values["update_notifications"])
+        self.assertEqual(len(values["colors"]), 270)
+
+    def test_invalid_configuration_is_reported_with_nonzero_status(self):
+        with self.subTest("missing explicit file"):
+            result = config_json(WORMINAL_CONFIG=str(FIXTURES / "absent.yaml"))
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("does not exist", result.stderr)
+
+    def test_defaults_ignore_every_file(self):
+        result = config_json("--json", "--defaults", WORMINAL_ALACRITTY_CONFIG=str(FIXTURES / "main.toml"))
+        self.assertEqual(json.loads(result.stdout)["font_family"], "Atkinson Hyperlegible Mono")
 
     def test_explorer_line_height_uses_terminal_metrics_and_offset(self):
-        config = {"font": {"normal": {"family": "monospace"}, "size": 14,
-                           "offset": {"y": -7}}}
-        with patch("tools.theme.find_config", return_value="configured"), \
-                patch("tools.theme.read_config", return_value=config), \
-                patch("tools.theme.font_height", return_value=25) as metrics:
-            self.assertEqual(explorer_font(), {"family": "monospace", "size": 14,
-                                               "lineHeight": 18})
-            metrics.assert_called_once_with("monospace", 14)
-            config["font"]["offset"]["y"] = -100
-            self.assertEqual(explorer_font()["lineHeight"], 1)
-        self.assertGreater(font_height("monospace", 14), 14)
+        values = {"font_family": "monospace", "font_size": 14.0, "font_offset_y": -7}
+        with patch.object(theme, "settings", return_value=values), \
+                patch.object(theme, "font_height", return_value=25) as metrics:
+            self.assertEqual(theme.explorer_font(), {"family": "monospace", "size": 14.0, "lineHeight": 18})
+            metrics.assert_called_once_with("monospace", 14.0)
+            values["font_offset_y"] = -100
+            self.assertEqual(theme.explorer_font()["lineHeight"], 1)
+        self.assertGreater(theme.font_height("monospace", 14), 14)
 
-    def test_explorer_font_without_configuration_needs_no_removed_c_source(self):
-        with patch("tools.theme.find_config", return_value=None), \
-                patch("tools.theme.font_height", return_value=16) as metrics:
-            self.assertEqual(explorer_font(), {"family": "Atkinson Hyperlegible Mono", "size": 9,
-                                               "lineHeight": 13})
-            metrics.assert_called_once_with("Atkinson Hyperlegible Mono", 9)
+    def test_legacy_header_quotes_family_and_keeps_unset_slots_out(self):
+        values = {"font_family": 'Aé "Font" \\ family', "font_size": 13.5, "font_offset_y": -3,
+                  "glyph_offset_y": 0, "history_size": 64, "scroll_multiplier": 5, "bold_bright": True,
+                  "colors": ["#000000", None, "#ffffff"]}
+        header = theme.legacy_header(values)
+        self.assertIn('theme_font_family = "Aé \\"Font\\" \\\\ family";', header)
+        self.assertIn("theme_font_size = 13.5;", header)
+        self.assertIn("theme_bold_bright = 1;", header)
+        self.assertIn('[2] = "#ffffff",', header)
+        self.assertNotIn("[1] =", header)
 
-    def test_default_alacritty_palette(self):
-        header = theme_header({})
-        self.assertIn('[0] = "#181818"', header)
-        self.assertIn('[1] = "#ac4242"', header)
-        self.assertIn('[15] = "#f8f8f8"', header)
-        self.assertIn('[258] = "#d8d8d8"', header)
-        self.assertIn('[259] = "#181818"', header)
-        self.assertIn('[261] = "#0f0f0f"', header)
-        self.assertIn('[269] = "#8e8e8e"', header)
-        self.assertIn("theme_bold_bright = 0", header)
-        self.assertIn("theme_update_notifications = 0", header)
-        self.assertIn("theme_update_notifications = 1", theme_header({"worminal": {"update_notifications": True}}))
-        with self.assertRaises(ValueError):
-            theme_header({"worminal": {"update_notifications": "yes"}})
-        self.assertIn("theme_font_offset_y = -3", header)
-        self.assertIn("theme_glyph_offset_y = 0", header)
-        self.assertIn("theme_font_size = 9.0", header)
-        self.assertIn('theme_font_family = "Atkinson Hyperlegible Mono"', header)
-        self.assertIn("theme_history_size = 10000", header)
-        self.assertIn("theme_scroll_multiplier = 3", header)
 
-    def test_partial_font_override_keeps_other_shared_defaults(self):
-        settings, _ = theme_values({"font": {"size": 12}})
-        self.assertEqual(settings["font_family"], "Atkinson Hyperlegible Mono")
-        self.assertEqual(settings["font_offset_y"], -3)
-        self.assertEqual(settings["font_size"], 12)
-        settings, _ = theme_values({"font": {"normal": {"family": "monospace"}, "offset": {"y": 0}}})
-        self.assertEqual(settings["font_family"], "monospace")
-        self.assertEqual(settings["font_offset_y"], 0)
-        self.assertEqual(settings["font_size"], 9)
-
-    def test_imports_override_by_color_key(self):
-        header = theme_header(read_config(FIXTURES / "main.toml"))
-        for entry in (
-            '[1] = "#abcdef"', '[12] = "#aabbcc"',
-            '[196] = "#123456"', '[256] = "#eeeeee"',
-            '[257] = "#454545"', '[258] = "#eeeeee"',
-            '[259] = "#222222"', '[260] = "#fedcba"',
-            '[261] = "#0f0f0f"', '[263] = "#556677"',
-            '[264] = "#a17e4d"', '[269] = "#808080"',
-            "theme_bold_bright = 1",
-            "theme_font_offset_y = -3",
-            "theme_font_size = 9.0",
-            'theme_font_family = "Iosevka Term"',
-            "theme_history_size = 64",
-            "theme_scroll_multiplier = 5",
-        ):
-            self.assertIn(entry, header)
-
-    def test_hex_prefix_and_derived_dim_colors(self):
-        header = theme_header({"colors": {
-            "normal": {"red": "0x123456"},
-            "primary": {"foreground": "0xabcdef"},
-        }})
-        self.assertIn('[1] = "#123456"', header)
-        self.assertIn('[262] = "#0b2238"', header)
-        self.assertIn('[269] = "#70879d"', header)
-
-    def test_font_family_is_quoted_for_generated_c(self):
-        header = theme_header({"font": {"normal": {"family": 'Mono: "Book"'}}})
-        self.assertIn('theme_font_family = "Mono: \\"Book\\""', header)
-
-    def test_legacy_yaml_is_discovered_and_compiled(self):
-        with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(FIXTURES.parent)}, clear=False):
-            path = find_config()
-        self.assertEqual(path, FIXTURES / "alacritty.yml")
-        header = theme_header(read_config(path))
-        for entry in (
-            'theme_font_family = "Input Mono Condensed"',
-            "theme_font_size = 6.0",
-            "theme_font_offset_y = -7",
-            "theme_glyph_offset_y = -4",
-            "theme_bold_bright = 1",
-            '[1] = "#abcdef"',
-            '[258] = "#f9e7c4"',
-            '[259] = "#1d1f21"',
-        ):
-            self.assertIn(entry, header)
-
-    def test_legacy_bold_setting_at_root(self):
-        self.assertIn("theme_bold_bright = 1",
-                      theme_header({"draw_bold_text_with_bright_colors": True}))
-
-    def test_invalid_color_and_import_cycle_fail_build(self):
-        with self.assertRaisesRegex(ValueError, "#RRGGBB"):
-            theme_header({"colors": {"normal": {"red": "red; }"}}})
-        with self.assertRaisesRegex(ValueError, "import cycle"):
-            read_config(FIXTURES / "cycle_a.toml")
-
-    def test_invalid_line_offset_and_history_fail_build(self):
-        with self.assertRaisesRegex(ValueError, "font.offset.y"):
-            theme_header({"font": {"offset": {"y": 1.5}}})
-        with self.assertRaisesRegex(ValueError, "font.glyph_offset.y"):
-            theme_header({"font": {"glyph_offset": {"y": 1.5}}})
-        with self.assertRaisesRegex(ValueError, "font.size"):
-            theme_header({"font": {"size": -1}})
-        with self.assertRaisesRegex(ValueError, "font.normal.family"):
-            theme_header({"font": {"normal": {"family": ""}}})
-        with self.assertRaisesRegex(ValueError, "font.normal.family"):
-            theme_header({"font": {"normal": {"family": 42}}})
-        with self.assertRaisesRegex(ValueError, "scrolling.history"):
-            theme_header({"scrolling": {"history": 100001}})
+if __name__ == "__main__":
+    unittest.main()

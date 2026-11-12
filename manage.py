@@ -168,7 +168,7 @@ def run_proof_script(path):
 
 @app.command()
 def build():
-    """Compile Worminal with the current Alacritty theme."""
+    """Compile Worminal; appearance is read at runtime from worminal.yaml or Alacritty config."""
     native_build.build_targets()
 
 
@@ -224,13 +224,11 @@ def check_rust_process():
 
 
 def run_rust_process_checks():
-    native_build.generate_theme()
     native_build.Builder().target("build/libworminal_engine.a")
     return run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-daemon"])
 
 
 def build_rust_daemon():
-    native_build.generate_theme()
     return native_build.Builder().rust_artifact("worminal-daemon")
 
 
@@ -243,7 +241,6 @@ def check_rust_frontend(unit_only: bool = typer.Option(
         False, help="Run Rust tests without private-display painter comparisons.")):
     """Check imported Rust viewports and exact C/Rust painter pixels on private X11 and native Wayland."""
     if unit_only:
-        native_build.generate_theme()
         native_build.Builder().target("build/libworminal_engine.a")
         raise typer.Exit(run_rust_frontend_tests())
     native_build.build_targets("build/render_probe")
@@ -303,7 +300,6 @@ def build_rust_daemon_command():
 @app.command("check-agent-api")
 def check_agent_api():
     """Check headless agent discovery, screen reads and keystrokes on a private workspace."""
-    native_build.generate_theme()
     native_build.Builder().target("build/libworminal_engine.a")
     code = run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-protocol",
                 "-p", "worminal-daemon", "--lib"])

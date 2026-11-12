@@ -3,13 +3,26 @@
 #include <stdlib.h>
 #include <string.h>
 #include "engine_parser.h"
-#include WORMINAL_THEME_HEADER
 
 int
 te_dimensions(int32_t columns, int32_t rows)
 {
 	return columns > 0 && columns <= 4096 && rows > 0 && rows <= 4096 &&
 	       (size_t)columns * rows <= 16000000;
+}
+
+int te_history_size = 10000, te_scroll_multiplier = 3;
+static int engines_created;
+
+int
+worminal_engine_configure(int32_t history, int32_t multiplier)
+{
+	if (history < 0 || history > 100000 || multiplier < 1) return WORMINAL_INVALID;
+	if (engines_created && (history != te_history_size || multiplier != te_scroll_multiplier))
+		return WORMINAL_INVALID;
+	te_history_size = history;
+	te_scroll_multiplier = multiplier;
+	return WORMINAL_OK;
 }
 
 int
@@ -24,6 +37,7 @@ worminal_engine_create(int32_t columns, int32_t rows, WorminalEngine **result)
 	te_tnew(created, columns, rows);
 	te_selinit(created);
 	*result = created;
+	engines_created = 1;
 	return WORMINAL_OK;
 }
 
@@ -37,7 +51,7 @@ te_freegrid(TermEngine *engine)
 	}
 	free(grid->line); free(grid->alt);
 	if (grid->hist)
-		for (int y = 0; y < theme_history_size; y++) free(grid->hist[y]);
+		for (int y = 0; y < te_history_size; y++) free(grid->hist[y]);
 	free(grid->hist); free(grid->dirty); free(grid->tabs);
 	memset(grid, 0, sizeof(*grid));
 }

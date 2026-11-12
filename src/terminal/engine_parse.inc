@@ -602,7 +602,7 @@ te_csihandle(TermEngine *session)
 			 * retained ring and leave a scrolled viewport on live rows. */
 			te_selclear(session);
 			if (term.hist) {
-				for (int i = 0; i < theme_history_size; i++)
+				for (int i = 0; i < te_history_size; i++)
 					free(term.hist[i]);
 				free(term.hist);
 				term.hist = NULL;

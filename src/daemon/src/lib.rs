@@ -3,6 +3,7 @@ mod api;
 mod api_cli;
 mod cli;
 mod commands;
+mod config_cli;
 mod device_probes;
 mod frames;
 mod handoff;

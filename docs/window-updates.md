@@ -36,5 +36,4 @@ PYTHONPATH=tests python3 tests/test_window_replacement.py
 These checks modify copied binaries under `build/checks`, never the installed application or desktop session.
 
 Update status (postponed, pending or failed) always appears in the window message bar. Desktop notifications for these
-notices are off by default; enable them with `update_notifications = true` under a `[worminal]` table in the Alacritty
-config, then rebuild. One notification is sent per notice, not per window.
+notices are off by default; enable them with `update_notifications: true` under `worminal:` in `worminal.yaml` (see `config.md`). One notification is sent per notice, not per window.

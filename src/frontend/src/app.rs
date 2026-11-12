@@ -733,7 +733,7 @@ impl App {
             };
             let mut palette_changed = false;
             // The catalog lists overrides only through the last one; later entries are defaults.
-            for index in 0..worminal_config::COLOR_NAMES.len() {
+            for index in 0..worminal_config::COLOR_COUNT {
                 let color = record.colors.get(index).filter(|color| !color.is_empty());
                 palette_changed |= page
                     .palette

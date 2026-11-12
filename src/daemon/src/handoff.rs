@@ -104,11 +104,11 @@ fn decode_tab(
     tab.url = (browser != 0).then_some(url);
     tab.mode = mode;
     tab.cursor = style;
-    if payload.u32()? as usize != worminal_config::COLOR_NAMES.len() {
+    if payload.u32()? as usize != worminal_config::COLOR_COUNT {
         return Err(invalid());
     }
-    let mut colors = Vec::with_capacity(worminal_config::COLOR_NAMES.len());
-    for _ in worminal_config::COLOR_NAMES {
+    let mut colors = Vec::with_capacity(worminal_config::COLOR_COUNT);
+    for _ in 0..worminal_config::COLOR_COUNT {
         let color = string(&mut payload)?;
         colors.push((!color.is_empty()).then_some(color));
     }
@@ -168,8 +168,8 @@ fn encode_tab(tab: &mut Tab, file: &mut File) -> io::Result<()> {
     ] {
         body.put_string(field)?;
     }
-    body.put_u32(worminal_config::COLOR_NAMES.len() as u32)?;
-    for index in 0..worminal_config::COLOR_NAMES.len() {
+    body.put_u32(worminal_config::COLOR_COUNT as u32)?;
+    for index in 0..worminal_config::COLOR_COUNT {
         body.put_string(
             tab.colors
                 .as_ref()

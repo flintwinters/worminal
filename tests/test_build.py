@@ -43,7 +43,7 @@ class BuildTests(unittest.TestCase):
         names = lambda: {destination.name for _, destination, _ in build.installation_files("/usr/local")}
         with patch.dict(os.environ, {"WORMINAL_HEADLESS": "1"}):
             self.assertEqual(names(), {"worminald", "worminal.1"})
-            with patch.object(build, "generate_theme"), patch.object(build, "Builder") as builder:
+            with patch.object(build, "Builder") as builder:
                 build.build_targets()
                 self.assertEqual([c.args[0] for c in builder().target.call_args_list], ["worminald"])
         with patch.dict(os.environ, {"WORMINAL_HEADLESS": "0"}):

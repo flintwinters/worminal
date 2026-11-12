@@ -910,7 +910,7 @@ impl Inner {
         } else {
             self.send(CommandKind::Scroll {
                 up,
-                amount: worminal_config::SCROLL_MULTIPLIER as u32,
+                amount: worminal_config::get().scroll_multiplier as u32,
             });
         }
     }

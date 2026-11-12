@@ -11,7 +11,7 @@ pub struct Palette {
 impl Default for Palette {
     fn default() -> Self {
         let mut palette = Self {
-            colors: vec![RGBA::new(0.0, 0.0, 0.0, 0.0); theme::COLOR_NAMES.len()],
+            colors: vec![RGBA::new(0.0, 0.0, 0.0, 0.0); theme::COLOR_COUNT],
         };
         for index in 0..palette.colors.len() {
             palette.set(index, None);
@@ -46,7 +46,8 @@ impl Palette {
                     let gray = (8 + 10 * (index - 232)) as f64 / 255.0;
                     RGBA::new(gray, gray, gray, 1.0)
                 } else {
-                    theme::COLOR_NAMES[index]
+                    theme::get().colors[index]
+                        .as_deref()
                         .and_then(|name| RGBA::parse(name).ok())
                         .unwrap_or(*current)
                 }
@@ -95,11 +96,11 @@ impl Font {
         let family = pattern
             .as_ref()
             .and_then(|pattern| pattern.family.as_deref())
-            .or(theme::FONT_FAMILY);
+            .or(theme::get().font_family.as_deref());
         let size = pattern
             .as_ref()
             .and_then(|pattern| pattern.size)
-            .unwrap_or(theme::FONT_SIZE);
+            .unwrap_or(theme::get().font_size);
         let size = (size + zoom).max(4.0);
         let mut description = pango::FontDescription::new();
         // A missing compiled family inherits Pango's widget font, just as set_family(NULL) does in C.
@@ -125,7 +126,7 @@ impl Font {
             description,
             metrics: Metrics {
                 width: width.max(1),
-                height: (ink_height + theme::FONT_OFFSET_Y).max(1),
+                height: (ink_height + theme::get().font_offset_y).max(1),
                 ink_height,
                 ascent,
             },
@@ -167,7 +168,7 @@ impl Painter {
         self.ascii.fill(None);
     }
     pub fn overlap(&self) -> i32 {
-        self.font.metrics.ink_height + theme::GLYPH_OFFSET_Y.saturating_abs()
+        self.font.metrics.ink_height + theme::get().glyph_offset_y.saturating_abs()
     }
     pub fn damage(&self, row: usize, width: i32) -> (i32, i32, i32, i32) {
         let overlap = self.overlap();
@@ -186,7 +187,7 @@ impl Painter {
         x: usize,
         y: usize,
     ) -> (RGBA, RGBA, bool) {
-        if theme::BOLD_BRIGHT != 0 && cell.attributes & ATTR_BOLD != 0 && cell.foreground < 8 {
+        if theme::get().bold_bright && cell.attributes & ATTR_BOLD != 0 && cell.foreground < 8 {
             cell.foreground += 8;
         }
         let mut fg = style.palette.color(cell.foreground);
@@ -259,7 +260,8 @@ impl Painter {
             layout
         };
         let metrics = self.font.metrics;
-        let top = 2 + (y as i32 + 1) * metrics.height - metrics.ink_height - theme::GLYPH_OFFSET_Y;
+        let top =
+            2 + (y as i32 + 1) * metrics.height - metrics.ink_height - theme::get().glyph_offset_y;
         if cached.is_some() || layout.line_count() == 1 {
             cr.move_to(
                 f64::from(2 + x as i32 * metrics.width),

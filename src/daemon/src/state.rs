@@ -437,10 +437,10 @@ impl Tab {
                 }
                 terminal::WORMINAL_PALETTE => {
                     if let Ok(index) = usize::try_from(event.argument) {
-                        if index < worminal_config::COLOR_NAMES.len() {
+                        if index < worminal_config::COLOR_COUNT {
                             let next = (event.flags == 0).then_some(event.data);
                             if self.colors.is_none() && next.is_some() {
-                                self.colors = Some(vec![None; worminal_config::COLOR_NAMES.len()]);
+                                self.colors = Some(vec![None; worminal_config::COLOR_COUNT]);
                             }
                             if let Some(colors) = &mut self.colors {
                                 self.catalog_dirty |= colors[index] != next;
@@ -537,7 +537,7 @@ impl Tab {
 
     fn color_rgb(&self, index: i32) -> Option<[u8; 3]> {
         let index = usize::try_from(index).ok()?;
-        let default = worminal_config::COLOR_NAMES.get(index)?;
+        let default = worminal_config::get().colors.get(index)?.as_deref();
         let override_value = self
             .colors
             .as_ref()

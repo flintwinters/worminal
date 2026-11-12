@@ -3,7 +3,6 @@
 #include <string.h>
 #include "engine_parser.h"
 #include "engine_codec.h"
-#include WORMINAL_THEME_HEADER
 
 typedef struct {
 	uint8_t *data;
@@ -59,7 +58,7 @@ te_export_compat(TermEngine *s, const WorminalTransportState *transport, EngineS
 	    (size_t)t->col * (t->row * 2 + (size_t)t->histlen) > 16000000) return 0;
 	EngineCompatSnapshot h = {
 		.magic = 0x57545331, .version = 1, .bytes = sizeof(EngineCompatSnapshot),
-		.glyph_bytes = sizeof(Glyph), .history = theme_history_size,
+		.glyph_bytes = sizeof(Glyph), .history = te_history_size,
 		.row = t->row, .col = t->col, .histlen = t->histlen, .scr = t->scr,
 		.c = t->c, .selection = s->sel, .csi = s->csiescseq,
 		.ocx = t->ocx, .ocy = t->ocy, .top = t->top, .bot = t->bot,
@@ -77,7 +76,7 @@ te_export_compat(TermEngine *s, const WorminalTransportState *transport, EngineS
 	    !transfer(fd, s->strescseq.buf, h.str_len, 1)) return 0;
 	for (int i = 0; i < t->row * 2 + t->histlen; i++) {
 		Line row = i < t->row ? t->line[i] : i < 2 * t->row ? t->alt[i - t->row] :
-		    t->hist[(t->histi - t->histlen + i - 2 * t->row + theme_history_size) % theme_history_size];
+		    t->hist[(t->histi - t->histlen + i - 2 * t->row + te_history_size) % te_history_size];
 		if (!transfer(fd, row, t->col * sizeof(Glyph), 1)) return 0;
 	}
 	return 1;
@@ -92,7 +91,7 @@ te_import_compat(EngineSnapshotIO *fd, WorminalTransportState *transport)
 	    h.bytes != sizeof(h) || h.glyph_bytes != sizeof(Glyph) ||
 	    h.row < 1 || h.row > 4096 || h.col < 1 || h.col > 4096 ||
 	    (size_t)h.col * (h.row * 2 + (size_t)MAX(h.histlen, 0)) > 16000000 ||
-	    h.histlen < 0 || h.histlen > theme_history_size || h.histlen > (int)h.history ||
+	    h.histlen < 0 || h.histlen > te_history_size || h.histlen > (int)h.history ||
 	    h.scr < 0 || h.scr > h.histlen || h.top < 0 || h.bot >= h.row || h.bot < h.top ||
 	    h.c.x < 0 || h.c.x >= h.col || h.c.y < 0 || h.c.y >= h.row ||
 	    h.charset < 0 || h.charset > 3 || h.icharset < 0 || h.icharset > 3 ||
@@ -122,7 +121,7 @@ te_import_compat(EngineSnapshotIO *fd, WorminalTransportState *transport)
 	    !transfer(fd, s->strescseq.buf, h.str_len, 0)) goto fail;
 	s->strescseq.buf[h.str_len] = '\0';
 	if (h.histlen) {
-		t->hist = calloc(theme_history_size, sizeof(Line));
+		t->hist = calloc(te_history_size, sizeof(Line));
 		if (!t->hist) goto fail;
 	}
 	for (int i = 0; i < t->row * 2 + h.histlen; i++) {
@@ -134,7 +133,7 @@ te_import_compat(EngineSnapshotIO *fd, WorminalTransportState *transport)
 		/* The URI table is not part of the snapshot: ids (and padding from older owners) are meaningless here. */
 		for (int x = 0; x < t->col; x++) row[x].link = 0;
 	}
-	t->histlen = h.histlen; t->histi = theme_history_size ? h.histlen % theme_history_size : 0;
+	t->histlen = h.histlen; t->histi = te_history_size ? h.histlen % te_history_size : 0;
 	t->scr = h.scr;
 	for (int i = 0; i < t->row; i++) t->dirty[i] = 1;
 	return s;

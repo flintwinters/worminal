@@ -12,7 +12,6 @@ BASELINE = "10381d74d741a98ef4816769527bbb5df12c2ede"
 
 
 def check():
-    build.generate_theme()
     builder = build.Builder()
     builder.target("build/libworminal_engine.a")
     symbols = subprocess.check_output(["nm", "-u", "build/libworminal_engine.a"],

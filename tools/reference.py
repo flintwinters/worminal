@@ -92,9 +92,9 @@ def target(name):
         raise ValueError('Historical fixtures cannot replace current application binaries')
     historical = module()
     from tools import build
-    build.generate_theme()
+    from tools import theme
     (historical.ROOT / 'build').mkdir(exist_ok=True)
-    shutil.copy2(ROOT / 'build/theme.h', historical.ROOT / 'build/theme.h')
+    (historical.ROOT / 'build/theme.h').write_text(theme.legacy_header(theme.settings()))
     builder = historical.Builder()
     output = name
     if name == 'build/worminal-gtk-c':
