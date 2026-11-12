@@ -121,6 +121,9 @@ pub fn decode(packet: Packet) -> io::Result<Option<Command>> {
         },
         WIRE_BROWSER_NAVIGATE => CommandKind::Navigate(string(&packet.body)?),
         WIRE_BROWSER_REPLACE => CommandKind::ReplaceBrowser(string(&packet.body)?),
+        WIRE_MOVE => CommandKind::Move {
+            position: integer(&packet.body)?,
+        },
         WIRE_ATTACH => CommandKind::Subscribe,
         WIRE_RELEASE => CommandKind::Release,
         WIRE_CAPABILITIES => CommandKind::Capabilities(integer(&packet.body)?),
@@ -238,6 +241,10 @@ pub fn encode(command: &Command) -> io::Result<Packet> {
         CommandKind::ReplaceBrowser(url) => {
             body.put_string(url)?;
             WIRE_BROWSER_REPLACE
+        }
+        CommandKind::Move { position } => {
+            body.put_u32(*position)?;
+            WIRE_MOVE
         }
         CommandKind::Subscribe => WIRE_ATTACH,
         CommandKind::Release => WIRE_RELEASE,

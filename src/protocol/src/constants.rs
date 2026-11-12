@@ -98,3 +98,7 @@ pub const WORP_OPEN_DETACHED: u32 = 9;
 /// OSC 99 metadata and payload, delivered only to capable controlling views.
 pub const WIRE_NOTIFICATION: u32 = 35;
 pub const WIRE_FEATURE_NOTIFICATIONS: u32 = 1 << 6;
+
+/// Move the packet's tab to a zero-based position in the daemon's tab order (one u32; clamped to the last
+/// position). Older daemons ignore it, and the catalog they keep sending restores the old order.
+pub const WIRE_MOVE: u32 = 36;

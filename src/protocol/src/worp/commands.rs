@@ -109,6 +109,10 @@ pub enum CommandKind {
         generation: u32,
         operation: SelectionOperation,
     },
+    /// Reorder: the tab takes this zero-based position among the daemon's tabs.
+    Move {
+        position: u32,
+    },
     Release,
     Subscribe,
     Capabilities(u32),

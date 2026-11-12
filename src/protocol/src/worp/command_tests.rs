@@ -64,6 +64,7 @@ fn variants() -> Vec<CommandKind> {
             generation: 42,
             operation: SelectionOperation::Cancel,
         },
+        CommandKind::Move { position: 3 },
         CommandKind::Release,
         CommandKind::Subscribe,
         CommandKind::Capabilities(7),

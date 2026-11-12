@@ -242,6 +242,10 @@ impl Service {
         let Some(index) = self.index(command.tab).filter(|_| ready) else {
             return Ok(());
         };
+        if let CommandKind::Move { position } = command.kind {
+            self.reorder(index, position as usize);
+            return self.publish(now);
+        }
         if self.tabs[index].url.is_some() {
             if matches!(command.kind, CommandKind::Close { .. }) {
                 self.close(index);

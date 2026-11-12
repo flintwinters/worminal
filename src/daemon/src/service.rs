@@ -188,6 +188,12 @@ impl Service {
         self.tabs.remove(index);
     }
 
+    /// The tab takes `position` (clamped), shifting those between. Shown/controller state is per tab, not per slot.
+    pub fn reorder(&mut self, index: usize, position: usize) {
+        let tab = self.tabs.remove(index);
+        self.tabs.insert(position.min(self.tabs.len()), tab);
+    }
+
     pub fn send_frame(&mut self, index: usize, full: bool, now: i64) -> io::Result<bool> {
         let tab = &mut self.tabs[index];
         let Some(terminal) = &mut tab.terminal else {

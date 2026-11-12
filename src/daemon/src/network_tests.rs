@@ -292,6 +292,38 @@ fn hidden_tabs_defer_frames_and_reveal_with_a_delta() {
     );
 }
 
+#[test]
+fn move_command_reorders_tabs_and_publishes_the_new_order() {
+    let mut fixture = Fixture::sized(9, 80, 24, 3);
+    let ids =
+        |fixture: &Fixture| -> Vec<u32> { fixture.service.tabs.iter().map(|t| t.id).collect() };
+    let send = |fixture: &mut Fixture, tab: u32, position: u32| {
+        fixture
+            .service
+            .message(
+                1,
+                Packet {
+                    kind: WIRE_MOVE,
+                    tab,
+                    body: position.to_be_bytes().to_vec(),
+                },
+            )
+            .unwrap();
+    };
+    send(&mut fixture, 1, 2);
+    assert_eq!(ids(&fixture), [2, 3, 1]);
+    send(&mut fixture, 1, 0);
+    assert_eq!(ids(&fixture), [1, 2, 3]);
+    send(&mut fixture, 2, 99);
+    assert_eq!(ids(&fixture), [1, 3, 2], "positions clamp to the end");
+    send(&mut fixture, 77, 0);
+    assert_eq!(ids(&fixture), [1, 3, 2], "unknown tabs are ignored");
+    assert!(
+        fixture.service.clients[&1].output.len() > 0,
+        "the new order reaches ready views as a catalog"
+    );
+}
+
 #[derive(Default)]
 struct Receiver {
     stream: Option<Box<dyn Write>>,

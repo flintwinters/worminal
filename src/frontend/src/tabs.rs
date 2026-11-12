@@ -19,6 +19,16 @@ pub struct Tab {
     /// Shown by a daemon on another host.
     pub remote: bool,
 }
+/// A primary-button press on a tab. It becomes a reorder once the pointer travels past `DRAG_SLOP`.
+struct Drag {
+    id: u32,
+    x: f64,
+    y: f64,
+    active: bool,
+    /// The tab whose slot the dragged tab takes if released now.
+    over: Option<u32>,
+}
+const DRAG_SLOP: f64 = 6.0;
 struct State {
     widget: gtk::DrawingArea,
     fonts: Rc<RefCell<Fonts>>,
@@ -32,6 +42,7 @@ struct State {
     /// Blink phase. The timer runs only while some tab needs attention.
     lit: Cell<bool>,
     blink: RefCell<Option<glib::SourceId>>,
+    drag: RefCell<Option<Drag>>,
 }
 #[derive(Clone)]
 pub struct Tabs(Rc<State>);
@@ -77,6 +88,14 @@ impl State {
             .collect();
         paint::source(cr, &palette.color(BG));
         cr.paint()?;
+        // The marker sits on the side the dragged tab approaches from.
+        let drop = self.drag.borrow().as_ref().and_then(|drag| {
+            let from = entries.iter().position(|entry| entry.id == drag.id)?;
+            let to = entries
+                .iter()
+                .position(|entry| Some(entry.id) == drag.over)?;
+            drag.active.then_some((to, to > from))
+        });
         for (i, (entry, (row, x))) in entries.iter().zip(place(&widths, right)).enumerate() {
             let top = 2 + row * metrics.height;
             let width = widths[i];
@@ -127,6 +146,17 @@ impl State {
                 1.0,
             );
             cr.fill()?;
+            if let Some((_, after)) = drop.filter(|(to, _)| *to == i) {
+                paint::source(cr, &palette.color(3));
+                let edge = if after { x + width - 2 } else { x };
+                cr.rectangle(
+                    f64::from(edge),
+                    f64::from(top),
+                    2.0,
+                    f64::from(metrics.height),
+                );
+                cr.fill()?;
+            }
             cr.restore()?;
         }
         Ok(())
@@ -153,6 +183,21 @@ impl State {
                     && x < f64::from((left + **width).min(right))
             })
             .map(|((entry, _), _)| entry.id)
+    }
+    fn drag_to(&self, x: f64, y: f64) {
+        let over = self.hit(x, y);
+        let mut drag = self.drag.borrow_mut();
+        let Some(drag) = drag.as_mut() else { return };
+        if !drag.active && (x - drag.x).hypot(y - drag.y) < DRAG_SLOP {
+            return;
+        }
+        // Keep the last target while the pointer crosses gaps.
+        let over = over.filter(|id| *id != drag.id).or(drag.over);
+        if !drag.active || over != drag.over {
+            drag.active = true;
+            drag.over = over;
+            self.widget.queue_draw();
+        }
     }
     /// Height follows the row count, which depends on the allocated width.
     fn fit(&self) {
@@ -188,8 +233,21 @@ impl Tabs {
             attention: RefCell::new(Vec::new()),
             lit: Cell::new(false),
             blink: RefCell::new(None),
+            drag: RefCell::new(None),
         });
-        state.widget.add_events(gdk::EventMask::BUTTON_PRESS_MASK);
+        state.widget.add_events(
+            gdk::EventMask::BUTTON_PRESS_MASK
+                | gdk::EventMask::BUTTON_RELEASE_MASK
+                | gdk::EventMask::BUTTON1_MOTION_MASK,
+        );
+        state.widget.connect_motion_notify_event(
+            glib::clone!(@weak state => @default-return glib::Propagation::Proceed,
+                move |_, event| {
+                let (x, y) = event.position();
+                state.drag_to(x, y);
+                glib::Propagation::Proceed
+            }),
+        );
         state
             .widget
             .connect_size_allocate(glib::clone!(@weak state => move |_, _| state.fit()));
@@ -213,9 +271,27 @@ impl Tabs {
             => @default-return glib::Propagation::Proceed, move |_, event| {
                 let (x, y) = event.position();
                 match event.button() {
-                    1 => if let Some(id) = state.hit(x, y) { select(id); return glib::Propagation::Stop; },
+                    1 => if let Some(id) = state.hit(x, y) {
+                        *state.drag.borrow_mut() = Some(Drag { id, x, y, active: false, over: None });
+                        select(id);
+                        return glib::Propagation::Stop;
+                    },
                     2 => if let Some(id) = state.hit(x, y) { close(id); return glib::Propagation::Stop; },
                     _ => {}
+                }
+                glib::Propagation::Proceed
+            }));
+    }
+    /// Dropping a dragged tab on another asks to move it into that tab's slot: `moved(dragged, target)`.
+    pub fn connect_moved(&self, moved: impl Fn(u32, u32) + 'static) {
+        let state = self.0.clone();
+        self.0.widget.connect_button_release_event(glib::clone!(@weak state
+            => @default-return glib::Propagation::Proceed, move |_, event| {
+                if event.button() != 1 { return glib::Propagation::Proceed; }
+                let Some(drag) = state.drag.borrow_mut().take() else { return glib::Propagation::Proceed };
+                if drag.active {
+                    state.widget.queue_draw();
+                    if let Some(target) = drag.over { moved(drag.id, target); }
                 }
                 glib::Propagation::Proceed
             }));
