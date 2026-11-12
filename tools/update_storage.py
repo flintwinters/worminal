@@ -7,6 +7,17 @@ import subprocess
 import tempfile
 
 
+def release_stale(cwd):
+    """Unmount verification tmpfs left by an aborted update; callers must hold the update lock."""
+    checks = (Path(cwd) / "build/checks").resolve()
+    for line in Path("/proc/mounts").read_text().splitlines():
+        target = Path(line.split()[1].replace("\\040", " "))
+        if target.parent == checks and target.name.startswith("update-posix-") and not target.name.endswith("-saved"):
+            print(f"Update: releasing storage left by an aborted update: {target}", flush=True)
+            subprocess.run(["sudo", "-n", "umount", str(target)], check=True)
+            target.rmdir()
+
+
 @contextmanager
 def verification_environment(cwd):
     checks = Path(cwd) / "build/checks"

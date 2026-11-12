@@ -129,7 +129,9 @@ regular-user build with `sudo -n python3 manage.py install --prefix /usr/local -
 into ~/.local. `check-install` validates a staged installation; `check-install --installed` checks installed files,
 modes, SSH/browser operation and actual module paths on private displays. Running owners retain mapped code; v2 owners hand off by themselves, v1 daemons are never touched.
 `manage.py running` classifies live processes against the installed files (`update` prints it); run it before claiming a change is active.
-Runtimes prepared by setup live under `build/dependencies` only; a stale `file-explorer/dist` fails preview checks until `explorer-build`. Inventory commands record
+`manage.py update` is the one-command flow and needs no manual preparation: it takes a per-checkout lock, releases tmpfs left by aborted runs,
+and `setup-check-runtime` builds a missing/stale explorer (`npm ci` as needed) and prepares audio and Weston under `build/dependencies`.
+If it still stops, fix the cause in that flow rather than around it. Inventory commands record
 process IDs, tabs, windows and file hashes without copying executables. Keep destinations in environment configuration
 and preserve the contributor's configured Git identity. Privacy hooks check staged content and commit messages;
 public commit attribution is allowed.

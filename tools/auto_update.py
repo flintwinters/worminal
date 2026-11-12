@@ -1,4 +1,5 @@
 """Unattended daily update: fetch a branch into a private clone, gate on the full suite, then install."""
+from contextlib import contextmanager
 import fcntl
 import os
 from pathlib import Path
@@ -36,17 +37,32 @@ def manage(*args, cwd=CLONE, sudo=False):
                           cwd=cwd).returncode
 
 
+@contextmanager
+def exclusive(cwd):
+    """One checked update per checkout: concurrent runs share tmpfs mounts, the build tree and the install."""
+    (Path(cwd) / "build").mkdir(exist_ok=True)
+    with open(Path(cwd) / "build/.update.lock", "w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise SystemExit("Another update or check of this checkout is running; wait for it to finish.")
+        yield
+
+
 def publish(cwd=ROOT, prefix=PREFIX):
-    """Build and validate as the user, publish, and verify the installed result."""
+    """Prepare, build and validate as the user, publish, verify the installed result, and report live processes."""
+    from tools.update_storage import release_stale
     steps = (("build",), ("setup-check-runtime",), ("check",),
              ("install", "--prefix", prefix, "--skip-build"))
     if prefix == PREFIX:
         steps += (("check-install", "--installed", "--skip-build"),)
-    for args in steps:
-        print(f"Update: {' '.join(args)}", flush=True)
-        if code := manage(*args, cwd=cwd, sudo=args[0] == "install"):
-            print(f"Update stopped at {args[0]}; see the preceding diagnostics.", flush=True)
-            return code
+    with exclusive(cwd):
+        release_stale(cwd)
+        for args in steps:
+            print(f"Update: {' '.join(args)}", flush=True)
+            if code := manage(*args, cwd=cwd, sudo=args[0] == "install"):
+                print(f"Update stopped at {args[0]}; see the preceding diagnostics.", flush=True)
+                return code
     if prefix == PREFIX:
         from tools import running
         print("Update: live processes (v2 owners hand off by themselves; v1 daemons are never touched)", flush=True)
