@@ -55,12 +55,13 @@ pub fn send_descriptors(
         message.msg_iov = &mut iovec;
         message.msg_iovlen = 1;
         message.msg_control = control.as_mut_ptr().cast();
-        message.msg_controllen = capacity;
+        message.msg_controllen = capacity as _;
         let header = libc::CMSG_FIRSTHDR(&message);
         (*header).cmsg_level = libc::SOL_SOCKET;
         (*header).cmsg_type = libc::SCM_RIGHTS;
+        // The msghdr/cmsghdr length fields are usize on glibc but u32 on musl.
         (*header).cmsg_len =
-            libc::CMSG_LEN((descriptors.len() * mem::size_of::<libc::c_int>()) as u32) as usize;
+            libc::CMSG_LEN((descriptors.len() * mem::size_of::<libc::c_int>()) as u32) as _;
         for (index, descriptor) in descriptors.iter().enumerate() {
             ptr::write_unaligned(
                 libc::CMSG_DATA(header).cast::<libc::c_int>().add(index),
@@ -104,7 +105,7 @@ pub fn receive_descriptors(
         message.msg_iov = &mut iovec;
         message.msg_iovlen = 1;
         message.msg_control = control.as_mut_ptr().cast();
-        message.msg_controllen = capacity;
+        message.msg_controllen = capacity as _;
         let count = loop {
             let count = libc::recvmsg(socket.as_raw_fd(), &mut message, libc::MSG_CMSG_CLOEXEC);
             if count >= 0 {
@@ -117,14 +118,14 @@ pub fn receive_descriptors(
         };
         let mut header = libc::CMSG_FIRSTHDR(&message);
         while !header.is_null() {
-            let length = (*header).cmsg_len;
+            let length = (*header).cmsg_len as usize;
             let prefix = libc::CMSG_LEN(0) as usize;
             // Kernel-generated headers are aligned and bounded by msg_controllen. Check lengths
             // before reading their payload, and own every installed fd even on truncated messages.
             let offset = header
                 .cast::<u8>()
                 .offset_from(control.as_ptr().cast::<u8>()) as usize;
-            if length < prefix || length > message.msg_controllen.saturating_sub(offset) {
+            if length < prefix || length > (message.msg_controllen as usize).saturating_sub(offset) {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "invalid descriptor control length",

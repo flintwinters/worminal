@@ -4,7 +4,6 @@
 #include "engine_parser.h"
 #include "engine_codec.h"
 #include WORMINAL_THEME_HEADER
-_Static_assert(BUFSIZ == WORMINAL_PENDING_BYTES, "legacy snapshot pending-buffer ABI changed");
 
 typedef struct {
 	uint8_t *data;
@@ -97,7 +96,7 @@ te_import_compat(EngineSnapshotIO *fd, WorminalTransportState *transport)
 	    h.scr < 0 || h.scr > h.histlen || h.top < 0 || h.bot >= h.row || h.bot < h.top ||
 	    h.c.x < 0 || h.c.x >= h.col || h.c.y < 0 || h.c.y >= h.row ||
 	    h.charset < 0 || h.charset > 3 || h.icharset < 0 || h.icharset > 3 ||
-	    h.ttybuflen < 0 || h.ttybuflen > BUFSIZ || h.str_len > 1024 * 1024 ||
+	    h.ttybuflen < 0 || h.ttybuflen > WORMINAL_PENDING_BYTES || h.str_len > 1024 * 1024 ||
 	    (h.output_kind < -1 || h.output_kind > 1) || h.csi.len > ESC_BUF_SIZ || h.csi.narg < 0 || h.csi.narg > ESC_ARG_SIZ)
 		return NULL;
 	/* A pending CSI writes one more byte before testing its limit. Complete CSI buffers may be
