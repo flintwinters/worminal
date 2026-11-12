@@ -125,7 +125,8 @@ pub fn receive_descriptors(
             let offset = header
                 .cast::<u8>()
                 .offset_from(control.as_ptr().cast::<u8>()) as usize;
-            if length < prefix || length > (message.msg_controllen as usize).saturating_sub(offset) {
+            if length < prefix || length > (message.msg_controllen as usize).saturating_sub(offset)
+            {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "invalid descriptor control length",
