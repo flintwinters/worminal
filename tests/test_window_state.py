@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+import uuid
 from unittest.mock import patch
 
 from x11 import close_window, isolated_display
@@ -28,15 +29,19 @@ OBJECT = "/org/worminal/Windows"
 
 @contextmanager
 def private_bus(env):
-    with tempfile.TemporaryDirectory(prefix="session-bus-", dir=CHECKS) as directory:
-        daemon = subprocess.Popen(["dbus-daemon", "--session", "--nofork", "--print-address=1",
-                                   f"--address=unix:path={directory}/bus"],
-                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        try:
-            yield {**env, "DBUS_SESSION_BUS_ADDRESS": daemon.stdout.readline().strip()}
-        finally:
-            daemon.terminate()
-            daemon.communicate(timeout=5)
+    # Abstract sockets have no path: nested update storage under build/checks exceeds the 108-byte
+    # sun_path limit, which left dbus-daemon silent and the address empty.
+    address = f"unix:abstract=worminal-bus-{uuid.uuid4().hex}"
+    daemon = subprocess.Popen(["dbus-daemon", "--session", "--nofork", "--print-address=1", f"--address={address}"],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        printed = daemon.stdout.readline().strip()
+        if not printed:
+            raise RuntimeError(f"private session bus did not start: {daemon.stderr.read()}")
+        yield {**env, "DBUS_SESSION_BUS_ADDRESS": printed}
+    finally:
+        daemon.terminate()
+        daemon.communicate(timeout=5)
 
 
 @unittest.skipUnless(all(shutil.which(tool) for tool in ("busctl", "dbus-daemon", "Xvfb", "xdotool")),
