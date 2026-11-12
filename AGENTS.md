@@ -114,8 +114,8 @@ Normal builds do not use this code. `manage.py clean` removes links left by inte
 Keep behavior checks when changing tests. Some tests check fixes by removing them and requiring a failure.
 Keep user profiles and diagnostic records when cleaning up code.
 
-`manage.py setup-preview-audio` prepares private browser-test audio without changing desktop packages; update
-workflows prepare it automatically. Its runtime stays under `build/dependencies` across diagnostic cleanup.
+`manage.py setup-check-runtime` prepares private browser audio and Weston without changing desktop packages;
+update workflows run it automatically. New runtimes stay under `build/dependencies` across diagnostic cleanup.
 `manage.py update` builds and checks the current checkout, installs to /usr/local, then verifies the installed
 artifacts on private displays. Installation and any necessary private tmpfs mounts use sudo; checks run as the user.
 `manage.py auto-update --timer install` schedules a daily 03:00 systemd user timer: it builds and checks the tip of

@@ -40,7 +40,7 @@ class UpdateTests(unittest.TestCase):
 
     def test_installs_each_new_tip_once_in_order_with_sudo_only_for_install(self):
         self.assertEqual(self.update(), 0)
-        self.assertEqual(self.steps, [("build", False), ("setup-preview-audio", False),
+        self.assertEqual(self.steps, [("build", False), ("setup-check-runtime", False),
                                      ("check", False), ("install", True)])
         self.update()
         self.assertEqual(len(self.steps), 4)
@@ -51,7 +51,7 @@ class UpdateTests(unittest.TestCase):
 
     def test_failing_check_never_installs_and_is_retried_next_night(self):
         self.assertEqual(self.update(failing="check"), 1)
-        self.assertEqual(self.steps, [("build", False), ("setup-preview-audio", False), ("check", False)])
+        self.assertEqual(self.steps, [("build", False), ("setup-check-runtime", False), ("check", False)])
         self.assertFalse(self.stamp.exists())
         self.update()
         self.assertIn(("install", True), self.steps)
@@ -63,7 +63,7 @@ class UpdateTests(unittest.TestCase):
         with patch.object(auto_update, "manage", manage):
             result = auto_update.update(str(self.origin), "main", self.clone, self.stamp)
         self.assertEqual(result, 1)
-        self.assertEqual(self.steps, ["build", "setup-preview-audio", "check", "install", "check-install"])
+        self.assertEqual(self.steps, ["build", "setup-check-runtime", "check", "install", "check-install"])
         self.assertFalse(self.stamp.exists())
 
 
@@ -80,7 +80,7 @@ class PublishTests(unittest.TestCase):
         with patch.object(auto_update, "manage", return_value=0) as manage:
             self.assertEqual(auto_update.publish(), 0)
         self.assertEqual([call.args[0] for call in manage.call_args_list],
-                         ["build", "setup-preview-audio", "check", "install", "check-install"])
+                         ["build", "setup-check-runtime", "check", "install", "check-install"])
         self.assertEqual([call.kwargs["sudo"] for call in manage.call_args_list],
                          [False, False, False, True, False])
 

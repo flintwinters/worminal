@@ -439,7 +439,7 @@ def check_preview():
 
 @app.command("setup-preview-wayland")
 def setup_preview_wayland():
-    """Download/extract an optional Debian Weston runtime under build/checks; no system installation."""
+    """Download/extract a project-local Debian Weston runtime; no system installation."""
     from tools.weston import setup
     setup()
 
@@ -449,6 +449,20 @@ def setup_preview_audio():
     """Prepare private browser-test audio without installing system packages; headless hosts skip it."""
     from tools.audio import setup
     setup()
+
+
+@app.command("setup-check-runtime")
+def setup_check_runtime():
+    """Prepare project-local audio and Weston dependencies needed by the full private-display suite."""
+    if native_build.headless():
+        return
+    from tools.audio import setup as setup_audio
+    from tools import weston
+    setup_audio()
+    try:
+        weston.command(os.environ.copy())
+    except ValueError:
+        weston.setup()
 
 
 @app.command("prove-preview-regressions")
