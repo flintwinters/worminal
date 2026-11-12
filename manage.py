@@ -801,10 +801,10 @@ def auto_update(timer: str = typer.Option(None, click_type=click.Choice(["instal
 
 
 @app.command("update")
-def update_checkout():
+def update_checkout(prefix: str = typer.Option("/usr/local", help="Installation prefix.")):
     """Build, run the full suite, install this checkout to /usr/local, and verify installed files."""
     from tools.auto_update import publish
-    raise typer.Exit(publish())
+    raise typer.Exit(publish(prefix=prefix))
 
 
 @app.command()

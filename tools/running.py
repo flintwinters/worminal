@@ -32,9 +32,11 @@ def processes(prefix="/usr/local"):
     installed = {name: Path(prefix, "bin", name) for name in EXECUTABLES}
     sockets, records = _sockets(), []
     for process in Path("/proc").iterdir():
-        if not process.name.isdecimal() or process.stat().st_uid != os.getuid():
+        if not process.name.isdecimal():
             continue
         try:
+            if process.stat().st_uid != os.getuid():
+                continue
             link = os.readlink(process / "exe")
             path = Path(link.removesuffix(" (deleted)"))
             if path != installed.get(path.name):
