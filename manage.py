@@ -444,6 +444,13 @@ def setup_preview_wayland():
     setup()
 
 
+@app.command("setup-preview-audio")
+def setup_preview_audio():
+    """Prepare private browser-test audio without installing system packages; headless hosts skip it."""
+    from tools.audio import setup
+    setup()
+
+
 @app.command("prove-preview-regressions")
 def prove_preview_regressions(match: str = typer.Option(None, help="Only run matching regression proofs.")):
     """Rebuild with fixes removed and check that the tests fail."""

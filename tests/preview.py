@@ -88,16 +88,19 @@ def profile(env):
 @contextmanager
 def audio(env):
     """Decode real media into a private silent sink, independent of desktop audio devices."""
-    if not shutil.which("pulseaudio"):
-        raise RuntimeError("Install pulseaudio for private browser media checks.")
+    from tools.audio import command
+    environment = dict(env)
+    executable = command(environment)
     runtime = Path(env["XDG_RUNTIME_DIR"]) / "pulse"
     runtime.mkdir(mode=0o700)
     socket = runtime / "native"
-    environment = {**env, "PULSE_RUNTIME_PATH": str(runtime), "PULSE_SERVER": "unix:" + str(socket),
-                   "PULSE_SINK": "worminal-tests"}
+    environment = {**environment, "PULSE_RUNTIME_PATH": str(runtime), "PULSE_SERVER": "unix:" + str(socket),
+                   "PULSE_SINK": "worminal-tests",
+                   # The private audio server must never claim the desktop's D-Bus name.
+                   "DBUS_SESSION_BUS_ADDRESS": "unix:path=" + str(runtime / "no-session-bus")}
     log_path = runtime / "server.log"
     with log_path.open("wb") as log:
-        process = subprocess.Popen(["pulseaudio", "-n", "--daemonize=no", "--use-pid-file=no",
+        process = subprocess.Popen([*executable, "-n", "--daemonize=no", "--use-pid-file=no",
                                     "--exit-idle-time=-1", "--log-target=stderr",
                                     "--load=module-null-sink sink_name=worminal-tests",
                                     "--load=module-native-protocol-unix auth-anonymous=1"],

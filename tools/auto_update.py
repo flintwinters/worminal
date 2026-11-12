@@ -33,7 +33,7 @@ def manage(*args, cwd=CLONE, sudo=False):
 
 def publish(cwd=ROOT, prefix=PREFIX):
     """Build and validate as the user; elevate only publication and verify the result."""
-    steps = (("build",), ("check",),
+    steps = (("build",), ("setup-preview-audio",), ("check",),
              ("install", "--prefix", prefix, "--skip-build"))
     if prefix == PREFIX:
         steps += (("check-install", "--installed", "--skip-build"),)
