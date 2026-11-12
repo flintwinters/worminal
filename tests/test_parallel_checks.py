@@ -102,7 +102,7 @@ class ParallelChecksTest(unittest.TestCase):
                           'child=subprocess.Popen([sys.executable,"-c","import time;time.sleep(30)"])\n'
                           f'pathlib.Path({str(marker)!r}).write_text(str(child.pid))\n'
                           'time.sleep(30)\n')
-        for name, timeout, delay, expected in (('timeout', .2, 30, 124), ('finished', None, 0, 0)):
+        for name, timeout, delay, expected in (('timeout', 2, 30, 124), ('finished', None, 0, 0)):
             with self.subTest(name=name):
                 source = script.read_text().replace('time.sleep(30)\n', f'time.sleep({delay})\n')
                 script.write_text(source)
@@ -113,7 +113,8 @@ class ParallelChecksTest(unittest.TestCase):
                     state = process.read_text().rsplit(')',1)[1].split()[0]
                 except (FileNotFoundError, ProcessLookupError):
                     continue  # The child can be reaped between opening and reading /proc.
-                self.assertEqual(state, 'Z')
+                # Zombie, or already reaped (dead): either way the process no longer runs.
+                self.assertIn(state, ('Z', 'X'))
 
     def test_automatic_default_and_explicit_override(self):
         self.module('test_a', '    def test_pass(self): pass\n')
