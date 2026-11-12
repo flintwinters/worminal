@@ -61,5 +61,6 @@ static char base64dec_getc(const char **);
 #include "engine_selection.inc"
 #include "engine_parse.inc"
 #include "engine_links.inc"
+#include "engine_notify.inc"
 #include "engine_strings.inc"
 #include "engine_reflow.inc"

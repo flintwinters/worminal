@@ -42,6 +42,9 @@ te_strhandle(TermEngine *session)
 		case 8: /* hyperlink: OSC 8 ; params ; URI */
 			te_oschyperlink(session);
 			return;
+		case 99: /* desktop notification: OSC 99 ; metadata ; payload */
+			te_oscnotify(session);
+			return;
 		case 52: /* manipulate selection data */
 			if (narg > 2) {
 				dec = base64dec(strescseq.args[2]);

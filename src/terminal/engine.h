@@ -109,7 +109,14 @@ enum worminal_event_type {
 	WORMINAL_BELL,
 	WORMINAL_PRINT,
 	WORMINAL_DIAGNOSTIC,
-	WORMINAL_WRITE
+	WORMINAL_WRITE,
+	/* argument: title bytes; flags: urgency (0-2) | occasion << 8; data: title then body, UTF-8 unchecked. */
+	WORMINAL_NOTIFY
+};
+enum worminal_notify_occasion {
+	WORMINAL_NOTIFY_ALWAYS = 0,
+	WORMINAL_NOTIFY_UNFOCUSED = 1,
+	WORMINAL_NOTIFY_INVISIBLE = 2
 };
 enum worminal_control { WORMINAL_TOGGLE_PRINTER = 0, WORMINAL_PRINT_SCREEN = 1 };
 

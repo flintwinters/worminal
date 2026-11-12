@@ -50,6 +50,7 @@ worminal_engine_destroy(WorminalEngine *engine)
 	te_freeevents(engine);
 	free(engine->strescseq.buf);
 	te_links_free(engine);
+	te_notify_free(engine);
 	free(engine);
 }
 

@@ -323,6 +323,67 @@ hyperlinks(void)
 	worminal_engine_destroy(engine);
 }
 
+/* Drains the next event, which must have the given type; returns its payload length. */
+static size_t
+expect_event(WorminalEngine *engine, uint32_t type, WorminalEvent *event, uint8_t *data, size_t capacity)
+{
+	assert(worminal_engine_event(engine, event, data, capacity) == WORMINAL_OK);
+	assert(event->type == type);
+	return event->bytes;
+}
+
+static void
+notifications(void)
+{
+	WorminalEngine *engine;
+	WorminalEvent event;
+	uint8_t data[4096];
+	assert(worminal_engine_create(12, 3, &engine) == WORMINAL_OK);
+	/* The simple form is a complete title; semicolons after the metadata belong to the payload. */
+	feed(engine, "\033]99;;a;b\033\\", 1);
+	assert(expect_event(engine, WORMINAL_NOTIFY, &event, data, sizeof(data)) == 3);
+	assert(event.argument == 3 && event.flags == (1 | WORMINAL_NOTIFY_ALWAYS << 8) && !memcmp(data, "a;b", 3));
+	/* Chunks sharing an identifier assemble title and body; metadata from any chunk applies. */
+	feed(engine, "\033]99;i=n1:d=0:p=title;Claude \007\033]99;i=n1:d=0;Code\007", 1);
+	feed(engine, "\033]99;i=n1:d=0:p=body:e=1:u=2;bmVlZHMgeW91\033\\", 1);
+	assert(worminal_engine_event(engine, &event, data, sizeof(data)) == WORMINAL_EMPTY);
+	feed(engine, "\033]99;i=n1:o=unfocused:a=focus;\033\\", 1);
+	assert(expect_event(engine, WORMINAL_NOTIFY, &event, data, sizeof(data)) == 20);
+	assert(event.argument == 11 && event.flags == (2 | WORMINAL_NOTIFY_UNFOCUSED << 8));
+	assert(!memcmp(data, "Claude Codeneeds you", 20));
+	/* A different identifier abandons an unfinished notification instead of merging with it. */
+	feed(engine, "\033]99;i=old:d=0;stale\033\\\033]99;i=new:p=body;fresh\033\\", 1);
+	assert(expect_event(engine, WORMINAL_NOTIFY, &event, data, sizeof(data)) == 5);
+	assert(event.argument == 0 && !memcmp(data, "fresh", 5));
+	/* Empty notifications, close requests and unknown payload types display nothing. */
+	feed(engine, "\033]99;i=x;\033\\\033]99;i=x:p=close;\033\\\033]99;i=x:p=alive;\033\\", 1);
+	/* Icons and buttons carry no text but still finish their notification. */
+	feed(engine, "\033]99;i=x:d=0;t\033\\\033]99;i=x:p=icon;ignored\033\\", 1);
+	assert(expect_event(engine, WORMINAL_NOTIFY, &event, data, sizeof(data)) == 1 && data[0] == 't');
+	/* Identifiers are echoed to the PTY: bytes outside the protocol alphabet discard the sequence. */
+	feed(engine, "\033]99;i=a\nb:p=?;\033\\\033]99;i=bad id;shown\033\\", 1);
+	assert(worminal_engine_event(engine, &event, data, sizeof(data)) == WORMINAL_EMPTY);
+	feed(engine, "\033]99;i=q.1:p=?;\033\\", 1);
+	const char *reply = "\033]99;i=q.1:p=?;a=focus:o=always,unfocused,invisible:p=title,body,?:u=0,1,2\033\\";
+	assert(expect_event(engine, WORMINAL_REPLY, &event, data, sizeof(data)) == strlen(reply));
+	assert(!memcmp(data, reply, strlen(reply)));
+	/* Oversized text is cut at a character boundary and never grows without bound. */
+	char text[5200] = "\033]99;i=big:d=0;";
+	size_t used = strlen(text);
+	while (used < 5000) { memcpy(text + used, "\xc3\xa9", 2); used += 2; }
+	memcpy(text + used, "\033\\", 3);
+	feed(engine, text, 1);
+	feed(engine, "\033]99;i=big:d=0:p=body;x\033\\", 1);
+	memcpy(text + 11, "d=1", 3); /* the same title text again, now as the final chunk */
+	feed(engine, text, 1);
+	assert(expect_event(engine, WORMINAL_NOTIFY, &event, data, sizeof(data)) == 256 + 1);
+	assert(event.argument == 256 && data[254] == 0xc3 && data[255] == 0xa9 && data[256] == 'x');
+	/* An unfinished notification is released with its engine (checked by LeakSanitizer). */
+	feed(engine, "\033]99;i=left:d=0;pending\033\\", 1);
+	assert(worminal_engine_event(engine, &event, data, sizeof(data)) == WORMINAL_EMPTY);
+	worminal_engine_destroy(engine);
+}
+
 int
 main(void)
 {
@@ -334,5 +395,6 @@ main(void)
 	clear_scrollback();
 	borrowed_selection();
 	hyperlinks();
+	notifications();
 	return 0;
 }
