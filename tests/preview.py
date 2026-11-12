@@ -397,6 +397,12 @@ def main():
         env["WORMINAL_TEST_EXECUTABLE"] = str(runtime_binary("worminal"))
         local_app = ROOT / "file-explorer/dist/index.html"
         if local_app.is_file():
+            newest = max((path.stat().st_mtime for tree in ("apps", "packages") for path in
+                          (ROOT / "file-explorer" / tree).rglob("*") if path.is_file() and "node_modules" not in path.parts),
+                         default=0)
+            # A dist from before a source change fails the explorer proof with an unrelated timeout.
+            if local_app.stat().st_mtime < newest:
+                raise RuntimeError("file-explorer/dist is older than its sources; run manage.py explorer-build")
             env["WORMINAL_PREVIEW_LOCAL_APP"] = local_app.as_uri()
         env["WORMINAL_PREVIEW_FIXTURE"] = url
         env["WORMINAL_PREVIEW_TLS_FIXTURE"] = tls_url

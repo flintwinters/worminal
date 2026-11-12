@@ -127,8 +127,9 @@ skips unchanged tips. It shares the checkout update pipeline and needs passwordl
 The active installation is `/usr/local/bin/worminal`, with modules in `/usr/local/lib/worminal`. Install a tested
 regular-user build with `sudo -n python3 manage.py install --prefix /usr/local --skip-build`; do not install fixes
 into ~/.local. `check-install` validates a staged installation; `check-install --installed` checks installed files,
-modes, SSH/browser operation and actual module paths on private displays. Running owners retain mapped code;
-check the running executable and loaded module files before claiming a change is active. Inventory commands record
+modes, SSH/browser operation and actual module paths on private displays. Running owners retain mapped code; v2 owners hand off by themselves, v1 daemons are never touched.
+`manage.py running` classifies live processes against the installed files (`update` prints it); run it before claiming a change is active.
+Runtimes prepared by setup live under `build/dependencies` only; a stale `file-explorer/dist` fails preview checks until `explorer-build`. Inventory commands record
 process IDs, tabs, windows and file hashes without copying executables. Keep destinations in environment configuration
 and preserve the contributor's configured Git identity. Privacy hooks check staged content and commit messages;
 public commit attribution is allowed.

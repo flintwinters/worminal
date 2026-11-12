@@ -47,6 +47,10 @@ def publish(cwd=ROOT, prefix=PREFIX):
         if code := manage(*args, cwd=cwd, sudo=args[0] == "install"):
             print(f"Update stopped at {args[0]}; see the preceding diagnostics.", flush=True)
             return code
+    if prefix == PREFIX:
+        from tools import running
+        print("Update: live processes (v2 owners hand off by themselves; v1 daemons are never touched)", flush=True)
+        running.report(prefix)
     return 0
 
 
