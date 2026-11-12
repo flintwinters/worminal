@@ -110,9 +110,11 @@ Normal builds do not use this code. `manage.py clean` removes links left by inte
 Keep behavior checks when changing tests. Some tests check fixes by removing them and requiring a failure.
 Keep user profiles and diagnostic records when cleaning up code.
 
+`manage.py update` builds and checks the current checkout, installs to /usr/local, then verifies the installed
+artifacts on private displays. Only installation uses sudo; a failed step stops the pipeline.
 `manage.py auto-update --timer install` schedules a daily 03:00 systemd user timer: it builds and checks the tip of
 `origin/main` in a private clone under `build/auto-update`, installs to /usr/local only if everything passes, and
-skips unchanged tips. It needs passwordless sudo for the install step.
+skips unchanged tips. It shares the checkout update pipeline and needs passwordless sudo for the install step.
 
 The active installation is `/usr/local/bin/worminal`, with modules in `/usr/local/lib/worminal`. Install a tested
 regular-user build with `sudo -n python3 manage.py install --prefix /usr/local --skip-build`; do not install fixes

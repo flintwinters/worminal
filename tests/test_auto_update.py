@@ -64,5 +64,22 @@ class ScheduleTests(unittest.TestCase):
         self.assertIn("manage.py auto-update", auto_update.units()[f"{auto_update.UNIT}.service"])
 
 
+class PublishTests(unittest.TestCase):
+    def test_verifies_installed_files_after_publication(self):
+        with patch.object(auto_update, "manage", return_value=0) as manage:
+            self.assertEqual(auto_update.publish(), 0)
+        self.assertEqual([call.args[0] for call in manage.call_args_list],
+                         ["build", "check", "install", "check-install"])
+        self.assertEqual([call.kwargs["sudo"] for call in manage.call_args_list],
+                         [False, False, True, False])
+
+    def test_failure_stops_all_later_steps(self):
+        for failed in range(4):
+            with self.subTest(failed=failed), patch.object(
+                    auto_update, "manage", side_effect=[0] * failed + [7]) as manage:
+                self.assertEqual(auto_update.publish(), 7)
+                self.assertEqual(manage.call_count, failed + 1)
+
+
 if __name__ == "__main__":
     unittest.main()

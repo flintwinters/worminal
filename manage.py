@@ -767,6 +767,13 @@ def auto_update(timer: str = typer.Option(None, click_type=click.Choice(["instal
     raise typer.Exit(updates.update() if timer is None else updates.schedule(timer == "remove") or 0)
 
 
+@app.command("update")
+def update_checkout():
+    """Build, run the full suite, install this checkout to /usr/local, and verify installed files."""
+    from tools.auto_update import publish
+    raise typer.Exit(publish())
+
+
 @app.command()
 def uninstall(prefix: Path = typer.Option(None, help="Prefix used for installation.")):
     """Remove installed files; supports PREFIX, MANPREFIX, and DESTDIR."""

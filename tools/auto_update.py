@@ -27,6 +27,20 @@ def manage(*args, cwd=CLONE, sudo=False):
                           cwd=cwd).returncode
 
 
+def publish(cwd=ROOT, prefix=PREFIX):
+    """Build and validate as the user; elevate only publication and verify the result."""
+    steps = (("build",), ("check",),
+             ("install", "--prefix", prefix, "--skip-build"))
+    if prefix == PREFIX:
+        steps += (("check-install", "--installed", "--skip-build"),)
+    for args in steps:
+        print(f"Update: {' '.join(args)}", flush=True)
+        if code := manage(*args, cwd=cwd, sudo=args[0] == "install"):
+            print(f"Update stopped at {args[0]}; see the preceding diagnostics.", flush=True)
+            return code
+    return 0
+
+
 def update(remote=None, branch=BRANCH, clone=CLONE, stamp=STAMP, prefix=PREFIX):
     """Install the branch tip if it differs from the last install and passes build and check."""
     remote = remote or git("remote", "get-url", "origin", cwd=ROOT)
@@ -45,12 +59,9 @@ def update(remote=None, branch=BRANCH, clone=CLONE, stamp=STAMP, prefix=PREFIX):
             print(f"Already installed {tip[:7]}.")
             return 0
         git("reset", "-q", "--hard", tip, cwd=clone)
-        # Build as the regular user, gate on the whole suite, and only then publish.
-        for step in (lambda: manage("build", cwd=clone), lambda: manage("check", cwd=clone),
-                     lambda: manage("install", "--prefix", prefix, "--skip-build", cwd=clone, sudo=True)):
-            if code := step():
-                print(f"Update to {tip[:7]} stopped; nothing newer was installed.")
-                return code
+        if code := publish(cwd=clone, prefix=prefix):
+            print(f"Update to {tip[:7]} did not finish; the installed stamp was not advanced.")
+            return code
         stamp.write_text(tip)
         print(f"Installed {tip[:7]}.")
         return 0
