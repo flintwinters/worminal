@@ -39,8 +39,8 @@ struct State {
     palette: RefCell<Option<Rc<RefCell<Palette>>>>,
     /// Tabs that rang the bell and have not received input since; selecting a tab keeps it.
     attention: RefCell<Vec<u32>>,
-    /// Blink phase. The timer runs only while some tab needs attention.
-    lit: Cell<bool>,
+    /// Attention glow strength, 0..=1. The timer runs only while some tab needs attention.
+    glow: Cell<f64>,
     blink: RefCell<Option<glib::SourceId>>,
     drag: RefCell<Option<Drag>>,
 }
@@ -63,9 +63,24 @@ fn place(widths: &[i32], right: i32) -> Vec<(i32, i32)> {
         })
         .collect()
 }
+/// Seconds per full fade out and back in.
+const GLOW_PERIOD: f64 = 2.0;
 fn width(layout: &pango::Layout, entry: &Tab, metrics: Metrics) -> i32 {
     layout.set_text(&entry.label);
     layout.pixel_size().0 + 2 * metrics.width
+}
+fn mix(from: &gdk::RGBA, to: &gdk::RGBA, amount: f64) -> gdk::RGBA {
+    let blend = |a: f64, b: f64| a + (b - a) * amount;
+    gdk::RGBA::new(
+        blend(from.red(), to.red()),
+        blend(from.green(), to.green()),
+        blend(from.blue(), to.blue()),
+        1.0,
+    )
+}
+/// Attention glow for `seconds` into an alert: starts at full strength, then breathes on a cosine.
+fn glow_at(seconds: f64) -> f64 {
+    (1.0 + (seconds * std::f64::consts::TAU / GLOW_PERIOD).cos()) / 2.0
 }
 impl State {
     fn draw(&self, cr: &cairo::Context, right: i32) -> Result<(), cairo::Error> {
@@ -111,9 +126,23 @@ impl State {
             layout.set_text(&entry.label);
             let baseline = top + (metrics.height - metrics.ink_height) / 2 + metrics.ascent;
             let selected = entry.id == self.active.get();
-            let alert = self.lit.get() && self.attention.borrow().contains(&entry.id);
+            let glow = if self.attention.borrow().contains(&entry.id) {
+                self.glow.get()
+            } else {
+                0.0
+            };
+            let alert = glow > 0.0;
             if selected || alert {
-                paint::source(cr, &palette.color(if alert { 3 } else { FG }));
+                let base = palette.color(FG);
+                paint::source(
+                    cr,
+                    &if alert {
+                        let from = if selected { base } else { palette.color(BG) };
+                        mix(&from, &palette.color(3), glow)
+                    } else {
+                        base
+                    },
+                );
                 cr.rectangle(
                     f64::from(x),
                     f64::from(top),
@@ -122,18 +151,16 @@ impl State {
                 );
                 cr.fill()?;
             }
-            paint::source(
-                cr,
-                &palette.color(if selected || alert {
-                    BG
-                } else if entry.browser {
-                    1
-                } else if entry.remote {
-                    2
-                } else {
-                    7
-                }),
-            );
+            let resting = palette.color(if selected {
+                BG
+            } else if entry.browser {
+                1
+            } else if entry.remote {
+                2
+            } else {
+                7
+            });
+            paint::source(cr, &mix(&resting, &palette.color(BG), glow));
             cr.move_to(
                 f64::from(x + metrics.width),
                 f64::from(baseline) - f64::from(layout.baseline()) / f64::from(pango::SCALE),
@@ -231,7 +258,7 @@ impl Tabs {
             active: Cell::new(0),
             palette: RefCell::new(None),
             attention: RefCell::new(Vec::new()),
-            lit: Cell::new(false),
+            glow: Cell::new(0.0),
             blink: RefCell::new(None),
             drag: RefCell::new(None),
         });
@@ -296,31 +323,34 @@ impl Tabs {
                 glib::Propagation::Proceed
             }));
     }
-    /// Blink a tab until it receives input; a waiting agent is not answered by looking at it.
+    /// Fade a tab in and out until it receives input; a waiting agent is not answered by looking at it.
     pub fn alert(&self, id: u32) {
         let state = &self.0;
         if state.attention.borrow().contains(&id) {
             return;
         }
         state.attention.borrow_mut().push(id);
-        state.lit.set(true);
-        state.widget.queue_draw();
         if state.blink.borrow().is_some() {
+            state.widget.queue_draw();
             return;
         }
+        let start = std::time::Instant::now();
+        state.glow.set(glow_at(0.0));
+        state.widget.queue_draw();
         let weak = Rc::downgrade(state);
         *state.blink.borrow_mut() = Some(glib::timeout_add_local(
-            std::time::Duration::from_millis(500),
+            std::time::Duration::from_millis(33),
             move || {
                 let Some(state) = weak.upgrade() else {
                     return glib::ControlFlow::Break;
                 };
                 if state.attention.borrow().is_empty() {
-                    state.lit.set(false);
+                    state.glow.set(0.0);
+                    state.widget.queue_draw();
                     state.blink.borrow_mut().take();
                     return glib::ControlFlow::Break;
                 }
-                state.lit.set(!state.lit.get());
+                state.glow.set(glow_at(start.elapsed().as_secs_f64()));
                 state.widget.queue_draw();
                 glib::ControlFlow::Continue
             },
