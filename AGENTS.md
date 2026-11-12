@@ -98,6 +98,8 @@ Analysis/dependency configuration lives under `tools`; `privacy-setup` generates
 `manage.py` into the Git directory. Management suppresses Python bytecode caches.
 Never test under /tmp or inject test input into the desktop.
 Private test runtimes must outlive their GUI and service owners; await owner exit before removing their files.
+Publication checks require Unix ownership semantics. On UID-remapping NFS, use a project-local tmpfs beneath
+`build/checks` through `WORMINAL_TEST_CHECKS_DIR`; preserve its diagnostics before unmounting it.
 `manage.py` drops desktop display variables. `manage.py check` runs the full private-display suite. Native Wayland
 checks use project-local Weston with matching virtual-seat ABI and no X11 fallback. Prepare optional private
 Muffin/Weston through their setup commands. Performance checks measure private software presentation, not desktop

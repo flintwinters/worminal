@@ -55,6 +55,16 @@ class UpdateTests(unittest.TestCase):
         self.update()
         self.assertIn(("install", True), self.steps)
 
+    def test_failed_installed_verification_does_not_mark_tip_successful(self):
+        def manage(*args, **kwargs):
+            self.steps.append(args[0])
+            return 1 if args[0] == "check-install" else 0
+        with patch.object(auto_update, "manage", manage):
+            result = auto_update.update(str(self.origin), "main", self.clone, self.stamp)
+        self.assertEqual(result, 1)
+        self.assertEqual(self.steps, ["build", "check", "install", "check-install"])
+        self.assertFalse(self.stamp.exists())
+
 
 class ScheduleTests(unittest.TestCase):
     def test_timer_fires_at_three_and_catches_up_missed_runs(self):
