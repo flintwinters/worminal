@@ -20,6 +20,8 @@ deadlines and serialization. It does not manage processes, descriptors, GUI obje
 OSC 8 links are 16-bit cell ids into a bounded per-terminal URI table; ids never leave the daemon: ROW_LINKS
 packets carry each row's URIs inline, and snapshots drop them. Clicks open only http(s) or type `worminal://input`
 text (newline executes) into the same tab. The Rust wrapper manages C handles and screen buffers, and normalizes clipboard paste in place.
+OSC 99 metadata/payload events go only to capable controlling views; those views assemble bounded title/body
+notifications and deliver them asynchronously on their desktop, including for remote tabs.
 The frontend owns its ordered keyboard mappings in Rust. Shell defaults live with Rust PTY creation;
 browser defaults live with Rust target resolution. C headers retain only engine snapshot and module ABIs:
 `src/protocol` owns wire constants and framing, `src/workspace` owns recovery/handoff formats, and `src/gtk`
@@ -98,8 +100,8 @@ Analysis/dependency configuration lives under `tools`; `privacy-setup` generates
 `manage.py` into the Git directory. Management suppresses Python bytecode caches.
 Never test under /tmp or inject test input into the desktop.
 Private test runtimes must outlive their GUI and service owners; await owner exit before removing their files.
-Publication checks require Unix ownership semantics. On UID-remapping NFS, use a project-local tmpfs beneath
-`build/checks` through `WORMINAL_TEST_CHECKS_DIR`; preserve its diagnostics before unmounting it.
+Publication checks require Unix ownership semantics. Update workflows automatically use project-local tmpfs
+on UID-remapping filesystems, preserve diagnostics, then unmount; this also requires passwordless sudo.
 `manage.py` drops desktop display variables. `manage.py check` runs the full private-display suite. Native Wayland
 checks use project-local Weston with matching virtual-seat ABI and no X11 fallback. Prepare optional private
 Muffin/Weston through their setup commands. Performance checks measure private software presentation, not desktop
@@ -113,7 +115,7 @@ Keep behavior checks when changing tests. Some tests check fixes by removing the
 Keep user profiles and diagnostic records when cleaning up code.
 
 `manage.py update` builds and checks the current checkout, installs to /usr/local, then verifies the installed
-artifacts on private displays. Only installation uses sudo; a failed step stops the pipeline.
+artifacts on private displays. Installation and any necessary private tmpfs mounts use sudo; checks run as the user.
 `manage.py auto-update --timer install` schedules a daily 03:00 systemd user timer: it builds and checks the tip of
 `origin/main` in a private clone under `build/auto-update`, installs to /usr/local only if everything passes, and
 skips unchanged tips. It shares the checkout update pipeline and needs passwordless sudo for the install step.

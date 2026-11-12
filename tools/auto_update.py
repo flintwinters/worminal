@@ -23,6 +23,10 @@ def git(*args, cwd=CLONE):
 
 
 def manage(*args, cwd=CLONE, sudo=False):
+    if args[0] in ("check", "check-install"):
+        from tools.update_storage import verification_environment
+        with verification_environment(cwd) as env:
+            return subprocess.run([sys.executable, "manage.py", *args], cwd=cwd, env=env).returncode
     return subprocess.run([*(["sudo", "-n"] if sudo else []), sys.executable, "manage.py", *args],
                           cwd=cwd).returncode
 
