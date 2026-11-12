@@ -285,29 +285,33 @@ pub fn run(arguments: &[OsString], upgrading: bool) -> io::Result<i32> {
             }),
         _ => Err(invalid("Run worminald install-on-remote --help for usage.")),
     };
-    let result = match result {
+    let mut result = match result {
         Ok(result) => result,
         Err(error) => json!({"ok":false,"error":error.to_string()}),
     };
-    if upgrading && result.get("current").is_none() {
-        // Detached views discard stdout, so record changes and failures where daemon events go.
-        crate::process::diagnostic(&format!("Remote upgrade: {result}"));
-    }
-    println!("{result}");
     if upgrading && result.get("ok").and_then(Value::as_bool) != Some(false) {
         // Settings follow versions: once both sides run compatible code, merge their worminal.yaml.
+        // A failed sync is reported beside the upgrade result but never fails the upgrade.
         if let [endpoint] = arguments {
-            let report = endpoint
+            result["config"] = endpoint
                 .to_str()
                 .ok_or_else(|| invalid("SSH endpoint must be UTF-8."))
                 .and_then(|endpoint| {
                     crate::config_sync::run(endpoint, worminal_config::sync::Prefer::Neither)
                 })
                 .unwrap_or_else(|error| json!({"ok": false, "error": error.to_string()}));
-            crate::process::diagnostic(&format!("Config sync: {report}"));
-            println!("{report}");
         }
     }
+    if upgrading
+        && (result.get("current").is_none()
+            || result["config"]["conflicts"]
+                .as_array()
+                .is_some_and(|c| !c.is_empty()))
+    {
+        // Detached views discard stdout, so record changes, failures and conflicts where daemon events go.
+        crate::process::diagnostic(&format!("Remote upgrade: {result}"));
+    }
+    println!("{result}");
     Ok(
         if result.get("ok").and_then(Value::as_bool) == Some(false) {
             1
