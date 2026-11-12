@@ -271,6 +271,7 @@ struct App {
     notebook: gtk::Notebook,
     tabstrip: crate::tabs::Tabs,
     notifications: RefCell<notifications::Notifications>,
+    notification_desktop: Rc<notifications::Desktop>,
     status: gtk::Label,
     config: Config,
     fonts: Rc<RefCell<Fonts>>,
@@ -352,6 +353,7 @@ impl App {
             fonts,
             tabstrip,
             notifications: RefCell::default(),
+            notification_desktop: Rc::default(),
             config,
             window,
             notebook,
@@ -553,7 +555,23 @@ impl App {
                 match outcome {
                     Some(notifications::Outcome::Show(message)) => {
                         self.tabstrip.alert(event.tab);
-                        notifications::show(message);
+                        let weak = Rc::downgrade(self);
+                        let tab = event.tab;
+                        self.notification_desktop.show(message, move |token| {
+                            if let Some(app) = weak.upgrade() {
+                                if app.closing.get()
+                                    || app.replacing.get()
+                                    || !app.pages.borrow().iter().any(|page| page.id == tab)
+                                {
+                                    return;
+                                }
+                                app.select_id(tab);
+                                if let Some(token) = token {
+                                    app.window.set_startup_id(&token);
+                                }
+                                crate::graphics_ffi::show_window(&app.window);
+                            }
+                        });
                     }
                     Some(notifications::Outcome::Reply(bytes)) => self.send(
                         event.tab,

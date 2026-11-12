@@ -280,6 +280,13 @@ def check_rust_app():
     raise typer.Exit(run([sys.executable, "tests/rust_app.py"]))
 
 
+@app.command("check-notifications")
+def check_notifications():
+    """Check OSC 99 delivery and click activation on a private session bus and X11 desktop."""
+    native_build.build_targets("worminal-rust", "worminald")
+    raise typer.Exit(run([sys.executable, "tests/test_notifications.py", "-q"]))
+
+
 @app.command("check-rust-browser")
 def check_rust_browser():
     """Check real Rust browser views, lazy loading, owner forwarding and local-document security privately."""

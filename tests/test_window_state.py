@@ -28,13 +28,15 @@ OBJECT = "/org/worminal/Windows"
 
 @contextmanager
 def private_bus(env):
-    daemon = subprocess.Popen(["dbus-daemon", "--session", "--nofork", "--print-address=1"],
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    try:
-        yield {**env, "DBUS_SESSION_BUS_ADDRESS": daemon.stdout.readline().strip()}
-    finally:
-        daemon.terminate()
-        daemon.communicate(timeout=5)
+    with tempfile.TemporaryDirectory(prefix="session-bus-", dir=CHECKS) as directory:
+        daemon = subprocess.Popen(["dbus-daemon", "--session", "--nofork", "--print-address=1",
+                                   f"--address=unix:path={directory}/bus"],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            yield {**env, "DBUS_SESSION_BUS_ADDRESS": daemon.stdout.readline().strip()}
+        finally:
+            daemon.terminate()
+            daemon.communicate(timeout=5)
 
 
 @unittest.skipUnless(all(shutil.which(tool) for tool in ("busctl", "dbus-daemon", "Xvfb", "xdotool")),

@@ -21,7 +21,8 @@ OSC 8 links are 16-bit cell ids into a bounded per-terminal URI table; ids never
 packets carry each row's URIs inline, and snapshots drop them. Clicks open only http(s) or type `worminal://input`
 text (newline executes) into the same tab. The Rust wrapper manages C handles and screen buffers, and normalizes clipboard paste in place.
 OSC 99 metadata/payload events go only to capable controlling views; those views assemble bounded title/body
-notifications and deliver them asynchronously on their desktop, including for remote tabs.
+notifications and deliver them asynchronously on their desktop, including for remote tabs. Click targets
+retain weak window ownership and use the existing tab-selection and platform activation paths.
 The frontend owns its ordered keyboard mappings in Rust. Shell defaults live with Rust PTY creation;
 browser defaults live with Rust target resolution. C headers retain only engine snapshot and module ABIs:
 `src/protocol` owns wire constants and framing, `src/workspace` owns recovery/handoff formats, and `src/gtk`

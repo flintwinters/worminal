@@ -1,6 +1,9 @@
 //! Bounded OSC 99 title/body assembly. Desktop delivery belongs to the view, including over SSH.
-use gtk::{gio, glib, prelude::*};
-use std::{cell::Cell, collections::HashMap};
+use gtk::glib;
+use std::collections::HashMap;
+#[path = "notification_desktop.rs"]
+mod desktop;
+pub(super) use desktop::Desktop;
 
 const MAX_TEXT: usize = 16 * 1024;
 const MAX_PENDING: usize = 32;
@@ -9,10 +12,20 @@ const MAX_PENDING: usize = 32;
 pub(super) struct Notifications {
     pending: HashMap<(u32, String), Message>,
 }
-#[derive(Default, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub(super) struct Message {
     title: String,
     body: String,
+    focus: bool,
+}
+impl Default for Message {
+    fn default() -> Self {
+        Self {
+            title: String::new(),
+            body: String::new(),
+            focus: true,
+        }
+    }
 }
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Outcome {
@@ -24,6 +37,7 @@ impl Notifications {
         let text = std::str::from_utf8(bytes).ok()?;
         let (metadata, payload) = text.split_once(';')?;
         let (mut id, mut kind, mut done, mut encoded) = ("", "title", true, false);
+        let mut actions = None;
         for field in metadata.split(':') {
             let Some((key, value)) = field.split_once('=') else {
                 continue;
@@ -33,6 +47,7 @@ impl Notifications {
                 "p" => kind = value,
                 "d" => done = value != "0",
                 "e" => encoded = value == "1",
+                "a" => actions = Some(value),
                 _ => {}
             }
         }
@@ -46,7 +61,7 @@ impl Notifications {
         }
         if kind == "?" {
             return Some(Outcome::Reply(
-                format!("\x1b]99;i={id}:p=?;p=title,body:o=always\x1b\\").into_bytes(),
+                format!("\x1b]99;i={id}:p=?;p=title,body:o=always:a=focus\x1b\\").into_bytes(),
             ));
         }
         if !matches!(kind, "title" | "body") {
@@ -70,6 +85,15 @@ impl Notifications {
             return None;
         }
         let message = self.pending.entry(key.clone()).or_default();
+        if let Some(actions) = actions {
+            for action in actions.split(',') {
+                match action {
+                    "focus" => message.focus = true,
+                    "-focus" => message.focus = false,
+                    _ => {}
+                }
+            }
+        }
         if message.title.len() + message.body.len() + payload.len() > MAX_TEXT {
             self.pending.remove(&key);
             return None;
@@ -90,63 +114,6 @@ impl Notifications {
     }
 }
 
-thread_local! { static IN_FLIGHT: Cell<usize> = const { Cell::new(0) }; }
-struct Delivery;
-impl Drop for Delivery {
-    fn drop(&mut self) {
-        IN_FLIGHT.with(|count| count.set(count.get() - 1));
-    }
-}
-
-pub(super) fn show(message: Message) {
-    // Bound asynchronous work too: a silent or slow desktop service must not grow memory forever.
-    if !IN_FLIGHT.with(|count| {
-        if count.get() >= MAX_PENDING {
-            return false;
-        }
-        count.set(count.get() + 1);
-        true
-    }) {
-        return;
-    }
-    let delivery = Delivery;
-    // Session bus discovery and notification delivery must never block the GTK event loop.
-    gio::bus_get(
-        gio::BusType::Session,
-        gio::Cancellable::NONE,
-        move |result| {
-            let Ok(bus) = result else {
-                drop(delivery);
-                return;
-            };
-            let hints = HashMap::<String, glib::Variant>::new();
-            let parameters = (
-                "Worminal",
-                0u32,
-                "utilities-terminal",
-                message.title,
-                glib::markup_escape_text(&message.body).to_string(),
-                Vec::<String>::new(),
-                hints,
-                -1i32,
-            )
-                .to_variant();
-            bus.call(
-                Some("org.freedesktop.Notifications"),
-                "/org/freedesktop/Notifications",
-                "org.freedesktop.Notifications",
-                "Notify",
-                Some(&parameters),
-                None,
-                gio::DBusCallFlags::NONE,
-                5000,
-                gio::Cancellable::NONE,
-                move |_| drop(delivery),
-            );
-        },
-    );
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,14 +127,16 @@ mod tests {
             notifications.receive(1, b"i=x:p=body:e=1;SGVsbG8="),
             Some(Outcome::Show(Message {
                 title: "Build; done".into(),
-                body: "Hello".into()
+                body: "Hello".into(),
+                ..Message::default()
             }))
         );
         assert_eq!(
             notifications.receive(2, b"i=x;p"),
             Some(Outcome::Show(Message {
                 title: "Otherp".into(),
-                body: String::new()
+                body: String::new(),
+                ..Message::default()
             }))
         );
     }
@@ -177,7 +146,7 @@ mod tests {
         assert_eq!(
             n.receive(1, b"i=q:p=?;"),
             Some(Outcome::Reply(
-                b"\x1b]99;i=q:p=?;p=title,body:o=always\x1b\\".to_vec()
+                b"\x1b]99;i=q:p=?;p=title,body:o=always:a=focus\x1b\\".to_vec()
             ))
         );
         for bytes in [
@@ -193,7 +162,28 @@ mod tests {
             n.receive(1, b"p=body;Body only"),
             Some(Outcome::Show(Message {
                 title: "Body only".into(),
-                body: String::new()
+                body: String::new(),
+                ..Message::default()
+            }))
+        );
+    }
+    #[test]
+    fn focus_defaults_on_and_can_be_disabled_across_chunks() {
+        let mut n = Notifications::default();
+        assert_eq!(n.receive(1, b"i=x:d=0:a=-focus;title"), None);
+        assert_eq!(
+            n.receive(1, b"i=x:p=body;body"),
+            Some(Outcome::Show(Message {
+                title: "title".into(),
+                body: "body".into(),
+                focus: false
+            }))
+        );
+        assert_eq!(
+            n.receive(1, b"a=-focus,focus;title"),
+            Some(Outcome::Show(Message {
+                title: "title".into(),
+                ..Message::default()
             }))
         );
     }
