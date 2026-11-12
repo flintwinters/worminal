@@ -96,6 +96,11 @@ def retire_worker(process, directory):
                 if identity not in ready:
                     try: signal.pidfd_send_signal(identity, signal.SIGKILL)
                     except ProcessLookupError: pass
+            deadline = time.monotonic() + 5
+            for identity in identities:
+                ready, _, _ = select.select([identity], [], [], max(0, deadline - time.monotonic()))
+                if not ready:
+                    raise TimeoutError('Private fixture owners did not exit; retain their runtime files.')
         if process.poll() is None: process.kill()
         process.wait(timeout=5)
     finally:
@@ -111,12 +116,12 @@ def invoke(name, args, directory, timeout=180):
         try:
             returncode = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            retire_worker(process, directory)
             output.write(b'\nWorker timed out; tagged private fixtures were retired.\n')
             returncode = 124
-        except BaseException:
+        finally:
+            # Successful workers can leave daemonized fixtures too. Retire those owners
+            # before historical binaries or private runtimes are removed, including on NFS.
             retire_worker(process, directory)
-            raise
     text = log.read_text(errors='replace')
     counts = re.findall(r'Ran (\d+) tests? in ', text)
     return {'name': name, 'returncode': returncode, 'seconds': time.perf_counter()-started,

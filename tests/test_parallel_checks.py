@@ -95,19 +95,25 @@ class ParallelChecksTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('below project build/checks', result.stderr)
 
-    def test_timed_out_worker_retires_its_tagged_child(self):
+    def test_finished_and_timed_out_workers_retire_their_tagged_children(self):
         marker = self.root/'child-pid'
         script = self.root/'hang.py'
         script.write_text('import subprocess,sys,time,pathlib\n'
                           'child=subprocess.Popen([sys.executable,"-c","import time;time.sleep(30)"])\n'
                           f'pathlib.Path({str(marker)!r}).write_text(str(child.pid))\n'
                           'time.sleep(30)\n')
-        result = test_runner.invoke('fixture', [sys.executable,str(script)], self.root/'worker', timeout=.2)
-        self.assertEqual(result['returncode'], 124)
-        pid = marker.read_text()
-        process = Path(f'/proc/{pid}/stat')
-        if process.exists():
-            self.assertEqual(process.read_text().rsplit(')',1)[1].split()[0], 'Z')
+        for name, timeout, delay, expected in (('timeout', .2, 30, 124), ('finished', None, 0, 0)):
+            with self.subTest(name=name):
+                source = script.read_text().replace('time.sleep(30)\n', f'time.sleep({delay})\n')
+                script.write_text(source)
+                result = test_runner.invoke('fixture', [sys.executable,str(script)], self.root/name, timeout=timeout)
+                self.assertEqual(result['returncode'], expected)
+                process = Path(f'/proc/{marker.read_text()}/stat')
+                try:
+                    state = process.read_text().rsplit(')',1)[1].split()[0]
+                except (FileNotFoundError, ProcessLookupError):
+                    continue  # The child can be reaped between opening and reading /proc.
+                self.assertEqual(state, 'Z')
 
     def test_automatic_default_and_explicit_override(self):
         self.module('test_a', '    def test_pass(self): pass\n')
