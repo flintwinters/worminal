@@ -106,6 +106,7 @@ impl Service {
                         & (WIRE_FEATURE_COPY_ROWS
                             | WIRE_FEATURE_ROW_SPAN
                             | WIRE_FEATURE_FOCUSED_FRAMES
+                            | WIRE_FEATURE_NOTIFICATIONS
                             | WIRE_FEATURE_ROW_LINKS);
                     self.emit(
                         client,
@@ -115,6 +116,7 @@ impl Service {
                                 WIRE_FEATURE_COPY_ROWS
                                     | WIRE_FEATURE_SELECT_ALL
                                     | WIRE_FEATURE_ROW_SPAN
+                                    | WIRE_FEATURE_NOTIFICATIONS
                                     | WIRE_FEATURE_ROW_LINKS,
                             ),
                         },

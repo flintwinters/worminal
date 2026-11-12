@@ -33,6 +33,7 @@ pub enum EventKind {
     FrameFinish,
     Clipboard(Vec<u8>),
     Bell,
+    Notification(Vec<u8>),
     Print(Vec<u8>),
     Released,
     Error(Vec<u8>),

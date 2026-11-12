@@ -74,6 +74,14 @@ impl Service {
     }
 
     pub fn emit(&mut self, client: ClientId, event: worp::events::Event) {
+        if matches!(event.kind, worp::events::EventKind::Notification(_))
+            && !self
+                .clients
+                .get(&client)
+                .is_some_and(|c| c.features & worminal_protocol::WIRE_FEATURE_NOTIFICATIONS != 0)
+        {
+            return;
+        }
         match worp::v2_events::encode(&event) {
             Ok(packet) => self.queue(client, packet.kind, packet.tab, packet.body),
             Err(_) => self.drop_client(client),

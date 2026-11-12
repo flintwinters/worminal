@@ -323,9 +323,33 @@ hyperlinks(void)
 	worminal_engine_destroy(engine);
 }
 
+static void
+notifications(void)
+{
+	WorminalEngine *engine;
+	assert(worminal_engine_create(8, 3, &engine) == WORMINAL_OK);
+	/* Both terminators and fragmented input must preserve semicolons after metadata. */
+	const char *parts[] = { "\033]99;i=x:d=0;Build;", " title\007",
+	                        "\033]99;i=x:p=body;Body; text\033\\" };
+	feed(engine, parts[0], 1);
+	WorminalEvent event;
+	uint8_t payload[128];
+	assert(worminal_engine_event(engine, &event, payload, sizeof(payload)) == WORMINAL_EMPTY);
+	for (int i = 1; i < 3; i++) {
+		feed(engine, parts[i], 1);
+		assert(worminal_engine_event(engine, &event, payload, sizeof(payload)) == WORMINAL_OK);
+		const char *expected = i == 1 ? "i=x:d=0;Build; title" : "i=x:p=body;Body; text";
+		assert(event.type == WORMINAL_NOTIFICATION && event.bytes == strlen(expected));
+		assert(!memcmp(payload, expected, event.bytes));
+		assert(worminal_engine_event(engine, &event, payload, sizeof(payload)) == WORMINAL_EMPTY);
+	}
+	worminal_engine_destroy(engine);
+}
+
 int
 main(void)
 {
+	notifications();
 	events_and_isolation();
 	sync_and_utf8();
 	input_modes();

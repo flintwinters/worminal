@@ -30,6 +30,8 @@ mod browser_views;
 mod chrome;
 #[path = "app_links.rs"]
 mod links;
+#[path = "notifications.rs"]
+mod notifications;
 #[path = "app_shortcuts.rs"]
 mod shortcuts;
 
@@ -268,6 +270,7 @@ struct App {
     window: gtk::Window,
     notebook: gtk::Notebook,
     tabstrip: crate::tabs::Tabs,
+    notifications: RefCell<notifications::Notifications>,
     status: gtk::Label,
     config: Config,
     fonts: Rc<RefCell<Fonts>>,
@@ -348,6 +351,7 @@ impl App {
             state_id: window_state::next_id()?,
             fonts,
             tabstrip,
+            notifications: RefCell::default(),
             config,
             window,
             notebook,
@@ -542,6 +546,23 @@ impl App {
             EventKind::Released => {
                 if let Some(terminal) = self.terminal(event.tab) {
                     terminal.release();
+                }
+            }
+            EventKind::Notification(bytes) => {
+                let outcome = self.notifications.borrow_mut().receive(event.tab, bytes);
+                match outcome {
+                    Some(notifications::Outcome::Show(message)) => {
+                        self.tabstrip.alert(event.tab);
+                        notifications::show(message);
+                    }
+                    Some(notifications::Outcome::Reply(bytes)) => self.send(
+                        event.tab,
+                        CommandKind::Input {
+                            bytes,
+                            control: worminal_protocol::worp::commands::Control::Preserve,
+                        },
+                    ),
+                    None => {}
                 }
             }
             EventKind::Bell => {

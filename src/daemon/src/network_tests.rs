@@ -578,3 +578,38 @@ fn automation_queue_rejection_keeps_the_terminal_alive() {
         .windows(15)
         .any(|bytes| bytes == b"queue is full.\""));
 }
+
+#[test]
+fn osc99_only_reaches_capable_controllers() {
+    use worminal_protocol::worp::events::{Event, EventKind};
+    for features in [0, WIRE_FEATURE_NOTIFICATIONS] {
+        let mut fixture = Fixture::with_features(features);
+        let now = fixture.service.now();
+        let notices = fixture.service.tabs[0]
+            .feed(b"\x1b]99;;Build;done\x07", now)
+            .unwrap();
+        let mut delivered = false;
+        for notice in notices {
+            if let Notice::Event(client, kind @ EventKind::Notification(_)) = notice {
+                assert_eq!(client, 1);
+                assert_eq!(kind, EventKind::Notification(b";Build;done".to_vec()));
+                fixture.service.emit(client, Event { tab: 1, kind });
+                delivered = true;
+            }
+        }
+        assert!(delivered);
+        let mut bytes = Vec::new();
+        fixture.output().flush(&mut bytes, usize::MAX).unwrap();
+        assert_eq!(bytes.is_empty(), features == 0);
+        if features != 0 {
+            let (_, packet) = Decoder::default().push(&bytes).unwrap();
+            assert_eq!(
+                worp::v2_events::decode(packet.unwrap()).unwrap(),
+                Some(Event {
+                    tab: 1,
+                    kind: EventKind::Notification(b";Build;done".to_vec())
+                })
+            );
+        }
+    }
+}

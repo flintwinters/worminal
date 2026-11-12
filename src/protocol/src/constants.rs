@@ -94,3 +94,7 @@ pub const WIRE_SELECTION_CANCEL: u32 = 2;
 
 /// Complete byte-preserving detached launch in the existing Worp envelope.
 pub const WORP_OPEN_DETACHED: u32 = 9;
+
+/// OSC 99 metadata and payload, delivered only to capable controlling views.
+pub const WIRE_NOTIFICATION: u32 = 35;
+pub const WIRE_FEATURE_NOTIFICATIONS: u32 = 1 << 6;

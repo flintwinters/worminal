@@ -10,6 +10,11 @@ fn string(body: &mut Payload<'_>) -> io::Result<Vec<u8>> {
     Ok(body.string()?.to_vec())
 }
 
+fn encode_string(bytes: &[u8], body: &mut Buffer, kind: u32) -> io::Result<u32> {
+    body.put_string(bytes)?;
+    Ok(kind)
+}
+
 fn catalog(bytes: &[u8]) -> io::Result<Catalog> {
     let mut body = Payload::new(bytes);
     let count = body.u32()? as usize;
@@ -178,6 +183,11 @@ pub fn decode(packet: Packet) -> io::Result<Option<Event>> {
             body.finish()?;
             EventKind::Clipboard(value)
         }
+        WIRE_NOTIFICATION => {
+            let value = string(&mut body)?;
+            body.finish()?;
+            EventKind::Notification(value)
+        }
         WIRE_BELL => {
             body.finish()?;
             EventKind::Bell
@@ -316,10 +326,8 @@ pub fn encode(event: &Event) -> io::Result<Packet> {
         }
         EventKind::Links { row, runs } => encode_links(*row, runs, &mut body)?,
         EventKind::FrameFinish => WIRE_FRAME_FINISH,
-        EventKind::Clipboard(bytes) => {
-            body.put_string(bytes)?;
-            WIRE_CLIPBOARD
-        }
+        EventKind::Clipboard(bytes) => encode_string(bytes, &mut body, WIRE_CLIPBOARD)?,
+        EventKind::Notification(bytes) => encode_string(bytes, &mut body, WIRE_NOTIFICATION)?,
         EventKind::Bell => WIRE_BELL,
         EventKind::Print(bytes) => {
             body.put_bytes(bytes)?;

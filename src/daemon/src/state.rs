@@ -490,6 +490,14 @@ impl Tab {
                         ));
                     }
                 }
+                terminal::WORMINAL_NOTIFICATION => {
+                    if let Some(client) = self.controller {
+                        notices.push(Notice::Event(
+                            client,
+                            worminal_protocol::worp::events::EventKind::Notification(event.data),
+                        ));
+                    }
+                }
                 terminal::WORMINAL_BELL => {
                     if let Some(client) = self.controller {
                         notices.push(Notice::Event(

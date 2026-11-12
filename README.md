@@ -20,6 +20,7 @@ Native windows and other clients use the same Worp operations, including catalog
 
 Agents can discover and control existing terminal sessions with `worminald api help`;
 see [the agent interface](docs/automation.md) for listing tabs, reading screens and sending keystrokes.
+Shell applications can send [OSC 99 desktop notifications](docs/notifications.md), including from remote tabs.
 A small [explicit device registry](docs/devices.md) shares enrolled SSH routes through one authority, with
 on-demand availability checks and no heartbeats.
 Use [`worminald install-on-remote HOST`](docs/remote-install.md) to bootstrap a new compatible headless node over SSH.

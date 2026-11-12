@@ -19,6 +19,13 @@ te_strhandle(TermEngine *session)
 	};
 
 	term.esc &= ~(ESC_STR_END|ESC_STR);
+	/* Preserve payload semicolons: ordinary OSC argument splitting is destructive. */
+	if (strescseq.type == ']' && strescseq.len >= 3 &&
+	    !memcmp(strescseq.buf, "99;", 3)) {
+		te_emit(session, WORMINAL_NOTIFICATION, 0, 0,
+		        strescseq.buf + 3, strescseq.len - 3);
+		return;
+	}
 	te_strparse(session);
 	par = (narg = strescseq.narg) ? atoi(strescseq.args[0]) : 0;
 
