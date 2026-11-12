@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 import subprocess
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -39,13 +40,47 @@ class BuildTests(unittest.TestCase):
                 self.assertIn(unittest.mock.call("build/lib/worminal/" + build.RUST_BROWSER_MODULE, "worminal-browser"),
                               library.call_args_list)
 
+    def test_independent_steps_run_together_and_every_one_finishes_before_a_failure_is_raised(self):
+        # A serial implementation never gets three parties to the barrier, so it fails with BrokenBarrierError.
+        barrier = threading.Barrier(3, timeout=10)
+        finished = []
+
+        def together(name, fail=False):
+            def run():
+                barrier.wait()
+                finished.append(name)
+                if fail:
+                    raise RuntimeError(name)
+            return run
+        with self.assertRaisesRegex(RuntimeError, "second"):
+            build.concurrently([together("first"), together("second", fail=True), together("third")])
+        self.assertCountEqual(finished, ["first", "second", "third"])
+
+    def test_targets_build_the_engine_first_then_independent_c_targets_beside_the_ordered_lane(self):
+        events = []
+        gate = threading.Barrier(2, timeout=10)
+
+        def target(_, name):
+            events.append(name)
+            if name in ("worminald", "build/engine_test"):
+                gate.wait()  # The ordered lane and an independent target must be running at the same moment.
+        with (patch.object(build, "headless", return_value=True),
+              patch.object(build.Builder, "__init__", lambda self: None),
+              patch.object(build.Builder, "target", target)):
+            build.build_targets("build/engine_test", "build/historical_probe")
+        self.assertEqual(events[0], "build/libworminal_engine.a")
+        self.assertCountEqual(events[1:], ["worminald", "build/historical_probe", "build/engine_test"])
+        self.assertLess(events.index("worminald"), events.index("build/historical_probe"))
+
     def test_headless_target_builds_and_installs_only_the_daemon(self):
         names = lambda: {destination.name for _, destination, _ in build.installation_files("/usr/local")}
         with patch.dict(os.environ, {"WORMINAL_HEADLESS": "1"}):
             self.assertEqual(names(), {"worminald", "worminal.1"})
             with patch.object(build, "Builder") as builder:
                 build.build_targets()
-                self.assertEqual([c.args[0] for c in builder().target.call_args_list], ["worminald"])
+                # The engine archive is the daemon's own prerequisite, built up front so parallel lanes never race on it.
+        self.assertEqual([c.args[0] for c in builder().target.call_args_list],
+                         ["build/libworminal_engine.a", "worminald"])
         with patch.dict(os.environ, {"WORMINAL_HEADLESS": "0"}):
             self.assertIn("worminal", names())
         with patch.dict(os.environ, {}, clear=False):
