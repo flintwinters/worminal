@@ -78,6 +78,30 @@ fn mix(from: &gdk::RGBA, to: &gdk::RGBA, amount: f64) -> gdk::RGBA {
         1.0,
     )
 }
+/// Background fill (none for resting tabs) and text color of one tab at the given glow strength.
+fn colors(
+    palette: &Palette,
+    entry: &Tab,
+    selected: bool,
+    glow: f64,
+) -> (Option<gdk::RGBA>, gdk::RGBA) {
+    let fill = if glow > 0.0 {
+        let from = palette.color(if selected { FG } else { BG });
+        Some(mix(&from, &palette.color(3), glow))
+    } else {
+        selected.then(|| palette.color(FG))
+    };
+    let resting = palette.color(if selected {
+        BG
+    } else if entry.browser {
+        1
+    } else if entry.remote {
+        2
+    } else {
+        7
+    });
+    (fill, mix(&resting, &palette.color(BG), glow))
+}
 /// Attention glow for `seconds` into an alert: starts at full strength, then breathes on a cosine.
 fn glow_at(seconds: f64) -> f64 {
     (1.0 + (seconds * std::f64::consts::TAU / GLOW_PERIOD).cos()) / 2.0
@@ -131,18 +155,9 @@ impl State {
             } else {
                 0.0
             };
-            let alert = glow > 0.0;
-            if selected || alert {
-                let base = palette.color(FG);
-                paint::source(
-                    cr,
-                    &if alert {
-                        let from = if selected { base } else { palette.color(BG) };
-                        mix(&from, &palette.color(3), glow)
-                    } else {
-                        base
-                    },
-                );
+            let (fill, text) = colors(&palette, entry, selected, glow);
+            if let Some(fill) = fill {
+                paint::source(cr, &fill);
                 cr.rectangle(
                     f64::from(x),
                     f64::from(top),
@@ -151,16 +166,7 @@ impl State {
                 );
                 cr.fill()?;
             }
-            let resting = palette.color(if selected {
-                BG
-            } else if entry.browser {
-                1
-            } else if entry.remote {
-                2
-            } else {
-                7
-            });
-            paint::source(cr, &mix(&resting, &palette.color(BG), glow));
+            paint::source(cr, &text);
             cr.move_to(
                 f64::from(x + metrics.width),
                 f64::from(baseline) - f64::from(layout.baseline()) / f64::from(pango::SCALE),
