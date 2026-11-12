@@ -5,6 +5,7 @@
 //! YAML, with imports) supplies everything it does not override, so current setups keep working.
 mod resolve;
 mod source;
+pub mod sync;
 
 pub use resolve::{Settings, COLOR_COUNT};
 pub use source::{alacritty_path, worminal_path};

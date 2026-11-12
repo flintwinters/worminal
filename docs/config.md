@@ -23,6 +23,20 @@ Supported Alacritty keys: `font` (`size`, `normal.family`, `offset.y`, `glyph_of
 (`history`, `multiplier`). Colors are `#rrggbb` or `0xrrggbb`; an unquoted YAML `0xrrggbb` also works.
 Built-in defaults come from `assets/palette.json` and `assets/font.yaml`.
 
+## Sync between devices
+
+`worminald config sync [--prefer local|remote] SSH_ENDPOINT` merges `worminal.yaml` with a peer's. Views run it
+automatically, once per host, right after `upgrade-remote` (the outcome goes to the daemon log).
+
+- Each node remembers, per peer, the last agreed copy (`$XDG_STATE_HOME/worminal/config-sync/`); the merge is
+  three-way per dotted key. A key changed on one side takes that side; the same change on both agrees; deleting a
+  key propagates unless the other side changed it.
+- Different changes to one key are conflicts: both sides keep their value and the report lists the keys until the
+  values meet or `--prefer` picks a side. Nothing is overwritten silently.
+- The initiator decides; the peer applies the result only if its file is unchanged since it reported it, validates
+  it, and replaces it atomically. Local changes happen only after the peer accepted. Rewritten files lose comments.
+- Only `worminal.yaml` syncs; Alacritty files stay per device. No background traffic: sync happens on connect.
+
 ## Behavior
 
 - Invalid configuration makes `worminal` and `worminald` report to stderr and run with defaults; they never refuse

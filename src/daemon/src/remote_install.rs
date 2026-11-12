@@ -294,6 +294,20 @@ pub fn run(arguments: &[OsString], upgrading: bool) -> io::Result<i32> {
         crate::process::diagnostic(&format!("Remote upgrade: {result}"));
     }
     println!("{result}");
+    if upgrading && result.get("ok").and_then(Value::as_bool) != Some(false) {
+        // Settings follow versions: once both sides run compatible code, merge their worminal.yaml.
+        if let [endpoint] = arguments {
+            let report = endpoint
+                .to_str()
+                .ok_or_else(|| invalid("SSH endpoint must be UTF-8."))
+                .and_then(|endpoint| {
+                    crate::config_sync::run(endpoint, worminal_config::sync::Prefer::Neither)
+                })
+                .unwrap_or_else(|error| json!({"ok": false, "error": error.to_string()}));
+            crate::process::diagnostic(&format!("Config sync: {report}"));
+            println!("{report}");
+        }
+    }
     Ok(
         if result.get("ok").and_then(Value::as_bool) == Some(false) {
             1

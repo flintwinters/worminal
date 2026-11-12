@@ -212,3 +212,80 @@ fn legacy_bold_setting_at_root_and_notifications_flag() {
             .update_notifications
     );
 }
+
+mod sync_tests {
+    use crate::sync::{merge3, parse, render, Prefer};
+
+    fn flat(text: &str) -> crate::sync::Flat {
+        parse(text).unwrap()
+    }
+
+    #[test]
+    fn independent_changes_on_both_sides_combine() {
+        let base = flat("font:\n  size: 9\nscrolling:\n  history: 100\n");
+        let local = flat("font:\n  size: 12\nscrolling:\n  history: 100\n");
+        let remote = flat("font:\n  size: 9\nscrolling:\n  history: 500\n");
+        let merged = merge3(&base, &local, &remote, Prefer::Neither);
+        assert!(merged.conflicts.is_empty());
+        assert_eq!(merged.local, merged.remote);
+        assert_eq!(
+            render(&merged.local),
+            "font:\n  size: 12\nscrolling:\n  history: 500\n"
+        );
+        assert_eq!(merged.base, merged.local);
+    }
+
+    #[test]
+    fn same_change_agrees_and_deletions_propagate_unless_other_side_changed() {
+        let base = flat("a: 1\nb: 1\nc: 1\n");
+        let local = flat("a: 2\nc: 5\n");
+        let remote = flat("a: 2\nb: 1\nc: 1\n");
+        let merged = merge3(&base, &local, &remote, Prefer::Neither);
+        assert!(merged.conflicts.is_empty());
+        assert_eq!(
+            render(&merged.remote),
+            "a: 2\nc: 5\n",
+            "b deleted locally, c changed locally"
+        );
+        let remote = flat("a: 1\nb: 7\nc: 1\n");
+        let merged = merge3(&base, &flat("a: 1\nc: 1\n"), &remote, Prefer::Neither);
+        assert_eq!(
+            merged.conflicts,
+            ["b"],
+            "deleted on one side, changed on the other"
+        );
+    }
+
+    #[test]
+    fn conflicts_leave_both_sides_and_base_untouched_until_preferred() {
+        let base = flat("font:\n  size: 9\nx: 1\n");
+        let local = flat("font:\n  size: 10\nx: 2\n");
+        let remote = flat("font:\n  size: 11\nx: 1\n");
+        let merged = merge3(&base, &local, &remote, Prefer::Neither);
+        assert_eq!(merged.conflicts, ["font.size"]);
+        assert_eq!(render(&merged.local), "font:\n  size: 10\nx: 2\n");
+        assert_eq!(render(&merged.remote), "font:\n  size: 11\nx: 2\n");
+        assert_eq!(render(&merged.base), "font:\n  size: 9\nx: 2\n");
+        let merged = merge3(&base, &local, &remote, Prefer::Remote);
+        assert!(merged.conflicts.is_empty());
+        assert_eq!(render(&merged.local), "font:\n  size: 11\nx: 2\n");
+    }
+
+    #[test]
+    fn first_sync_without_base_conflicts_only_where_values_differ() {
+        let merged = merge3(
+            &flat(""),
+            &flat("a: 1\nb: 2\n"),
+            &flat("a: 1\nb: 3\nc: 4\n"),
+            Prefer::Neither,
+        );
+        assert_eq!(merged.conflicts, ["b"]);
+        assert_eq!(render(&merged.local), "a: 1\nb: 2\nc: 4\n");
+    }
+
+    #[test]
+    fn non_mapping_documents_are_rejected() {
+        assert!(parse("- 1\n").is_err());
+        assert!(parse("").unwrap().is_empty());
+    }
+}

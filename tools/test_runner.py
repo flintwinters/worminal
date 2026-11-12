@@ -20,7 +20,7 @@ from tools.paths import CHECKS
 # These modules use private temporary resources and do not publish shared build artifacts.
 # New or renamed suites stay serial until their resource ownership has been reviewed.
 INDEPENDENT = frozenset({'test_theme', 'test_privacy', 'test_perf_metrics', 'test_http_fixture',
-                         'test_remote_install', 'test_remote_upgrade', 'test_handoff', 'test_upgrade',
+                         'test_remote_install', 'test_remote_upgrade', 'test_config_sync', 'test_handoff', 'test_upgrade',
                          'test_window_replacement', 'test_master_startup'})
 DISPLAY_ENV = ('DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'DBUS_SESSION_BUS_ADDRESS', 'GDK_BACKEND')
 

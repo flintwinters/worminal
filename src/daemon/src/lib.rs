@@ -4,6 +4,7 @@ mod api_cli;
 mod cli;
 mod commands;
 mod config_cli;
+mod config_sync;
 mod device_probes;
 mod frames;
 mod handoff;

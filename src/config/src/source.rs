@@ -11,10 +11,16 @@ fn home() -> PathBuf {
     env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
 }
 
-fn config_home() -> PathBuf {
+pub(crate) fn config_home() -> PathBuf {
     env::var_os("XDG_CONFIG_HOME")
         .filter(|value| !value.is_empty())
         .map_or_else(|| home().join(".config"), PathBuf::from)
+}
+
+pub(crate) fn state_home() -> PathBuf {
+    env::var_os("XDG_STATE_HOME")
+        .filter(|value| !value.is_empty())
+        .map_or_else(|| home().join(".local/state"), PathBuf::from)
 }
 
 fn explicit(variable: &str, what: &str) -> Result<Option<PathBuf>, String> {
