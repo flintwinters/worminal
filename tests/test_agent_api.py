@@ -135,6 +135,45 @@ class AgentApiTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertFalse(json.loads(result.stdout)['ok'])
 
+    def test_help_topics_document_every_reply_key_without_a_daemon(self):
+        """An agent with only the executable must learn the reply shapes from `api help schema`."""
+        environment = {**self.fixture.env, 'WORMINAL_SHARED_SOCKET_SCOPE': self.fixture.scope + '-absent'}
+        def help_text(*topic):
+            result = subprocess.run([str(workspace.DAEMON), 'api', 'help', *topic], env=environment,
+                                    capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return result.stdout
+        index = help_text()
+        for topic in ('schema', 'session'):
+            self.assertIn(f'worminald api help {topic}', index)
+        self.assertIn('api help schema', subprocess.run(
+            [str(workspace.DAEMON), '--help'], env=environment, capture_output=True, text=True,
+            timeout=5).stdout)
+        unknown = subprocess.run([str(workspace.DAEMON), 'api', 'help', 'nonsense'], env=environment,
+                                 capture_output=True, text=True, timeout=5)
+        self.assertEqual(unknown.returncode, 2)
+        self.assertIn('worminald api help schema', unknown.stderr)
+        schema = help_text('schema')
+        tab = self.fixture.launch('stty raw -echo; printf READY; exec cat')
+        replies = [self.api('list'), self.api('read', tab), self.api('type', tab, 'x'),
+                   self.api('key', tab, 'Enter'), self.api('devices'), self.api('open', '--', '/bin/cat'),
+                   self.api('enroll', 'schema-node', 'schema@example.test'),
+                   self.api('forget', 'schema-node'), self.api('read', 999, success=False)]
+        replies.append(self.api('close', replies[5]['id']))
+        def keys(value):
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    yield key
+                    yield from keys(item)
+            elif isinstance(value, list):
+                for item in value:
+                    yield from keys(item)
+        for key in {key for reply in replies for key in keys(reply)}:
+            self.assertIn(f'"{key}"', schema, f'api help schema does not document {key!r}')
+        session = help_text('session')
+        for word in ('ATTACH', 'CATALOG', 'FOCUS', 'FRAME_FINISH', 'MOVE', 'WORP', 'PANES'):
+            self.assertIn(word, session)
+
     @contextmanager
     def session(self):
         process = subprocess.Popen([str(workspace.DAEMON), 'api', '--session'],

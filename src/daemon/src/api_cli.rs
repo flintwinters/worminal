@@ -1,4 +1,5 @@
 use crate::api::{quote, HELP};
+use crate::api_help;
 use std::{
     ffi::{OsStr, OsString},
     io,
@@ -171,7 +172,15 @@ pub fn run(scope: &[u8], arguments: &[OsString]) -> io::Result<i32> {
     if arguments.is_empty()
         || (arguments.len() == 1 && matches!(arguments[0].to_str(), Some("help" | "--help" | "-h")))
     {
-        print!("{HELP}");
+        print!("{HELP}{}", api_help::index());
+        return Ok(0);
+    }
+    if arguments.len() == 2 && arguments[0] == "help" {
+        let Some(text) = arguments[1].to_str().and_then(api_help::topic) else {
+            eprintln!("Unknown help topic.\n{}", api_help::index());
+            return Ok(2);
+        };
+        print!("{text}");
         return Ok(0);
     }
     if arguments.len() == 1 && arguments[0] == "--session" {

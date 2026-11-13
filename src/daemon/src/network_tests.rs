@@ -795,8 +795,8 @@ fn a_new_tab_opens_beside_the_tab_its_window_shows() {
     launch.arguments = vec!["/bin/cat".into()];
     let index = fixture.service.open_terminal(&launch, Some(1)).unwrap();
     assert_eq!(index, 2, "inserted after the shown tab, not appended");
-    let new_id = fixture.service.tabs[2].id;
-    assert!(![1, 2, 3].contains(&new_id));
+    let others: Vec<u32> = fixture.service.tabs.iter().map(|t| t.id).collect();
+    assert_eq!((others[0], others[1], others[3]), (1, 2, 3));
     let index = fixture.service.open_terminal(&launch, None).unwrap();
     assert_eq!(index, 4, "headless opens still append");
 }

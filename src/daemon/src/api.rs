@@ -38,8 +38,8 @@ Registry authority: worminald api --master user@host devices
 Remote: worminald api --master user@host list
 Bootstrap a new node: worminald install-on-remote --help
 Worp transports: authenticated local socket or SSH; identical semantic commands and events.
-Persistent session: worminald api --session, or ssh user@host worminald api --session.
-Rust contract: worminal_protocol::worp::{commands,events,session}; v2 framing is one binding.
+Persistent session (binary): worminald api --session, or ssh user@host worminald api --session.
+Reply JSON keys, limits and exit codes: worminald api help schema. Streaming wire format: worminald api help session.
 Unary commands below are a JSON request/reply convenience; session clients may use them too.
 All operations connect to an existing daemon; none starts or restores a workspace.
 Open does not open a GUI window or take control. Paths, argv and environment belong to the target daemon.

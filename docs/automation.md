@@ -1,6 +1,7 @@
 # Agent interface
 
-Run `worminald api` (or `worminald api help`) to discover the native command interface.
+Run `worminald --help`, then `worminald api help` (plus `api help schema` for reply JSON and `api help session` for the
+binary stream) to discover the native command interface from the executable alone.
 It works on headless hosts and uses [Worp](worp.md), independently of the selected delivery transport.
 It never starts a daemon or restores shells as a side effect of inspection.
 [Install a new remote node](remote-install.md) with the separate native `install-on-remote` bootstrap command.

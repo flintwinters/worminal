@@ -1,6 +1,7 @@
 //! Headless workspace application. OS ownership is isolated from terminal semantics.
 mod api;
 mod api_cli;
+mod api_help;
 mod cli;
 mod commands;
 mod config_cli;

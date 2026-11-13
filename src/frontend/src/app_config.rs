@@ -96,6 +96,7 @@ impl Config {
                         Ctrl+Shift+W: close tab\nCtrl+Shift+C/V: clipboard  Alt+1..9: select tab\n\n\
                         --surf URL|FILE: open a browser window (--browser is an alias)\n\
                         --new-browser-tab URL|FILE: replace this terminal with a browser\n\
+                        Automation and agents: run `worminald --help`, then `worminald api help`\n\
                         -h | --help: show help\n-v | --version: show version");
                     return Ok(None);
                 }

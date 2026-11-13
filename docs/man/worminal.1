@@ -62,8 +62,14 @@ connects over SSH to a service on that host; the remote account needs
 in its PATH. Further hosts can be reached with ordinary SSH inside a tab.
 .SH AUTOMATION
 Run
+.B worminald --help
+indexes every reference; 
 .B worminald api help
-to discover the headless agent interface.
+(with topics
+.B schema
+and
+.B session
+) documents the headless agent interface completely.
 .B worminald api list
 lists existing tabs as JSON.
 .B worminald api read TAB

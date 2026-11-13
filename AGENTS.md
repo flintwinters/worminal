@@ -33,6 +33,8 @@ The per-user v2 daemon owns ordered tabs, PTYs and bounded scrollback. Views con
 `--master user@host`. A terminal has one live painting view and can outlive every window. Frontend replicas import
 one viewport; they never parse terminal output or recompute history/reflow. Browser records have no PTY.
 `worminald api` is the headless agent interface over Worp; see `docs/automation.md` and `docs/worp.md`.
+The executable alone must teach an agent everything: `worminald --help` indexes `api help [schema|session]`, `config`,
+`install-on-remote` and `upgrade-remote`; `api_help.rs` owns those texts and tests check them against real replies.
 `src/protocol::worp` owns shared transport-independent commands/events for every client, plus unary
 request/reply conveniences; local sockets and SSH bind them to the existing v2 stream protocol.
 Device enrollment is explicit per authority user, shared across scopes and persisted independently of tabs;

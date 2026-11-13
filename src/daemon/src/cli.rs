@@ -173,15 +173,7 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
         return crate::api_cli::run(scope, &arguments[2..]);
     }
     if arguments.len() == 2 && matches!(arguments[1].to_str(), Some("--help" | "-h")) {
-        println!(
-            "worminald: persistent terminal workspace service\n\
-                  Run worminald api help for the automation API.\n\
-                  Run worminald config --help to inspect or validate runtime configuration.\n\
-                  Run worminald install-on-remote --help to bootstrap a new node over SSH.\n\
-                  Run worminald upgrade-remote --help to sync an older node with a newer peer.\n\
-                  Service commands: --serve, --bridge, --stop, --handin NAME, --handoff NAME, \
-                  --new-browser-tab URL|FILE"
-        );
+        print!("{}", crate::api_help::OVERVIEW);
         return Ok(0);
     }
     if arguments.len() == 2 {
