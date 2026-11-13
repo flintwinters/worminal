@@ -155,6 +155,23 @@ class UpgradeTest(HandoffFixture, unittest.TestCase):
                 self.fail('replacement did not checkpoint the imported workspace')
             time.sleep(.01)
 
+    def test_replacement_preserves_a_moved_tab_order_that_differs_from_id_order(self):
+        # The handoff lists tabs in strip order; a receiver that demanded ascending ids refused every live daemon
+        # whose tabs had been moved or grouped, so such daemons could never be replaced.
+        peer, env, parent = self.start(2, self.binary)
+        first, _ = self.launch(peer, 2, 'first')
+        second, _ = self.launch(peer, 2, 'second')
+        send(peer, 36, second, number(0), version=2)
+        deadline = time.monotonic() + 3
+        expected = self.catalog(peer)
+        while [row[0] for row in expected] != [second, first]:
+            self.assertLess(time.monotonic(), deadline, 'tab did not move')
+            time.sleep(.02)
+            expected = self.catalog(peer)
+        self.replace()
+        replacement = self.completed(parent, env)
+        self.assertEqual(self.catalog(replacement), expected)
+
     def test_empty_workspace_replaces_without_resurrecting_tabs(self):
         _, env, parent = self.start(2, self.binary)
         self.replace()

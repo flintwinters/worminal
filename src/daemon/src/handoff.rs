@@ -14,8 +14,14 @@ use worminal_engine::Engine;
 use worminal_protocol::{Buffer, Payload, MAX_PAYLOAD};
 use worminal_workspace::{handoff::*, rights};
 
+/// The caller's location names the failed check, since a rejected handoff is only visible in the donor's syslog.
+#[track_caller]
 fn invalid() -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, "invalid handoff snapshot")
+    let at = std::panic::Location::caller();
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("invalid handoff snapshot ({}:{})", at.file(), at.line()),
+    )
 }
 
 struct Cursor<'a> {
@@ -335,20 +341,25 @@ pub(crate) fn receive(
     } else {
         None
     };
-    let mut previous = 0;
+    let mut seen = std::collections::HashSet::new();
     for index in 0..count {
         let id = match incoming {
             Incoming::Upgrade => cursor.number()?,
             Incoming::Append => *next_id + index,
             Incoming::Mapped { ids, .. } => ids[index as usize],
         };
-        if preserving && (id <= previous || id >= saved_next) {
+        // Tabs arrive in strip order, which moving and grouping make differ from id order, so ids need only be
+        // unique and below the next id to allocate.
+        if preserving && (id == 0 || id >= saved_next || !seen.insert(id)) {
             return Err(invalid());
         }
-        previous = id;
         staged.push(decode_tab(&mut cursor, id, &mut descriptors)?);
     }
-    if !cursor.remaining().is_empty() || descriptors.next().is_some() {
+    let (bytes, spare) = (cursor.remaining().len(), descriptors.count());
+    if bytes != 0 || spare != 0 {
+        process::diagnostic(&format!(
+            "handoff snapshot has {bytes} unread bytes and {spare} unused descriptors after {count} tabs"
+        ));
         return Err(invalid());
     }
     // Reserve publication space before R. Adoption after C performs no allocation, validation, or OS setup.
