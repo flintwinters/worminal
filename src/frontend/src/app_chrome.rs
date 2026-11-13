@@ -23,7 +23,7 @@ impl App {
             return;
         }
         let pages = self.pages.borrow();
-        let entries = pages
+        let entries: Vec<_> = pages
             .iter()
             .map(|page| {
                 let label = if page.browser {
@@ -46,26 +46,32 @@ impl App {
                 }
             })
             .collect();
-        let palette = pages
-            .iter()
-            .find(|page| page.id == self.active.get())
-            .map(|page| page.palette.clone());
-        self.tabstrip.update(entries, self.active.get(), palette);
+        for pane in self.panes() {
+            let members = self.tabs_of(&pane);
+            let active = self.active_of(&pane).unwrap_or(0);
+            let palette = pages
+                .iter()
+                .find(|page| page.id == active)
+                .map(|page| page.palette.clone());
+            let own = entries
+                .iter()
+                .filter(|entry| members.contains(&entry.id))
+                .cloned()
+                .collect();
+            pane.strip.update(own, active, palette);
+        }
     }
     pub(super) fn select_index(self: &Rc<Self>, index: u32) {
-        if self.notebook.current_page() == Some(index) {
-            let id = self.notebook.nth_page(Some(index)).and_then(|widget| {
-                self.pages
-                    .borrow()
-                    .iter()
-                    .find(|page| page.widget == widget)
-                    .map(|page| page.id)
-            });
-            if let Some(id) = id {
-                self.activate(id);
-            }
-        } else {
-            self.notebook.set_current_page(Some(index));
+        let notebook = self.notebook();
+        let widget = notebook.nth_page(Some(index));
+        let id = self
+            .pages
+            .borrow()
+            .iter()
+            .find(|page| Some(&page.widget) == widget.as_ref())
+            .map(|page| page.id);
+        if let Some(id) = id {
+            self.select_id(id);
         }
     }
     /// The daemon owns tab order. Ask it to put `id` in `target`'s slot; the catalog it publishes reorders the strip.
@@ -91,14 +97,15 @@ impl App {
         }
     }
     pub(super) fn select_id(self: &Rc<Self>, id: u32) {
+        let Some(pane) = self.pane_of(id) else { return };
         let index = self
-            .pages
-            .borrow()
-            .iter()
-            .find(|page| page.id == id)
-            .and_then(|page| self.notebook.page_num(&page.widget));
-        if let Some(index) = index {
-            self.select_index(index);
+            .page_widget(id)
+            .and_then(|widget| pane.notebook.page_num(&widget));
+        self.focus_pane(&pane);
+        if pane.notebook.current_page() == index {
+            self.activate(id);
+        } else {
+            pane.notebook.set_current_page(index);
         }
     }
 }

@@ -273,9 +273,7 @@ fn text(bytes: &[u8]) -> String {
 struct App {
     state_id: u32,
     window: gtk::Window,
-    notebook: gtk::Notebook,
     panes: split::Panes,
-    tabstrip: crate::tabs::Tabs,
     notifications: RefCell<notifications::Notifications>,
     notification_desktop: Rc<notifications::Desktop>,
     status: gtk::Label,
@@ -341,29 +339,22 @@ impl App {
             ensure()?;
         }
         let window = Self::replacement_window(&config);
-        let notebook = gtk::Notebook::new();
-        notebook.set_show_tabs(false);
-        notebook.set_show_border(false);
         let fonts = Rc::new(RefCell::new(Fonts::new(config.font.clone(), config.zoom)));
-        let tabstrip = crate::tabs::Tabs::new(fonts.clone());
         let status = gtk::Label::new(None);
         status.set_ellipsize(gtk::pango::EllipsizeMode::End);
         status.set_no_show_all(true);
         let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        container.pack_start(tabstrip.widget(), false, false, 0);
-        let panes = split::Panes::new(&notebook);
+        let panes = split::Panes::new();
         container.pack_start(panes.widget(), true, true, 0);
         container.pack_end(&status, false, false, 0);
         chrome::outline(&window, &container);
         let app = Rc::new(Self {
             state_id: window_state::next_id()?,
             fonts,
-            tabstrip,
             notifications: RefCell::default(),
             notification_desktop: Rc::default(),
             config,
             window,
-            notebook,
             panes,
             status,
             pages: RefCell::new(Vec::new()),
@@ -379,15 +370,7 @@ impl App {
             geometry_pending: Cell::new(true),
             early_keys: RefCell::new(VecDeque::new()),
         });
-        app.connect_tabstrip();
-        // GTK maps the new child in its default switch handler. Focus it afterwards.
-        app.notebook.connect_local("switch-page", true, glib::clone!(@weak app => @default-return None, move |values| {
-            if app.syncing.get() { return None; }
-            let widget = values[1].get::<gtk::Widget>().ok()?;
-            let id = app.pages.borrow().iter().find(|page| page.widget == widget).map(|page| page.id);
-            if let Some(id) = id { app.activate(id); }
-            None
-        }));
+        app.start_panes();
         app.window.connect_key_press_event(
             glib::clone!(@weak app => @default-return glib::Propagation::Proceed,
             move |_, event| app.shortcut(event).into()),
@@ -442,8 +425,8 @@ impl App {
             .and_then(|page| page.terminal.clone())
     }
     fn activate(self: &Rc<Self>, id: u32) {
-        self.place(id);
         self.active.set(id);
+        self.show_page(id);
         let title = self
             .pages
             .borrow()
@@ -460,7 +443,7 @@ impl App {
         }
         if let Some(terminal) = self.terminal(id) {
             self.fit_geometry(&terminal);
-            self.present();
+            self.present(true);
             terminal.select();
             terminal.widget().grab_focus();
         } else {
@@ -488,7 +471,7 @@ impl App {
     }
     /// Fade the tab here and, as it rises, in the daemon's other views until input answers it.
     fn alert(self: &Rc<Self>, id: u32, severity: u32) {
-        if let Some(severity) = self.tabstrip.alert(id, severity) {
+        if let Some(severity) = self.strip_of(id).alert(id, severity) {
             if self.features(id) & WIRE_FEATURE_ATTENTION != 0 {
                 self.send(id, CommandKind::Attention(severity));
             }
@@ -502,7 +485,7 @@ impl App {
             Action::Send(kind) => {
                 // Keys, paste and mouse reports answer a bell; focus reports use FocusState.
                 if matches!(kind, CommandKind::Input { .. }) {
-                    self.tabstrip.answer(id);
+                    self.strip_of(id).answer(id);
                 }
                 self.send(id, kind)
             }
@@ -592,7 +575,7 @@ impl App {
             }
             EventKind::Bell => {
                 self.window.error_bell();
-                let severity = self.tabstrip.ring(event.tab);
+                let severity = self.strip_of(event.tab).ring(event.tab);
                 self.alert(event.tab, severity);
                 if !self.window.is_active() {
                     self.window.set_urgency_hint(true);
@@ -600,9 +583,9 @@ impl App {
             }
             EventKind::Attention(severity) => {
                 if *severity > 0 {
-                    self.tabstrip.alert(event.tab, *severity);
+                    self.strip_of(event.tab).alert(event.tab, *severity);
                 } else {
-                    self.tabstrip.answer(event.tab);
+                    self.strip_of(event.tab).answer(event.tab);
                 }
             }
             EventKind::Print(bytes) => self.print(bytes)?,
@@ -679,13 +662,14 @@ impl App {
             .collect();
         for page in obsolete {
             replaced_active |= page.id == self.active.get();
-            self.leave(page.id);
+            if let Some(pane) = self.pane_of(page.id) {
+                if let Some(index) = pane.notebook.page_num(&page.widget) {
+                    pane.notebook.remove_page(Some(index));
+                }
+            }
             self.pages
                 .borrow_mut()
                 .retain(|current| current.id != page.id);
-            if let Some(index) = self.notebook.page_num(&page.widget) {
-                self.notebook.remove_page(Some(index));
-            }
         }
         for record in &records {
             let existing = self
@@ -744,7 +728,7 @@ impl App {
                     view: Rc::new(RefCell::new(None)),
                 };
                 self.pages.borrow_mut().push(page.clone());
-                self.notebook.append_page(&page.widget, Some(&page.label));
+                self.notebook().append_page(&page.widget, Some(&page.label));
                 page.widget.show_all();
                 page.label.show();
                 page
@@ -797,10 +781,11 @@ impl App {
                 .map(|(position, record)| (record.id, position))
                 .collect();
             pages.sort_by_key(|page| (page.id >> LINK_SHIFT, order.get(&page.id).copied()));
-            for (position, page) in pages.iter().enumerate() {
-                self.notebook
-                    .reorder_child(&page.widget, Some(position as u32));
-            }
+        }
+        self.reorder_panes();
+        let collapsed = self.collapse();
+        if collapsed {
+            self.rebuild();
         }
         self.syncing.set(false);
         let requested = link.requested.replace(0);
@@ -840,8 +825,7 @@ impl App {
                     && page.id >> LINK_SHIFT == index
                     && (!page.browser || page.view.borrow().is_some()));
             self.syncing.set(true);
-            self.notebook
-                .set_current_page(self.notebook.page_num(&page.widget));
+            self.show_page(page.id);
             self.syncing.set(false);
             if changed {
                 self.activate(chosen);
@@ -853,6 +837,7 @@ impl App {
         } else {
             self.message(Some("No tabs. Ctrl+Shift+T opens a terminal."));
         }
+        self.present(false);
         if index != 0 && records.is_empty() {
             self.drop_remote(index);
         }

@@ -311,8 +311,29 @@ class RustApplicationTest(unittest.TestCase):
             xdo('mouseup', '1')
             # The anchor stays left; the dropped tab takes the right half and focus.
             wait_for(blue, red, 'dropping a tab on the right edge did not split the window')
+            # Each pane has its own strip holding only its tabs: the dropped tab is selected in the right strip,
+            # and the left strip no longer has the second tab where the shared strip had it.
+            background = (24, 24, 24)
+            self.assertNotEqual(pixel(.505, 4 / 500), background, 'the right pane has no tab strip of its own')
+            self.assertEqual(pixel(100 / 900, 4 / 500), background, 'the left strip still lists the dropped tab')
+            # Dragging the right pane's tab onto the left strip puts it back there and ends the split.
+            xdo('mousemove', '--window', wid, '462', '8', 'mousedown', '1')
+            for step in range(1, 11):
+                xdo('mousemove', '--window', wid, str(462 - 400 * step // 10), '8')
+                time.sleep(.02)
+            xdo('mouseup', '1')
+            wait_for(red, red, 'dropping a tab on the other strip did not merge the panes')
+            self.assertEqual(pixel(.505, 4 / 500), background, 'the right strip outlived the split')
+            # Split again, then Ctrl+Shift+X gathers the tabs.
+            xdo('mousemove', '--window', wid, '12', '8', 'mousedown', '1')
+            for step in range(1, 11):
+                xdo('mousemove', '--window', wid, str(12 + 876 * step // 10), str(8 + 250 * step // 10))
+                time.sleep(.02)
+            xdo('mouseup', '1')
+            wait_for(blue, red, 'the second split did not happen')
             xdo('key', '--clearmodifiers', 'ctrl+shift+x')
             wait_for(red, red, 'ctrl+shift+x did not leave only the focused pane')
+            self.assertEqual(pixel(.505, 4 / 500), background, 'the right strip outlived the unsplit')
 
     @staticmethod
     def stop(process):

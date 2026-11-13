@@ -98,13 +98,13 @@ impl Layout {
             },
         }
     }
-    /// `id` joins the pane showing `anchor` on the `zone` side, or takes its place for `Center`.
+    /// `id` joins the pane showing `anchor` on the `zone` side; `Center` is no split and changes nothing.
     pub fn insert(self, anchor: u32, id: u32, zone: Zone) -> Self {
         match self {
             Self::Leaf(leaf) if leaf == anchor => {
                 let (new, old) = (Box::new(Self::Leaf(id)), Box::new(Self::Leaf(leaf)));
                 match zone {
-                    Zone::Center => Self::Leaf(id),
+                    Zone::Center => Self::Leaf(leaf),
                     Zone::Left => Self::split(true, new, old),
                     Zone::Right => Self::split(true, old, new),
                     Zone::Top => Self::split(false, new, old),
@@ -129,10 +129,6 @@ impl Layout {
             first,
             second,
         }
-    }
-    /// A layout showing one tab is no split.
-    pub fn split_only(self) -> Option<Self> {
-        matches!(self, Self::Split { .. }).then_some(self)
     }
 }
 
@@ -161,10 +157,7 @@ mod tests {
         assert_eq!(left.leaves(), [2, 1]);
         let nested = left.insert(1, 3, Zone::Bottom);
         assert_eq!(nested.leaves(), [2, 1, 3]);
-        assert_eq!(
-            nested.clone().insert(2, 4, Zone::Center).leaves(),
-            [4, 1, 3]
-        );
+        assert_eq!(nested.clone().insert(2, 4, Zone::Center), nested);
         assert_eq!(nested.insert(9, 5, Zone::Left).leaves(), [2, 1, 3]);
     }
 
@@ -175,7 +168,6 @@ mod tests {
         assert_eq!(layout.clone().without(1).unwrap().leaves(), [2, 3]);
         let alone = layout.without(1).unwrap().without(3).unwrap();
         assert_eq!(alone, Leaf(2));
-        assert_eq!(alone.clone().split_only(), None);
         assert_eq!(alone.without(2), None);
     }
 }

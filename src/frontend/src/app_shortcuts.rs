@@ -70,9 +70,9 @@ impl App {
         if (state == Mod::CONTROL_MASK || state == control_shift)
             && [key::Tab, key::ISO_Left_Tab].contains(&value)
         {
-            let count = self.notebook.n_pages();
+            let count = self.notebook().n_pages();
             if count != 0 {
-                let current = self.notebook.current_page().unwrap_or(0);
+                let current = self.notebook().current_page().unwrap_or(0);
                 self.select_index(if state == control_shift {
                     (current + count - 1) % count
                 } else {
@@ -140,7 +140,7 @@ impl App {
             zoom += if value == key::equal { 1.0 } else { -1.0 };
         } else if state == Mod::CONTROL_MASK || state == Mod::MOD1_MASK {
             if let Some(c @ '0'..='9') = value.to_unicode() {
-                let count = self.notebook.n_pages();
+                let count = self.notebook().n_pages();
                 if count != 0 {
                     let index = match c {
                         '9' => count - 1,
