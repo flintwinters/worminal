@@ -266,6 +266,19 @@ impl Tab {
             self.catalog_dirty = true;
             self.regroup = true;
         }
+        // A task that exits without withdrawing its OSC 9;4 progress would leave the tab busy forever.
+        // The shell leads its own process group, so the shell in the foreground means nothing is running.
+        if self.mode & terminal::MODE_BUSY != 0
+            && terminal
+                .pty
+                .fd()
+                .filter(|_| pid > 0)
+                .and_then(crate::ssh::foreground_group)
+                == Some(pid)
+        {
+            self.mode &= !terminal::MODE_BUSY;
+            self.catalog_dirty = true;
+        }
     }
 
     /// The name views paint for this tab; grouping compares it.

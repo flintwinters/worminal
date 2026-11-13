@@ -16,6 +16,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use worminal_engine_sys::MODE_BUSY;
 use worminal_protocol::worp::{
     commands::{CommandKind, OpenMode},
     events::{Catalog, Event, EventKind, TabKind},
@@ -252,6 +253,8 @@ struct Page {
     directory: PathBuf,
     /// Remote user while an SSH client is in the terminal's foreground.
     ssh_user: Option<String>,
+    /// A task in the terminal reports progress (OSC 9;4), as an agent does while it works.
+    busy: bool,
     browser: bool,
     url: String,
     view: Rc<RefCell<Option<crate::browser::Browser>>>,
@@ -723,6 +726,7 @@ impl App {
                     title: String::new(),
                     directory: PathBuf::new(),
                     ssh_user: None,
+                    busy: false,
                     browser: record.browser,
                     url: record.url.clone(),
                     view: Rc::new(RefCell::new(None)),
@@ -769,6 +773,7 @@ impl App {
                 }
                 page.directory = record.directory.clone();
                 page.ssh_user = record.ssh_user.clone();
+                page.busy = record.mode & MODE_BUSY != 0;
             }
         }
         {

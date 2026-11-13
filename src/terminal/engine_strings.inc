@@ -46,6 +46,12 @@ te_strhandle(TermEngine *session)
 			if (narg > 1)
 				te_xsettitle(session, strescseq.args[1]);
 			return;
+		case 9: /* OSC 9 ; 4 ; state ; value -- task progress (ConEmu); plain OSC 9 text is not supported */
+			if (narg > 2 && !strcmp(strescseq.args[1], "4")) {
+				j = atoi(strescseq.args[2]);
+				te_xsetmode(session, j == 1 || j == 3, MODE_BUSY);
+			}
+			return;
 		case 8: /* hyperlink: OSC 8 ; params ; URI */
 			te_oschyperlink(session);
 			return;
@@ -475,6 +481,7 @@ te_eschandle(TermEngine *session, uchar ascii)
 		te_xsetmode(session, 0, MODE_HIDE);
 		te_xsetmode(session, 0, MODE_BRCKTPASTE);
 		te_xsetmode(session, 0, MODE_ALTSCROLL);
+		te_xsetmode(session, 0, MODE_BUSY);
 		break;
 	case '=': /* DECPAM -- Application keypad */
 		te_xsetmode(session, 1, MODE_APPKEYPAD);

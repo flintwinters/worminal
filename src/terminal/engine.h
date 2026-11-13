@@ -56,6 +56,7 @@ enum win_mode {
 	MODE_BRCKTPASTE  = 1 << 16,
 	MODE_NUMLOCK     = 1 << 17,
 	MODE_ALTSCROLL   = 1 << 18,
+	MODE_BUSY        = 1 << 19, /* OSC 9;4 reports an active task: normal progress or indeterminate */
 	MODE_MOUSE       = MODE_MOUSEBTN|MODE_MOUSEMOTION|MODE_MOUSEX10\
 	                  |MODE_MOUSEMANY,
 };

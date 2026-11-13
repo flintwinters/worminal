@@ -185,6 +185,43 @@ fn a_foreground_ssh_client_labels_the_tab_with_its_user() {
 }
 
 #[test]
+fn progress_reports_set_and_clear_the_busy_mode_in_the_catalog() {
+    let mut fixture = Fixture::new();
+    let tab = &mut fixture.tab;
+    assert_eq!(
+        tab.metadata_record(1).unwrap().mode & terminal::MODE_BUSY,
+        0
+    );
+    tab.feed(b"\x1b]9;4;3\x07", 2).unwrap();
+    assert_ne!(
+        tab.metadata_record(3).unwrap().mode & terminal::MODE_BUSY,
+        0
+    );
+    tab.feed(b"\x1b]9;4;0;\x07", 4).unwrap();
+    assert_eq!(
+        tab.metadata_record(5).unwrap().mode & terminal::MODE_BUSY,
+        0
+    );
+}
+
+#[test]
+fn a_progress_report_the_task_never_withdrew_ends_when_the_shell_returns_to_the_foreground() {
+    // Without this a task killed mid-progress would leave its tab busy until the tab closed.
+    let mut fixture = Fixture::new();
+    let tab = &mut fixture.tab;
+    tab.feed(b"\x1b]9;4;3\x07", 1).unwrap();
+    tab.metadata(2).unwrap();
+    assert!(!tab.catalog_dirty);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while tab.mode & terminal::MODE_BUSY != 0 && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+        tab.refresh_directory(3);
+    }
+    assert_eq!(tab.mode & terminal::MODE_BUSY, 0);
+    assert!(tab.catalog_dirty, "views learn that the task ended");
+}
+
+#[test]
 fn output_directory_checks_coalesce_without_delaying_periodic_checks() {
     let mut fixture = Fixture::new();
     let tab = &mut fixture.tab;

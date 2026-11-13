@@ -43,6 +43,7 @@ impl App {
                     browser: page.browser,
                     remote: self.master_of(page.id).is_some(),
                     ssh: page.ssh_user.is_some(),
+                    busy: page.busy,
                 }
             })
             .collect();
