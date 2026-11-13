@@ -102,10 +102,10 @@ mod label_tests {
 
     #[test]
     fn labels_prefer_the_ssh_user_and_fall_back_to_the_last_component() {
-        assert_eq!(tab_label(b"/home/a/project", None), b"project");
-        assert_eq!(tab_label(b"/home/a/project/", None), b"project");
+        assert_eq!(tab_label(b"/srv/work/project", None), b"project");
+        assert_eq!(tab_label(b"/srv/work/project/", None), b"project");
         assert_eq!(tab_label(b"/", None), b"/");
-        assert_eq!(tab_label(b"/home/a/project", Some(b"root")), b"root");
+        assert_eq!(tab_label(b"/srv/work/project", Some(b"root")), b"root");
         let field = directory_field(b"/x", Some(b"root"));
         assert_eq!(
             split_directory_field(&field),
