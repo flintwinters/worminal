@@ -17,6 +17,7 @@ try:
 except ModuleNotFoundError as error:
     raise SystemExit("Install Typer to use manage.py: python3 -m pip install typer") from error
 
+from tools import timing
 from tools.paths import CHECKS, runtime_binary
 from tools import build as native_build
 from tools.theme import explorer_font
@@ -53,7 +54,8 @@ def run(args, *, env=None):
     # Maintenance checks must never read or overwrite the user's recovery recipes.
     private_env = {**(os.environ if env is None else env),
                    "XDG_STATE_HOME": str(CHECKS / "state")}
-    return subprocess.run(args, env=private_env).returncode
+    with timing.span(" ".join(str(part) for part in args)[:120].replace(sys.executable, "python"), "run"):
+        return subprocess.run(args, env=private_env).returncode
 
 
 def check_file_limits():
@@ -1027,9 +1029,37 @@ def qtile():
     raise typer.Exit(run_proof_script(ROOT / "tests/proof_qtile.py"))
 
 
+@app.command("timings")
+def timings(run: str = typer.Argument(None, help="Run file name or unique part of it; default is the latest."),
+            depth: int = typer.Option(4, min=1, help="Levels of the span tree to show."),
+            minimum: float = typer.Option(0.5, help="Hide spans faster than this many seconds."),
+            list_runs: bool = typer.Option(False, "--list", help="List recorded runs instead."),
+            compare: bool = typer.Option(False, "--compare", help="Compare with the previous run of the same command.")):
+    """Show where the time of a recorded manage.py run went (every command records its own)."""
+    runs = timing.runs()
+    if list_runs:
+        for path in runs[-30:]:
+            spans, roots = timing.load(path)
+            typer.echo(f"{path.name}  {max((root['seconds'] for root in roots), default=0):8.1f}s")
+        return
+    chosen = [path for path in runs if not run or run in path.name]
+    if not chosen:
+        raise typer.Exit("No recorded runs; run a manage.py command first.")
+    latest = chosen[-1]
+    typer.echo(timing.render(latest, depth=depth, minimum=minimum))
+    if compare:
+        command = latest.name.split("-", 2)[2]
+        earlier = [path for path in chosen[:-1] if path.name.endswith("-" + command)]
+        typer.echo("\n" + (timing.compare(latest, earlier[-1]) if earlier else "No earlier run of this command."))
+
+
 if __name__ == "__main__":
+    command = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else "manage"
+    if command != "timings":
+        timing.start(command)
     try:
-        app()
+        with timing.span("manage.py " + " ".join(sys.argv[1:]), "command"):
+            app()
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         typer.echo(f"Command failed: {error}", err=True)
         raise SystemExit(1) from error

@@ -15,6 +15,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+from tools import timing
 from tools.paths import CHECKS
 
 # These modules use private temporary resources and do not publish shared build artifacts.
@@ -57,6 +58,8 @@ def environment(directory):
     env['PYTHONDONTWRITEBYTECODE'] = '1'
     env['PYTHONPATH'] = os.pathsep.join([str(ROOT/'tests'), str(ROOT), env.get('PYTHONPATH', '')])
     env['GIO_USE_VFS'] = 'local'
+    if timing.active():
+        env[timing.PARENT_VARIABLE] = timing.current()
     for name, child in (('XDG_STATE_HOME', 'state'), ('XDG_CACHE_HOME', 'cache'),
                         ('XDG_DATA_HOME', 'data'), ('XDG_RUNTIME_DIR', 'runtime')):
         path = directory/child
@@ -108,6 +111,11 @@ def retire_worker(process, directory):
 
 
 def invoke(name, args, directory, timeout=180):
+    with timing.span(name, "test-module"):
+        return _invoke(name, args, directory, timeout)
+
+
+def _invoke(name, args, directory, timeout):
     directory.mkdir(parents=True)
     started = time.perf_counter()
     log = directory/'output.log'
@@ -185,12 +193,24 @@ class SerialLoader(unittest.TestLoader):
         return super().loadTestsFromModule(module, *args, **kwargs)
 
 
+class TimedResult(unittest.TextTestResult):
+    """Records each test case as a span so slow cases show under their module in `manage.py timings`."""
+    def startTest(self, test):
+        self._span = timing.span(test.id(), 'test')
+        self._span.__enter__()
+        super().startTest(test)
+
+    def stopTest(self, test):
+        super().stopTest(test)
+        self._span.__exit__(None, None, None)
+
+
 def worker(excluded, match):
     loader = SerialLoader(excluded)
     if match:
         loader.testNamePatterns = [match if '*' in match else f'*{match}*']
     suite = loader.discover(str(ROOT/'tests'))
-    result = unittest.TextTestRunner(verbosity=0).run(suite)
+    result = unittest.TextTestRunner(verbosity=0, resultclass=TimedResult).run(suite)
     return int(not result.wasSuccessful())
 
 

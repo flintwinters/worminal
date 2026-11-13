@@ -11,6 +11,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
+from tools import timing
 from tools.paths import runtime_binary
 from tools.test_runner import available_cpus
 
@@ -44,8 +45,16 @@ def words(name, default=""):
     return shlex.split(os.environ.get(name, default))
 
 
+def describe(command):
+    """The artifact a compiler or cargo command produces, else its first words."""
+    if "-o" in command[:-1]:
+        return Path(command[command.index("-o") + 1]).name.removesuffix(".pending")
+    return " ".join(str(part) for part in command[:8])
+
+
 def invoke(command):
-    subprocess.run(command, cwd=ROOT, check=True)
+    with timing.span(describe(command), "compile"):
+        subprocess.run(command, cwd=ROOT, check=True)
 
 
 def pkg_flags(option, packages=PACKAGES):
