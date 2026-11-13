@@ -786,3 +786,17 @@ fn osc99_only_reaches_capable_controllers() {
         }
     }
 }
+
+#[test]
+fn a_new_tab_opens_beside_the_tab_its_window_shows() {
+    let mut fixture = Fixture::sized(9, 80, 24, 3);
+    fixture.service.tabs[1].shown = true;
+    let mut launch = Launch::restore(Vec::new());
+    launch.arguments = vec!["/bin/cat".into()];
+    let index = fixture.service.open_terminal(&launch, Some(1)).unwrap();
+    assert_eq!(index, 2, "inserted after the shown tab, not appended");
+    let new_id = fixture.service.tabs[2].id;
+    assert!(![1, 2, 3].contains(&new_id));
+    let index = fixture.service.open_terminal(&launch, None).unwrap();
+    assert_eq!(index, 4, "headless opens still append");
+}

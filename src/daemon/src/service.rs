@@ -164,9 +164,17 @@ impl Service {
                 "Program or working directory could not be opened.",
             ));
         }
-        self.tabs.push(tab);
+        // The launch inherits the active tab's directory, so the new tab joins it rather than waiting
+        // at the end for a title change that never comes (the label is already settled at creation).
+        let active = client.and_then(|client| {
+            self.tabs
+                .iter()
+                .position(|tab| tab.shown && tab.controller == Some(client))
+        });
+        let position = active.map_or(self.tabs.len(), |index| index + 1);
+        self.tabs.insert(position, tab);
         self.restored_launch = false;
-        Ok(self.tabs.len() - 1)
+        Ok(position)
     }
 
     pub fn open_browser(&mut self, url: Vec<u8>) -> io::Result<u32> {
