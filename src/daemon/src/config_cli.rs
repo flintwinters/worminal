@@ -2,13 +2,9 @@
 use std::{ffi::OsString, io};
 use worminal_config::sync::Prefer;
 
-const USAGE: &str = "usage: worminald config [--json [--defaults]|--paths]\n\
+const USAGE: &str = "usage: worminald config [--json [--defaults]|--paths|--example|--help]\n\
     worminald config sync [--prefer local|remote] SSH_ENDPOINT\n\
-    Validate the effective configuration (worminal.yaml layered over an Alacritty config).\n\
-    --json  print the resolved settings (--defaults ignores every file); --paths  print the files in use\n\
-    sync merges worminal.yaml with the peer per key against the last agreed copy; conflicting keys stay as they\n\
-    are on both sides and are reported until --prefer picks a side. Comments in rewritten files are not kept.\n\
-    (exchange is the peer side of sync.)";
+    Run worminald config --help for the complete reference.";
 
 fn sync(arguments: &[OsString]) -> io::Result<i32> {
     let (prefer, endpoint) = match arguments {
@@ -48,7 +44,11 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
         [flag] if flag == "--json" || flag == "--paths" => flag.to_str().unwrap_or(""),
         [json, defaults] if json == "--json" && defaults == "--defaults" => "--defaults",
         [flag] if flag == "--help" || flag == "-h" => {
-            println!("{USAGE}");
+            println!("{}", worminal_config::help());
+            return Ok(0);
+        }
+        [flag] if flag == "--example" => {
+            print!("{}", worminal_config::EXAMPLE);
             return Ok(0);
         }
         _ => {
@@ -63,6 +63,10 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
         if mode == "--paths" {
             println!("worminal: {}", found(worminal_config::worminal_path())?);
             println!("alacritty: {}", found(worminal_config::alacritty_path())?);
+            println!(
+                "worminal_default: {}",
+                worminal_config::worminal_default_path().display()
+            );
             return Ok(());
         }
         let settings = if mode == "--defaults" {
@@ -74,6 +78,16 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
             println!("{}", settings.to_json());
         } else {
             println!("configuration is valid");
+            if let Some(path) = worminal_config::worminal_path()? {
+                let ignored = worminal_config::unknown_keys(&worminal_config::read(&path)?);
+                if !ignored.is_empty() {
+                    println!(
+                        "ignored by Worminal in {}: {} (see worminald config --help)",
+                        path.display(),
+                        ignored.join(", ")
+                    );
+                }
+            }
         }
         Ok::<(), String>(())
     })();

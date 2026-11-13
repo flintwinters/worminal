@@ -6,6 +6,7 @@ Resolution rules themselves are unit-tested in src/config; these checks cover th
 import json
 import os
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -38,6 +39,19 @@ class ThemeTest(unittest.TestCase):
             result = config_json(WORMINAL_CONFIG=str(FIXTURES / "absent.yaml"))
             self.assertEqual(result.returncode, 1)
             self.assertIn("does not exist", result.stderr)
+
+    def test_the_executable_teaches_how_to_configure(self):
+        """An agent needs no docs: --help, --example and --paths say what to edit, and validation names typos."""
+        self.assertIn("worminald config --paths", config_json("--help").stdout)
+        example = config_json("--example", WORMINAL_CONFIG="").stdout
+        with tempfile.TemporaryDirectory(prefix="config-", dir=Path(__file__).resolve().parents[1] / "build") as root:
+            written = Path(root) / "worminal.yaml"
+            written.write_text(example + "font:\n  sizee: 12\n")
+            result = config_json(WORMINAL_CONFIG=str(written))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("font.sizee", result.stdout)
+            paths = config_json("--paths", XDG_CONFIG_HOME=root).stdout
+            self.assertIn(f"worminal_default: {root}/worminal/worminal.yaml", paths)
 
     def test_defaults_ignore_every_file(self):
         result = config_json("--json", "--defaults", WORMINAL_ALACRITTY_CONFIG=str(FIXTURES / "main.toml"))

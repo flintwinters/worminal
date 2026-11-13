@@ -35,12 +35,17 @@ fn explicit(variable: &str, what: &str) -> Result<Option<PathBuf>, String> {
     }
 }
 
+/// Where worminal.yaml belongs when none exists yet.
+pub fn worminal_default_path() -> PathBuf {
+    config_home().join("worminal/worminal.yaml")
+}
+
 /// `WORMINAL_CONFIG`, else `$XDG_CONFIG_HOME/worminal/worminal.yaml` when present.
 pub fn worminal_path() -> Result<Option<PathBuf>, String> {
     if let Some(path) = explicit("WORMINAL_CONFIG", "Worminal config")? {
         return Ok(Some(path));
     }
-    let path = config_home().join("worminal/worminal.yaml");
+    let path = worminal_default_path();
     Ok(path.is_file().then_some(path))
 }
 

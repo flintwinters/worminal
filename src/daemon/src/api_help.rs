@@ -10,7 +10,7 @@ Discover by topic (each prints a complete reference and needs no running daemon)
   worminald api help                  list, open, close, read, type, key, devices, enroll, forget
   worminald api help schema           JSON reply shapes, limits, exit codes
   worminald api help session          binary streaming protocol (worminald api --session)
-  worminald config --help             inspect or validate runtime configuration (worminal.yaml)
+  worminald config --help             how to read, edit and validate worminal.yaml (--example)
   worminald install-on-remote --help  bootstrap a new headless node over SSH
   worminald upgrade-remote --help     sync an older node with a newer peer
 

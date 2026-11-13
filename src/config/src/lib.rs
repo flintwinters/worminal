@@ -3,12 +3,14 @@
 //! Configuration is read when a process first needs it, never at build time. `worminal.yaml` holds the
 //! Worminal-owned settings and may use any Alacritty key; an existing Alacritty config (TOML or legacy
 //! YAML, with imports) supplies everything it does not override, so current setups keep working.
+mod reference;
 mod resolve;
 mod source;
 pub mod sync;
 
+pub use reference::{help, unknown_keys, EXAMPLE};
 pub use resolve::{Settings, COLOR_COUNT};
-pub use source::{alacritty_path, worminal_path};
+pub use source::{alacritty_path, read, worminal_default_path, worminal_path};
 use std::sync::OnceLock;
 
 /// Settings of this process. Invalid configuration reports to stderr and falls back to defaults rather

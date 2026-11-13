@@ -299,3 +299,56 @@ mod sync_tests {
         assert!(parse("").unwrap().is_empty());
     }
 }
+
+#[test]
+fn the_example_is_the_default_configuration_and_names_only_known_keys() {
+    let example: Value = serde_yaml_ng::from_str(EXAMPLE).unwrap();
+    assert_eq!(
+        resolve(example.clone()).unwrap(),
+        resolve(json!({})).unwrap()
+    );
+    assert!(
+        unknown_keys(&example).is_empty(),
+        "{:?}",
+        unknown_keys(&example)
+    );
+}
+
+#[test]
+fn unknown_keys_flag_typos_but_not_supported_spellings() {
+    let config: Value = serde_yaml_ng::from_str(
+        "font: {size: 10, nmal: {family: x}}\nwindow: {opacity: 0.9}\n\
+         colors: {normal: {red: '#ff0000', pink: '#ffffff'}, indexed_colors: []}\n\
+         general: {import: [], live_config_reload: true}\nworminal: {group_tabs_by_title: false, tabs: 1}\n",
+    )
+    .unwrap();
+    assert_eq!(
+        unknown_keys(&config),
+        [
+            "colors.normal.pink",
+            "font.nmal",
+            "general.live_config_reload",
+            "window",
+            "worminal.tabs"
+        ]
+    );
+}
+
+#[test]
+fn the_reference_lists_every_command_and_setting() {
+    let text = help();
+    for word in [
+        "--paths",
+        "--json",
+        "--example",
+        "sync",
+        "font.size",
+        "scrolling.history",
+        "colors.indexed_colors",
+        "worminal.group_tabs_by_title",
+        "WORMINAL_CONFIG",
+        "restarts",
+    ] {
+        assert!(text.contains(word), "help omits {word}");
+    }
+}
