@@ -53,7 +53,9 @@ impl Command {
             CommandKind::Input { bytes, .. } if bytes.len() > super::MAX_INPUT_BYTES => {
                 return Err(invalid())
             }
-            CommandKind::Focus { columns, rows } | CommandKind::Resize { columns, rows }
+            CommandKind::Focus { columns, rows }
+            | CommandKind::Resize { columns, rows }
+            | CommandKind::Pane { columns, rows }
                 if *columns == 0
                     || *columns > crate::WORKSPACE_MAX_COLS
                     || *rows == 0
@@ -93,6 +95,11 @@ pub enum CommandKind {
         rows: u32,
     },
     Resize {
+        columns: u32,
+        rows: u32,
+    },
+    /// Focus that keeps the view's other shown tabs shown: a split pane. Needs `WIRE_FEATURE_PANES`.
+    Pane {
         columns: u32,
         rows: u32,
     },

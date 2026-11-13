@@ -42,6 +42,10 @@ fn variants() -> Vec<CommandKind> {
             columns: 90,
             rows: 25,
         },
+        CommandKind::Pane {
+            columns: 40,
+            rows: 12,
+        },
         CommandKind::FocusState(true),
         CommandKind::Close { receipt: false },
         CommandKind::Close { receipt: true },

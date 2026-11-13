@@ -73,12 +73,12 @@ pub fn decode(packet: Packet) -> io::Result<Option<Command>> {
             bytes: packet.body,
             control: Control::Acquire,
         },
-        WIRE_FOCUS | WIRE_RESIZE => {
+        WIRE_FOCUS | WIRE_RESIZE | WIRE_PANE => {
             let (columns, rows) = pair(&packet.body)?;
-            if packet.kind == WIRE_FOCUS {
-                CommandKind::Focus { columns, rows }
-            } else {
-                CommandKind::Resize { columns, rows }
+            match packet.kind {
+                WIRE_FOCUS => CommandKind::Focus { columns, rows },
+                WIRE_PANE => CommandKind::Pane { columns, rows },
+                _ => CommandKind::Resize { columns, rows },
             }
         }
         WIRE_CLOSE => CommandKind::Close { receipt: false },
@@ -185,13 +185,15 @@ pub fn encode(command: &Command) -> io::Result<Packet> {
             body.put_bytes(bytes)?;
             WIRE_INPUT
         }
-        CommandKind::Focus { columns, rows } | CommandKind::Resize { columns, rows } => {
+        CommandKind::Focus { columns, rows }
+        | CommandKind::Resize { columns, rows }
+        | CommandKind::Pane { columns, rows } => {
             body.put_u32(*columns)?;
             body.put_u32(*rows)?;
-            if matches!(command.kind, CommandKind::Focus { .. }) {
-                WIRE_FOCUS
-            } else {
-                WIRE_RESIZE
+            match command.kind {
+                CommandKind::Focus { .. } => WIRE_FOCUS,
+                CommandKind::Pane { .. } => WIRE_PANE,
+                _ => WIRE_RESIZE,
             }
         }
         CommandKind::Close { .. } => WIRE_CLOSE,

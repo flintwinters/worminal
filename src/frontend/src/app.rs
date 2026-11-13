@@ -34,6 +34,8 @@ mod links;
 mod notifications;
 #[path = "app_shortcuts.rs"]
 mod shortcuts;
+#[path = "app_split.rs"]
+mod split;
 
 thread_local! { static WINDOWS: RefCell<Vec<Rc<App>>> = const { RefCell::new(Vec::new()) }; }
 use config::Config;
@@ -272,6 +274,7 @@ struct App {
     state_id: u32,
     window: gtk::Window,
     notebook: gtk::Notebook,
+    panes: split::Panes,
     tabstrip: crate::tabs::Tabs,
     notifications: RefCell<notifications::Notifications>,
     notification_desktop: Rc<notifications::Desktop>,
@@ -348,7 +351,8 @@ impl App {
         status.set_no_show_all(true);
         let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
         container.pack_start(tabstrip.widget(), false, false, 0);
-        container.pack_start(&notebook, true, true, 0);
+        let panes = split::Panes::new(&notebook);
+        container.pack_start(panes.widget(), true, true, 0);
         container.pack_end(&status, false, false, 0);
         chrome::outline(&window, &container);
         let app = Rc::new(Self {
@@ -360,6 +364,7 @@ impl App {
             config,
             window,
             notebook,
+            panes,
             status,
             pages: RefCell::new(Vec::new()),
             active: Cell::new(0),
@@ -374,12 +379,7 @@ impl App {
             geometry_pending: Cell::new(true),
             early_keys: RefCell::new(VecDeque::new()),
         });
-        app.tabstrip.connect_selected(
-            glib::clone!(@weak app => move |id| app.select_id(id)),
-            glib::clone!(@weak app => move |id| app.send(id, CommandKind::Close { receipt: false })),
-        );
-        app.tabstrip
-            .connect_moved(glib::clone!(@weak app => move |id, target| app.move_tab(id, target)));
+        app.connect_tabstrip();
         // GTK maps the new child in its default switch handler. Focus it afterwards.
         app.notebook.connect_local("switch-page", true, glib::clone!(@weak app => @default-return None, move |values| {
             if app.syncing.get() { return None; }
@@ -442,6 +442,7 @@ impl App {
             .and_then(|page| page.terminal.clone())
     }
     fn activate(self: &Rc<Self>, id: u32) {
+        self.place(id);
         self.active.set(id);
         let title = self
             .pages
@@ -459,14 +460,7 @@ impl App {
         }
         if let Some(terminal) = self.terminal(id) {
             self.fit_geometry(&terminal);
-            let (cols, rows) = terminal.dimensions();
-            self.send(
-                id,
-                CommandKind::Focus {
-                    columns: cols,
-                    rows,
-                },
-            );
+            self.present();
             terminal.select();
             terminal.widget().grab_focus();
         } else {
@@ -513,7 +507,7 @@ impl App {
                 self.send(id, kind)
             }
             Action::Claim => self.activate(id),
-            Action::Resized(cols, rows) if !self.syncing.get() && self.active.get() == id => {
+            Action::Resized(cols, rows) if !self.syncing.get() && self.is_visible(id) => {
                 if let Some(terminal) = self.terminal(id) {
                     self.fit_geometry(&terminal);
                 }
@@ -685,6 +679,7 @@ impl App {
             .collect();
         for page in obsolete {
             replaced_active |= page.id == self.active.get();
+            self.leave(page.id);
             self.pages
                 .borrow_mut()
                 .retain(|current| current.id != page.id);
@@ -721,7 +716,10 @@ impl App {
                     )?)
                 };
                 let widget: gtk::Widget = if let Some(terminal) = &terminal {
-                    terminal.widget().clone().upcast()
+                    // A split moves the terminal out of its page and back, so the page owns a wrapper.
+                    let wrapper = gtk::Box::new(gtk::Orientation::Vertical, 0);
+                    wrapper.pack_start(terminal.widget(), true, true, 0);
+                    wrapper.upcast()
                 } else {
                     let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
                     let claim = gtk::Button::with_label("Show browser here");

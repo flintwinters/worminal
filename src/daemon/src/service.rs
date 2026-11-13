@@ -130,7 +130,7 @@ impl Service {
         }
     }
 
-    /// A client window displays one tab: mark it shown and every other tab it controls hidden.
+    /// `Focus` makes a window display one tab (`Pane` adds to the shown ones): mark it shown and every other tab it controls hidden.
     pub fn show(&mut self, index: usize, client: ClientId) {
         for (position, tab) in self.tabs.iter_mut().enumerate() {
             if tab.controller == Some(client) {

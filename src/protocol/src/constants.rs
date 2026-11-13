@@ -114,3 +114,9 @@ pub const ATTENTION_DONE: u32 = 1;
 pub const ATTENTION_HELP: u32 = 2;
 pub const ATTENTION_FAILED: u32 = 3;
 pub const WIRE_FEATURE_ATTENTION: u32 = 1 << 7;
+
+/// Like `FOCUS` (same two u32: columns, rows; takes control and resizes) but the tab joins the tabs the view
+/// already shows instead of hiding them, so one window can paint several tabs as split panes. `FOCUS` still
+/// leaves exactly one tab shown. The daemon advertises the feature; views never send the packet without it.
+pub const WIRE_PANE: u32 = 38;
+pub const WIRE_FEATURE_PANES: u32 = 1 << 8;

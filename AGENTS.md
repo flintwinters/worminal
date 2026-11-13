@@ -69,7 +69,9 @@ remote workspaces share saved URLs only. Updated owners stage automatic window r
 
 Painting preserves matching background runs, overlapping glyph/cursor damage, fractional-grid fallback and Unicode
 font fallback. Cache printable ASCII shaping only. Views defer unused buffers/layouts/input methods/timers.
-The Cairo tab strip uses terminal metrics/colors and the tab order reported by the daemon. Browser file labels
+Dragging a terminal tab onto a pane edge splits the window (`layout.rs` tree, `app_split.rs` widgets; per window, never
+persisted). The daemon only learns the shown set: `Focus` shows one tab, `Pane` (feature `PANES`) adds one, and `Resize`
+never hides neighbours. Ctrl+Shift+X unsplits. The Cairo tab strip uses terminal metrics/colors and the tab order reported by the daemon. Browser file labels
 decode the filename; web tabs retain document titles. D-Bus directory arrays retain original filesystem bytes.
 `docs/window-state.md` defines that read-only public contract. X11 activation uses fresh server timestamps;
 Wayland activation remains compositor policy.

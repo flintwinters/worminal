@@ -2,6 +2,7 @@
 use crate::{
     fonts::Fonts,
     graphics_ffi,
+    layout::Target,
     paint::{self, Metrics, Palette},
 };
 use gtk::{gdk, prelude::*};
@@ -22,7 +23,20 @@ pub struct Tab {
     /// An SSH client is in the terminal's foreground.
     pub ssh: bool,
 }
-/// A primary-button press on a tab. It becomes a reorder once the pointer travels past `DRAG_SLOP`.
+/// What the strip asks of the window. A tab is selected when its button is released, so a drag that
+/// starts on it leaves the panes it is dragged over on screen.
+pub struct Actions {
+    pub select: Box<dyn Fn(u32)>,
+    pub close: Box<dyn Fn(u32)>,
+    /// Dropped on another tab: `moved(dragged, target)` asks to move it into that tab's slot.
+    pub moved: Box<dyn Fn(u32, u32)>,
+    /// The pane region a drop of `dragged` at this strip position would split, if any.
+    pub locate: Box<dyn Fn(u32, f64, f64) -> Option<Target>>,
+    /// The region to mark while a drag hovers it; `None` clears the mark.
+    pub hover: Box<dyn Fn(Option<Target>)>,
+    pub split: Box<dyn Fn(u32, Target)>,
+}
+/// A primary-button press on a tab. It becomes a reorder or a split once the pointer travels past `DRAG_SLOP`.
 struct Drag {
     id: u32,
     x: f64,
@@ -30,6 +44,8 @@ struct Drag {
     active: bool,
     /// The tab whose slot the dragged tab takes if released now.
     over: Option<u32>,
+    /// The pane region the dragged tab splits if released now; it wins over `over`.
+    target: Option<Target>,
 }
 const DRAG_SLOP: f64 = 6.0;
 struct State {
@@ -48,6 +64,7 @@ struct State {
     glow: Cell<f64>,
     blink: RefCell<Option<glib::SourceId>>,
     drag: RefCell<Option<Drag>>,
+    actions: RefCell<Option<Rc<Actions>>>,
 }
 #[derive(Clone)]
 pub struct Tabs(Rc<State>);
@@ -246,17 +263,43 @@ impl State {
     }
     fn drag_to(&self, x: f64, y: f64) {
         let over = self.hit(x, y);
-        let mut drag = self.drag.borrow_mut();
-        let Some(drag) = drag.as_mut() else { return };
-        if !drag.active && (x - drag.x).hypot(y - drag.y) < DRAG_SLOP {
+        let Some((id, started)) = self.drag.borrow().as_ref().map(|drag| {
+            (
+                drag.id,
+                drag.active || (x - drag.x).hypot(y - drag.y) >= DRAG_SLOP,
+            )
+        }) else {
+            return;
+        };
+        if !started {
             return;
         }
-        // Keep the last target while the pointer crosses gaps.
-        let over = over.filter(|id| *id != drag.id).or(drag.over);
-        if !drag.active || over != drag.over {
+        // Window callbacks run with no strip state borrowed.
+        let actions = self.actions.borrow().clone();
+        let target = actions
+            .as_ref()
+            .and_then(|actions| (actions.locate)(id, x, y));
+        let changed = {
+            let mut drag = self.drag.borrow_mut();
+            let Some(drag) = drag.as_mut() else { return };
+            // Keep the last tab while the pointer crosses gaps; a pane region replaces it.
+            let over = if target.is_some() {
+                None
+            } else {
+                over.filter(|over| *over != drag.id).or(drag.over)
+            };
+            let changed = !drag.active || over != drag.over || target != drag.target;
+            let moved = target != drag.target;
             drag.active = true;
             drag.over = over;
+            drag.target = target;
+            changed.then_some(moved)
+        };
+        if let Some(moved) = changed {
             self.widget.queue_draw();
+            if let Some(actions) = actions.filter(|_| moved) {
+                (actions.hover)(target);
+            }
         }
     }
     /// Height follows the row count, which depends on the allocated width.
@@ -295,6 +338,7 @@ impl Tabs {
             glow: Cell::new(0.0),
             blink: RefCell::new(None),
             drag: RefCell::new(None),
+            actions: RefCell::new(None),
         });
         state.widget.add_events(
             gdk::EventMask::BUTTON_PRESS_MASK
@@ -326,33 +370,38 @@ impl Tabs {
     pub fn widget(&self) -> &gtk::DrawingArea {
         &self.0.widget
     }
-    pub fn connect_selected(&self, select: impl Fn(u32) + 'static, close: impl Fn(u32) + 'static) {
+    pub fn connect(&self, actions: Actions) {
         let state = self.0.clone();
+        *state.actions.borrow_mut() = Some(Rc::new(actions));
         self.0.widget.connect_button_press_event(glib::clone!(@weak state
             => @default-return glib::Propagation::Proceed, move |_, event| {
                 let (x, y) = event.position();
+                let Some(id) = state.hit(x, y) else { return glib::Propagation::Proceed };
                 match event.button() {
-                    1 => if let Some(id) = state.hit(x, y) {
-                        *state.drag.borrow_mut() = Some(Drag { id, x, y, active: false, over: None });
-                        select(id);
-                        return glib::Propagation::Stop;
-                    },
-                    2 => if let Some(id) = state.hit(x, y) { close(id); return glib::Propagation::Stop; },
-                    _ => {}
+                    1 => *state.drag.borrow_mut() = Some(Drag { id, x, y, active: false, over: None, target: None }),
+                    2 => {
+                        let actions = state.actions.borrow().clone();
+                        if let Some(actions) = actions { (actions.close)(id); }
+                    }
+                    _ => return glib::Propagation::Proceed,
                 }
-                glib::Propagation::Proceed
+                glib::Propagation::Stop
             }));
-    }
-    /// Dropping a dragged tab on another asks to move it into that tab's slot: `moved(dragged, target)`.
-    pub fn connect_moved(&self, moved: impl Fn(u32, u32) + 'static) {
-        let state = self.0.clone();
         self.0.widget.connect_button_release_event(glib::clone!(@weak state
             => @default-return glib::Propagation::Proceed, move |_, event| {
                 if event.button() != 1 { return glib::Propagation::Proceed; }
                 let Some(drag) = state.drag.borrow_mut().take() else { return glib::Propagation::Proceed };
+                let Some(actions) = state.actions.borrow().clone() else { return glib::Propagation::Proceed };
                 if drag.active {
                     state.widget.queue_draw();
-                    if let Some(target) = drag.over { moved(drag.id, target); }
+                    (actions.hover)(None);
+                }
+                match (drag.target, drag.over) {
+                    (Some(target), _) => (actions.split)(drag.id, target),
+                    (None, over) => {
+                        if let Some(over) = over { (actions.moved)(drag.id, over); }
+                        (actions.select)(drag.id);
+                    }
                 }
                 glib::Propagation::Proceed
             }));

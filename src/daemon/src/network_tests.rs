@@ -292,6 +292,30 @@ fn hidden_tabs_defer_frames_and_reveal_with_a_delta() {
     );
 }
 
+/// A pane joins the shown tabs; `FOCUS` is what hides the rest. Without this a split window would see
+/// only the last-focused pane's frames from a focused-frames daemon.
+#[test]
+fn pane_keeps_other_shown_tabs_shown_and_focus_hides_them() {
+    let mut fixture = Fixture::sized(9 | 16, 120, 40, 3);
+    let send = |fixture: &mut Fixture, kind: u32, tab: u32| {
+        let body = [60u32, 40].iter().flat_map(|v| v.to_be_bytes()).collect();
+        fixture
+            .service
+            .message(1, Packet { kind, tab, body })
+            .unwrap();
+    };
+    send(&mut fixture, WIRE_FOCUS, 1);
+    send(&mut fixture, WIRE_PANE, 2);
+    let shown = |fixture: &Fixture| -> Vec<bool> {
+        fixture.service.tabs.iter().map(|tab| tab.shown).collect()
+    };
+    assert_eq!(shown(&fixture), [true, true, false]);
+    send(&mut fixture, WIRE_PANE, 3);
+    assert_eq!(shown(&fixture), [true, true, true]);
+    send(&mut fixture, WIRE_FOCUS, 2);
+    assert_eq!(shown(&fixture), [false, true, false]);
+}
+
 #[test]
 fn move_command_reorders_tabs_and_publishes_the_new_order() {
     let mut fixture = Fixture::sized(9, 80, 24, 3);

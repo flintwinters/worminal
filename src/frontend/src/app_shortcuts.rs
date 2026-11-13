@@ -111,6 +111,10 @@ impl App {
                     self.send(self.active.get(), CommandKind::Close { receipt: false });
                     return true;
                 }
+                key::x => {
+                    self.unsplit();
+                    return true;
+                }
                 key::c | key::v | key::y => {
                     if let Some(terminal) = self.terminal(self.active.get()) {
                         if value == key::c {

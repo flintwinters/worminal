@@ -119,6 +119,7 @@ impl Service {
                                     | WIRE_FEATURE_ROW_SPAN
                                     | WIRE_FEATURE_NOTIFICATIONS
                                     | WIRE_FEATURE_ATTENTION
+                                    | WIRE_FEATURE_PANES
                                     | WIRE_FEATURE_ROW_LINKS,
                             ),
                         },
@@ -347,7 +348,9 @@ impl Service {
                     }
                 }
             }
-            CommandKind::Focus { columns, rows } | CommandKind::Resize { columns, rows } => {
+            CommandKind::Focus { columns, rows }
+            | CommandKind::Resize { columns, rows }
+            | CommandKind::Pane { columns, rows } => {
                 if matches!(command.kind, CommandKind::Resize { .. })
                     && self.tabs[index].controller != Some(client)
                 {
@@ -363,7 +366,12 @@ impl Service {
                 let claim = self.tabs[index].controller != Some(client);
                 let revealed = !self.tabs[index].shown;
                 self.take_control(index, client);
-                self.show(index, client);
+                // Only `Focus` hides the client's other tabs: a pane's resize must not hide its neighbours.
+                if matches!(command.kind, CommandKind::Focus { .. }) {
+                    self.show(index, client);
+                } else {
+                    self.tabs[index].shown = true;
+                }
                 let resized = self.resize(index, columns, rows, now)?;
                 if claim || resized || revealed {
                     // A revealed tab resumes from its retained baseline with a delta.

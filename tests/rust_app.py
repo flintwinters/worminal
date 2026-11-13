@@ -6,6 +6,7 @@ from runtime import runtime_binary
 from contextlib import ExitStack
 import os
 import fcntl
+import json
 from pathlib import Path
 import socket
 import signal
@@ -231,6 +232,87 @@ class RustApplicationTest(unittest.TestCase):
                 subprocess.run(['xdotool', 'type', '--clearmodifiers', 'survives'], env=env, check=True)
                 self.assertEqual(read_bytes(attached.stdout, 8), b'survives')
                 self.assertEqual(os.readlink(f'/proc/{shell}/fd/0'), tty)
+
+    def test_dragging_a_tab_onto_a_pane_edge_splits_the_window(self):
+        from Xlib import X, display, error
+        from PIL import Image
+        red, blue = (200, 30, 30), (20, 40, 210)
+        # Each terminal repaints its whole screen continuously: resizing keeps text but not erased background.
+        # Typing through the agent API would take the window's control of the tab, so no tab is typed into.
+        fill = lambda color: "while :; do printf '\\033[48;2;%d;%d;%dm\\033[2J'; sleep .2; done" % color
+        with isolated_display() as env, ExitStack() as cleanup:
+            script = CHECKS / 'split-shell.sh'
+            script.write_text(f'#!/bin/sh\n{fill(blue)}\n')
+            script.chmod(0o755)
+            env.update(GDK_BACKEND='x11', SHELL=str(script))
+            env.pop('WAYLAND_DISPLAY', None)
+            app = subprocess.Popen([str(runtime_binary("worminal-rust")), '-T', 'Rust split', '-o', '-',
+                                    '-e', '/bin/sh', '-c', fill(red)],
+                                   env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.addCleanup(lambda: self.stop(app))
+            wid = window(env, app)
+            xdo = lambda *args: subprocess.run(['xdotool', *args], env=env, check=True)
+            api = lambda *args: subprocess.check_output([str(runtime_binary('worminald')), 'api', *args],
+                                                        env=env, text=True)
+            server = display.Display(env['DISPLAY'])
+            cleanup.callback(server.close)
+            root = server.create_resource_object('window', int(wid))
+
+            def size():
+                geometry = root.get_geometry()
+                return geometry.width, geometry.height
+
+            def settle():
+                # The first terminal fits the window to its character grid, then the test fixes the size.
+                last, since = None, time.monotonic()
+                while time.monotonic() - since < .5:
+                    if size() != last:
+                        last, since = size(), time.monotonic()
+                    time.sleep(.02)
+                return last
+            settle()
+            xdo('windowsize', wid, '900', '500')
+            self.assertEqual(settle(), (900, 500))
+
+            def pixel(fx, fy):
+                try:
+                    data = root.get_image(int(size()[0] * fx), int(size()[1] * fy), 1, 1,
+                                          X.ZPixmap, 0xffffffff).data
+                except error.BadMatch:  # not mapped yet
+                    return None
+                return tuple(data[:3][::-1])
+
+            def wait_for(left, right, message):
+                deadline = time.monotonic() + 8
+                while (pixel(.25, .75), pixel(.75, .75)) != (left, right):
+                    self.assertIsNone(app.poll())
+                    if time.monotonic() >= deadline:
+                        width, height = size()
+                        data = root.get_image(0, 0, width, height, X.ZPixmap, 0xffffffff).data
+                        Image.frombuffer('RGB', (width, height), data, 'raw', 'BGRX', 0, 1).save(
+                            CHECKS / 'rust-app-split.png')
+                        self.fail(f'{message}: {pixel(.25, .75)} {pixel(.75, .75)}')
+                    time.sleep(.05)
+
+            wait_for(red, red, 'first tab did not fill the window')
+            xdo('windowfocus', '--sync', wid)
+            xdo('key', '--clearmodifiers', 'ctrl+shift+t')
+            deadline = time.monotonic() + 5
+            while len(json.loads(api('list'))['tabs']) != 2:
+                self.assertLess(time.monotonic(), deadline, 'second tab did not open')
+                time.sleep(.05)
+            # The new tab is selected and fills the window.
+            wait_for(blue, blue, 'second tab did not fill the window')
+            # Drag the first tab's label onto the right edge of the pane.
+            xdo('mousemove', '--window', wid, '12', '8', 'mousedown', '1')
+            for step in range(1, 11):
+                xdo('mousemove', '--window', wid, str(12 + 876 * step // 10), str(8 + 250 * step // 10))
+                time.sleep(.02)
+            xdo('mouseup', '1')
+            # The anchor stays left; the dropped tab takes the right half and focus.
+            wait_for(blue, red, 'dropping a tab on the right edge did not split the window')
+            xdo('key', '--clearmodifiers', 'ctrl+shift+x')
+            wait_for(red, red, 'ctrl+shift+x did not leave only the focused pane')
 
     @staticmethod
     def stop(process):
