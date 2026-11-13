@@ -87,6 +87,7 @@ impl App {
                     | WIRE_FEATURE_ROW_SPAN
                     | WIRE_FEATURE_FOCUSED_FRAMES
                     | WIRE_FEATURE_NOTIFICATIONS
+                    | WIRE_FEATURE_ATTENTION
                     | WIRE_FEATURE_ROW_LINKS,
             ),
         );

@@ -202,6 +202,11 @@ pub fn decode(packet: Packet) -> io::Result<Option<Event>> {
             body.finish()?;
             EventKind::Released
         }
+        WIRE_ATTENTION => {
+            let on = body.u32()?;
+            body.finish()?;
+            EventKind::Attention(on != 0)
+        }
         WIRE_ERROR => {
             let value = string(&mut body)?;
             body.finish()?;
@@ -329,6 +334,10 @@ pub fn encode(event: &Event) -> io::Result<Packet> {
         EventKind::Clipboard(bytes) => encode_string(bytes, &mut body, WIRE_CLIPBOARD)?,
         EventKind::Notification(bytes) => encode_string(bytes, &mut body, WIRE_NOTIFICATION)?,
         EventKind::Bell => WIRE_BELL,
+        EventKind::Attention(on) => {
+            body.put_u32(u32::from(*on))?;
+            WIRE_ATTENTION
+        }
         EventKind::Print(bytes) => {
             body.put_bytes(bytes)?;
             WIRE_PRINT

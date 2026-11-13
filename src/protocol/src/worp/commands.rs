@@ -114,6 +114,8 @@ pub enum CommandKind {
         position: u32,
     },
     Release,
+    /// The sending view alerted this tab; the daemon relays it to the other views.
+    Attention,
     Subscribe,
     Capabilities(u32),
     ServiceInfo,

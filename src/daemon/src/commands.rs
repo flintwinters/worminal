@@ -107,6 +107,7 @@ impl Service {
                             | WIRE_FEATURE_ROW_SPAN
                             | WIRE_FEATURE_FOCUSED_FRAMES
                             | WIRE_FEATURE_NOTIFICATIONS
+                            | WIRE_FEATURE_ATTENTION
                             | WIRE_FEATURE_ROW_LINKS);
                     self.emit(
                         client,
@@ -117,6 +118,7 @@ impl Service {
                                     | WIRE_FEATURE_SELECT_ALL
                                     | WIRE_FEATURE_ROW_SPAN
                                     | WIRE_FEATURE_NOTIFICATIONS
+                                    | WIRE_FEATURE_ATTENTION
                                     | WIRE_FEATURE_ROW_LINKS,
                             ),
                         },
@@ -245,6 +247,10 @@ impl Service {
         if let CommandKind::Move { position } = command.kind {
             self.reorder(index, position as usize);
             return self.publish(now);
+        }
+        if matches!(command.kind, CommandKind::Attention) {
+            self.set_attention(index, true, Some(client));
+            return Ok(());
         }
         if self.tabs[index].url.is_some() {
             if matches!(command.kind, CommandKind::Close { .. }) {

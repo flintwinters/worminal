@@ -347,6 +347,33 @@ impl Service {
         }
     }
 
+    /// Tell every view that negotiated attention, except `skip` (the one that raised it), about a change.
+    pub fn set_attention(&mut self, index: usize, on: bool, skip: Option<ClientId>) {
+        if std::mem::replace(&mut self.tabs[index].attention, on) == on {
+            return;
+        }
+        let tab = self.tabs[index].id;
+        let clients: Vec<_> = self
+            .clients
+            .values()
+            .filter(|c| {
+                c.ready
+                    && Some(c.id) != skip
+                    && c.features & worminal_protocol::WIRE_FEATURE_ATTENTION != 0
+            })
+            .map(|c| c.id)
+            .collect();
+        for client in clients {
+            self.emit(
+                client,
+                Event {
+                    tab,
+                    kind: EventKind::Attention(on),
+                },
+            );
+        }
+    }
+
     pub fn publish(&mut self, now: i64) -> io::Result<()> {
         let mut bytes = self.catalog(now)?;
         if self.published.as_ref() == Some(&bytes) {

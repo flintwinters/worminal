@@ -489,6 +489,12 @@ impl App {
             );
         }
     }
+    /// Fade the tab here and, once, in the daemon's other views until input answers it.
+    fn alert(self: &Rc<Self>, id: u32) {
+        if self.tabstrip.alert(id) && self.features(id) & WIRE_FEATURE_ATTENTION != 0 {
+            self.send(id, CommandKind::Attention);
+        }
+    }
     fn action(self: &Rc<Self>, id: u32, action: Action) {
         if self.replacing.get() {
             return;
@@ -556,7 +562,7 @@ impl App {
                 let outcome = self.notifications.borrow_mut().receive(event.tab, bytes);
                 match outcome {
                     Some(notifications::Outcome::Show(message)) => {
-                        self.tabstrip.alert(event.tab);
+                        self.alert(event.tab);
                         let weak = Rc::downgrade(self);
                         let tab = event.tab;
                         self.notification_desktop.show(message, move |token| {
@@ -587,9 +593,16 @@ impl App {
             }
             EventKind::Bell => {
                 self.window.error_bell();
-                self.tabstrip.alert(event.tab);
+                self.alert(event.tab);
                 if !self.window.is_active() {
                     self.window.set_urgency_hint(true);
+                }
+            }
+            EventKind::Attention(on) => {
+                if *on {
+                    self.tabstrip.alert(event.tab);
+                } else {
+                    self.tabstrip.answer(event.tab);
                 }
             }
             EventKind::Print(bytes) => self.print(bytes)?,

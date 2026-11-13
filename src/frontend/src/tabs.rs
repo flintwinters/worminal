@@ -330,15 +330,16 @@ impl Tabs {
             }));
     }
     /// Fade a tab in and out until it receives input; a waiting agent is not answered by looking at it.
-    pub fn alert(&self, id: u32) {
+    /// Returns whether the tab was newly alerted.
+    pub fn alert(&self, id: u32) -> bool {
         let state = &self.0;
         if state.attention.borrow().contains(&id) {
-            return;
+            return false;
         }
         state.attention.borrow_mut().push(id);
         if state.blink.borrow().is_some() {
             state.widget.queue_draw();
-            return;
+            return true;
         }
         let start = std::time::Instant::now();
         state.glow.set(glow_at(0.0));
@@ -361,6 +362,7 @@ impl Tabs {
                 glib::ControlFlow::Continue
             },
         ));
+        true
     }
     pub fn answer(&self, id: u32) {
         let mut attention = self.0.attention.borrow_mut();

@@ -362,6 +362,60 @@ fn a_title_change_moves_the_tab_beside_the_nearest_match() {
     assert!(fixture.service.tabs.iter().all(|t| !t.regroup));
 }
 
+#[test]
+fn attention_reaches_other_views_once_and_input_answers_it_everywhere() {
+    let features = worminal_protocol::WIRE_FEATURE_ATTENTION;
+    let mut fixture = Fixture::sized(features, 80, 24, 1);
+    let service = &mut fixture.service;
+    for id in [2, 3] {
+        let (stream, _peer) = UnixStream::pair().unwrap();
+        service.clients.insert(
+            id,
+            Client {
+                id,
+                socket: stream,
+                pid: 0,
+                ready: true,
+                // View 3 predates the feature and must never see the packet.
+                features: if id == 2 { features } else { 0 },
+                decoder: Decoder::default(),
+                output: Queue::new(CLIENT_QUEUE),
+                needs_resync: false,
+                selection: None,
+            },
+        );
+    }
+    let attention = |service: &mut Service, client| {
+        let packet = Packet {
+            kind: WIRE_ATTENTION,
+            tab: 1,
+            body: Vec::new(),
+        };
+        service.message(client, packet).unwrap();
+    };
+    let queued = |service: &Service, client| service.clients[&client].output.pending().len();
+    let before = queued(service, 1);
+    attention(service, 1);
+    let relayed = queued(service, 2);
+    assert!(relayed > 0, "another view must learn of the alert");
+    assert_eq!(queued(service, 1), before, "the raising view already knows");
+    assert_eq!(queued(service, 3), 0, "unnegotiated views get nothing");
+    attention(service, 1);
+    assert_eq!(
+        queued(service, 2),
+        relayed,
+        "a repeated alert is not relayed again"
+    );
+    let now = service.now();
+    service.input_operation(1, b"x", Some(1), now).unwrap();
+    assert!(
+        queued(service, 2) > relayed,
+        "input clears the alert in other views"
+    );
+    assert!(queued(service, 1) > before, "and in the typing view");
+    assert_eq!(queued(service, 3), 0);
+}
+
 #[derive(Default)]
 struct Receiver {
     stream: Option<Box<dyn Write>>,

@@ -102,3 +102,9 @@ pub const WIRE_FEATURE_NOTIFICATIONS: u32 = 1 << 6;
 /// Move the packet's tab to a zero-based position in the daemon's tab order (one u32; clamped to the last
 /// position). Older daemons ignore it, and the catalog they keep sending restores the old order.
 pub const WIRE_MOVE: u32 = 36;
+
+/// A view that alerts a tab (bell or notification) tells the daemon with an empty-bodied command; the daemon
+/// relays `ATTENTION` events (one u32: 1 alerted, 0 answered) to the other views, so every window's tab strip
+/// fades the tab until input reaches it. Only peers that negotiated the feature send or receive it.
+pub const WIRE_ATTENTION: u32 = 37;
+pub const WIRE_FEATURE_ATTENTION: u32 = 1 << 7;
