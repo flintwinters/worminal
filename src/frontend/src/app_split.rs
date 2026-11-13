@@ -3,7 +3,7 @@
 //! shows (`Pane`), never the geometry.
 use super::{App, LINK_SHIFT};
 use crate::{
-    layout::{Layout, Target, Zone},
+    layout::{neighbor, Direction, Layout, PaneRect, Target, Zone},
     tabs::{Actions, Tabs},
 };
 use gtk::prelude::*;
@@ -317,6 +317,61 @@ impl App {
         self.collapse();
         self.rebuild();
         self.select_id(id);
+    }
+    /// The panes' rectangles in the pane area's coordinates.
+    fn pane_rects(&self) -> Vec<(u32, PaneRect)> {
+        self.panes()
+            .iter()
+            .filter_map(|pane| {
+                let (x, y) = pane
+                    .widget
+                    .translate_coordinates(self.panes.widget(), 0, 0)?;
+                Some((
+                    pane.id,
+                    (
+                        x,
+                        y,
+                        pane.widget.allocated_width(),
+                        pane.widget.allocated_height(),
+                    ),
+                ))
+            })
+            .collect()
+    }
+    /// Select the tab shown by the pane lying `direction` of the focused one. False when there is none, so
+    /// a window without a split leaves the keystroke to the application.
+    pub(super) fn focus_toward(self: &Rc<Self>, direction: Direction) -> bool {
+        let from = self.focused_pane().id;
+        let Some(pane) = neighbor(&self.pane_rects(), from, direction).and_then(|id| self.pane(id))
+        else {
+            return false;
+        };
+        if let Some(tab) = self.active_of(&pane) {
+            self.select_id(tab);
+        }
+        true
+    }
+    /// Move the current tab as a drag would: into the pane lying `direction` of its own, or, at the window's
+    /// edge, into a new pane split off that side (never emptying its own pane). False when the tab cannot
+    /// move, so the keystroke stays the application's.
+    pub(super) fn move_toward(self: &Rc<Self>, direction: Direction) -> bool {
+        let id = self.active.get();
+        let Some(home) = self.pane_of(id).filter(|_| self.can_split(id)) else {
+            return false;
+        };
+        let target = match neighbor(&self.pane_rects(), home.id, direction) {
+            Some(anchor) => Target {
+                anchor,
+                zone: Zone::Center,
+            },
+            None if self.tabs_of(&home).len() > 1 => Target {
+                anchor: home.id,
+                zone: direction.zone(),
+            },
+            None => return false,
+        };
+        self.drop_tab(id, target);
+        true
     }
     /// Gather every tab into the focused pane again.
     pub(super) fn unsplit(self: &Rc<Self>) {

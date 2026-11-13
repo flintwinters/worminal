@@ -490,6 +490,11 @@ impl App {
                 self.send(id, kind)
             }
             Action::Claim => self.activate(id),
+            Action::Pointed => {
+                if self.active.get() != id {
+                    self.activate(id);
+                }
+            }
             Action::Resized(cols, rows) if !self.syncing.get() && self.is_visible(id) => {
                 if let Some(terminal) = self.terminal(id) {
                     self.fit_geometry(&terminal);

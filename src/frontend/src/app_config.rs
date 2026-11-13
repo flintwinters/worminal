@@ -93,7 +93,9 @@ impl Config {
                         usage: {product} [--master HOST] [--attach] [-aiv] [-f font] [-g COLSxROWS] \
                         [-c class] [-n name] [-T title] [-o file] [-l line] [-e command ...]\n\n\
                         Ctrl+Shift+T: tab  Ctrl+Shift+N: window  \
-                        Ctrl+Shift+W: close tab\nCtrl+Shift+C/V: clipboard  Alt+1..9: select tab\n\n\
+                        Ctrl+Shift+W: close tab\nCtrl+Shift+C/V: clipboard  Alt+1..9: select tab\n\
+                        Ctrl+Shift+Arrows: focus pane  Alt+Shift+Arrows: move tab to pane  \
+                        Ctrl+Shift+X: gather panes\n\n\
                         --surf URL|FILE: open a browser window (--browser is an alias)\n\
                         --new-browser-tab URL|FILE: replace this terminal with a browser\n\
                         Automation and agents: run `worminald --help`, then `worminald api help`\n\

@@ -20,6 +20,8 @@ use worminal_protocol::{WORKSPACE_MAX_COLS, WORKSPACE_MAX_ROWS};
 pub enum Action {
     Send(CommandKind),
     Claim,
+    /// A press landed on this already-live terminal; the app makes its tab the current one.
+    Pointed,
     Resized(u32, u32),
     Print(Vec<u8>),
     Error(String),
@@ -684,8 +686,15 @@ impl Inner {
     fn button(self: &Rc<Self>, event: &gdk::EventButton) {
         self.prepare();
         let release = event.event_type() == gdk::EventType::ButtonRelease;
-        if !release && !self.state.borrow().viewport.live() {
-            self.emit(Action::Claim);
+        // `grab_focus` below moves typing here, but copy, paste, new tabs and pane focus follow the app's active
+        // tab. Panes of a split are all live, so only a terminal that is not yet live used to claim the tab: a
+        // click on the other pane typed there while Ctrl+Shift+C/V still used the previous tab.
+        if !release {
+            self.emit(if self.state.borrow().viewport.live() {
+                Action::Pointed
+            } else {
+                Action::Claim
+            });
         }
         self.widget.grab_focus();
         let (px, py) = event.position();
