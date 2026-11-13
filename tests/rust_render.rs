@@ -31,6 +31,7 @@ fn tabs(args: &[String]) {
             id: body.u32().unwrap(),
             browser: body.u32().unwrap() != 0,
             remote: false,
+            ssh: false,
             label: String::from_utf8(body.string().unwrap().to_vec()).unwrap(),
         })
         .collect();

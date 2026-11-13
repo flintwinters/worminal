@@ -248,6 +248,8 @@ struct Page {
     palette: Rc<RefCell<Palette>>,
     title: String,
     directory: PathBuf,
+    /// Remote user while an SSH client is in the terminal's foreground.
+    ssh_user: Option<String>,
     browser: bool,
     url: String,
     view: Rc<RefCell<Option<crate::browser::Browser>>>,
@@ -260,6 +262,7 @@ struct Record {
     cursor: u32,
     title: String,
     directory: PathBuf,
+    ssh_user: Option<String>,
     colors: Vec<String>,
 }
 fn text(bytes: &[u8]) -> String {
@@ -647,12 +650,9 @@ impl App {
             }
             // Paths preserve raw filename bytes; painted labels alone use lossy Unicode.
             use std::os::unix::ffi::OsStringExt;
-            let directory = tab
-                .directory
-                .split(|byte| *byte == 0)
-                .next()
-                .unwrap()
-                .to_vec();
+            let (directory, ssh_user) =
+                worminal_protocol::worp::events::split_directory_field(&tab.directory);
+            let directory = directory.to_vec();
             records.push(Record {
                 id: tab.id | index << LINK_SHIFT,
                 browser: tab.kind == TabKind::Browser,
@@ -661,6 +661,7 @@ impl App {
                 cursor: tab.cursor,
                 title: text(&tab.title),
                 directory: PathBuf::from(OsString::from_vec(directory)),
+                ssh_user: ssh_user.map(text),
                 colors: tab.colors.iter().map(|color| text(color)).collect(),
             });
         }
@@ -736,6 +737,7 @@ impl App {
                     palette,
                     title: String::new(),
                     directory: PathBuf::new(),
+                    ssh_user: None,
                     browser: record.browser,
                     url: record.url.clone(),
                     view: Rc::new(RefCell::new(None)),
@@ -781,6 +783,7 @@ impl App {
                     page.title = record.title.clone();
                 }
                 page.directory = record.directory.clone();
+                page.ssh_user = record.ssh_user.clone();
             }
         }
         {

@@ -17,6 +17,7 @@ mod service;
 mod service_handoff;
 mod service_io;
 mod service_upgrade;
+mod ssh;
 mod state;
 mod upgrade_io;
 pub use cli::run;

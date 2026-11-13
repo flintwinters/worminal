@@ -64,6 +64,57 @@ pub enum TabKind {
     Browser,
 }
 
+/// A terminal tab's catalog `directory` is the working directory, optionally followed by NUL and the user of
+/// the SSH session in the terminal's foreground. Views that predate the suffix read up to the first NUL.
+pub fn directory_field(directory: &[u8], ssh_user: Option<&[u8]>) -> Vec<u8> {
+    let mut field = directory.to_vec();
+    if let Some(user) = ssh_user {
+        field.push(0);
+        field.extend_from_slice(user);
+    }
+    field
+}
+
+/// Inverse of [`directory_field`].
+pub fn split_directory_field(field: &[u8]) -> (&[u8], Option<&[u8]>) {
+    let mut parts = field.splitn(2, |byte| *byte == 0);
+    let directory = parts.next().unwrap_or_default();
+    (directory, parts.next())
+}
+
+/// What a terminal tab is called: the SSH user, else the working directory's last component. Daemon and
+/// views share this so grouping by name matches what the strip shows.
+pub fn tab_label(directory: &[u8], ssh_user: Option<&[u8]>) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt;
+    if let Some(user) = ssh_user {
+        return user.to_vec();
+    }
+    let path = std::path::Path::new(std::ffi::OsStr::from_bytes(directory));
+    path.file_name()
+        .unwrap_or(path.as_os_str())
+        .as_bytes()
+        .to_vec()
+}
+
+#[cfg(test)]
+mod label_tests {
+    use super::*;
+
+    #[test]
+    fn labels_prefer_the_ssh_user_and_fall_back_to_the_last_component() {
+        assert_eq!(tab_label(b"/home/a/project", None), b"project");
+        assert_eq!(tab_label(b"/home/a/project/", None), b"project");
+        assert_eq!(tab_label(b"/", None), b"/");
+        assert_eq!(tab_label(b"/home/a/project", Some(b"root")), b"root");
+        let field = directory_field(b"/x", Some(b"root"));
+        assert_eq!(
+            split_directory_field(&field),
+            (&b"/x"[..], Some(&b"root"[..]))
+        );
+        assert_eq!(split_directory_field(b"/x"), (&b"/x"[..], None));
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TabRecord {
     pub id: u32,

@@ -29,10 +29,12 @@ impl App {
                 let label = if page.browser {
                     browser_label(&page.url, &page.title)
                 } else {
-                    page.directory
-                        .file_name()
-                        .map(|name| name.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| page.directory.to_string_lossy().into_owned())
+                    use std::os::unix::ffi::OsStrExt;
+                    String::from_utf8_lossy(&worminal_protocol::worp::events::tab_label(
+                        page.directory.as_os_str().as_bytes(),
+                        page.ssh_user.as_deref().map(str::as_bytes),
+                    ))
+                    .into_owned()
                 };
                 page.label.set_text(&label);
                 Tab {
@@ -40,6 +42,7 @@ impl App {
                     label,
                     browser: page.browser,
                     remote: self.master_of(page.id).is_some(),
+                    ssh: page.ssh_user.is_some(),
                 }
             })
             .collect();

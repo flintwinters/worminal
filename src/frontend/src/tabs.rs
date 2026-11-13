@@ -18,6 +18,8 @@ pub struct Tab {
     pub browser: bool,
     /// Shown by a daemon on another host.
     pub remote: bool,
+    /// An SSH client is in the terminal's foreground.
+    pub ssh: bool,
 }
 /// A primary-button press on a tab. It becomes a reorder once the pointer travels past `DRAG_SLOP`.
 struct Drag {
@@ -64,6 +66,8 @@ fn place(widths: &[i32], right: i32) -> Vec<(i32, i32)> {
         .collect()
 }
 /// Seconds per full fade out and back in.
+/// ANSI magenta: tabs whose foreground is an SSH session.
+const SSH: u32 = 5;
 const GLOW_PERIOD: f64 = 2.0;
 fn width(layout: &pango::Layout, entry: &Tab, metrics: Metrics) -> i32 {
     layout.set_text(&entry.label);
@@ -85,14 +89,21 @@ fn colors(
     selected: bool,
     glow: f64,
 ) -> (Option<gdk::RGBA>, gdk::RGBA) {
+    let selected_fill = palette.color(if entry.ssh { SSH } else { FG });
     let fill = if glow > 0.0 {
-        let from = palette.color(if selected { FG } else { BG });
+        let from = if selected {
+            selected_fill
+        } else {
+            palette.color(BG)
+        };
         Some(mix(&from, &palette.color(3), glow))
     } else {
-        selected.then(|| palette.color(FG))
+        selected.then_some(selected_fill)
     };
     let resting = palette.color(if selected {
         BG
+    } else if entry.ssh {
+        SSH
     } else if entry.browser {
         1
     } else if entry.remote {

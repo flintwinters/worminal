@@ -16,13 +16,17 @@ including headless remote daemons.
 ```yaml
 worminal:
   update_notifications: true   # desktop notification when a window update is postponed, pending or failed
-  group_tabs_by_title: true    # when a tab's title changes, the daemon moves it beside a tab with the same title
+  group_tabs_by_title: true    # when a tab's name changes, the daemon moves it beside a tab with the same name
 ```
 
 Supported Alacritty keys: `font` (`size`, `normal.family`, `offset.y`, `glyph_offset.y`), `colors` (`primary`,
 `normal`, `bright`, `dim`, `cursor`, `indexed_colors`, `draw_bold_text_with_bright_colors`) and `scrolling`
 (`history`, `multiplier`). Colors are `#rrggbb` or `0xrrggbb`; an unquoted YAML `0xrrggbb` also works.
 Built-in defaults come from `assets/palette.json` and `assets/font.yaml`.
+
+Tabs are named after their working directory's last component. While an `ssh` client is in a terminal's
+foreground the tab is purple and named after the user it connects as (`user@host`, `-l user`, `-o User=`; otherwise
+the local user, since `~/.ssh/config` is not consulted).
 
 ## Sync between devices
 

@@ -194,15 +194,15 @@ impl Service {
         self.tabs.insert(position.min(self.tabs.len()), tab);
     }
 
-    /// Where a tab whose title changed belongs: beside the nearest tab with the same title, unless
+    /// Where a tab whose label changed belongs: beside the nearest tab with the same label, unless
     /// a neighbour already has it. The position is for `reorder`.
     fn group_position(&self, index: usize) -> Option<usize> {
-        let title = &self.tabs[index].title;
-        let same = |i: &usize| *i != index && self.tabs[*i].title == *title;
-        if title.is_empty()
+        let label = self.tabs[index].label();
+        let same = |i: &usize| *i != index && self.tabs[*i].label() == label;
+        if label.is_empty()
             || [index.wrapping_sub(1), index + 1]
                 .iter()
-                .any(|i| self.tabs.get(*i).is_some_and(|t| t.title == *title))
+                .any(|i| self.tabs.get(*i).is_some_and(|tab| tab.label() == label))
         {
             return None;
         }
@@ -217,7 +217,7 @@ impl Service {
         })
     }
 
-    /// Titles follow the working directory; tabs showing the same one stay together.
+    /// Labels follow the working directory (or SSH user); tabs showing the same one stay together.
     pub fn group_by_title(&mut self) {
         let grouping = worminal_config::get().group_tabs_by_title;
         for index in 0..self.tabs.len() {

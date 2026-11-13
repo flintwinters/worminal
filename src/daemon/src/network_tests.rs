@@ -325,7 +325,7 @@ fn move_command_reorders_tabs_and_publishes_the_new_order() {
 }
 
 #[test]
-fn a_title_change_moves_the_tab_beside_the_nearest_match() {
+fn a_label_change_moves_the_tab_beside_the_nearest_match() {
     let mut fixture = Fixture::sized(9, 80, 24, 5);
     let ids =
         |fixture: &Fixture| -> Vec<u32> { fixture.service.tabs.iter().map(|t| t.id).collect() };
@@ -336,12 +336,12 @@ fn a_title_change_moves_the_tab_beside_the_nearest_match() {
             .iter_mut()
             .find(|t| t.id == id)
             .unwrap();
-        tab.title = title.to_vec();
+        tab.directory = [b"/work/", title].concat();
         tab.regroup = true;
         fixture.service.group_by_title();
     };
     for (id, title) in [(1, "a"), (2, "b"), (3, "c"), (4, "d"), (5, "e")] {
-        fixture.service.tabs[id as usize - 1].title = title.into();
+        fixture.service.tabs[id as usize - 1].directory = format!("/work/{title}").into();
     }
     retitle(&mut fixture, 4, b"b");
     assert_eq!(
@@ -359,6 +359,18 @@ fn a_title_change_moves_the_tab_beside_the_nearest_match() {
     );
     retitle(&mut fixture, 5, b"zzz");
     assert_eq!(ids(&fixture), [2, 4, 3, 5, 1], "no match: unchanged");
+    for id in [3, 1] {
+        let tab = fixture
+            .service
+            .tabs
+            .iter_mut()
+            .find(|t| t.id == id)
+            .unwrap();
+        tab.ssh_user = Some(b"root".to_vec());
+        tab.regroup = true;
+        fixture.service.group_by_title();
+    }
+    assert_eq!(ids(&fixture), [2, 4, 3, 1, 5], "ssh tabs group by user");
     assert!(fixture.service.tabs.iter().all(|t| !t.regroup));
 }
 

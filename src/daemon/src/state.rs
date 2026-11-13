@@ -106,6 +106,8 @@ pub(crate) struct Tab {
     pub title: Vec<u8>,
     pub initial_title: Vec<u8>,
     pub directory: Vec<u8>,
+    /// Remote user of the SSH client in the terminal's foreground; refreshed with `directory`.
+    pub ssh_user: Option<Vec<u8>>,
     next_output_directory: i64,
     pub clipboard: Vec<u8>,
     pub url: Option<Vec<u8>>,
@@ -188,6 +190,7 @@ impl Tab {
             title: title.to_vec(),
             initial_title: title.to_vec(),
             directory: Vec::new(),
+            ssh_user: None,
             next_output_directory: 0,
             clipboard: Vec::new(),
             url: None,
@@ -252,10 +255,25 @@ impl Tab {
             None
         };
         let bytes = directory.map_or_else(Vec::new, |path| path.into_os_string().into_vec());
-        if self.directory != bytes {
+        let ssh_user = terminal
+            .pty
+            .fd()
+            .filter(|_| pid > 0)
+            .and_then(|fd| crate::ssh::foreground_user(fd, &crate::ssh::local_user()));
+        if self.directory != bytes || self.ssh_user != ssh_user {
             self.directory = bytes;
+            self.ssh_user = ssh_user;
             self.catalog_dirty = true;
+            self.regroup = true;
         }
+    }
+
+    /// The name views paint for this tab; grouping compares it.
+    pub fn label(&self) -> Vec<u8> {
+        if self.url.is_some() {
+            return self.title.clone();
+        }
+        worminal_protocol::worp::events::tab_label(&self.directory, self.ssh_user.as_deref())
     }
 
     pub fn metadata(&mut self, now: i64) -> io::Result<&[u8]> {
@@ -292,7 +310,10 @@ impl Tab {
             mode: self.mode,
             cursor: self.cursor,
             title: self.title.clone(),
-            directory: self.directory.clone(),
+            directory: worminal_protocol::worp::events::directory_field(
+                &self.directory,
+                self.ssh_user.as_deref(),
+            ),
             colors: overrides[..count]
                 .iter()
                 .map(|color| color.clone().unwrap_or_default())
@@ -426,7 +447,6 @@ impl Tab {
                     if self.title != title {
                         self.title = title;
                         self.catalog_dirty = true;
-                        self.regroup = true;
                     }
                 }
                 terminal::WORMINAL_MODE => {

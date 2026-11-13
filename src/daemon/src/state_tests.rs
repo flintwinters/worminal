@@ -10,9 +10,12 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
+        Self::running(vec!["/bin/cat".into()])
+    }
+    fn running(arguments: Vec<OsString>) -> Self {
         let reaper = ChildReaper::default();
         let mut launch = Launch::restore(Vec::new());
-        launch.arguments = vec!["/bin/cat".into()];
+        launch.arguments = arguments;
         let tab = Tab::shell(1, &launch, false, Some(7), reaper.clone()).unwrap();
         Self { tab, reaper }
     }
@@ -150,6 +153,35 @@ fn clean_metadata_reuses_storage_and_dirty_metadata_replaces_the_cache() {
     let storage = tab.catalog.as_ptr();
     assert_eq!(tab.metadata(11).unwrap(), updated);
     assert_eq!(tab.catalog.as_ptr(), storage);
+}
+
+#[test]
+fn a_foreground_ssh_client_labels_the_tab_with_its_user() {
+    // A shell symlinked as ssh waits on the terminal: a harmless foreground job whose argv[0] is an ssh client.
+    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../build/checks")
+        .join(format!("ssh-foreground-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let ssh = directory.join("ssh");
+    let _ = std::fs::remove_file(&ssh);
+    std::os::unix::fs::symlink("/bin/sh", &ssh).unwrap();
+    let mut fixture = Fixture::running(vec![ssh.into(), "-c".into(), "read line".into()]);
+    let tab = &mut fixture.tab;
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while tab.ssh_user.is_none() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+        tab.refresh_directory(1);
+    }
+    assert_eq!(tab.ssh_user.as_deref(), Some(&crate::ssh::local_user()[..]));
+    assert_eq!(tab.label(), crate::ssh::local_user());
+    assert!(tab.regroup && tab.catalog_dirty);
+    let field =
+        worminal_protocol::worp::events::directory_field(&tab.directory, tab.ssh_user.as_deref());
+    assert!(
+        field.contains(&0),
+        "the catalog carries the user after a NUL"
+    );
+    std::fs::remove_dir_all(&directory).unwrap();
 }
 
 #[test]
