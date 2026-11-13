@@ -51,11 +51,11 @@ impl Panes {
                 move |_, cr| {
                 if let Some((x, y, width, height)) = marked.get() {
                     cr.rectangle(x, y, width, height);
-                    cr.set_source_rgba(0.45, 0.65, 1.0, 0.25);
+                    cr.set_source_rgba(0.6, 0.6, 0.6, 0.25);
                     if let Err(error) = cr.fill_preserve() {
                         eprintln!("worminal: split mark: {error}");
                     }
-                    cr.set_source_rgba(0.45, 0.65, 1.0, 0.9);
+                    cr.set_source_rgba(0.6, 0.6, 0.6, 0.9);
                     cr.set_line_width(2.0);
                     if let Err(error) = cr.stroke() {
                         eprintln!("worminal: split mark: {error}");
