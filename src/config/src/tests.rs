@@ -51,6 +51,7 @@ fn defaults_match_alacritty_palette_and_shared_font() {
         (10000, 3)
     );
     assert!(!settings.bold_bright && !settings.update_notifications);
+    assert!(settings.group_tabs_by_title, "grouping is on by default");
 }
 
 #[test]
@@ -193,6 +194,10 @@ fn import_cycles_and_bad_types_are_rejected() {
             json!({"worminal": {"update_notifications": "yes"}}),
             "worminal.update_notifications",
         ),
+        (
+            json!({"worminal": {"group_tabs_by_title": 1}}),
+            "worminal.group_tabs_by_title",
+        ),
     ] {
         let error = resolve(config).unwrap_err();
         assert!(error.contains(message), "{error} should mention {message}");
@@ -210,6 +215,11 @@ fn legacy_bold_setting_at_root_and_notifications_flag() {
         resolve(json!({"worminal": {"update_notifications": true}}))
             .unwrap()
             .update_notifications
+    );
+    assert!(
+        !resolve(json!({"worminal": {"group_tabs_by_title": false}}))
+            .unwrap()
+            .group_tabs_by_title
     );
 }
 

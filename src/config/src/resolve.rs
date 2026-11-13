@@ -23,6 +23,8 @@ pub struct Settings {
     pub scroll_multiplier: i32,
     pub bold_bright: bool,
     pub update_notifications: bool,
+    /// The daemon moves a tab beside another with the same title when its title changes.
+    pub group_tabs_by_title: bool,
     /// `#rrggbb` per palette slot. Unset indexed slots stay `None`: renderers synthesize them.
     pub colors: Vec<Option<String>>,
 }
@@ -59,9 +61,9 @@ fn integer(
         })
 }
 
-fn boolean(value: Option<&Value>, name: &str) -> Fallible<bool> {
+fn boolean(value: Option<&Value>, default: bool, name: &str) -> Fallible<bool> {
     match value {
-        None => Ok(false),
+        None => Ok(default),
         Some(Value::Bool(flag)) => Ok(*flag),
         Some(_) => Err(format!("{name} must be boolean")),
     }
@@ -242,10 +244,16 @@ impl Settings {
                 "scrolling.multiplier",
                 1..=i64::from(i32::MAX),
             )? as i32,
-            bold_bright: boolean(bold, "colors.draw_bold_text_with_bright_colors")?,
+            bold_bright: boolean(bold, false, "colors.draw_bold_text_with_bright_colors")?,
             update_notifications: boolean(
                 worminal.get("update_notifications"),
+                false,
                 "worminal.update_notifications",
+            )?,
+            group_tabs_by_title: boolean(
+                worminal.get("group_tabs_by_title"),
+                true,
+                "worminal.group_tabs_by_title",
             )?,
             colors: palette(config)?,
         })
@@ -262,6 +270,7 @@ impl Settings {
             "scroll_multiplier": self.scroll_multiplier,
             "bold_bright": self.bold_bright,
             "update_notifications": self.update_notifications,
+            "group_tabs_by_title": self.group_tabs_by_title,
             "colors": self.colors,
         })
     }

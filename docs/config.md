@@ -16,6 +16,7 @@ including headless remote daemons.
 ```yaml
 worminal:
   update_notifications: true   # desktop notification when a window update is postponed, pending or failed
+  group_tabs_by_title: true    # when a tab's title changes, the daemon moves it beside a tab with the same title
 ```
 
 Supported Alacritty keys: `font` (`size`, `normal.family`, `offset.y`, `glyph_offset.y`), `colors` (`primary`,

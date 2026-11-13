@@ -119,6 +119,8 @@ pub(crate) struct Tab {
     catalog_record: Option<worminal_protocol::worp::events::TabRecord>,
     pub catalog_pending: bool,
     pub catalog_dirty: bool,
+    /// The title changed since the service last considered grouping this tab.
+    pub regroup: bool,
     pub pending_frame: bool,
     pub input_frame: bool,
     /// Displayed by its controller; only Service::show changes it while controlled.
@@ -197,6 +199,7 @@ impl Tab {
             catalog_record: None,
             catalog_pending: false,
             catalog_dirty: true,
+            regroup: false,
             pending_frame: false,
             input_frame: false,
             shown: false,
@@ -420,6 +423,7 @@ impl Tab {
                     if self.title != title {
                         self.title = title;
                         self.catalog_dirty = true;
+                        self.regroup = true;
                     }
                 }
                 terminal::WORMINAL_MODE => {

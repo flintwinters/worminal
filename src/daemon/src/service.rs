@@ -194,6 +194,42 @@ impl Service {
         self.tabs.insert(position.min(self.tabs.len()), tab);
     }
 
+    /// Where a tab whose title changed belongs: beside the nearest tab with the same title, unless
+    /// a neighbour already has it. The position is for `reorder`.
+    fn group_position(&self, index: usize) -> Option<usize> {
+        let title = &self.tabs[index].title;
+        let same = |i: &usize| *i != index && self.tabs[*i].title == *title;
+        if title.is_empty()
+            || [index.wrapping_sub(1), index + 1]
+                .iter()
+                .any(|i| self.tabs.get(*i).is_some_and(|t| t.title == *title))
+        {
+            return None;
+        }
+        let nearest = (0..self.tabs.len())
+            .filter(same)
+            .min_by_key(|i| i.abs_diff(index))?;
+        // After removal, tabs past `index` shift down one.
+        Some(if nearest < index {
+            nearest + 1
+        } else {
+            nearest
+        })
+    }
+
+    /// Titles follow the working directory; tabs showing the same one stay together.
+    pub fn group_by_title(&mut self) {
+        let grouping = worminal_config::get().group_tabs_by_title;
+        for index in 0..self.tabs.len() {
+            if !std::mem::take(&mut self.tabs[index].regroup) || !grouping {
+                continue;
+            }
+            if let Some(position) = self.group_position(index) {
+                self.reorder(index, position);
+            }
+        }
+    }
+
     pub fn send_frame(&mut self, index: usize, full: bool, now: i64) -> io::Result<bool> {
         let tab = &mut self.tabs[index];
         let Some(terminal) = &mut tab.terminal else {
@@ -486,6 +522,7 @@ impl Service {
         if emitted {
             self.last_frame = now;
         }
+        self.group_by_title();
         if self.closed != 0
             || self
                 .tabs
