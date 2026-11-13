@@ -98,8 +98,7 @@ Builds and installs auto-detect a headless host (no GTK/WebKit/Pango via pkg-con
 `build/`; native executables use `build/bin` and modules use `build/lib/worminal`, matching installed prefixes.
 `tools/paths.py` owns runtime/diagnostic path decisions. Diagnostics belong in `build/checks`; optional Python
 virtualenvs use `build/venv`. `clean` preserves diagnostics/virtualenvs while removing compiled output.
-Analysis/dependency configuration lives under `tools`; `privacy-setup` generates the Git privacy hooks from
-`manage.py` into the Git directory. Management suppresses Python bytecode caches.
+Analysis/dependency configuration lives under `tools`. Management suppresses Python bytecode caches.
 Never test under /tmp or inject test input into the desktop.
 Private test runtimes must outlive their GUI and service owners; await owner exit before removing their files.
 Publication checks require Unix ownership semantics. Update workflows automatically use project-local tmpfs
@@ -133,8 +132,7 @@ modes, SSH/browser operation and actual module paths on private displays. Runnin
 and `setup-check-runtime` builds a missing/stale explorer (`npm ci` as needed) and prepares audio and Weston under `build/dependencies`.
 If it still stops, fix the cause in that flow rather than around it. Inventory commands record
 process IDs, tabs, windows and file hashes without copying executables. Keep destinations in environment configuration
-and preserve the contributor's configured Git identity. Privacy hooks check staged content and commit messages;
-public commit attribution is allowed.
+and preserve the contributor's configured Git identity.
 
 ## Current investigations
 

@@ -20,7 +20,7 @@ from tools.paths import CHECKS
 
 # These modules use private temporary resources and do not publish shared build artifacts.
 # New or renamed suites stay serial until their resource ownership has been reviewed.
-INDEPENDENT = frozenset({'test_theme', 'test_privacy', 'test_perf_metrics', 'test_http_fixture',
+INDEPENDENT = frozenset({'test_theme', 'test_perf_metrics', 'test_http_fixture',
                          'test_remote_install', 'test_remote_upgrade', 'test_config_sync', 'test_handoff', 'test_upgrade',
                          'test_window_replacement', 'test_master_startup', 'test_test_runner'})
 DISPLAY_ENV = ('DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'DBUS_SESSION_BUS_ADDRESS', 'GDK_BACKEND')
@@ -175,9 +175,9 @@ def run_python(jobs=None, match=None, modules=()):
     for result in results:
         # Replay complete output without interleaving concurrent test failures.
         print(Path(result['log']).read_text(errors='replace'), end='', flush=True)
+    tests = sum(result['tests'] for result in results)  # reruns of failed tests are not extra tests
     retry_failures(results, directory)
-    report = {'jobs': jobs, 'seconds': time.perf_counter()-started, 'results': results,
-              'tests': sum(result['tests'] for result in results)}
+    report = {'jobs': jobs, 'seconds': time.perf_counter()-started, 'results': results, 'tests': tests}
     (directory/'summary.json').write_text(json.dumps(report, indent=2)+'\n')
     print(f'Python checks: {report["tests"]} tests in {report["seconds"]:.2f}s; logs: {directory}', flush=True)
     return int(any(result['returncode'] for result in results))

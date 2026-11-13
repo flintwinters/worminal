@@ -16,7 +16,7 @@ For iteration against existing build artifacts:
 
 ```sh
 python3 manage.py check-python --jobs 2 --module test_upgrade --module test_window_replacement
-python3 manage.py check-python --jobs 2 --module test_privacy --module test_http_fixture
+python3 manage.py check-python --jobs 2 --module test_theme --module test_http_fixture
 python3 manage.py check-python --jobs 2 --match retained
 ```
 
@@ -42,7 +42,7 @@ Short CPU-heavy suites can become slower because of process startup and CPU cont
 selected tests on the target machine. Native compilation is not duplicated across workers. Parallel mode does not
 shorten timeout assertions or skip cleanup/coverage to manufacture a speedup.
 
-A representative Cinnamon run (12 exposed CPUs) passed the same 34 upgrade/handoff/window/privacy tests in
+A representative Cinnamon run (12 exposed CPUs) passed the same 34 upgrade/handoff/window tests in
 30.32s with one worker and 17.65s with two workers, about 42% less wall time. This is a selected-suite measurement,
 not a claim about the full check command. The short-suite sample on the two-CPU assistant host was slower in
 parallel; use `--jobs 1` when that suits the selected checks better.
