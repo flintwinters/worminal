@@ -53,10 +53,10 @@ def exclusive(cwd):
         yield
 
 
-def publish(cwd=ROOT, prefix=PREFIX, installed=INSTALLED):
-    """Prepare, build and validate as the user, publish, verify the installed result, and report live processes."""
+def publish(cwd=ROOT, prefix=PREFIX, installed=INSTALLED, checked=True):
+    """Build, optionally run the full suite, publish, verify the installed result, and report live processes."""
     from tools.update_storage import release_stale
-    steps = (("build",), ("setup-check-runtime",), ("check",),
+    steps = (("build",), *((("setup-check-runtime",), ("check",)) if checked else ()),
              ("install", "--prefix", prefix, "--skip-build"))
     if prefix == PREFIX:
         steps += (("check-install", "--installed", "--skip-build"),)
@@ -78,7 +78,7 @@ def publish(cwd=ROOT, prefix=PREFIX, installed=INSTALLED):
 
 def delegate(cwd, prefix):
     """The clone runs its own `update`: only the code being installed knows its own steps."""
-    return subprocess.run([sys.executable, "manage.py", "update", "--prefix", prefix], cwd=cwd).returncode
+    return subprocess.run([sys.executable, "manage.py", "update", "--check", "--prefix", prefix], cwd=cwd).returncode
 
 
 def contains_installed(clone, tip, installed, checkout):

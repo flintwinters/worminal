@@ -117,8 +117,9 @@ Keep user profiles and diagnostic records when cleaning up code.
 
 `manage.py setup-check-runtime` prepares private browser audio and Weston without changing desktop packages;
 update workflows run it automatically. New runtimes stay under `build/dependencies` across diagnostic cleanup.
-`manage.py update` builds and checks the current checkout, installs to /usr/local, then verifies the installed
-artifacts on private displays. Installation and any necessary private tmpfs mounts use sudo; checks run as the user.
+`manage.py update` builds the current checkout, installs to /usr/local, then verifies the installed artifacts on
+private displays; it does not run the test suite (`update --check` does, as auto-update does). Installation and any
+private tmpfs mounts use sudo; checks run as the user.
 `manage.py auto-update --timer install` schedules a daily 03:00 systemd user timer: it builds and checks the tip of
 `origin/main` in a private clone under `build/auto-update`, installs to /usr/local only if everything passes, and
 skips unchanged tips. It shares the checkout update pipeline and needs passwordless sudo for the install step.

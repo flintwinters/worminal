@@ -752,10 +752,11 @@ def auto_update(timer: str = typer.Option(None, click_type=click.Choice(["instal
 
 
 @app.command("update")
-def update_checkout(prefix: str = typer.Option("/usr/local", help="Installation prefix.")):
-    """Build, run the full suite, install this checkout to /usr/local, and verify installed files."""
+def update_checkout(prefix: str = typer.Option("/usr/local", help="Installation prefix."),
+                    check: bool = typer.Option(False, help="Also run the full suite before installing.")):
+    """Build, install this checkout to /usr/local, and verify installed files; run check separately."""
     from tools.auto_update import publish
-    raise typer.Exit(publish(prefix=prefix))
+    raise typer.Exit(publish(prefix=prefix, checked=check))
 
 
 @app.command()

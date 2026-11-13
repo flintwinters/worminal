@@ -107,8 +107,8 @@ class PublishTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def publish(self):
-        return auto_update.publish(self.root, installed=self.root / "installed")
+    def publish(self, checked=True):
+        return auto_update.publish(self.root, installed=self.root / "installed", checked=checked)
 
     def test_verifies_installed_files_after_publication_and_records_the_commit(self):
         with patch.object(auto_update, "manage", return_value=0) as manage:
@@ -118,6 +118,11 @@ class PublishTests(unittest.TestCase):
         self.assertEqual([call.kwargs["sudo"] for call in manage.call_args_list],
                          [False, False, False, True, False])
         self.assertEqual((self.root / "installed").read_text(), "abc123\n")
+
+    def test_unchecked_update_builds_installs_and_verifies_without_the_suite(self):
+        with patch.object(auto_update, "manage", return_value=0) as manage:
+            self.assertEqual(self.publish(checked=False), 0)
+        self.assertEqual([call.args[0] for call in manage.call_args_list], ["build", "install", "check-install"])
 
     def test_failure_stops_all_later_steps_and_records_nothing(self):
         for failed in range(5):
