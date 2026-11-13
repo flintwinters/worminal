@@ -20,12 +20,13 @@ Native windows and other clients use the same Worp operations, including catalog
 
 Agents can discover and control existing terminal sessions with `worminald api help`;
 see [the agent interface](docs/automation.md) for listing tabs, reading screens and sending keystrokes.
+Shell applications can send [OSC 99 desktop notifications](docs/notifications.md), including from remote tabs.
 A small [explicit device registry](docs/devices.md) shares enrolled SSH routes through one authority, with
 on-demand availability checks and no heartbeats.
 Use [`worminald install-on-remote HOST`](docs/remote-install.md) to bootstrap a new compatible headless node over SSH.
 For existing devices, [`python3 manage.py upgrade HOST`](docs/remote-upgrade.md) copies this device’s installed release.
 
 Installations include Atkinson Hyperlegible Mono as the default font, at 9 pt with a -3 pixel line offset.
-Explicit Alacritty font settings at build time and the `-f` command-line option override the defaults.
+Font settings in `worminal.yaml` or an Alacritty config (see [docs/config.md](docs/config.md)) and the `-f` command-line option override the defaults.
 
 Built with Rust, GTK, WebKitGTK, and a terminal engine derived from [st](https://git.suckless.org/st/); see [LICENSE](LICENSE).

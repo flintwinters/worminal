@@ -378,10 +378,10 @@ te_tlineat(TermEngine *session, int y, int scroll)
 	if (IS_SET(MODE_ALTSCREEN))
 		scroll = 0;
 	if (y < scroll) {
-		if (!term.hist || theme_history_size <= 0)
+		if (!term.hist || te_history_size <= 0)
 			te_fail("invalid scrollback viewport\n");
-		return term.hist[(term.histi - scroll + y + theme_history_size)
-		                 % theme_history_size];
+		return term.hist[(term.histi - scroll + y + te_history_size)
+		                 % te_history_size];
 	}
 	return term.line[y - scroll];
 }
@@ -391,16 +391,16 @@ te_thistorypush(TermEngine *session, Line line)
 {
 	Line recycled;
 
-	if (theme_history_size <= 0)
+	if (te_history_size <= 0)
 		te_fail("history is disabled\n");
 	if (!term.hist) {
-		term.hist = te_alloc(theme_history_size * sizeof(Line));
-		memset(term.hist, 0, theme_history_size * sizeof(Line));
+		term.hist = te_alloc(te_history_size * sizeof(Line));
+		memset(term.hist, 0, te_history_size * sizeof(Line));
 	}
 	recycled = term.hist[term.histi];
 	term.hist[term.histi] = line;
-	term.histi = (term.histi + 1) % theme_history_size;
-	if (term.histlen < theme_history_size)
+	term.histi = (term.histi + 1) % te_history_size;
+	if (term.histlen < te_history_size)
 		term.histlen++;
 	if (term.scr)
 		term.scr = MIN(term.scr + 1, term.histlen);
@@ -414,7 +414,7 @@ te_kscrollup(TermEngine *session, const Arg *arg)
 
 	if (IS_SET(MODE_ALTSCREEN) || !term.histlen)
 		return;
-	n = arg->i < 0 ? term.row + arg->i : arg->i ? arg->i : theme_scroll_multiplier;
+	n = arg->i < 0 ? term.row + arg->i : arg->i ? arg->i : te_scroll_multiplier;
 	LIMIT(n, 0, term.histlen - term.scr);
 	if (n) {
 		te_selclear(session);
@@ -430,7 +430,7 @@ te_kscrolldown(TermEngine *session, const Arg *arg)
 
 	if (IS_SET(MODE_ALTSCREEN) || !term.scr)
 		return;
-	n = arg->i < 0 ? term.row + arg->i : arg->i ? arg->i : theme_scroll_multiplier;
+	n = arg->i < 0 ? term.row + arg->i : arg->i ? arg->i : te_scroll_multiplier;
 	LIMIT(n, 0, term.scr);
 	if (n) {
 		te_selclear(session);
@@ -490,7 +490,7 @@ te_tscrollup(TermEngine *session, int orig, int n)
 		return;
 	/* Only a full main-screen scroll contributes to command history. */
 	if (!IS_SET(MODE_ALTSCREEN) && orig == 0 &&
-	    term.top == 0 && term.bot == term.row - 1 && theme_history_size) {
+	    term.top == 0 && term.bot == term.row - 1 && te_history_size) {
 		if (term.scr)
 			te_selclear(session);
 		for (j = 0; j < n; j++) {

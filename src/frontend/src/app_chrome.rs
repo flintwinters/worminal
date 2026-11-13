@@ -1,8 +1,9 @@
 //! Application chrome shares terminal metrics, while labels keep filesystem bytes out of display text handling.
-use super::App;
+use super::{App, LINK_SHIFT};
 use crate::tabs::Tab;
 use gtk::{gio, prelude::*};
 use std::rc::Rc;
+use worminal_protocol::worp::commands::CommandKind;
 
 fn browser_label(url: &str, title: &str) -> String {
     if let Ok(uri) = glib::Uri::parse(url, glib::UriFlags::ENCODED) {
@@ -28,10 +29,12 @@ impl App {
                 let label = if page.browser {
                     browser_label(&page.url, &page.title)
                 } else {
-                    page.directory
-                        .file_name()
-                        .map(|name| name.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| page.directory.to_string_lossy().into_owned())
+                    use std::os::unix::ffi::OsStrExt;
+                    String::from_utf8_lossy(&worminal_protocol::worp::events::tab_label(
+                        page.directory.as_os_str().as_bytes(),
+                        page.ssh_user.as_deref().map(str::as_bytes),
+                    ))
+                    .into_owned()
                 };
                 page.label.set_text(&label);
                 Tab {
@@ -39,6 +42,7 @@ impl App {
                     label,
                     browser: page.browser,
                     remote: self.master_of(page.id).is_some(),
+                    ssh: page.ssh_user.is_some(),
                 }
             })
             .collect();
@@ -62,6 +66,28 @@ impl App {
             }
         } else {
             self.notebook.set_current_page(Some(index));
+        }
+    }
+    /// The daemon owns tab order. Ask it to put `id` in `target`'s slot; the catalog it publishes reorders the strip.
+    /// Tabs of different daemons keep their link grouping, so those drops are ignored.
+    pub(super) fn move_tab(self: &Rc<Self>, id: u32, target: u32) {
+        let link = id >> LINK_SHIFT;
+        if target >> LINK_SHIFT != link {
+            return;
+        }
+        let position = self
+            .pages
+            .borrow()
+            .iter()
+            .filter(|page| page.id >> LINK_SHIFT == link)
+            .position(|page| page.id == target);
+        if let Some(position) = position {
+            self.send(
+                id,
+                CommandKind::Move {
+                    position: position as u32,
+                },
+            );
         }
     }
     pub(super) fn select_id(self: &Rc<Self>, id: u32) {

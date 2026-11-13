@@ -15,13 +15,14 @@ import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+from tools import timing
 from tools.paths import CHECKS
 
 # These modules use private temporary resources and do not publish shared build artifacts.
 # New or renamed suites stay serial until their resource ownership has been reviewed.
-INDEPENDENT = frozenset({'test_theme', 'test_privacy', 'test_perf_metrics', 'test_http_fixture',
-                         'test_remote_install', 'test_remote_upgrade', 'test_handoff', 'test_upgrade',
-                         'test_window_replacement', 'test_master_startup'})
+INDEPENDENT = frozenset({'test_theme', 'test_perf_metrics', 'test_http_fixture',
+                         'test_remote_install', 'test_remote_upgrade', 'test_config_sync', 'test_handoff', 'test_upgrade',
+                         'test_window_replacement', 'test_master_startup', 'test_test_runner'})
 DISPLAY_ENV = ('DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'DBUS_SESSION_BUS_ADDRESS', 'GDK_BACKEND')
 
 
@@ -57,6 +58,8 @@ def environment(directory):
     env['PYTHONDONTWRITEBYTECODE'] = '1'
     env['PYTHONPATH'] = os.pathsep.join([str(ROOT/'tests'), str(ROOT), env.get('PYTHONPATH', '')])
     env['GIO_USE_VFS'] = 'local'
+    if timing.active():
+        env[timing.PARENT_VARIABLE] = timing.current()
     for name, child in (('XDG_STATE_HOME', 'state'), ('XDG_CACHE_HOME', 'cache'),
                         ('XDG_DATA_HOME', 'data'), ('XDG_RUNTIME_DIR', 'runtime')):
         path = directory/child
@@ -96,6 +99,11 @@ def retire_worker(process, directory):
                 if identity not in ready:
                     try: signal.pidfd_send_signal(identity, signal.SIGKILL)
                     except ProcessLookupError: pass
+            deadline = time.monotonic() + 5
+            for identity in identities:
+                ready, _, _ = select.select([identity], [], [], max(0, deadline - time.monotonic()))
+                if not ready:
+                    raise TimeoutError('Private fixture owners did not exit; retain their runtime files.')
         if process.poll() is None: process.kill()
         process.wait(timeout=5)
     finally:
@@ -103,6 +111,11 @@ def retire_worker(process, directory):
 
 
 def invoke(name, args, directory, timeout=180):
+    with timing.span(name, "test-module"):
+        return _invoke(name, args, directory, timeout)
+
+
+def _invoke(name, args, directory, timeout):
     directory.mkdir(parents=True)
     started = time.perf_counter()
     log = directory/'output.log'
@@ -111,12 +124,12 @@ def invoke(name, args, directory, timeout=180):
         try:
             returncode = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            retire_worker(process, directory)
             output.write(b'\nWorker timed out; tagged private fixtures were retired.\n')
             returncode = 124
-        except BaseException:
+        finally:
+            # Successful workers can leave daemonized fixtures too. Retire those owners
+            # before historical binaries or private runtimes are removed, including on NFS.
             retire_worker(process, directory)
-            raise
     text = log.read_text(errors='replace')
     counts = re.findall(r'Ran (\d+) tests? in ', text)
     return {'name': name, 'returncode': returncode, 'seconds': time.perf_counter()-started,
@@ -162,11 +175,48 @@ def run_python(jobs=None, match=None, modules=()):
     for result in results:
         # Replay complete output without interleaving concurrent test failures.
         print(Path(result['log']).read_text(errors='replace'), end='', flush=True)
-    report = {'jobs': jobs, 'seconds': time.perf_counter()-started, 'results': results,
-              'tests': sum(result['tests'] for result in results)}
+    tests = sum(result['tests'] for result in results)  # reruns of failed tests are not extra tests
+    retry_failures(results, directory)
+    report = {'jobs': jobs, 'seconds': time.perf_counter()-started, 'results': results, 'tests': tests}
     (directory/'summary.json').write_text(json.dumps(report, indent=2)+'\n')
     print(f'Python checks: {report["tests"]} tests in {report["seconds"]:.2f}s; logs: {directory}', flush=True)
     return int(any(result['returncode'] for result in results))
+
+
+FAILED_TEST = re.compile(r'^(?:FAIL|ERROR): \S+ \(([\w.]+)', re.MULTILINE)
+
+
+def failed_tests(text):
+    """Test ids that unittest reported as failed or errored, in order, without duplicates."""
+    return list(dict.fromkeys(FAILED_TEST.findall(text)))
+
+
+def retry_failures(results, directory):
+    """Give failed tests one quiet rerun, alone, before the suite fails.
+
+    The GUI checks drive real X servers with wall-clock deadlines on a machine other work shares, so one of them
+    occasionally misses a deadline while the product is fine. A test that fails twice is a real failure; one that
+    passes alone is recorded in `flaky.jsonl` and reported, never hidden. Crashes and timeouts name no tests and
+    are never retried.
+    """
+    failing = [result for result in results if result['returncode']]
+    ids = [test for result in failing for test in failed_tests(Path(result['log']).read_text(errors='replace'))]
+    if not ids or any(result['returncode'] == 124 or not failed_tests(Path(result['log']).read_text(errors='replace'))
+                      for result in failing):
+        return
+    print(f'Retrying {len(ids)} failed test(s) alone: {", ".join(ids)}', flush=True)
+    retry = invoke('retry', command(ids), directory/'retry', timeout=None)
+    print(Path(retry['log']).read_text(errors='replace'), end='', flush=True)
+    results.append(retry)
+    if retry['returncode']:
+        return
+    for result in failing:
+        result['returncode'] = 0
+        result['flaky'] = failed_tests(Path(result['log']).read_text(errors='replace'))
+    with (CHECKS/'flaky.jsonl').open('a') as ledger:
+        for test in ids:
+            ledger.write(json.dumps({'time': time.time(), 'test': test}) + '\n')
+    print('FLAKY (failed, then passed alone; recorded in flaky.jsonl): ' + ', '.join(ids), flush=True)
 
 
 class SerialLoader(unittest.TestLoader):
@@ -180,12 +230,24 @@ class SerialLoader(unittest.TestLoader):
         return super().loadTestsFromModule(module, *args, **kwargs)
 
 
+class TimedResult(unittest.TextTestResult):
+    """Records each test case as a span so slow cases show under their module in `manage.py timings`."""
+    def startTest(self, test):
+        self._span = timing.span(test.id(), 'test')
+        self._span.__enter__()
+        super().startTest(test)
+
+    def stopTest(self, test):
+        super().stopTest(test)
+        self._span.__exit__(None, None, None)
+
+
 def worker(excluded, match):
     loader = SerialLoader(excluded)
     if match:
         loader.testNamePatterns = [match if '*' in match else f'*{match}*']
     suite = loader.discover(str(ROOT/'tests'))
-    result = unittest.TextTestRunner(verbosity=0).run(suite)
+    result = unittest.TextTestRunner(verbosity=0, resultclass=TimedResult).run(suite)
     return int(not result.wasSuccessful())
 
 

@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <string.h>
 #include "engine_parser.h"
-#include WORMINAL_THEME_HEADER
 
 struct EngineEventNode {
 	EngineEventNode *next;
@@ -94,7 +93,7 @@ int te_xsetcursor(TermEngine *engine, int cursor)
 void te_xloadcols(TermEngine *engine) { te_emit(engine, WORMINAL_PALETTE_RESET, 0, 0, NULL, 0); }
 int te_xsetcolorname(TermEngine *engine, int index, const char *name)
 {
-	if (index < 0 || index >= (int)LEN(colorname)) return 1;
+	if (index < 0 || index >= WORMINAL_COLOR_COUNT) return 1;
 	string_event(engine, WORMINAL_PALETTE, index, name);
 	return 0;
 }

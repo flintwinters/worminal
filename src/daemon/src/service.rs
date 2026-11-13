@@ -74,6 +74,14 @@ impl Service {
     }
 
     pub fn emit(&mut self, client: ClientId, event: worp::events::Event) {
+        if matches!(event.kind, worp::events::EventKind::Notification(_))
+            && !self
+                .clients
+                .get(&client)
+                .is_some_and(|c| c.features & worminal_protocol::WIRE_FEATURE_NOTIFICATIONS != 0)
+        {
+            return;
+        }
         match worp::v2_events::encode(&event) {
             Ok(packet) => self.queue(client, packet.kind, packet.tab, packet.body),
             Err(_) => self.drop_client(client),
@@ -178,6 +186,48 @@ impl Service {
             .map_or(0, |tab| tab.id);
         self.release(index);
         self.tabs.remove(index);
+    }
+
+    /// The tab takes `position` (clamped), shifting those between. Shown/controller state is per tab, not per slot.
+    pub fn reorder(&mut self, index: usize, position: usize) {
+        let tab = self.tabs.remove(index);
+        self.tabs.insert(position.min(self.tabs.len()), tab);
+    }
+
+    /// Where a tab whose label changed belongs: beside the nearest tab with the same label, unless
+    /// a neighbour already has it. The position is for `reorder`.
+    fn group_position(&self, index: usize) -> Option<usize> {
+        let label = self.tabs[index].label();
+        let same = |i: &usize| *i != index && self.tabs[*i].label() == label;
+        if label.is_empty()
+            || [index.wrapping_sub(1), index + 1]
+                .iter()
+                .any(|i| self.tabs.get(*i).is_some_and(|tab| tab.label() == label))
+        {
+            return None;
+        }
+        let nearest = (0..self.tabs.len())
+            .filter(same)
+            .min_by_key(|i| i.abs_diff(index))?;
+        // After removal, tabs past `index` shift down one.
+        Some(if nearest < index {
+            nearest + 1
+        } else {
+            nearest
+        })
+    }
+
+    /// Labels follow the working directory (or SSH user); tabs showing the same one stay together.
+    pub fn group_by_title(&mut self) {
+        let grouping = worminal_config::get().group_tabs_by_title;
+        for index in 0..self.tabs.len() {
+            if !std::mem::take(&mut self.tabs[index].regroup) || !grouping {
+                continue;
+            }
+            if let Some(position) = self.group_position(index) {
+                self.reorder(index, position);
+            }
+        }
     }
 
     pub fn send_frame(&mut self, index: usize, full: bool, now: i64) -> io::Result<bool> {
@@ -294,6 +344,33 @@ impl Service {
             .collect();
         if let Err(error) = self.recovery.save(&recipes) {
             process::diagnostic(&format!("Workspace recovery save: {error}"));
+        }
+    }
+
+    /// Tell every view that negotiated attention, except `skip` (the one that raised it), about a change.
+    pub fn set_attention(&mut self, index: usize, severity: u32, skip: Option<ClientId>) {
+        if std::mem::replace(&mut self.tabs[index].attention, severity) == severity {
+            return;
+        }
+        let tab = self.tabs[index].id;
+        let clients: Vec<_> = self
+            .clients
+            .values()
+            .filter(|c| {
+                c.ready
+                    && Some(c.id) != skip
+                    && c.features & worminal_protocol::WIRE_FEATURE_ATTENTION != 0
+            })
+            .map(|c| c.id)
+            .collect();
+        for client in clients {
+            self.emit(
+                client,
+                Event {
+                    tab,
+                    kind: EventKind::Attention(severity),
+                },
+            );
         }
     }
 
@@ -472,6 +549,7 @@ impl Service {
         if emitted {
             self.last_frame = now;
         }
+        self.group_by_title();
         if self.closed != 0
             || self
                 .tabs

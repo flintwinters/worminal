@@ -21,7 +21,7 @@ from x11 import close_window, isolated_display
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from tools import build
-from tools.theme import theme_values
+from tools.theme import settings
 
 
 def digest(path):
@@ -56,7 +56,7 @@ def main(installed=False):
     ET.SubElement(fontconfig, 'cachedir').text = str(CHECKS / 'install-font-cache')
     fontconfig_path = CHECKS / 'install-fontconfig.xml'
     ET.ElementTree(fontconfig).write(fontconfig_path, encoding='utf-8', xml_declaration=True)
-    family = theme_values({})[0]['font_family']
+    family = settings(defaults=True)['font_family']
     for style, filename in (('Regular', build.FONT_FILES[0]), ('Italic', build.FONT_FILES[1])):
         matched = subprocess.check_output(['fc-match', '-f', '%{file}', f'{family}:style={style}'],
             env={**os.environ, 'FONTCONFIG_FILE': str(fontconfig_path)}, text=True, timeout=10)

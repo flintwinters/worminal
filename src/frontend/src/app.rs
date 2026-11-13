@@ -30,6 +30,8 @@ mod browser_views;
 mod chrome;
 #[path = "app_links.rs"]
 mod links;
+#[path = "notifications.rs"]
+mod notifications;
 #[path = "app_shortcuts.rs"]
 mod shortcuts;
 
@@ -246,6 +248,8 @@ struct Page {
     palette: Rc<RefCell<Palette>>,
     title: String,
     directory: PathBuf,
+    /// Remote user while an SSH client is in the terminal's foreground.
+    ssh_user: Option<String>,
     browser: bool,
     url: String,
     view: Rc<RefCell<Option<crate::browser::Browser>>>,
@@ -258,6 +262,7 @@ struct Record {
     cursor: u32,
     title: String,
     directory: PathBuf,
+    ssh_user: Option<String>,
     colors: Vec<String>,
 }
 fn text(bytes: &[u8]) -> String {
@@ -268,6 +273,8 @@ struct App {
     window: gtk::Window,
     notebook: gtk::Notebook,
     tabstrip: crate::tabs::Tabs,
+    notifications: RefCell<notifications::Notifications>,
+    notification_desktop: Rc<notifications::Desktop>,
     status: gtk::Label,
     config: Config,
     fonts: Rc<RefCell<Fonts>>,
@@ -348,6 +355,8 @@ impl App {
             state_id: window_state::next_id()?,
             fonts,
             tabstrip,
+            notifications: RefCell::default(),
+            notification_desktop: Rc::default(),
             config,
             window,
             notebook,
@@ -369,6 +378,8 @@ impl App {
             glib::clone!(@weak app => move |id| app.select_id(id)),
             glib::clone!(@weak app => move |id| app.send(id, CommandKind::Close { receipt: false })),
         );
+        app.tabstrip
+            .connect_moved(glib::clone!(@weak app => move |id, target| app.move_tab(id, target)));
         // GTK maps the new child in its default switch handler. Focus it afterwards.
         app.notebook.connect_local("switch-page", true, glib::clone!(@weak app => @default-return None, move |values| {
             if app.syncing.get() { return None; }
@@ -481,6 +492,14 @@ impl App {
             );
         }
     }
+    /// Fade the tab here and, as it rises, in the daemon's other views until input answers it.
+    fn alert(self: &Rc<Self>, id: u32, severity: u32) {
+        if let Some(severity) = self.tabstrip.alert(id, severity) {
+            if self.features(id) & WIRE_FEATURE_ATTENTION != 0 {
+                self.send(id, CommandKind::Attention(severity));
+            }
+        }
+    }
     fn action(self: &Rc<Self>, id: u32, action: Action) {
         if self.replacing.get() {
             return;
@@ -544,11 +563,52 @@ impl App {
                     terminal.release();
                 }
             }
+            EventKind::Notification(bytes) => {
+                let outcome = self.notifications.borrow_mut().receive(event.tab, bytes);
+                match outcome {
+                    Some(notifications::Outcome::Show(message)) => {
+                        self.alert(event.tab, ATTENTION_DONE);
+                        let weak = Rc::downgrade(self);
+                        let tab = event.tab;
+                        self.notification_desktop.show(message, move |token| {
+                            if let Some(app) = weak.upgrade() {
+                                if app.closing.get()
+                                    || app.replacing.get()
+                                    || !app.pages.borrow().iter().any(|page| page.id == tab)
+                                {
+                                    return;
+                                }
+                                app.select_id(tab);
+                                if let Some(token) = token {
+                                    app.window.set_startup_id(&token);
+                                }
+                                crate::graphics_ffi::show_window(&app.window);
+                            }
+                        });
+                    }
+                    Some(notifications::Outcome::Reply(bytes)) => self.send(
+                        event.tab,
+                        CommandKind::Input {
+                            bytes,
+                            control: worminal_protocol::worp::commands::Control::Preserve,
+                        },
+                    ),
+                    None => {}
+                }
+            }
             EventKind::Bell => {
                 self.window.error_bell();
-                self.tabstrip.alert(event.tab);
+                let severity = self.tabstrip.ring(event.tab);
+                self.alert(event.tab, severity);
                 if !self.window.is_active() {
                     self.window.set_urgency_hint(true);
+                }
+            }
+            EventKind::Attention(severity) => {
+                if *severity > 0 {
+                    self.tabstrip.alert(event.tab, *severity);
+                } else {
+                    self.tabstrip.answer(event.tab);
                 }
             }
             EventKind::Print(bytes) => self.print(bytes)?,
@@ -593,12 +653,9 @@ impl App {
             }
             // Paths preserve raw filename bytes; painted labels alone use lossy Unicode.
             use std::os::unix::ffi::OsStringExt;
-            let directory = tab
-                .directory
-                .split(|byte| *byte == 0)
-                .next()
-                .unwrap()
-                .to_vec();
+            let (directory, ssh_user) =
+                worminal_protocol::worp::events::split_directory_field(&tab.directory);
+            let directory = directory.to_vec();
             records.push(Record {
                 id: tab.id | index << LINK_SHIFT,
                 browser: tab.kind == TabKind::Browser,
@@ -607,6 +664,7 @@ impl App {
                 cursor: tab.cursor,
                 title: text(&tab.title),
                 directory: PathBuf::from(OsString::from_vec(directory)),
+                ssh_user: ssh_user.map(text),
                 colors: tab.colors.iter().map(|color| text(color)).collect(),
             });
         }
@@ -682,6 +740,7 @@ impl App {
                     palette,
                     title: String::new(),
                     directory: PathBuf::new(),
+                    ssh_user: None,
                     browser: record.browser,
                     url: record.url.clone(),
                     view: Rc::new(RefCell::new(None)),
@@ -694,7 +753,7 @@ impl App {
             };
             let mut palette_changed = false;
             // The catalog lists overrides only through the last one; later entries are defaults.
-            for index in 0..worminal_config::COLOR_NAMES.len() {
+            for index in 0..worminal_config::COLOR_COUNT {
                 let color = record.colors.get(index).filter(|color| !color.is_empty());
                 palette_changed |= page
                     .palette
@@ -727,6 +786,7 @@ impl App {
                     page.title = record.title.clone();
                 }
                 page.directory = record.directory.clone();
+                page.ssh_user = record.ssh_user.clone();
             }
         }
         {

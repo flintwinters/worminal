@@ -20,7 +20,7 @@ te_tresizeplain(TermEngine *session, int col, int row)
 		te_selclear(session);
 	/* Slide the screen to keep the cursor visible; retain displaced main rows. */
 	for (i = 0; i <= term.c.y - row; i++) {
-		if (theme_history_size && !IS_SET(MODE_ALTSCREEN))
+		if (te_history_size && !IS_SET(MODE_ALTSCREEN))
 			free(te_thistorypush(session, term.line[i]));
 		else
 			free(term.line[i]);
@@ -45,7 +45,7 @@ te_tresizeplain(TermEngine *session, int col, int row)
 	/* resize each row to new width, zero-pad if needed */
 	if (col != term.col) {
 		Glyph blank = { .u = ' ', .fg = defaultfg, .bg = defaultbg };
-		for (i = 0; i < theme_history_size && term.hist; i++) {
+		for (i = 0; i < te_history_size && term.hist; i++) {
 			if (!term.hist[i])
 				continue;
 			term.hist[i] = te_realloc(term.hist[i], col * sizeof(Glyph));
@@ -146,14 +146,14 @@ te_treflow(TermEngine *session, int col, int row)
 		last--;
 	}
 	/* Keep at most the bounded history plus the visible screen while streaming. */
-	out.cap = (size_t)theme_history_size + row;
+	out.cap = (size_t)te_history_size + row;
 	out.lines = te_alloc(out.cap * sizeof(Line));
 	memset(out.lines, 0, out.cap * sizeof(Line));
 	te_treflownew(session, &out);
 	for (n = 0; n < oldhistlen + last + 1; n++) {
 		if (n < oldhistlen)
-			source = term.hist[(term.histi - oldhistlen + n + theme_history_size)
-			                   % theme_history_size];
+			source = term.hist[(term.histi - oldhistlen + n + te_history_size)
+			                   % te_history_size];
 		else
 			source = term.line[n - oldhistlen];
 		if (previouswrap && out.x == col) {
@@ -251,16 +251,16 @@ te_treflow(TermEngine *session, int col, int row)
 		free(term.line[i]);
 	free(term.line);
 	if (term.hist) {
-		for (i = 0; i < theme_history_size; i++)
+		for (i = 0; i < te_history_size; i++)
 			free(term.hist[i]);
 		free(term.hist);
 	}
 	term.line = te_alloc(row * sizeof(Line));
-	term.histlen = MIN((size_t)theme_history_size, start - first);
-	term.hist = term.histlen ? te_alloc(theme_history_size * sizeof(Line)) : NULL;
+	term.histlen = MIN((size_t)te_history_size, start - first);
+	term.hist = term.histlen ? te_alloc(te_history_size * sizeof(Line)) : NULL;
 	if (term.hist)
-		memset(term.hist, 0, theme_history_size * sizeof(Line));
-	term.histi = theme_history_size ? term.histlen % theme_history_size : 0;
+		memset(term.hist, 0, te_history_size * sizeof(Line));
+	term.histi = te_history_size ? term.histlen % te_history_size : 0;
 	for (i = 0; i < term.histlen; i++) {
 		size_t position = start - term.histlen + i;
 		term.hist[i] = out.lines[position % out.cap];

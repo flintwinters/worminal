@@ -20,6 +20,9 @@ deadlines and serialization. It does not manage processes, descriptors, GUI obje
 OSC 8 links are 16-bit cell ids into a bounded per-terminal URI table; ids never leave the daemon: ROW_LINKS
 packets carry each row's URIs inline, and snapshots drop them. Clicks open only http(s) or type `worminal://input`
 text (newline executes) into the same tab. The Rust wrapper manages C handles and screen buffers, and normalizes clipboard paste in place.
+OSC 99 metadata/payload events go only to capable controlling views; those views assemble bounded title/body
+notifications and deliver them asynchronously on their desktop, including for remote tabs. Click targets
+retain weak window ownership and use the existing tab-selection and platform activation paths.
 The frontend owns its ordered keyboard mappings in Rust. Shell defaults live with Rust PTY creation;
 browser defaults live with Rust target resolution. C headers retain only engine snapshot and module ABIs:
 `src/protocol` owns wire constants and framing, `src/workspace` owns recovery/handoff formats, and `src/gtk`
@@ -84,20 +87,22 @@ Parent explorer build commands supply palette/font inputs; standalone builds ret
 ## Build, test and install
 
 `manage.py` is strictly internal build/test/install/maintenance tooling. Product workflows use native executables.
-Build as the regular user to compile their Alacritty appearance.
 Rust bindings require libclang plus the matching Clang compiler and builtin headers; libclang alone is insufficient.
 `check-rust-lint` (part of `check`) enforces rustfmt, a Rust file-length cap and warning-free Clippy (rustup
 component `clippy`). Lint policy lives once in the workspace `Cargo.toml`; long-function exceptions use `#[expect]`.
-Shared font defaults in `assets/font.toml` use bundled Atkinson Hyperlegible Mono; installation includes
-both font styles and their OFL license. Explicit Alacritty fields override defaults, including for explorer builds.
+Configuration is runtime, never compiled in: `src/config` is the only resolver (`worminald config --json` for tools),
+layering `worminal.yaml` over an Alacritty config; see `docs/config.md`. Defaults in `assets/font.yaml` use bundled
+Atkinson Hyperlegible Mono; installation includes both font styles and their OFL license. Scrollback capacity is
+fixed by a process's first engine; other settings apply to new processes/windows.
 Builds and installs auto-detect a headless host (no GTK/WebKit/Pango via pkg-config, or `WORMINAL_HEADLESS=1`; `0` forces graphics) and then build/install only `worminald` and the manual. Cargo output and generated files belong in
 `build/`; native executables use `build/bin` and modules use `build/lib/worminal`, matching installed prefixes.
 `tools/paths.py` owns runtime/diagnostic path decisions. Diagnostics belong in `build/checks`; optional Python
 virtualenvs use `build/venv`. `clean` preserves diagnostics/virtualenvs while removing compiled output.
-Analysis/dependency configuration lives under `tools`; `privacy-setup` generates the Git privacy hooks from
-`manage.py` into the Git directory. Management suppresses Python bytecode caches.
+Analysis/dependency configuration lives under `tools`. Management suppresses Python bytecode caches.
 Never test under /tmp or inject test input into the desktop.
 Private test runtimes must outlive their GUI and service owners; await owner exit before removing their files.
+Publication checks require Unix ownership semantics. Update workflows automatically use project-local tmpfs
+on UID-remapping filesystems, preserve diagnostics, then unmount; this also requires passwordless sudo.
 `manage.py` drops desktop display variables. `manage.py check` runs the full private-display suite. Native Wayland
 checks use project-local Weston with matching virtual-seat ABI and no X11 fallback. Prepare optional private
 Muffin/Weston through their setup commands. Performance checks measure private software presentation, not desktop
@@ -110,18 +115,25 @@ Normal builds do not use this code. `manage.py clean` removes links left by inte
 Keep behavior checks when changing tests. Some tests check fixes by removing them and requiring a failure.
 Keep user profiles and diagnostic records when cleaning up code.
 
+`manage.py setup-check-runtime` prepares private browser audio and Weston without changing desktop packages;
+update workflows run it automatically. New runtimes stay under `build/dependencies` across diagnostic cleanup.
+`manage.py update` builds the current checkout, installs to /usr/local, then verifies the installed artifacts on
+private displays; it does not run the test suite (`update --check` does, as auto-update does). Installation and any
+private tmpfs mounts use sudo; checks run as the user.
 `manage.py auto-update --timer install` schedules a daily 03:00 systemd user timer: it builds and checks the tip of
 `origin/main` in a private clone under `build/auto-update`, installs to /usr/local only if everything passes, and
-skips unchanged tips. It needs passwordless sudo for the install step.
+skips unchanged tips. It shares the checkout update pipeline and needs passwordless sudo for the install step.
 
 The active installation is `/usr/local/bin/worminal`, with modules in `/usr/local/lib/worminal`. Install a tested
 regular-user build with `sudo -n python3 manage.py install --prefix /usr/local --skip-build`; do not install fixes
 into ~/.local. `check-install` validates a staged installation; `check-install --installed` checks installed files,
-modes, SSH/browser operation and actual module paths on private displays. Running owners retain mapped code;
-check the running executable and loaded module files before claiming a change is active. Inventory commands record
+modes, SSH/browser operation and actual module paths on private displays. Running owners retain mapped code; v2 owners hand off by themselves, v1 daemons are never touched.
+`manage.py running` classifies live processes against the installed files (`update` prints it); run it before claiming a change is active.
+`manage.py update` is the one-command flow and needs no manual preparation: it takes a per-checkout lock, releases tmpfs left by aborted runs,
+and `setup-check-runtime` builds a missing/stale explorer (`npm ci` as needed) and prepares audio and Weston under `build/dependencies`.
+If it still stops, fix the cause in that flow rather than around it. Inventory commands record
 process IDs, tabs, windows and file hashes without copying executables. Keep destinations in environment configuration
-and preserve the contributor's configured Git identity. Privacy hooks check staged content and commit messages;
-public commit attribution is allowed.
+and preserve the contributor's configured Git identity.
 
 ## Current investigations
 

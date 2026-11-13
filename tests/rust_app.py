@@ -25,6 +25,7 @@ from x11 import isolated_display, close_window
 from preview import profile, service, wayland_display
 from test_window_state import private_bus, WindowStateTest
 from test_window_activation import WindowActivationTests
+from test_notifications import NotificationTests
 from runtime import copy_runtime, window, stop_application
 from rust_module import RustModuleTest
 from test_runtime import RuntimeCleanupTest

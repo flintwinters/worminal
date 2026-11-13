@@ -7,9 +7,13 @@ from pathlib import Path
 import shlex
 import shutil
 import subprocess
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 
-from tools.theme import generate_theme
+from tools import timing
 from tools.paths import runtime_binary
+from tools.test_runner import available_cpus
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -41,8 +45,16 @@ def words(name, default=""):
     return shlex.split(os.environ.get(name, default))
 
 
+def describe(command):
+    """The artifact a compiler or cargo command produces, else its first words."""
+    if "-o" in command[:-1]:
+        return Path(command[command.index("-o") + 1]).name.removesuffix(".pending")
+    return " ".join(str(part) for part in command[:8])
+
+
 def invoke(command):
-    subprocess.run(command, cwd=ROOT, check=True)
+    with timing.span(describe(command), "compile"):
+        subprocess.run(command, cwd=ROOT, check=True)
 
 
 def pkg_flags(option, packages=PACKAGES):
@@ -79,6 +91,19 @@ def link_flags():
     return ["-lm", "-lrt", "-lutil", *pkg_flags("--libs"), *words("LDFLAGS")]
 
 
+# Every step may run on its own thread; only this many compiler or linker processes run at once.
+COMPILERS = threading.BoundedSemaphore(available_cpus())
+
+
+def concurrently(calls):
+    """Run independent build steps together. All finish, then the first failure is raised."""
+    calls = list(calls)
+    with ThreadPoolExecutor(max_workers=max(1, len(calls))) as workers:
+        futures = [workers.submit(call) for call in calls]
+    for future in futures:
+        future.result()
+
+
 def step(output, command, dependencies, *, depfile=False):
     """Publish successful outputs only; include command changes and compiler-discovered headers in freshness."""
     output = ROOT / output
@@ -102,7 +127,8 @@ def step(output, command, dependencies, *, depfile=False):
         args += ["-MMD", "-MF", str(pending_dep), "-MT", str(output)]
     print(f"Build: {output.relative_to(ROOT)}", flush=True)
     try:
-        invoke(args)
+        with COMPILERS:
+            invoke(args)
         temporary.replace(output)
         if depfile:
             pending_dep.replace(dep)
@@ -119,11 +145,9 @@ class Builder:
         self.libs = link_flags()
 
     def program(self, output, sources, *, variant="default", flags=(), libs=None, link_dependencies=()):
-        objects = []
-        for source in sources:
-            obj = f"build/obj/{variant}/{Path(source).with_suffix('.o')}"
-            step(obj, [*self.cc, *self.cflags, *flags, "-c", source], [source], depfile=True)
-            objects.append(obj)
+        objects = [f"build/obj/{variant}/{Path(source).with_suffix('.o')}" for source in sources]
+        concurrently(partial(step, obj, [*self.cc, *self.cflags, *flags, "-c", source], [source], depfile=True)
+                     for obj, source in zip(objects, sources))
         step(output, [*self.cc, *objects, *(self.libs if libs is None else libs)],
              [*objects, *link_dependencies])
 
@@ -156,6 +180,11 @@ class Builder:
         finally:
             temporary.unlink(missing_ok=True)
 
+    def independent(self, target):
+        """C-only targets whose outputs and inputs no other target shares, so they can build alongside any other."""
+        return (target in ("build/engine_test", "build/browser_cpu.so", "build/gui-peer.so", "build/scrollback_test")
+                or target.startswith("build/") and target.removeprefix("build/") in PROBES)
+
     def target(self, target):
         if target == "worminal-rust":
             self.target("build/lib/worminal/" + RUST_BROWSER_MODULE)
@@ -166,13 +195,11 @@ class Builder:
         elif target == "build/lib/worminal/" + RUST_BROWSER_MODULE:
             self.rust_library(target, "worminal-browser")
         elif target == "build/libworminal_engine.a":
-            objects = []
-            for source in ENGINE:
-                obj = f"build/obj/engine/{Path(source).with_suffix('.o')}"
-                step(obj, [*self.cc, *CPPFLAGS, *words("CPPFLAGS"), *words("CFLAGS", "-O3"),
-                           "-ffunction-sections", "-fdata-sections",
-                           "-c", f"src/{source}"], [f"src/{source}"], depfile=True)
-                objects.append(obj)
+            objects = [f"build/obj/engine/{Path(source).with_suffix('.o')}" for source in ENGINE]
+            concurrently(partial(step, obj, [*self.cc, *CPPFLAGS, *words("CPPFLAGS"), *words("CFLAGS", "-O3"),
+                                             "-ffunction-sections", "-fdata-sections",
+                                             "-c", f"src/{source}"], [f"src/{source}"], depfile=True)
+                         for obj, source in zip(objects, ENGINE))
             step(target, [*words("AR", "ar"), "rcs", "{output}", *objects], objects)
         elif target == "build/engine_test":
             self.program(target, ["tests/engine.c", *(f"src/{s}" for s in ENGINE)],
@@ -217,12 +244,21 @@ def __getattr__(name):
     raise AttributeError(name)
 
 
+def run_all(builder, targets):
+    for target in targets:
+        builder.target(target)
+
+
 def build_targets(*targets):
-    generate_theme()
     builder = Builder()
     core = ("worminald",) if headless() else ("worminal", "worminald")
-    for target in dict.fromkeys((*core, *targets)):
-        builder.target(target)
+    targets = list(dict.fromkeys((*core, *targets)))
+    # Cargo, shared C outputs and historical (Git-built) targets stay in order on one lane; it runs beside
+    # the independent C targets. Rust build steps need the engine archive, so it exists before either lane starts.
+    builder.target("build/libworminal_engine.a")
+    lane = [target for target in targets if not builder.independent(target)]
+    concurrently([partial(run_all, builder, lane), *(partial(builder.target, target) for target in targets
+                                                      if builder.independent(target))])
 
 
 def analyze():
@@ -294,7 +330,7 @@ def retired_installation_files(prefix=None):
 
 def install(prefix=None, *, skip_build=False):
     files = installation_files(prefix)
-    # Build before sudo so the result uses the user's theme.
+    # Build before sudo (the theme itself is read at runtime).
     if not skip_build:
         build_targets()
     for source, destination, mode in files:

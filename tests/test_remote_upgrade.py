@@ -23,8 +23,16 @@ def row(name, data, mode=0o755):
     return {'role': name, 'size': len(data), 'sha256': hashlib.sha256(data).hexdigest(), 'mode': mode}
 
 
+def private_installation(test):
+    # Publication deliberately refuses group-writable ancestors. Fixture directories
+    # must model a privileged installation even when the developer uses umask 0002.
+    previous = os.umask(0o022)
+    test.addCleanup(os.umask, previous)
+
+
 class PublishTest(unittest.TestCase):
     def setUp(self):
+        private_installation(self)
         self.directory = tempfile.TemporaryDirectory(prefix='remote-upgrade-', dir=CHECKS)
         self.addCleanup(self.directory.cleanup)
         self.prefix = Path(self.directory.name)
@@ -52,6 +60,13 @@ class PublishTest(unittest.TestCase):
             self.assertEqual(path.read_bytes(), data)
             self.assertEqual(path.stat().st_mode & 0o777, item['mode'])
         self.assertEqual(list(self.prefix.rglob('.worminal-upgrade-*')), [])
+
+    def test_group_writable_installation_directory_is_refused(self):
+        (self.prefix / 'bin').chmod(0o775)
+        with self.assertRaisesRegex(ValueError, 'writable by another user'):
+            self.publish()
+        self.assertEqual([agent.digest(self.prefix / item['role']) for item in self.layout['files']],
+                         [item['previous'] for item in self.layout['files']])
 
     def test_failed_second_exchange_restores_original_inodes(self):
         original = agent.exchange
@@ -109,6 +124,7 @@ class PublishTest(unittest.TestCase):
 
 class CommandTest(unittest.TestCase):
     def setUp(self):
+        private_installation(self)
         self.directory = tempfile.TemporaryDirectory(prefix='upgrade-command-', dir=CHECKS)
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)

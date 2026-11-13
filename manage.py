@@ -17,11 +17,11 @@ try:
 except ModuleNotFoundError as error:
     raise SystemExit("Install Typer to use manage.py: python3 -m pip install typer") from error
 
+from tools import timing
 from tools.paths import CHECKS, runtime_binary
 from tools import build as native_build
 from tools.theme import explorer_font
 from tools.icon import generate_icon
-from tools.privacy import check_privacy
 from tools.git_index import tracked_files
 
 
@@ -53,7 +53,8 @@ def run(args, *, env=None):
     # Maintenance checks must never read or overwrite the user's recovery recipes.
     private_env = {**(os.environ if env is None else env),
                    "XDG_STATE_HOME": str(CHECKS / "state")}
-    return subprocess.run(args, env=private_env).returncode
+    with timing.span(" ".join(str(part) for part in args)[:120].replace(sys.executable, "python"), "run"):
+        return subprocess.run(args, env=private_env).returncode
 
 
 def check_file_limits():
@@ -85,8 +86,6 @@ def check_file_limits():
 
 
 def run_checks(match=None, jobs=None):
-    if check_privacy(ROOT):
-        return 1
     native_build.build_targets(
         "worminal-rust", "worminal-x11", "worminald-x11", "worminald-preview", "build/key_injector",
         "build/placement_wm", "build/compact-worminal",
@@ -152,8 +151,8 @@ def run_headless_checks():
     if code:
         return code
     patterns = ("test_build.py", "test_reference.py", "test_perf_metrics.py", "test_cli.py", "test_workspace.py",
-                "test_preview_workspace.py", "test_agent_api.py", "test_remote_install.py", "test_remote_upgrade.py", "test_theme.py",
-                "test_privacy.py", "test_handoff.py", "test_restore.py", "test_upgrade.py")
+                "test_preview_workspace.py", "test_agent_api.py", "test_remote_install.py", "test_remote_upgrade.py", "test_theme.py", "test_config_sync.py", "test_running.py", "test_update_flow.py",
+                "test_handoff.py", "test_restore.py", "test_upgrade.py")
     for pattern in patterns:
         code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                     "-p", pattern, "-q"])
@@ -168,7 +167,7 @@ def run_proof_script(path):
 
 @app.command()
 def build():
-    """Compile Worminal with the current Alacritty theme."""
+    """Compile Worminal; appearance is read at runtime from worminal.yaml or Alacritty config."""
     native_build.build_targets()
 
 
@@ -224,13 +223,11 @@ def check_rust_process():
 
 
 def run_rust_process_checks():
-    native_build.generate_theme()
     native_build.Builder().target("build/libworminal_engine.a")
     return run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-daemon"])
 
 
 def build_rust_daemon():
-    native_build.generate_theme()
     return native_build.Builder().rust_artifact("worminal-daemon")
 
 
@@ -243,7 +240,6 @@ def check_rust_frontend(unit_only: bool = typer.Option(
         False, help="Run Rust tests without private-display painter comparisons.")):
     """Check imported Rust viewports and exact C/Rust painter pixels on private X11 and native Wayland."""
     if unit_only:
-        native_build.generate_theme()
         native_build.Builder().target("build/libworminal_engine.a")
         raise typer.Exit(run_rust_frontend_tests())
     native_build.build_targets("build/render_probe")
@@ -280,6 +276,13 @@ def check_rust_app():
     raise typer.Exit(run([sys.executable, "tests/rust_app.py"]))
 
 
+@app.command("check-notifications")
+def check_notifications():
+    """Check OSC 99 delivery and click activation on a private session bus and X11 desktop."""
+    native_build.build_targets("worminal-rust", "worminald")
+    raise typer.Exit(run([sys.executable, "tests/test_notifications.py", "-q"]))
+
+
 @app.command("check-rust-browser")
 def check_rust_browser():
     """Check real Rust browser views, lazy loading, owner forwarding and local-document security privately."""
@@ -296,7 +299,6 @@ def build_rust_daemon_command():
 @app.command("check-agent-api")
 def check_agent_api():
     """Check headless agent discovery, screen reads and keystrokes on a private workspace."""
-    native_build.generate_theme()
     native_build.Builder().target("build/libworminal_engine.a")
     code = run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-protocol",
                 "-p", "worminal-daemon", "--lib"])
@@ -403,6 +405,13 @@ def inventory():
     inventory()
 
 
+@app.command("running")
+def running(prefix: Path = typer.Option("/usr/local", help="Installation prefix whose live processes to classify.")):
+    """Report which live Worminal processes run the installed files; v1 daemons are listed, never changed."""
+    from tools import running as live
+    live.report(str(prefix))
+
+
 @app.command("build-preview")
 def build_preview():
     """Build compatibility names for the GTK frontend and v2 service."""
@@ -439,9 +448,32 @@ def check_preview():
 
 @app.command("setup-preview-wayland")
 def setup_preview_wayland():
-    """Download/extract an optional Debian Weston runtime under build/checks; no system installation."""
+    """Download/extract a project-local Debian Weston runtime; no system installation."""
     from tools.weston import setup
     setup()
+
+
+@app.command("setup-preview-audio")
+def setup_preview_audio():
+    """Prepare private browser-test audio without installing system packages; headless hosts skip it."""
+    from tools.audio import setup
+    setup()
+
+
+@app.command("setup-check-runtime")
+def setup_check_runtime():
+    """Prepare everything the full suite needs: explorer build, project-local audio and Weston; idempotent."""
+    if native_build.headless():
+        return
+    from tools import explorer
+    explorer.prepare()
+    from tools.audio import setup as setup_audio
+    from tools import weston
+    setup_audio()
+    try:
+        weston.command(os.environ.copy())
+    except ValueError:
+        weston.setup()
 
 
 @app.command("prove-preview-regressions")
@@ -494,50 +526,6 @@ def check_python(jobs: int = typer.Option(None, min=1, show_default="available C
     """Run Python checks against existing build artifacts; use check to build prerequisites first."""
     from tools.test_runner import run_python
     raise typer.Exit(run_python(jobs=jobs, match=match, modules=module or ()))
-
-
-@app.command("check-privacy")
-def privacy(history: bool = typer.Option(False, "--history", help="Also scan reachable Git history."),
-            staged: bool = typer.Option(False, "--staged", help="Scan index content instead of working files."),
-            message_file: Path = typer.Option(None, "--message-file", help="Also scan a commit message."),
-            repository: Path = typer.Option(ROOT, "--repository", help="Repository or initialized submodule to scan.")):
-    """Scan tracked content for common private data; redact matched values."""
-    repository = repository.resolve()
-    message_file = message_file.resolve() if message_file else None
-    with chdir(repository):
-        raise typer.Exit(int(check_privacy(repository, history, staged, message_file)))
-
-
-@app.command("check-privacy-tests")
-def check_privacy_tests():
-    """Check privacy scanning and identity-preserving hook setup."""
-    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
-                         "-p", "test_privacy.py", "-q"]))
-
-
-# Git runs only executables with these exact names, so the hooks are generated into the Git
-# directory; this table is their tracked source. Hooks run from the top of the work tree.
-PRIVACY_HOOKS = {
-    "pre-commit": '"--staged"',
-    "commit-msg": '"--staged", "--message-file", sys.argv[1]',
-    "pre-push": '"--history"',
-}
-
-
-@app.command("privacy-setup")
-def privacy_setup():
-    """Generate the privacy hooks into the Git directory without changing the configured Git identity."""
-    # Older setups pointed Git at tracked hook files. Unset that first: --git-path resolves through it.
-    subprocess.run(["git", "config", "--local", "--unset", "core.hooksPath"])
-    hooks = Path(subprocess.check_output(["git", "rev-parse", "--git-path", "hooks"], text=True).strip())
-    hooks.mkdir(parents=True, exist_ok=True)
-    for name, arguments in PRIVACY_HOOKS.items():
-        hook = hooks / name
-        hook.write_text("#!/usr/bin/env python3\n# Generated by manage.py privacy-setup; edit PRIVACY_HOOKS there.\n"
-                        "import os\nimport sys\n\n"
-                        f'os.execv(sys.executable, [sys.executable, "manage.py", "check-privacy", {arguments}])\n')
-        hook.chmod(0o755)
-    typer.echo("Privacy hooks installed; configured Git identity preserved.")
 
 
 @app.command("check-keys")
@@ -738,10 +726,6 @@ def explorer_build():
 @app.command("explorer-check")
 def explorer_check():
     """Check explorer types, directory behavior, DOM interactions, and standalone output."""
-    code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
-                "-p", "test_privacy.py", "-q"])
-    if code:
-        raise typer.Exit(code)
     check_file_limits()
     explorer_command("check")
 
@@ -771,6 +755,14 @@ def auto_update(timer: TimerAction = typer.Option(
     """Update /usr/local from the tip of main if it changed and passes build and check."""
     from tools import auto_update as updates
     raise typer.Exit(updates.update() if timer is None else updates.schedule(timer is TimerAction.remove) or 0)
+
+
+@app.command("update")
+def update_checkout(prefix: str = typer.Option("/usr/local", help="Installation prefix."),
+                    check: bool = typer.Option(False, help="Also run the full suite before installing.")):
+    """Build, install this checkout to /usr/local, and verify installed files; run check separately."""
+    from tools.auto_update import publish
+    raise typer.Exit(publish(prefix=prefix, checked=check))
 
 
 @app.command()
@@ -993,9 +985,37 @@ def qtile():
     raise typer.Exit(run_proof_script(ROOT / "tests/proof_qtile.py"))
 
 
+@app.command("timings")
+def timings(run: str = typer.Argument(None, help="Run file name or unique part of it; default is the latest."),
+            depth: int = typer.Option(4, min=1, help="Levels of the span tree to show."),
+            minimum: float = typer.Option(0.5, help="Hide spans faster than this many seconds."),
+            list_runs: bool = typer.Option(False, "--list", help="List recorded runs instead."),
+            compare: bool = typer.Option(False, "--compare", help="Compare with the previous run of the same command.")):
+    """Show where the time of a recorded manage.py run went (every command records its own)."""
+    runs = timing.runs()
+    if list_runs:
+        for path in runs[-30:]:
+            spans, roots = timing.load(path)
+            typer.echo(f"{path.name}  {max((root['seconds'] for root in roots), default=0):8.1f}s")
+        return
+    chosen = [path for path in runs if not run or run in path.name]
+    if not chosen:
+        raise typer.Exit("No recorded runs; run a manage.py command first.")
+    latest = chosen[-1]
+    typer.echo(timing.render(latest, depth=depth, minimum=minimum))
+    if compare:
+        command = latest.name.split("-", 2)[2]
+        earlier = [path for path in chosen[:-1] if path.name.endswith("-" + command)]
+        typer.echo("\n" + (timing.compare(latest, earlier[-1]) if earlier else "No earlier run of this command."))
+
+
 if __name__ == "__main__":
+    command = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else "manage"
+    if command != "timings":
+        timing.start(command)
     try:
-        app()
+        with timing.span("manage.py " + " ".join(sys.argv[1:]), "command"):
+            app()
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         typer.echo(f"Command failed: {error}", err=True)
         raise SystemExit(1) from error

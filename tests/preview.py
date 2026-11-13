@@ -20,6 +20,7 @@ import time
 
 from http_fixture import serving
 from x11 import isolated_display
+from tools import explorer
 from workspace_protocol import send as wire_send, wait_kind as wire_wait, service_pid
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -88,16 +89,19 @@ def profile(env):
 @contextmanager
 def audio(env):
     """Decode real media into a private silent sink, independent of desktop audio devices."""
-    if not shutil.which("pulseaudio"):
-        raise RuntimeError("Install pulseaudio for private browser media checks.")
+    from tools.audio import command
+    environment = dict(env)
+    executable = command(environment)
     runtime = Path(env["XDG_RUNTIME_DIR"]) / "pulse"
     runtime.mkdir(mode=0o700)
     socket = runtime / "native"
-    environment = {**env, "PULSE_RUNTIME_PATH": str(runtime), "PULSE_SERVER": "unix:" + str(socket),
-                   "PULSE_SINK": "worminal-tests"}
+    environment = {**environment, "PULSE_RUNTIME_PATH": str(runtime), "PULSE_SERVER": "unix:" + str(socket),
+                   "PULSE_SINK": "worminal-tests",
+                   # The private audio server must never claim the desktop's D-Bus name.
+                   "DBUS_SESSION_BUS_ADDRESS": "unix:path=" + str(runtime / "no-session-bus")}
     log_path = runtime / "server.log"
     with log_path.open("wb") as log:
-        process = subprocess.Popen(["pulseaudio", "-n", "--daemonize=no", "--use-pid-file=no",
+        process = subprocess.Popen([*executable, "-n", "--daemonize=no", "--use-pid-file=no",
                                     "--exit-idle-time=-1", "--log-target=stderr",
                                     "--load=module-null-sink sink_name=worminal-tests",
                                     "--load=module-native-protocol-unix auth-anonymous=1"],
@@ -394,6 +398,8 @@ def main():
         env["WORMINAL_TEST_EXECUTABLE"] = str(runtime_binary("worminal"))
         local_app = ROOT / "file-explorer/dist/index.html"
         if local_app.is_file():
+            if explorer.dist_stale():
+                raise RuntimeError("file-explorer/dist is older than its sources; run manage.py explorer-build")
             env["WORMINAL_PREVIEW_LOCAL_APP"] = local_app.as_uri()
         env["WORMINAL_PREVIEW_FIXTURE"] = url
         env["WORMINAL_PREVIEW_TLS_FIXTURE"] = tls_url

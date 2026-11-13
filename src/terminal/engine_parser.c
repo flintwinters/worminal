@@ -9,7 +9,6 @@
 #include <wchar.h>
 #include "engine_parser.h"
 #include "engine_context.h"
-#include WORMINAL_THEME_HEADER
 static int te_tlinelen(TermEngine *session, int y);
 static void te_selnormalize(TermEngine *session);
 static void te_selsnap(TermEngine *session, int *x, int *y, int direction);

@@ -121,8 +121,16 @@ pub fn decode(packet: Packet) -> io::Result<Option<Command>> {
         },
         WIRE_BROWSER_NAVIGATE => CommandKind::Navigate(string(&packet.body)?),
         WIRE_BROWSER_REPLACE => CommandKind::ReplaceBrowser(string(&packet.body)?),
+        WIRE_MOVE => CommandKind::Move {
+            position: integer(&packet.body)?,
+        },
         WIRE_ATTACH => CommandKind::Subscribe,
         WIRE_RELEASE => CommandKind::Release,
+        WIRE_ATTENTION => CommandKind::Attention(if packet.body.is_empty() {
+            ATTENTION_DONE
+        } else {
+            integer(&packet.body)?
+        }),
         WIRE_CAPABILITIES => CommandKind::Capabilities(integer(&packet.body)?),
         WIRE_SERVICE_INFO => CommandKind::ServiceInfo,
         WIRE_STOP => CommandKind::Stop,
@@ -239,8 +247,16 @@ pub fn encode(command: &Command) -> io::Result<Packet> {
             body.put_string(url)?;
             WIRE_BROWSER_REPLACE
         }
+        CommandKind::Move { position } => {
+            body.put_u32(*position)?;
+            WIRE_MOVE
+        }
         CommandKind::Subscribe => WIRE_ATTACH,
         CommandKind::Release => WIRE_RELEASE,
+        CommandKind::Attention(severity) => {
+            body.put_u32(*severity)?;
+            WIRE_ATTENTION
+        }
         CommandKind::Capabilities(features) => {
             body.put_u32(*features)?;
             WIRE_CAPABILITIES

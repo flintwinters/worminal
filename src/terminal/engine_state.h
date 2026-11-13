@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include "st.h"
 #include "engine.h"
+extern int te_history_size, te_scroll_multiplier;
 #define UTF_SIZ 4
 #define ESC_BUF_SIZ (128 * UTF_SIZ)
 #define ESC_ARG_SIZ 16

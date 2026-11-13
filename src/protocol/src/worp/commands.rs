@@ -109,7 +109,13 @@ pub enum CommandKind {
         generation: u32,
         operation: SelectionOperation,
     },
+    /// Reorder: the tab takes this zero-based position among the daemon's tabs.
+    Move {
+        position: u32,
+    },
     Release,
+    /// The sending view alerted this tab at this severity; the daemon relays it to the other views.
+    Attention(u32),
     Subscribe,
     Capabilities(u32),
     ServiceInfo,

@@ -14,7 +14,8 @@ typedef struct {
 	int charset, icharset;
 	Rune lastc;
 	int altscreen_allowed, ttybuflen, remote_scroll, output_kind;
-	char ttybuf[BUFSIZ];
+	/* Fixed by the snapshot format, not by libc: BUFSIZ is 8192 on glibc but 1024 on musl. */
+	char ttybuf[WORMINAL_PENDING_BYTES];
 	char str_type;
 	uint32_t str_len;
 } EngineCompatSnapshot;

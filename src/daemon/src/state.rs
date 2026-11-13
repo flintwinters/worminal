@@ -106,6 +106,8 @@ pub(crate) struct Tab {
     pub title: Vec<u8>,
     pub initial_title: Vec<u8>,
     pub directory: Vec<u8>,
+    /// Remote user of the SSH client in the terminal's foreground; refreshed with `directory`.
+    pub ssh_user: Option<Vec<u8>>,
     next_output_directory: i64,
     pub clipboard: Vec<u8>,
     pub url: Option<Vec<u8>>,
@@ -119,6 +121,10 @@ pub(crate) struct Tab {
     catalog_record: Option<worminal_protocol::worp::events::TabRecord>,
     pub catalog_pending: bool,
     pub catalog_dirty: bool,
+    /// The title changed since the service last considered grouping this tab.
+    pub regroup: bool,
+    /// Severity of an alert by some view not yet answered by input (0 none); Service::set_attention changes it.
+    pub attention: u32,
     pub pending_frame: bool,
     pub input_frame: bool,
     /// Displayed by its controller; only Service::show changes it while controlled.
@@ -184,6 +190,7 @@ impl Tab {
             title: title.to_vec(),
             initial_title: title.to_vec(),
             directory: Vec::new(),
+            ssh_user: None,
             next_output_directory: 0,
             clipboard: Vec::new(),
             url: None,
@@ -197,6 +204,8 @@ impl Tab {
             catalog_record: None,
             catalog_pending: false,
             catalog_dirty: true,
+            regroup: false,
+            attention: 0,
             pending_frame: false,
             input_frame: false,
             shown: false,
@@ -246,10 +255,25 @@ impl Tab {
             None
         };
         let bytes = directory.map_or_else(Vec::new, |path| path.into_os_string().into_vec());
-        if self.directory != bytes {
+        let ssh_user = terminal
+            .pty
+            .fd()
+            .filter(|_| pid > 0)
+            .and_then(|fd| crate::ssh::foreground_user(fd, &crate::ssh::local_user()));
+        if self.directory != bytes || self.ssh_user != ssh_user {
             self.directory = bytes;
+            self.ssh_user = ssh_user;
             self.catalog_dirty = true;
+            self.regroup = true;
         }
+    }
+
+    /// The name views paint for this tab; grouping compares it.
+    pub fn label(&self) -> Vec<u8> {
+        if self.url.is_some() {
+            return self.title.clone();
+        }
+        worminal_protocol::worp::events::tab_label(&self.directory, self.ssh_user.as_deref())
     }
 
     pub fn metadata(&mut self, now: i64) -> io::Result<&[u8]> {
@@ -286,7 +310,10 @@ impl Tab {
             mode: self.mode,
             cursor: self.cursor,
             title: self.title.clone(),
-            directory: self.directory.clone(),
+            directory: worminal_protocol::worp::events::directory_field(
+                &self.directory,
+                self.ssh_user.as_deref(),
+            ),
             colors: overrides[..count]
                 .iter()
                 .map(|color| color.clone().unwrap_or_default())
@@ -437,10 +464,10 @@ impl Tab {
                 }
                 terminal::WORMINAL_PALETTE => {
                     if let Ok(index) = usize::try_from(event.argument) {
-                        if index < worminal_config::COLOR_NAMES.len() {
+                        if index < worminal_config::COLOR_COUNT {
                             let next = (event.flags == 0).then_some(event.data);
                             if self.colors.is_none() && next.is_some() {
-                                self.colors = Some(vec![None; worminal_config::COLOR_NAMES.len()]);
+                                self.colors = Some(vec![None; worminal_config::COLOR_COUNT]);
                             }
                             if let Some(colors) = &mut self.colors {
                                 self.catalog_dirty |= colors[index] != next;
@@ -490,6 +517,14 @@ impl Tab {
                         ));
                     }
                 }
+                terminal::WORMINAL_NOTIFICATION => {
+                    if let Some(client) = self.controller {
+                        notices.push(Notice::Event(
+                            client,
+                            worminal_protocol::worp::events::EventKind::Notification(event.data),
+                        ));
+                    }
+                }
                 terminal::WORMINAL_BELL => {
                     if let Some(client) = self.controller {
                         notices.push(Notice::Event(
@@ -529,7 +564,7 @@ impl Tab {
 
     fn color_rgb(&self, index: i32) -> Option<[u8; 3]> {
         let index = usize::try_from(index).ok()?;
-        let default = worminal_config::COLOR_NAMES.get(index)?;
+        let default = worminal_config::get().colors.get(index)?.as_deref();
         let override_value = self
             .colors
             .as_ref()

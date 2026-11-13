@@ -292,6 +292,155 @@ fn hidden_tabs_defer_frames_and_reveal_with_a_delta() {
     );
 }
 
+#[test]
+fn move_command_reorders_tabs_and_publishes_the_new_order() {
+    let mut fixture = Fixture::sized(9, 80, 24, 3);
+    let ids =
+        |fixture: &Fixture| -> Vec<u32> { fixture.service.tabs.iter().map(|t| t.id).collect() };
+    let send = |fixture: &mut Fixture, tab: u32, position: u32| {
+        fixture
+            .service
+            .message(
+                1,
+                Packet {
+                    kind: WIRE_MOVE,
+                    tab,
+                    body: position.to_be_bytes().to_vec(),
+                },
+            )
+            .unwrap();
+    };
+    send(&mut fixture, 1, 2);
+    assert_eq!(ids(&fixture), [2, 3, 1]);
+    send(&mut fixture, 1, 0);
+    assert_eq!(ids(&fixture), [1, 2, 3]);
+    send(&mut fixture, 2, 99);
+    assert_eq!(ids(&fixture), [1, 3, 2], "positions clamp to the end");
+    send(&mut fixture, 77, 0);
+    assert_eq!(ids(&fixture), [1, 3, 2], "unknown tabs are ignored");
+    assert!(
+        !fixture.service.clients[&1].output.is_empty(),
+        "the new order reaches ready views as a catalog"
+    );
+}
+
+#[test]
+fn a_label_change_moves_the_tab_beside_the_nearest_match() {
+    let mut fixture = Fixture::sized(9, 80, 24, 5);
+    let ids =
+        |fixture: &Fixture| -> Vec<u32> { fixture.service.tabs.iter().map(|t| t.id).collect() };
+    let retitle = |fixture: &mut Fixture, id: u32, title: &[u8]| {
+        let tab = fixture
+            .service
+            .tabs
+            .iter_mut()
+            .find(|t| t.id == id)
+            .unwrap();
+        tab.directory = [b"/work/", title].concat();
+        tab.regroup = true;
+        fixture.service.group_by_title();
+    };
+    for (id, title) in [(1, "a"), (2, "b"), (3, "c"), (4, "d"), (5, "e")] {
+        fixture.service.tabs[id as usize - 1].directory = format!("/work/{title}").into();
+    }
+    retitle(&mut fixture, 4, b"b");
+    assert_eq!(
+        ids(&fixture),
+        [1, 2, 4, 3, 5],
+        "moves after an earlier match"
+    );
+    retitle(&mut fixture, 1, b"e");
+    assert_eq!(ids(&fixture), [2, 4, 3, 5, 1], "moves after a later match");
+    retitle(&mut fixture, 3, b"b");
+    assert_eq!(
+        ids(&fixture),
+        [2, 4, 3, 5, 1],
+        "already adjacent: unchanged"
+    );
+    retitle(&mut fixture, 5, b"zzz");
+    assert_eq!(ids(&fixture), [2, 4, 3, 5, 1], "no match: unchanged");
+    for id in [3, 1] {
+        let tab = fixture
+            .service
+            .tabs
+            .iter_mut()
+            .find(|t| t.id == id)
+            .unwrap();
+        tab.ssh_user = Some(b"root".to_vec());
+        tab.regroup = true;
+        fixture.service.group_by_title();
+    }
+    assert_eq!(ids(&fixture), [2, 4, 3, 1, 5], "ssh tabs group by user");
+    assert!(fixture.service.tabs.iter().all(|t| !t.regroup));
+}
+
+#[test]
+fn attention_reaches_other_views_once_and_input_answers_it_everywhere() {
+    let features = worminal_protocol::WIRE_FEATURE_ATTENTION;
+    let mut fixture = Fixture::sized(features, 80, 24, 1);
+    let service = &mut fixture.service;
+    for id in [2, 3] {
+        let (stream, _peer) = UnixStream::pair().unwrap();
+        service.clients.insert(
+            id,
+            Client {
+                id,
+                socket: stream,
+                pid: 0,
+                ready: true,
+                // View 3 predates the feature and must never see the packet.
+                features: if id == 2 { features } else { 0 },
+                decoder: Decoder::default(),
+                output: Queue::new(CLIENT_QUEUE),
+                needs_resync: false,
+                selection: None,
+            },
+        );
+    }
+    let attention = |service: &mut Service, client| {
+        let packet = Packet {
+            kind: WIRE_ATTENTION,
+            tab: 1,
+            body: Vec::new(),
+        };
+        service.message(client, packet).unwrap();
+    };
+    let queued = |service: &Service, client| service.clients[&client].output.pending().len();
+    let before = queued(service, 1);
+    attention(service, 1);
+    let relayed = queued(service, 2);
+    assert!(relayed > 0, "another view must learn of the alert");
+    assert_eq!(queued(service, 1), before, "the raising view already knows");
+    assert_eq!(queued(service, 3), 0, "unnegotiated views get nothing");
+    attention(service, 1);
+    assert_eq!(
+        queued(service, 2),
+        relayed,
+        "a repeated alert is not relayed again"
+    );
+    let raised = |service: &mut Service, severity: u32| {
+        let packet = Packet {
+            kind: WIRE_ATTENTION,
+            tab: 1,
+            body: severity.to_be_bytes().to_vec(),
+        };
+        service.message(1, packet).unwrap();
+    };
+    raised(service, ATTENTION_FAILED);
+    let escalated = queued(service, 2);
+    assert!(escalated > relayed, "a higher severity is relayed");
+    raised(service, ATTENTION_HELP);
+    assert_eq!(queued(service, 2), escalated, "severity never falls");
+    let now = service.now();
+    service.input_operation(1, b"x", Some(1), now).unwrap();
+    assert!(
+        queued(service, 2) > relayed,
+        "input clears the alert in other views"
+    );
+    assert!(queued(service, 1) > before, "and in the typing view");
+    assert_eq!(queued(service, 3), 0);
+}
+
 #[derive(Default)]
 struct Receiver {
     stream: Option<Box<dyn Write>>,
@@ -577,4 +726,39 @@ fn automation_queue_rejection_keeps_the_terminal_alive() {
         .pending()
         .windows(15)
         .any(|bytes| bytes == b"queue is full.\""));
+}
+
+#[test]
+fn osc99_only_reaches_capable_controllers() {
+    use worminal_protocol::worp::events::{Event, EventKind};
+    for features in [0, WIRE_FEATURE_NOTIFICATIONS] {
+        let mut fixture = Fixture::with_features(features);
+        let now = fixture.service.now();
+        let notices = fixture.service.tabs[0]
+            .feed(b"\x1b]99;;Build;done\x07", now)
+            .unwrap();
+        let mut delivered = false;
+        for notice in notices {
+            if let Notice::Event(client, kind @ EventKind::Notification(_)) = notice {
+                assert_eq!(client, 1);
+                assert_eq!(kind, EventKind::Notification(b";Build;done".to_vec()));
+                fixture.service.emit(client, Event { tab: 1, kind });
+                delivered = true;
+            }
+        }
+        assert!(delivered);
+        let mut bytes = Vec::new();
+        fixture.output().flush(&mut bytes, usize::MAX).unwrap();
+        assert_eq!(bytes.is_empty(), features == 0);
+        if features != 0 {
+            let (_, packet) = Decoder::default().push(&bytes).unwrap();
+            assert_eq!(
+                worp::v2_events::decode(packet.unwrap()).unwrap(),
+                Some(Event {
+                    tab: 1,
+                    kind: EventKind::Notification(b";Build;done".to_vec())
+                })
+            );
+        }
+    }
 }

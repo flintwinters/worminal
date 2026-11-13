@@ -26,6 +26,11 @@ pub fn connect_worp(master: &OsStr) -> io::Result<(UnixStream, Child)> {
     connect_command(master, &[b"api", b"--stdio"])
 }
 
+/// Config sync talks to `worminald config exchange`; it never starts or restores a workspace.
+pub fn connect_config(master: &OsStr) -> io::Result<(UnixStream, Child)> {
+    connect_command(master, &[b"config", b"exchange"])
+}
+
 fn connect_command(master: &OsStr, command: &[&[u8]]) -> io::Result<(UnixStream, Child)> {
     connect_program(master, WORKSPACE_DAEMON.to_bytes(), command)
 }

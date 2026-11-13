@@ -6,7 +6,7 @@ pub type Cell = sys::WorminalCell;
 pub type Frame = sys::WorminalFrame;
 pub type TransportState = sys::WorminalTransportState;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Error(pub i32);
 
 pub(crate) fn check(status: i32) -> Result<(), Error> {
@@ -32,6 +32,14 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(columns: i32, rows: i32) -> Result<Self, Error> {
+        // History arrays are sized from the process-wide capacity, so it is fixed by the first engine.
+        static CONFIGURED: std::sync::OnceLock<Result<(), Error>> = std::sync::OnceLock::new();
+        let settings = worminal_config::get();
+        (*CONFIGURED.get_or_init(|| {
+            check(unsafe {
+                sys::worminal_engine_configure(settings.history_size, settings.scroll_multiplier)
+            })
+        }))?;
         let mut handle = std::ptr::null_mut();
         // C publishes a handle only after initialization; Drop is its only release path.
         check(unsafe { sys::worminal_engine_create(columns, rows, &mut handle) })?;
