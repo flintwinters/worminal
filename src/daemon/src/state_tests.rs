@@ -205,6 +205,33 @@ fn progress_reports_set_and_clear_the_busy_mode_in_the_catalog() {
 }
 
 #[test]
+fn agent_program_status_updates_the_catalog() {
+    let mut fixture = Fixture::new();
+    let tab = &mut fixture.tab;
+    for (index, (status, busy)) in [
+        ("state=working:title=Codex", true),
+        ("state=blocked:kind=permission", false),
+        ("state=working:title=Claude", true),
+        ("state=done", false),
+        ("state=working", true),
+        ("state=clear", false),
+        ("state=workingish", false),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let now = i64::try_from(index).unwrap() * 2 + 1;
+        tab.feed(format!("\x1b]7501;{status}\x1b\\").as_bytes(), now)
+            .unwrap();
+        assert_eq!(
+            tab.metadata_record(now + 1).unwrap().mode & terminal::MODE_BUSY != 0,
+            busy,
+            "{status}"
+        );
+    }
+}
+
+#[test]
 fn a_progress_report_the_task_never_withdrew_ends_when_the_shell_returns_to_the_foreground() {
     // Without this a task killed mid-progress would leave its tab busy until the tab closed.
     let mut fixture = Fixture::new();

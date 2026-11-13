@@ -52,6 +52,24 @@ te_strhandle(TermEngine *session)
 				te_xsetmode(session, j == 1 || j == 3, MODE_BUSY);
 			}
 			return;
+		case 7501: /* Program status used by coding agents; fields are colon separated. */
+			if (narg != 2)
+				return;
+			if (!strcmp(strescseq.args[1], "?")) {
+				te_ttywrite(session, "\033]7501;?\033\\", sizeof("\033]7501;?\033\\") - 1, 0);
+				return;
+			}
+			/* Compare the whole state field: titles/messages must never change activity. */
+			p = strescseq.args[1];
+			dec = strchr(p, ':');
+			if (dec)
+				*dec = '\0';
+			if (!strcmp(p, "state=working"))
+				te_xsetmode(session, 1, MODE_BUSY);
+			else if (!strcmp(p, "state=idle") || !strcmp(p, "state=done") ||
+			         !strcmp(p, "state=blocked") || !strcmp(p, "state=clear"))
+				te_xsetmode(session, 0, MODE_BUSY);
+			return;
 		case 8: /* hyperlink: OSC 8 ; params ; URI */
 			te_oschyperlink(session);
 			return;

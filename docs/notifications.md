@@ -53,3 +53,7 @@ that died mid-progress from leaving the tab busy. Plain `OSC 9` text and other `
 printf '\033]9;4;3\033\\'   # busy
 printf '\033]9;4;0\033\\'   # idle
 ```
+
+Agent program status (`OSC 7501`) also drives this same busy indicator: `state=working` starts it;
+`idle`, `done`, `blocked` and `clear` end it. Worminal answers the `OSC 7501;?` capability probe.
+Agents already running when this support was installed may need restarting to repeat their capability probe.
