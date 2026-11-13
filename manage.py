@@ -2,6 +2,7 @@
 """Build, check, measure, and prove Worminal: run `python3 manage.py --help`."""
 
 from contextlib import chdir
+from enum import Enum
 import os
 import json
 from pathlib import Path
@@ -12,7 +13,6 @@ sys.dont_write_bytecode = True
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
 try:
-    import click
     import typer
 except ModuleNotFoundError as error:
     raise SystemExit("Install Typer to use manage.py: python3 -m pip install typer") from error
@@ -759,12 +759,18 @@ def install(prefix: Path = typer.Option(None, help="Installation prefix (default
     native_build.install(prefix, skip_build=skip_build)
 
 
+class TimerAction(str, Enum):
+    """Typer 0.7 (root's distro package, used under sudo) lacks click_type, so choices are an Enum."""
+    install = "install"
+    remove = "remove"
+
+
 @app.command("auto-update")
-def auto_update(timer: str = typer.Option(None, click_type=click.Choice(["install", "remove"]),
-                                          help="Manage the daily 03:00 systemd user timer instead of updating.")):
+def auto_update(timer: TimerAction = typer.Option(
+        None, help="Manage the daily 03:00 systemd user timer instead of updating.")):
     """Update /usr/local from the tip of main if it changed and passes build and check."""
     from tools import auto_update as updates
-    raise typer.Exit(updates.update() if timer is None else updates.schedule(timer == "remove") or 0)
+    raise typer.Exit(updates.update() if timer is None else updates.schedule(timer is TimerAction.remove) or 0)
 
 
 @app.command()
