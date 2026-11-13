@@ -10,6 +10,7 @@ use std::{
     rc::Rc,
 };
 use worminal_engine_sys::{WORMINAL_DEFAULT_BACKGROUND as BG, WORMINAL_DEFAULT_FOREGROUND as FG};
+use worminal_protocol::{ATTENTION_DONE, ATTENTION_FAILED, ATTENTION_HELP};
 
 #[derive(Clone)]
 pub struct Tab {
@@ -39,8 +40,10 @@ struct State {
     entries: RefCell<Vec<Tab>>,
     active: Cell<u32>,
     palette: RefCell<Option<Rc<RefCell<Palette>>>>,
-    /// Tabs that rang the bell and have not received input since; selecting a tab keeps it.
-    attention: RefCell<Vec<u32>>,
+    /// Tabs (with severity) that rang the bell and have not received input since; selecting a tab keeps it.
+    attention: RefCell<Vec<(u32, u32)>>,
+    /// Bells rung by each tab in its latest burst, with the time of the last one.
+    bells: RefCell<Vec<(u32, u32, std::time::Instant)>>,
     /// Attention glow strength, 0..=1. The timer runs only while some tab needs attention.
     glow: Cell<f64>,
     blink: RefCell<Option<glib::SourceId>>,
@@ -88,6 +91,7 @@ fn colors(
     entry: &Tab,
     selected: bool,
     glow: f64,
+    severity: u32,
 ) -> (Option<gdk::RGBA>, gdk::RGBA) {
     let selected_fill = palette.color(if entry.ssh { SSH } else { FG });
     let fill = if glow > 0.0 {
@@ -96,7 +100,7 @@ fn colors(
         } else {
             palette.color(BG)
         };
-        Some(mix(&from, &palette.color(3), glow))
+        Some(mix(&from, &palette.color(severity_color(severity)), glow))
     } else {
         selected.then_some(selected_fill)
     };
@@ -113,6 +117,16 @@ fn colors(
     });
     (fill, mix(&resting, &palette.color(BG), glow))
 }
+/// Palette color of an alert: green when finished, yellow when the user is needed, red on failure.
+fn severity_color(severity: u32) -> u32 {
+    match severity {
+        ATTENTION_DONE => 2,
+        ATTENTION_HELP => 3,
+        _ => 1,
+    }
+}
+/// Bells closer together than this belong to one burst, whose length is the alert's severity.
+const BELL_BURST: std::time::Duration = std::time::Duration::from_millis(1500);
 /// Attention glow for `seconds` into an alert: starts at full strength, then breathes on a cosine.
 fn glow_at(seconds: f64) -> f64 {
     (1.0 + (seconds * std::f64::consts::TAU / GLOW_PERIOD).cos()) / 2.0
@@ -161,12 +175,14 @@ impl State {
             layout.set_text(&entry.label);
             let baseline = top + (metrics.height - metrics.ink_height) / 2 + metrics.ascent;
             let selected = entry.id == self.active.get();
-            let glow = if self.attention.borrow().contains(&entry.id) {
-                self.glow.get()
-            } else {
-                0.0
-            };
-            let (fill, text) = colors(&palette, entry, selected, glow);
+            let severity = self
+                .attention
+                .borrow()
+                .iter()
+                .find(|(id, _)| *id == entry.id)
+                .map_or(0, |(_, severity)| *severity);
+            let glow = if severity > 0 { self.glow.get() } else { 0.0 };
+            let (fill, text) = colors(&palette, entry, selected, glow, severity);
             if let Some(fill) = fill {
                 paint::source(cr, &fill);
                 cr.rectangle(
@@ -275,6 +291,7 @@ impl Tabs {
             active: Cell::new(0),
             palette: RefCell::new(None),
             attention: RefCell::new(Vec::new()),
+            bells: RefCell::new(Vec::new()),
             glow: Cell::new(0.0),
             blink: RefCell::new(None),
             drag: RefCell::new(None),
@@ -341,16 +358,21 @@ impl Tabs {
             }));
     }
     /// Fade a tab in and out until it receives input; a waiting agent is not answered by looking at it.
-    /// Returns whether the tab was newly alerted.
-    pub fn alert(&self, id: u32) -> bool {
+    /// Severity only rises until input answers the tab. Returns the new severity if it changed.
+    pub fn alert(&self, id: u32, severity: u32) -> Option<u32> {
         let state = &self.0;
-        if state.attention.borrow().contains(&id) {
-            return false;
+        let severity = severity.clamp(ATTENTION_DONE, ATTENTION_FAILED);
+        {
+            let mut attention = state.attention.borrow_mut();
+            match attention.iter_mut().find(|(alerted, _)| *alerted == id) {
+                Some((_, current)) if *current >= severity => return None,
+                Some((_, current)) => *current = severity,
+                None => attention.push((id, severity)),
+            }
         }
-        state.attention.borrow_mut().push(id);
         if state.blink.borrow().is_some() {
             state.widget.queue_draw();
-            return true;
+            return Some(severity);
         }
         let start = std::time::Instant::now();
         state.glow.set(glow_at(0.0));
@@ -373,12 +395,29 @@ impl Tabs {
                 glib::ControlFlow::Continue
             },
         ));
-        true
+        Some(severity)
+    }
+    /// Count a bell into its tab's burst: one bell finished, two need the user, three failed.
+    pub fn ring(&self, id: u32) -> u32 {
+        let now = std::time::Instant::now();
+        let mut bells = self.0.bells.borrow_mut();
+        bells.retain(|(_, _, last)| now.duration_since(*last) < BELL_BURST);
+        match bells.iter_mut().find(|(bell, _, _)| *bell == id) {
+            Some((_, count, last)) => {
+                *count = (*count + 1).min(ATTENTION_FAILED);
+                *last = now;
+                *count
+            }
+            None => {
+                bells.push((id, 1, now));
+                1
+            }
+        }
     }
     pub fn answer(&self, id: u32) {
         let mut attention = self.0.attention.borrow_mut();
         let count = attention.len();
-        attention.retain(|alert| *alert != id);
+        attention.retain(|(alert, _)| *alert != id);
         if attention.len() != count {
             self.0.widget.queue_draw();
         }
@@ -389,7 +428,7 @@ impl Tabs {
         self.0
             .attention
             .borrow_mut()
-            .retain(|id| entries.iter().any(|entry| entry.id == *id));
+            .retain(|(id, _)| entries.iter().any(|entry| entry.id == *id));
         *self.0.palette.borrow_mut() = palette;
         let empty = entries.is_empty();
         *self.0.entries.borrow_mut() = entries;

@@ -104,7 +104,13 @@ pub const WIRE_FEATURE_NOTIFICATIONS: u32 = 1 << 6;
 pub const WIRE_MOVE: u32 = 36;
 
 /// A view that alerts a tab (bell or notification) tells the daemon with an empty-bodied command; the daemon
-/// relays `ATTENTION` events (one u32: 1 alerted, 0 answered) to the other views, so every window's tab strip
+/// relays `ATTENTION` events (one u32: severity, 0 answered) to the other views, so every window's tab strip
 /// fades the tab until input reaches it. Only peers that negotiated the feature send or receive it.
+/// The command's optional u32 body is the severity (empty means `ATTENTION_DONE`, as older views send);
+/// a severity only ever rises until input answers the tab, and older peers read any nonzero value as alerted.
 pub const WIRE_ATTENTION: u32 = 37;
+/// Severity by bells rung in one burst: finished, needs the user, failed.
+pub const ATTENTION_DONE: u32 = 1;
+pub const ATTENTION_HELP: u32 = 2;
+pub const ATTENTION_FAILED: u32 = 3;
 pub const WIRE_FEATURE_ATTENTION: u32 = 1 << 7;

@@ -219,7 +219,7 @@ impl Service {
             self.take_control(index, owner);
         }
         // Input answers an alert in every view, however it arrived.
-        self.set_attention(index, false, None);
+        self.set_attention(index, 0, None);
         let notices = self.tabs[index].input(bytes, true, now)?;
         self.notices(tab, notices);
         self.send_frame(index, false, now)?;

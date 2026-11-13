@@ -123,8 +123,8 @@ pub(crate) struct Tab {
     pub catalog_dirty: bool,
     /// The title changed since the service last considered grouping this tab.
     pub regroup: bool,
-    /// Alerted by some view and not yet answered by input; Service::set_attention changes it.
-    pub attention: bool,
+    /// Severity of an alert by some view not yet answered by input (0 none); Service::set_attention changes it.
+    pub attention: u32,
     pub pending_frame: bool,
     pub input_frame: bool,
     /// Displayed by its controller; only Service::show changes it while controlled.
@@ -205,7 +205,7 @@ impl Tab {
             catalog_pending: false,
             catalog_dirty: true,
             regroup: false,
-            attention: false,
+            attention: 0,
             pending_frame: false,
             input_frame: false,
             shown: false,

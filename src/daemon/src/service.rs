@@ -348,8 +348,8 @@ impl Service {
     }
 
     /// Tell every view that negotiated attention, except `skip` (the one that raised it), about a change.
-    pub fn set_attention(&mut self, index: usize, on: bool, skip: Option<ClientId>) {
-        if std::mem::replace(&mut self.tabs[index].attention, on) == on {
+    pub fn set_attention(&mut self, index: usize, severity: u32, skip: Option<ClientId>) {
+        if std::mem::replace(&mut self.tabs[index].attention, severity) == severity {
             return;
         }
         let tab = self.tabs[index].id;
@@ -368,7 +368,7 @@ impl Service {
                 client,
                 Event {
                     tab,
-                    kind: EventKind::Attention(on),
+                    kind: EventKind::Attention(severity),
                 },
             );
         }

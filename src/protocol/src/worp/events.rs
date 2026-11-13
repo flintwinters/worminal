@@ -33,8 +33,8 @@ pub enum EventKind {
     FrameFinish,
     Clipboard(Vec<u8>),
     Bell,
-    /// Another view alerted (`true`) or input answered (`false`) this tab.
-    Attention(bool),
+    /// Another view alerted this tab at a severity, or input answered it (0).
+    Attention(u32),
     Notification(Vec<u8>),
     Print(Vec<u8>),
     Released,

@@ -248,8 +248,13 @@ impl Service {
             self.reorder(index, position as usize);
             return self.publish(now);
         }
-        if matches!(command.kind, CommandKind::Attention) {
-            self.set_attention(index, true, Some(client));
+        if let CommandKind::Attention(severity) = command.kind {
+            // Severity only rises until input answers the tab.
+            self.set_attention(
+                index,
+                severity.max(self.tabs[index].attention),
+                Some(client),
+            );
             return Ok(());
         }
         if self.tabs[index].url.is_some() {

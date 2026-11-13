@@ -492,10 +492,12 @@ impl App {
             );
         }
     }
-    /// Fade the tab here and, once, in the daemon's other views until input answers it.
-    fn alert(self: &Rc<Self>, id: u32) {
-        if self.tabstrip.alert(id) && self.features(id) & WIRE_FEATURE_ATTENTION != 0 {
-            self.send(id, CommandKind::Attention);
+    /// Fade the tab here and, as it rises, in the daemon's other views until input answers it.
+    fn alert(self: &Rc<Self>, id: u32, severity: u32) {
+        if let Some(severity) = self.tabstrip.alert(id, severity) {
+            if self.features(id) & WIRE_FEATURE_ATTENTION != 0 {
+                self.send(id, CommandKind::Attention(severity));
+            }
         }
     }
     fn action(self: &Rc<Self>, id: u32, action: Action) {
@@ -565,7 +567,7 @@ impl App {
                 let outcome = self.notifications.borrow_mut().receive(event.tab, bytes);
                 match outcome {
                     Some(notifications::Outcome::Show(message)) => {
-                        self.alert(event.tab);
+                        self.alert(event.tab, ATTENTION_DONE);
                         let weak = Rc::downgrade(self);
                         let tab = event.tab;
                         self.notification_desktop.show(message, move |token| {
@@ -596,14 +598,15 @@ impl App {
             }
             EventKind::Bell => {
                 self.window.error_bell();
-                self.alert(event.tab);
+                let severity = self.tabstrip.ring(event.tab);
+                self.alert(event.tab, severity);
                 if !self.window.is_active() {
                     self.window.set_urgency_hint(true);
                 }
             }
-            EventKind::Attention(on) => {
-                if *on {
-                    self.tabstrip.alert(event.tab);
+            EventKind::Attention(severity) => {
+                if *severity > 0 {
+                    self.tabstrip.alert(event.tab, *severity);
                 } else {
                     self.tabstrip.answer(event.tab);
                 }

@@ -126,7 +126,11 @@ pub fn decode(packet: Packet) -> io::Result<Option<Command>> {
         },
         WIRE_ATTACH => CommandKind::Subscribe,
         WIRE_RELEASE => CommandKind::Release,
-        WIRE_ATTENTION => CommandKind::Attention,
+        WIRE_ATTENTION => CommandKind::Attention(if packet.body.is_empty() {
+            ATTENTION_DONE
+        } else {
+            integer(&packet.body)?
+        }),
         WIRE_CAPABILITIES => CommandKind::Capabilities(integer(&packet.body)?),
         WIRE_SERVICE_INFO => CommandKind::ServiceInfo,
         WIRE_STOP => CommandKind::Stop,
@@ -249,7 +253,10 @@ pub fn encode(command: &Command) -> io::Result<Packet> {
         }
         CommandKind::Subscribe => WIRE_ATTACH,
         CommandKind::Release => WIRE_RELEASE,
-        CommandKind::Attention => WIRE_ATTENTION,
+        CommandKind::Attention(severity) => {
+            body.put_u32(*severity)?;
+            WIRE_ATTENTION
+        }
         CommandKind::Capabilities(features) => {
             body.put_u32(*features)?;
             WIRE_CAPABILITIES

@@ -418,6 +418,19 @@ fn attention_reaches_other_views_once_and_input_answers_it_everywhere() {
         relayed,
         "a repeated alert is not relayed again"
     );
+    let raised = |service: &mut Service, severity: u32| {
+        let packet = Packet {
+            kind: WIRE_ATTENTION,
+            tab: 1,
+            body: severity.to_be_bytes().to_vec(),
+        };
+        service.message(1, packet).unwrap();
+    };
+    raised(service, ATTENTION_FAILED);
+    let escalated = queued(service, 2);
+    assert!(escalated > relayed, "a higher severity is relayed");
+    raised(service, ATTENTION_HELP);
+    assert_eq!(queued(service, 2), escalated, "severity never falls");
     let now = service.now();
     service.input_operation(1, b"x", Some(1), now).unwrap();
     assert!(

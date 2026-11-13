@@ -66,7 +66,7 @@ fn variants() -> Vec<CommandKind> {
         },
         CommandKind::Move { position: 3 },
         CommandKind::Release,
-        CommandKind::Attention,
+        CommandKind::Attention(2),
         CommandKind::Subscribe,
         CommandKind::Capabilities(7),
         CommandKind::ServiceInfo,
