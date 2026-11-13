@@ -16,6 +16,33 @@ use std::{
 };
 use worminal_protocol::{Buffer, Decoder, Packet, Payload, WIRE_HELLO};
 
+/// Display/workspace identity shared by lightweight launchers and direct frontend entry.
+pub fn display_key(candidate: bool) -> Vec<u8> {
+    let mut values = [
+        "GDK_BACKEND",
+        "WAYLAND_DISPLAY",
+        "DISPLAY",
+        "WORMINAL_SHARED_SOCKET_SCOPE",
+    ]
+    .map(|name| std::env::var_os(name).unwrap_or_default());
+    // With only DISPLAY available, GTK's automatic backend is X11. Keep the existing
+    // automatic-owner key so a shell exporting x11 can reach an already running owner.
+    // On Wayland, explicit x11 can select a different display and must remain distinct.
+    if values[0] == "x11" && values[1].is_empty() && !values[2].is_empty() {
+        values[0].clear();
+    }
+    let mut key = Vec::new();
+    for (index, value) in values.iter().enumerate() {
+        if candidate {
+            key.extend_from_slice(&(value.as_bytes().len() as u64).to_be_bytes());
+        } else if index != 0 {
+            key.push(b':');
+        }
+        key.extend_from_slice(value.as_bytes());
+    }
+    key
+}
+
 pub struct Request {
     pub args: Vec<OsString>,
     pub directory: PathBuf,

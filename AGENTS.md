@@ -54,7 +54,8 @@ unchanged encoded rows/catalog state must not generate traffic. Negotiated row m
 older peers; synchronized redraw retains its deadline behavior. SSH directions advance independently under
 congestion. Spawn local daemons and SSH without GUI fork hooks, in their own sessions, after validating the display. A failed launch
 must not create orphan tabs. The same-user GUI broker authenticates peers before accepting launch data or
-descriptors.
+descriptors. Launcher and frontend share the broker's display identity; automatic and explicit X11
+join the same owner when no Wayland display is configured.
 
 Ownership transfers stage and validate sealed native snapshots and SCM_RIGHTS before commit. Receivers establish
 an independent session before accepting PTYs. Track local children separately from transferred processes and pin

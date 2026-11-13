@@ -9,6 +9,7 @@ import errno
 import os
 from pathlib import Path
 import select
+import shutil
 import socket
 import subprocess
 import tempfile
@@ -20,6 +21,42 @@ from x11 import isolated_display
 
 
 class RustModuleTest(unittest.TestCase):
+    def test_automatic_and_explicit_x11_share_the_owner(self):
+        from runtime import window, stop_application
+        for launcher, backend in (('worminal-rust', None), ('worminal-rust', 'x11'),
+                                  ('worminal', None), ('worminal', 'x11')):
+            with (self.subTest(launcher=launcher, owner_backend=backend),
+                  tempfile.TemporaryDirectory(prefix='rust-backend-', dir=CHECKS) as directory,
+                  isolated_display() as env):
+                env.pop('WAYLAND_DISPLAY', None)
+                env.pop('GDK_BACKEND', None)
+                if backend:
+                    env['GDK_BACKEND'] = backend
+                executable = copy_runtime(directory)
+                if launcher == 'worminal':
+                    shutil.copy2(runtime_binary(launcher), executable)
+                app = subprocess.Popen([str(executable), '--attach', '-T', 'Backend owner'], env=env,
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                try:
+                    window(env, app)
+                    caller = dict(env)
+                    if backend:
+                        caller.pop('GDK_BACKEND')
+                    else:
+                        caller['GDK_BACKEND'] = 'x11'
+                    # Remove the module so a separate owner cannot masquerade as successful forwarding.
+                    module = module_path(RUST_FRONTEND_MODULE, prefix=Path(directory))
+                    module.rename(module.with_suffix('.hidden'))
+                    result = subprocess.run([str(executable), '-T', 'Same backend', '-e', '/bin/cat'],
+                                            env=caller, capture_output=True, timeout=5)
+                    self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
+                    windows = subprocess.check_output(
+                        ['xdotool', 'search', '--onlyvisible', '--pid', str(app.pid)],
+                        env=env, text=True).splitlines()
+                    self.assertEqual(len(windows), 2)
+                finally:
+                    stop_application(app)
+
     def test_gui_broker_rejects_foreign_credentials(self):
         from runtime import window, stop_application
         with (tempfile.TemporaryDirectory(prefix='rust-peer-', dir=CHECKS) as directory,

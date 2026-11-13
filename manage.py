@@ -270,10 +270,14 @@ def check_test_runtime(prove: bool = typer.Option(False, help="Also require fail
 
 
 @app.command("check-rust-app")
-def check_rust_app():
+def check_rust_app(module_only: bool = typer.Option(
+        False, help="Run only launcher/module and GUI broker checks on private displays.")):
     """Check the actual Rust app: private shell input, clipboard, tabs and surviving-session reattachment."""
-    native_build.build_targets("worminal-rust", "worminald-x11", "build/worminald-c-v2", "build/gui-peer.so")
-    raise typer.Exit(run([sys.executable, "tests/rust_app.py"]))
+    native_build.build_targets("worminal", "worminal-rust", "worminald-x11",
+                               "build/worminald-c-v2", "build/gui-peer.so")
+    arguments = (["-m", "unittest", "discover", "-s", "tests", "-p", "rust_module.py", "-q"]
+                 if module_only else ["tests/rust_app.py"])
+    raise typer.Exit(run([sys.executable, *arguments]))
 
 
 @app.command("check-notifications")

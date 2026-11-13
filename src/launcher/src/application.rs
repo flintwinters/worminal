@@ -4,33 +4,13 @@ mod native;
 use std::{
     ffi::OsString,
     io,
-    os::{
-        linux::net::SocketAddrExt,
-        unix::{ffi::OsStrExt, net::SocketAddr},
-    },
+    os::{linux::net::SocketAddrExt, unix::net::SocketAddr},
     process::ExitCode,
 };
 use worminal_workspace::broker::Forward;
 
 fn forward(args: &[OsString], candidate: bool) -> io::Result<Forward> {
-    let mut key = Vec::new();
-    for (index, name) in [
-        "GDK_BACKEND",
-        "WAYLAND_DISPLAY",
-        "DISPLAY",
-        "WORMINAL_SHARED_SOCKET_SCOPE",
-    ]
-    .iter()
-    .enumerate()
-    {
-        let value = std::env::var_os(name).unwrap_or_default();
-        if candidate {
-            key.extend_from_slice(&(value.as_bytes().len() as u64).to_be_bytes());
-        } else if index != 0 {
-            key.push(b':');
-        }
-        key.extend_from_slice(value.as_bytes());
-    }
+    let key = worminal_workspace::broker::display_key(candidate);
     let hash = native::hash(&key)?;
     let name = format!(
         "{}-{}-{}",
