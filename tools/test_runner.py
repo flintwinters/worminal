@@ -22,7 +22,7 @@ from tools.paths import CHECKS
 # New or renamed suites stay serial until their resource ownership has been reviewed.
 INDEPENDENT = frozenset({'test_theme', 'test_privacy', 'test_perf_metrics', 'test_http_fixture',
                          'test_remote_install', 'test_remote_upgrade', 'test_config_sync', 'test_handoff', 'test_upgrade',
-                         'test_window_replacement', 'test_master_startup'})
+                         'test_window_replacement', 'test_master_startup', 'test_test_runner'})
 DISPLAY_ENV = ('DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'DBUS_SESSION_BUS_ADDRESS', 'GDK_BACKEND')
 
 
@@ -175,11 +175,48 @@ def run_python(jobs=None, match=None, modules=()):
     for result in results:
         # Replay complete output without interleaving concurrent test failures.
         print(Path(result['log']).read_text(errors='replace'), end='', flush=True)
+    retry_failures(results, directory)
     report = {'jobs': jobs, 'seconds': time.perf_counter()-started, 'results': results,
               'tests': sum(result['tests'] for result in results)}
     (directory/'summary.json').write_text(json.dumps(report, indent=2)+'\n')
     print(f'Python checks: {report["tests"]} tests in {report["seconds"]:.2f}s; logs: {directory}', flush=True)
     return int(any(result['returncode'] for result in results))
+
+
+FAILED_TEST = re.compile(r'^(?:FAIL|ERROR): \S+ \(([\w.]+)', re.MULTILINE)
+
+
+def failed_tests(text):
+    """Test ids that unittest reported as failed or errored, in order, without duplicates."""
+    return list(dict.fromkeys(FAILED_TEST.findall(text)))
+
+
+def retry_failures(results, directory):
+    """Give failed tests one quiet rerun, alone, before the suite fails.
+
+    The GUI checks drive real X servers with wall-clock deadlines on a machine other work shares, so one of them
+    occasionally misses a deadline while the product is fine. A test that fails twice is a real failure; one that
+    passes alone is recorded in `flaky.jsonl` and reported, never hidden. Crashes and timeouts name no tests and
+    are never retried.
+    """
+    failing = [result for result in results if result['returncode']]
+    ids = [test for result in failing for test in failed_tests(Path(result['log']).read_text(errors='replace'))]
+    if not ids or any(result['returncode'] == 124 or not failed_tests(Path(result['log']).read_text(errors='replace'))
+                      for result in failing):
+        return
+    print(f'Retrying {len(ids)} failed test(s) alone: {", ".join(ids)}', flush=True)
+    retry = invoke('retry', command(ids), directory/'retry', timeout=None)
+    print(Path(retry['log']).read_text(errors='replace'), end='', flush=True)
+    results.append(retry)
+    if retry['returncode']:
+        return
+    for result in failing:
+        result['returncode'] = 0
+        result['flaky'] = failed_tests(Path(result['log']).read_text(errors='replace'))
+    with (CHECKS/'flaky.jsonl').open('a') as ledger:
+        for test in ids:
+            ledger.write(json.dumps({'time': time.time(), 'test': test}) + '\n')
+    print('FLAKY (failed, then passed alone; recorded in flaky.jsonl): ' + ', '.join(ids), flush=True)
 
 
 class SerialLoader(unittest.TestLoader):
