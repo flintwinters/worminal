@@ -9,8 +9,9 @@ remote `/usr/local` installation over SSH. It does not build the checkout, read 
 packages, enroll devices, or copy credentials, configuration, browser profiles or workspace state. Exact SHA-256
 hashes identify the release: two builds can share a package version while containing different code.
 
-`--source-prefix /absolute/prefix` selects another complete installed source. Source and target must both be
-headless or both desktop installations. The layout comes from the normal installation rules, including modules,
+`--source-prefix /absolute/prefix` selects another complete installed source. A desktop source may promote a
+headless target: the launcher, modules and desktop assets are created (rollback removes them) and the target's
+GTK/WebKit libraries are probed first. A headless source never replaces a desktop target. The layout comes from the normal installation rules, including modules,
 manual, desktop assets and fonts. Custom `MANPREFIX`/`DESTDIR` layouts outside the source prefix are unsupported.
 Use `worminald install-on-remote HOST` for a new device.
 

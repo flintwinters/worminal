@@ -32,6 +32,14 @@ def digest(path):
     return result
 
 
+def previous(path):
+    """Digest and mode of an installed file, or (None, None) for a file a desktop promotion will create."""
+    try:
+        return digest(path), path.lstat().st_mode & 0o777
+    except FileNotFoundError:
+        return None, None
+
+
 def validate(layout):
     rows = layout.get('files', [])
     if not isinstance(layout.get('graphics'), bool) or not 2 <= len(rows) <= 16:
@@ -56,20 +64,22 @@ def preflight(layout):
     validate(layout)
     if not (PREFIX / 'bin/worminald').is_file():
         raise ValueError('Target has no existing installation; use install-on-remote first.')
-    if (PREFIX / 'bin/worminal').exists() != layout['graphics']:
-        raise ValueError('Source and target must both be headless or both desktop installations.')
+    # A desktop release may promote a headless target (its missing files are created); the reverse would orphan them.
+    if os.path.lexists(PREFIX / 'bin/worminal') and not layout['graphics']:
+        raise ValueError('A desktop installation cannot be replaced by a headless release.')
     if os.geteuid() != 0 and subprocess.run(['sudo', '-n', 'true'], stdout=subprocess.DEVNULL,
                                           stderr=subprocess.DEVNULL).returncode:
         raise ValueError('Non-interactive sudo is required; nothing was replaced.')
     for row in layout['files']:
-        row['previous'] = digest(PREFIX / row['role'])
-        row['previous_mode'] = (PREFIX / row['role']).lstat().st_mode & 0o777
+        row['previous'], row['previous_mode'] = previous(PREFIX / row['role'])
 
 
-def exchange(parent, left, right):
+def exchange(parent, left, right, create=False):
+    """Atomically swap two names, or with `create` move `left` to a `right` that must not exist."""
     libc = ctypes.CDLL(None, use_errno=True)
     rename = getattr(libc, 'renameat2', None)
-    if rename is None or rename(parent, os.fsencode(left), parent, os.fsencode(right), 2):
+    flag = 1 if create else 2  # RENAME_NOREPLACE / RENAME_EXCHANGE
+    if rename is None or rename(parent, os.fsencode(left), parent, os.fsencode(right), flag):
         raise OSError(ctypes.get_errno(), 'Atomic upgrade exchange is unavailable')
 
 
@@ -91,16 +101,25 @@ def publish(layout, stream):
             path = PREFIX / row['role']
             parent = support['private_parent'](path)
             parents.append(parent)
-            fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent)
-            with os.fdopen(fd, 'rb') as previous:
-                identity = os.fstat(previous.fileno())
-                if not stat.S_ISREG(identity.st_mode) or identity.st_uid != os.geteuid():
-                    raise ValueError('Unsafe existing installation ownership/type.')
-                if hashlib.file_digest(previous, 'sha256').hexdigest() != row.get('previous'):
+            if row.get('previous') is None:
+                # Created, never exchanged: the destination must still be absent (checked here, not trusted).
+                try:
+                    os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+                except FileNotFoundError:
+                    identity = None
+                else:
                     raise ValueError('Target changed since preflight; nothing was replaced.')
+            else:
+                fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent)
+                with os.fdopen(fd, 'rb') as installed:
+                    identity = os.fstat(installed.fileno())
+                    if not stat.S_ISREG(identity.st_mode) or identity.st_uid != os.geteuid():
+                        raise ValueError('Unsafe existing installation ownership/type.')
+                    if hashlib.file_digest(installed, 'sha256').hexdigest() != row.get('previous'):
+                        raise ValueError('Target changed since preflight; nothing was replaced.')
             temporary = '.worminal-upgrade-' + os.urandom(12).hex()
             fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
-            staged.append((parent, temporary, path.name, identity.st_ino, row))
+            staged.append((parent, temporary, path.name, identity and identity.st_ino, row))
             with os.fdopen(fd, 'wb') as candidate:
                 checksum = hashlib.sha256()
                 for data in support['exact'](stream, row['size']):
@@ -115,21 +134,34 @@ def publish(layout, stream):
         for parent, temporary, name, previous_inode, row in staged:
             if row['previous'] == row['sha256'] and row.get('previous_mode') == row['mode']:
                 continue
-            if os.stat(name, dir_fd=parent, follow_symlinks=False).st_ino != previous_inode:
+            if previous_inode is not None and os.stat(name, dir_fd=parent, follow_symlinks=False).st_ino != previous_inode:
                 raise ValueError('Concurrent installer changed a destination.')
             candidate_inode = os.stat(temporary, dir_fd=parent, follow_symlinks=False).st_ino
-            exchange(parent, temporary, name)
-            exchanged.append((parent, temporary, name, candidate_inode))
-            if os.stat(temporary, dir_fd=parent, follow_symlinks=False).st_ino != previous_inode:
-                raise ValueError('Concurrent installer changed a destination during publication.')
+            if previous_inode is None:
+                try:
+                    os.stat(name, dir_fd=parent, follow_symlinks=False)
+                except FileNotFoundError:
+                    pass
+                else:
+                    raise ValueError('Concurrent installer changed a destination.')
+                exchange(parent, temporary, name, create=True)
+                exchanged.append((parent, temporary, name, candidate_inode, True))
+            else:
+                exchange(parent, temporary, name)
+                exchanged.append((parent, temporary, name, candidate_inode, False))
+                if os.stat(temporary, dir_fd=parent, follow_symlinks=False).st_ino != previous_inode:
+                    raise ValueError('Concurrent installer changed a destination during publication.')
             os.fsync(parent)
     except BaseException:
         try:
-            for parent, temporary, name, candidate_inode in reversed(exchanged):
+            for parent, temporary, name, candidate_inode, created in reversed(exchanged):
                 if os.stat(name, dir_fd=parent, follow_symlinks=False).st_ino != candidate_inode:
                     raise RuntimeError('Concurrent change prevents rollback; '
                                        'preserve transaction files and inspect target.')
-                exchange(parent, temporary, name)
+                if created:
+                    os.unlink(name, dir_fd=parent)
+                else:
+                    exchange(parent, temporary, name)
                 os.fsync(parent)
         except BaseException:
             cleanup = False
@@ -261,8 +293,10 @@ def bootstrap(layout, code):
     cache.mkdir(mode=0o700, parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='upgrade-', dir=cache) as directory:
         paths = {}
-        for index, row in enumerate(layout['files']):
-            path = Path(directory) / str(index)
+        for row in layout['files']:
+            # Mirror the installed layout: the launcher finds its modules at ../lib/worminal beside its own path.
+            path = Path(directory) / row['role']
+            path.parent.mkdir(parents=True, exist_ok=True)
             with path.open('xb') as output:
                 for data in support['exact'](sys.stdin.buffer, row['size']):
                     output.write(data)
