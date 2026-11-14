@@ -45,6 +45,7 @@ It must refuse existing installations/workspaces and preserve state. Version syn
 `worminald upgrade-remote`: views run it once per host when they connect, and it updates whichever side has the older
 Cargo version, pushing or pulling the daemon with atomic replacement so the running daemon's watch hands live shells to
 the new file. It needs the same CPU, sudo and /usr/local on both sides, and never touches a v1 workspace.
+Every tab's environment carries `WORMINAL_DAEMON`, the serving worminald's path: an agent learns it is in a tab and where to start discovery.
 Inspection never takes control or starts a daemon; one-shot input preserves the existing view/controller.
 The daemon atomically saves ordered terminal directories and browser URLs, scoped by protocol/workspace under
 XDG_STATE_HOME. Restart recovery creates fresh shells with the one-shot WORMINAL_RESTORE=1 marker, never replays

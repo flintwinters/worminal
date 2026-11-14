@@ -1,7 +1,7 @@
 //! GTK terminal widget. All host actions run after releasing widget state borrows.
 use crate::{
     fonts::Fonts,
-    input::{self, KeyAction, Keyboard, Mouse},
+    input::{self, Autoscroll, KeyAction, Keyboard, Mouse},
     link_action,
     paint::{Painter, Palette, Style},
     viewport::{Damage, Viewport},
@@ -31,6 +31,8 @@ struct State {
     timer: Option<glib::SourceId>,
     keyboard: Keyboard,
     mouse: Mouse,
+    /// Middle-click autoscroll and its frame timer; any later press, key or focus loss ends it.
+    autoscroll: Option<(Autoscroll, glib::SourceId)>,
     mode: u32,
     cursor: u32,
     blink: bool,
@@ -82,6 +84,7 @@ impl Terminal {
                 timer: None,
                 keyboard: Keyboard::default(),
                 mouse: Mouse::default(),
+                autoscroll: None,
                 mode: 0,
                 cursor: 2,
                 blink: false,
@@ -162,6 +165,7 @@ impl Terminal {
         );
         inner.widget.connect_destroy(glib::clone!(@weak inner => move |_| {
             inner.clear_all_selection();
+            inner.stop_autoscroll();
             let (timer, im) = { let mut state = inner.state.borrow_mut(); state.destroyed = true;
                 (state.timer.take(), state.im.take()) };
             if let Some(timer) = timer { timer.remove(); }
@@ -330,7 +334,11 @@ impl Terminal {
 }
 impl Drop for Inner {
     fn drop(&mut self) {
-        if let Some(timer) = self.state.get_mut().timer.take() {
+        let state = self.state.get_mut();
+        if let Some(timer) = state.timer.take() {
+            timer.remove();
+        }
+        if let Some((_, timer)) = state.autoscroll.take() {
             timer.remove();
         }
     }
@@ -520,6 +528,7 @@ impl Inner {
         if event.event_type() == gdk::EventType::KeyRelease {
             return im.is_some_and(|im| im.filter_keypress(event));
         }
+        self.stop_autoscroll();
         let action = {
             let mut state = self.state.borrow_mut();
             let mode = state.mode;
@@ -650,6 +659,9 @@ impl Inner {
     }
     fn focus(self: &Rc<Self>, focused: bool) {
         self.prepare();
+        if !focused {
+            self.stop_autoscroll();
+        }
         let im = self.state.borrow().im.clone();
         if let Some(im) = im {
             im.set_client_window(self.widget.window().as_ref());
@@ -684,12 +696,26 @@ impl Inner {
     fn button(self: &Rc<Self>, event: &gdk::EventButton) {
         self.prepare();
         let release = event.event_type() == gdk::EventType::ButtonRelease;
+        let was_scrolling = !release && self.stop_autoscroll();
         if !release && !self.state.borrow().viewport.live() {
             self.emit(Action::Claim);
         }
         self.widget.grab_focus();
         let (px, py) = event.position();
         let (x, y) = self.pointer(px, py);
+        if event.button() == 2 && !event.state().contains(gdk::ModifierType::SHIFT_MASK) {
+            let eligible = {
+                let state = self.state.borrow();
+                state.mode & MODE_MOUSE == 0 && state.viewport.frame().alternate == 0
+            };
+            if eligible {
+                // A press that ended autoscroll must not restart it; its release is ignored too.
+                if !release && !was_scrolling {
+                    self.start_autoscroll(py);
+                }
+                return;
+            }
+        }
         // Links take button 1 before mouse reporting, as in the retired X11 frontend; Shift
         // bypasses them to select or report. Both press and release stay local.
         if event.button() == 1 && !event.state().contains(gdk::ModifierType::SHIFT_MASK) {
@@ -819,7 +845,13 @@ impl Inner {
         self.prepare();
         let (px, py) = event.position();
         let (x, y) = self.pointer(px, py);
-        self.state.borrow_mut().pointer = Some((x, y));
+        {
+            let mut state = self.state.borrow_mut();
+            state.pointer = Some((x, y));
+            if let Some((scroll, _)) = &mut state.autoscroll {
+                scroll.y = py;
+            }
+        }
         self.hover();
         let result = {
             let mut state = self.state.borrow_mut();
@@ -866,6 +898,50 @@ impl Inner {
                 Ok(damage) => self.damage(&damage),
                 Err(error) => self.error(error),
             }
+        }
+    }
+    fn start_autoscroll(self: &Rc<Self>, y: f64) {
+        const FRAME: Duration = Duration::from_millis(16);
+        let weak = Rc::downgrade(self);
+        let timer = glib::timeout_add_local(FRAME, move || match weak.upgrade() {
+            Some(inner) => {
+                inner.autoscroll_frame(FRAME.as_secs_f64());
+                glib::ControlFlow::Continue
+            }
+            None => glib::ControlFlow::Break,
+        });
+        self.state.borrow_mut().autoscroll = Some((Autoscroll::new(y), timer));
+        self.set_cursor(Some("all-scroll"));
+    }
+    /// Ends autoscroll, reporting whether it was running.
+    fn stop_autoscroll(&self) -> bool {
+        let Some((_, timer)) = self.state.borrow_mut().autoscroll.take() else {
+            return false;
+        };
+        timer.remove();
+        self.set_cursor(None);
+        true
+    }
+    fn set_cursor(&self, name: Option<&str>) {
+        if let Some(window) = self.widget.window() {
+            let cursor = name.and_then(|name| gdk::Cursor::from_name(&window.display(), name));
+            window.set_cursor(cursor.as_ref());
+        }
+    }
+    fn autoscroll_frame(&self, seconds: f64) {
+        let step = {
+            let mut state = self.state.borrow_mut();
+            let height = state
+                .painter
+                .as_ref()
+                .map_or(1.0, |painter| f64::from(painter.font().metrics.height));
+            state
+                .autoscroll
+                .as_mut()
+                .and_then(|(scroll, _)| scroll.step(seconds, height))
+        };
+        if let Some((up, amount)) = step {
+            self.send(CommandKind::Scroll { up, amount });
         }
     }
     fn wheel(self: &Rc<Self>, event: &gdk::EventScroll) {

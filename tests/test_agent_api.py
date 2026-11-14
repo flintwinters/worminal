@@ -135,6 +135,16 @@ class AgentApiTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertFalse(json.loads(result.stdout)['ok'])
 
+    def test_tabs_expose_their_daemon_so_agents_can_self_discover(self):
+        """WORMINAL_DAEMON marks a Worminal tab and names the worminald that serves it, even for explicit argv."""
+        tab = self.api('open', '--', '/bin/sh', '-c', 'printf "D=%s\\n" "$WORMINAL_DAEMON"; exec cat')['id']
+        deadline = time.monotonic() + 3
+        while f'D={Path(workspace.DAEMON).resolve()}' not in '\n'.join(self.api('read', tab)['lines']):
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(.01)
+        self.assertIn('WORMINAL_DAEMON', subprocess.run(
+            [str(workspace.DAEMON), '--help'], capture_output=True, text=True, timeout=5).stdout)
+
     def test_help_topics_document_every_reply_key_without_a_daemon(self):
         """An agent with only the executable must learn the reply shapes from `api help schema`."""
         environment = {**self.fixture.env, 'WORMINAL_SHARED_SOCKET_SCOPE': self.fixture.scope + '-absent'}

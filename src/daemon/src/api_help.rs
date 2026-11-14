@@ -15,7 +15,7 @@ Discover by topic (each prints a complete reference and needs no running daemon)
   worminald upgrade-remote --help     sync an older node with a newer peer
 
 Service commands: --serve, --bridge, --stop, --handin NAME, --handoff NAME, --new-browser-tab URL|FILE, --version
-Environment: WORMINAL_SHARED_SOCKET_SCOPE selects the workspace; `api --master user@host` targets another node over SSH.
+Environment: every Worminal tab sets WORMINAL_DAEMON to this executable's path (absent elsewhere). WORMINAL_SHARED_SOCKET_SCOPE selects the workspace; `api --master user@host` targets another node over SSH.
 Manual: man worminal. Inspection and `api` never start a daemon or restore shells.
 ";
 

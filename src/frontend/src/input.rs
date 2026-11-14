@@ -191,6 +191,41 @@ impl Mouse {
         }
     }
 }
+/// Browser-style middle-click autoscroll: the pointer's distance from the click anchor sets the
+/// scroll speed, with a dead zone around the anchor.
+pub struct Autoscroll {
+    anchor: f64,
+    pub y: f64,
+    /// Signed fractional lines (negative is up) left over from the previous step.
+    carry: f64,
+}
+impl Autoscroll {
+    const DEAD_ZONE: f64 = 12.0;
+    /// Lines per second for each line height of pointer distance beyond the dead zone.
+    const GAIN: f64 = 4.0;
+    const MAX_RATE: f64 = 80.0;
+    pub fn new(y: f64) -> Self {
+        Self {
+            anchor: y,
+            y,
+            carry: 0.0,
+        }
+    }
+    /// Whole lines to scroll after `seconds`, as `(up, lines)`.
+    pub fn step(&mut self, seconds: f64, line_height: f64) -> Option<(bool, u32)> {
+        let offset = self.y - self.anchor;
+        let beyond = (offset.abs() - Self::DEAD_ZONE).max(0.0);
+        if beyond == 0.0 {
+            self.carry = 0.0;
+            return None;
+        }
+        let rate = (beyond / line_height.max(1.0) * Self::GAIN).min(Self::MAX_RATE);
+        self.carry += rate * seconds * offset.signum();
+        let lines = self.carry.abs().floor();
+        self.carry -= lines * self.carry.signum();
+        (lines >= 1.0).then_some((offset < 0.0, lines as u32))
+    }
+}
 pub fn position(px: f64, py: f64, width: i32, height: i32, columns: i32, rows: i32) -> (i32, i32) {
     (
         ((px - 2.0) as i32 / width.max(1)).clamp(0, columns - 1),
@@ -201,6 +236,20 @@ pub fn position(px: f64, py: f64, width: i32, height: i32, columns: i32, rows: i
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn autoscroll_speed_follows_pointer_distance() {
+        let mut scroll = Autoscroll::new(100.0);
+        scroll.y = 108.0;
+        assert_eq!(scroll.step(1.0, 16.0), None, "inside the dead zone");
+        scroll.y = 100.0 + 12.0 + 32.0;
+        assert_eq!(scroll.step(1.0, 16.0), Some((false, 8)));
+        scroll.y = 100.0 - 12.0 - 16.0;
+        assert_eq!(scroll.step(0.1, 16.0), None, "fractions carry");
+        assert_eq!(scroll.step(0.2, 16.0), Some((true, 1)));
+        scroll.y = 1.0e6;
+        assert_eq!(scroll.step(1.0, 16.0), Some((false, 80)), "rate is capped");
+    }
 
     #[test]
     fn keyboard_mapping_matches_pre_migration_behavior() {
