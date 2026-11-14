@@ -697,6 +697,7 @@ impl Inner {
         self.prepare();
         let release = event.event_type() == gdk::EventType::ButtonRelease;
         let was_scrolling = !release && self.stop_autoscroll();
+        let shift = event.state().contains(gdk::ModifierType::SHIFT_MASK);
         if !release && !self.state.borrow().viewport.live() {
             self.emit(Action::Claim);
         }
@@ -705,14 +706,14 @@ impl Inner {
         let (x, y) = self.pointer(px, py);
         if event.button() == 2 && self.middle_scrolls(event) {
             // A press that ended autoscroll must not restart it; its release is ignored too.
-            if !release && !was_scrolling {
+            if !(release || was_scrolling) {
                 self.start_autoscroll(py);
             }
             return;
         }
         // Links take button 1 before mouse reporting, as in the retired X11 frontend; Shift
         // bypasses them to select or report. Both press and release stay local.
-        if event.button() == 1 && !event.state().contains(gdk::ModifierType::SHIFT_MASK) {
+        if event.button() == 1 && !shift {
             let mut state = self.state.borrow_mut();
             if release {
                 if let Some((url, column, row)) = state.link.take() {
@@ -742,9 +743,7 @@ impl Inner {
         }
         let bytes = {
             let mut state = self.state.borrow_mut();
-            if state.mode & MODE_MOUSE != 0
-                && !event.state().contains(gdk::ModifierType::SHIFT_MASK)
-            {
+            if state.mode & MODE_MOUSE != 0 && !shift {
                 state.mouse.button = if release { 0 } else { event.button() };
                 Some(event.button().checked_sub(1).and_then(|button| {
                     state.mouse.report(

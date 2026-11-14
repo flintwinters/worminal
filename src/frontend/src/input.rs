@@ -248,7 +248,11 @@ mod tests {
         assert_eq!(scroll.step(0.1, 16.0), None, "fractions carry");
         assert_eq!(scroll.step(0.2, 16.0), Some((true, 1)));
         scroll.y = 100.0;
-        assert_eq!(scroll.step(1.0, 16.0), None, "returning to the anchor stops");
+        assert_eq!(
+            scroll.step(1.0, 16.0),
+            None,
+            "returning to the anchor stops"
+        );
         scroll.y = 1.0e6;
         assert_eq!(scroll.step(1.0, 16.0), Some((false, 80)), "rate is capped");
     }
