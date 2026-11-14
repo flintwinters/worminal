@@ -6,7 +6,10 @@ From an existing master:
 worminald install-on-remote felix@new-disciple
 ```
 
-The native command installs the **headless daemon and manual** into `/usr/local`. It uses your existing SSH
+The native command installs the **daemon and manual** into `/usr/local`. When the target has GTK 3, WebKitGTK 4.1 and Pango/Cairo
+and this master is itself a desktop installation, it also installs the `worminal` command, its frontend and browser
+modules, the desktop entry and the icon; the staged launcher must run on the target or the install falls back to
+the daemon and manual alone. It uses your existing SSH
 configuration and authentication; no credentials, source checkout, configuration, registry or user state are copied.
 The target needs Linux on the same CPU architecture as the master, Python 3, and non-interactive sudo (or an
 explicit root SSH account). The transferred candidate must also pass an unprivileged runtime check on the target;
@@ -31,7 +34,7 @@ Worp. Run `worminald install-on-remote --help`; general daemon help and API help
 
 ## Publication and failures
 
-Only the running daemon inode and embedded manual are sent. The master validates target OS/CPU before sending
+Only the running daemon inode, embedded manual and (for a graphical target) the master's launcher, modules, desktop entry and icon are sent. The master validates target OS/CPU before sending
 payload bytes; the target checks existing state and sudo before accepting the transfer. It stages and executes the
 candidate as the SSH user before privileged publication. SHA-256 checks keep the published files identical to the
 staged payload. Files are published atomically without replacement; a concurrent destination is preserved and the
@@ -55,7 +58,7 @@ the node with the older Cargo version is updated from the newer one. A newer loc
 bootstrap as `install-on-remote`; a newer remote daemon is pulled through that bootstrap run locally. A daemon that
 predates `--version` counts as older. Equal versions change nothing.
 
-Only the daemon and manual in `/usr/local` are replaced (graphical modules are not). Replacement is a same-directory
+The daemon and manual in `/usr/local` are replaced; a pushed upgrade also adds the graphical `worminal` command to a graphics-capable target that lacks it, but never replaces an existing launcher or modules (use `manage.py upgrade`). Replacement is a same-directory
 atomic rename after the same staging, checksum, run check and non-interactive sudo steps as installation, and both
 sides must be Linux on the same CPU. The running daemon sees its executable change and hands its shells to the new
 file without restarting them; connected views reconnect. A daemon too old to watch its executable keeps running

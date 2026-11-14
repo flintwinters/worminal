@@ -22,6 +22,9 @@ source = source.replace("PREFIX = Path('/usr/local')",
 source = source.replace("shutil.which('worminald') or shutil.which('worminal')", 'False')
 source = source.replace('def legacy_workspace():', 'def legacy_workspace():\n    return False')
 source = source.replace('def active_workspace():', 'def active_workspace():\n    return '+str(scenario == 'active'))
+# The fixture target's libraries are not probed: the scenario says whether it can run graphics.
+source = source.replace('def graphics_available():',
+                        'def graphics_available():\n    return ' + str(os.environ.get('WORMINAL_TEST_GRAPHICS') == '1'))
 if scenario == 'runtime':
     # Deterministic runtime rejection after receiving and staging the real binary.
     needle = "if result.returncode or b'Worp' not in result.stdout:"

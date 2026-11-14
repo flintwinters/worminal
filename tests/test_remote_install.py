@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -13,6 +14,7 @@ from unittest.mock import patch
 from runtime import ROOT, CHECKS
 from tools import build, remote_install
 
+MODULES = ('frontend-rust-v2.so', 'browser-rust-v2.so')
 DAEMON = Path(os.environ.get('WORMINAL_TEST_PREVIEW_DAEMON', str(ROOT / 'build/cargo/release/worminal-daemon')))
 
 
@@ -88,6 +90,23 @@ class PublicationTest(unittest.TestCase):
         self.assertEqual(list(self.prefix.rglob('.worminal-install-*')), [])
 
 
+    def test_replace_creates_promoted_desktop_files_with_modules_before_the_launcher(self):
+        remote_install.publish(self.layout, io.BytesIO(payload(self.files)))
+        desktop = [{'role': role, 'base': 'prefix', 'path': path, 'mode': 0o755}
+                   for role, path in (('frontend', 'lib/worminal/f.so'), ('launcher', 'bin/worminal'))]
+        layout = {**self.layout, 'files': self.layout['files'] + desktop}
+        swapped = []
+        original = os.rename
+        def record(source, target, **kwargs):
+            swapped.append(target)
+            return original(source, target, **kwargs)
+        files = self.files + [('frontend', b'module'), ('launcher', b'launcher')]
+        with patch.object(remote_install.os, 'rename', side_effect=record):
+            remote_install.publish(layout, io.BytesIO(payload(files)), True)
+        self.assertEqual(swapped, ['worminal.1', 'f.so', 'worminal', 'worminald'])
+        self.assertEqual((self.prefix/'bin/worminal').read_bytes(), b'launcher')
+
+
 class RemoteCommandTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix='remote-command-', dir=CHECKS)
@@ -138,6 +157,59 @@ class RemoteCommandTest(unittest.TestCase):
         value = self.command(success=False)
         self.assertIn('already exists', value['error'])
         self.assertEqual(state.read_text(), 'preserve')
+
+    def graphical_controller(self):
+        """A copy of the daemon installed beside a launcher and modules, as `manage.py install` lays them out."""
+        controller = self.root / 'controller'
+        for directory in ('bin', 'lib/worminal'):
+            (controller/directory).mkdir(parents=True)
+        shutil.copy(DAEMON, controller/'bin/worminald')
+        (controller/'bin/worminal').write_text('#!/bin/sh\n[ "$1" = --version ] && echo worminal\nexit 0\n')
+        (controller/'bin/worminal').chmod(0o755)
+        for module in MODULES:
+            (controller/'lib/worminal'/module).write_bytes(b'module ' + module.encode())
+        return controller/'bin/worminald'
+
+    def install_from(self, daemon, graphics, command='install-on-remote'):
+        result = subprocess.run([str(daemon), command, 'fixture-host'],
+                                env={**self.env, 'WORMINAL_TEST_GRAPHICS': '1' if graphics else '0'},
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        value = json.loads(result.stdout)
+        self.assertTrue(value['installed'], value)
+        return value
+
+    def test_graphical_target_gets_the_worminal_command_beside_the_daemon(self):
+        daemon = self.graphical_controller()
+        result = self.install_from(daemon, graphics=True)
+        self.assertTrue(result['desktop'])
+        for name in ('bin/worminal', 'share/applications/worminal.desktop',
+                     'share/icons/hicolor/scalable/apps/worminal.svg'):
+            self.assertTrue((self.prefix/name).is_file(), name)
+        for module in MODULES:
+            self.assertEqual((self.prefix/'lib/worminal'/module).read_bytes(), b'module ' + module.encode())
+        self.assertEqual((self.prefix/'bin/worminald').read_bytes(), daemon.read_bytes())
+
+    def test_headless_target_or_headless_controller_installs_only_the_daemon(self):
+        self.assertFalse(self.install_from(self.graphical_controller(), graphics=False)['desktop'])
+        self.assertFalse((self.prefix/'bin/worminal').exists())
+        shutil.rmtree(self.prefix); self.prefix.mkdir(mode=0o700)
+        self.assertFalse(self.install_from(DAEMON, graphics=True)['desktop'])
+        self.assertFalse((self.prefix/'bin/worminal').exists())
+
+    def test_broken_launcher_keeps_the_daemon_install(self):
+        daemon = self.graphical_controller()
+        (daemon.parent/'worminal').write_text('#!/bin/sh\nexit 1\n')
+        result = self.install_from(daemon, graphics=True)
+        self.assertFalse(result['desktop'])
+        self.assertTrue((self.prefix/'bin/worminald').is_file())
+        self.assertFalse((self.prefix/'bin/worminal').exists())
+
+    def test_older_headless_peer_with_graphics_is_promoted_by_the_push(self):
+        daemon = self.graphical_controller()
+        self.fake(self.prefix, '0.0.1')
+        self.assertTrue(self.install_from(daemon, graphics=True, command='upgrade-remote')['desktop'])
+        self.assertTrue((self.prefix/'bin/worminal').is_file())
 
     def fake(self, prefix, version):
         """An installed daemon stand-in: reports its version (or predates --version) and passes the run check."""

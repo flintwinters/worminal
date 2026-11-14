@@ -42,7 +42,7 @@ The executable alone must teach an agent everything: `worminald --help` indexes 
 request/reply conveniences; local sockets and SSH bind them to the existing v2 stream protocol.
 Device enrollment is explicit per authority user, shared across scopes and persisted independently of tabs;
 `docs/devices.md` defines membership and caller-side availability. Never add heartbeats or block the daemon on probes.
-`worminald install-on-remote` bootstraps new compatible headless nodes over SSH; see `docs/remote-install.md`.
+`worminald install-on-remote` bootstraps new compatible nodes over SSH, adding the `worminal` command when the target has the graphics stack; see `docs/remote-install.md`.
 It must refuse existing installations/workspaces and preserve state. Version sync is the separate
 `worminald upgrade-remote`: views run it once per host when they connect, and it updates whichever side has the older
 Cargo version, pushing or pulling the daemon with atomic replacement so the running daemon's watch hands live shells to

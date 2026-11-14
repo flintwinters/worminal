@@ -9,6 +9,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from ctypes.util import find_library
 
 PREFIX = Path('/usr/local')
 LIMIT = 64 * 1024 * 1024
@@ -37,6 +38,29 @@ def exact(stream, size):
             raise ValueError('Transfer interrupted; no complete installation was published.')
         remaining -= len(data)
         yield data
+
+
+def graphics_available():
+    """True when the target carries the runtime libraries the graphical `worminal` command needs."""
+    return all(find_library(name) for name in ('gtk-3', 'webkit2gtk-4.1', 'pangocairo-1.0'))
+
+
+def widen(layout, value):
+    """Add the optional desktop files when the controller sent them; the daemon and manual are always required."""
+    desktop = layout.get('desktop', [])
+    records = value.get('files')
+    if desktop and isinstance(records, list) and len(records) == len(layout['files']) + len(desktop):
+        return {**layout, 'files': layout['files'] + desktop}
+    return layout
+
+
+def desktop_runs(paths, layout):
+    """The staged launcher runs here (it needs only GLib; modules are loaded later by the frontend)."""
+    launcher = paths[[item['role'] for item in layout['desktop']].index('launcher')]
+    try:
+        return subprocess.run([str(launcher), '--version'], capture_output=True, timeout=10).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 
 def destinations(layout):
@@ -160,8 +184,10 @@ def publish(layout, stream, replace=False):
             if replace:
                 # rename swaps the inode atomically, so the running daemon keeps its mapped code and its
                 # executable watch hands live shells to the new file. The daemon goes last: an interruption
-                # can leave a newer manual, never a half-written daemon.
-                for (fd, name), (_, path, _) in reversed(list(zip(staged, parents))):
+                # can leave a newer manual, never a half-written daemon. Layout order already puts modules
+                # before the launcher that loads them, so a promoted desktop never exposes a launcher without them.
+                swaps = list(zip(staged, parents))
+                for (fd, name), (_, path, _) in sorted(swaps, key=lambda swap: swap[1][0]['role'] == 'daemon'):
                     os.rename(name, path.name, src_dir_fd=fd, dst_dir_fd=fd)
                     os.fsync(fd)
             else:
@@ -214,7 +240,9 @@ def send(layout):
 
 
 def bootstrap(layout, source, replace=False):
-    ready = {'ready': True, 'system': platform.system(), 'machine': platform.machine()}
+    ready = {'ready': True, 'system': platform.system(), 'machine': platform.machine(),
+             # The controller sends the graphical command only to a target that can run it and lacks it.
+             'graphics': graphics_available(), 'desktop': os.path.lexists(PREFIX / 'bin/worminal')}
     first = None
     if replace:
         ready['version'] = installed_version(layout)
@@ -228,6 +256,8 @@ def bootstrap(layout, source, replace=False):
             return send(layout)
         if legacy_workspace():
             raise ValueError('A v1 Worminal workspace is active; it is never upgraded implicitly. Nothing was replaced.')
+    first = first or header(sys.stdin.buffer)
+    base, layout = layout, widen(layout, first)
     records = payload(layout, sys.stdin.buffer, first)
     if not replace:
         refuse_existing(layout)
@@ -246,7 +276,7 @@ def bootstrap(layout, source, replace=False):
                 for data in exact(sys.stdin.buffer, record['size']):
                     digest.update(data)
                     output.write(data)
-            path.chmod(0o700 if record['role'] == 'daemon' else 0o600)
+            path.chmod(0o700 if record['role'] in ('daemon', 'launcher') else 0o600)
             record['sha256'] = digest.hexdigest()
             paths.append(path)
         candidate = paths[[item['role'] for item in layout['files']].index('daemon')]
@@ -257,6 +287,9 @@ def bootstrap(layout, source, replace=False):
                              'Nothing was installed.') from error
         if result.returncode or b'Worp' not in result.stdout:
             raise ValueError('The staged daemon cannot run here (runtime/libc incompatibility). Nothing was installed.')
+        if layout is not base and not desktop_runs(paths[len(base['files']):], layout):
+            # A half-present graphics stack must not cost the node its daemon: install the required files only.
+            layout, records, paths = base, records[:len(base['files'])], paths[:len(base['files'])]
         if not replace:
             refuse_existing(layout)
         # The privileged publisher consumes bytes from stdin, never user-controlled source paths.
@@ -279,6 +312,7 @@ def bootstrap(layout, source, replace=False):
                 process.kill()
                 process.wait()
     return {'ok': True, 'installed': True, 'upgraded': replace, 'started': False, 'prefix': str(PREFIX),
+            'desktop': layout is not base,
             'files': [{'role': row['role'], 'sha256': row['sha256']} for row in records]}
 
 

@@ -15,6 +15,10 @@ use worminal_workspace::ssh;
 const LAYOUT: &str = include_str!("../../../assets/headless-install.json");
 const BOOTSTRAP: &str = include_str!("../../../tools/remote_install.py");
 const MANUAL: &str = include_str!("../../../docs/man/worminal.1");
+const DESKTOP_ENTRY: &str = include_str!("../../../assets/worminal.desktop");
+const ICON: &str = include_str!("../../../assets/worminal.svg");
+const FRONTEND_HEADER: &str = include_str!("../../gtk/rust_frontend_module.h");
+const BROWSER_HEADER: &str = include_str!("../../gtk/rust_browser_module.h");
 const LIMIT: u64 = 64 * 1024 * 1024;
 const HEADER_LIMIT: usize = 16384;
 const UPGRADE_HELP: &str = "Usage: worminald upgrade-remote SSH_ENDPOINT\n\
@@ -24,7 +28,8 @@ Both sides must be Linux on the same CPU, with Python 3 and non-interactive sudo
 Files are replaced atomically; a running daemon hands its shells to the new file without restarting them.\n\
 Active v1 workspaces are never touched. Views run this automatically once per host when they connect.\n";
 const HELP: &str = "Usage: worminald install-on-remote SSH_ENDPOINT\n\
-Install this headless daemon and its manual on a new compatible Linux node over SSH.\n\
+Install this daemon and its manual on a new compatible Linux node over SSH.\n\
+A target with GTK/WebKit also gets the worminal command, modules, desktop entry and icon.\n\
 Requires Python 3 and non-interactive sudo on the target. Installs into /usr/local.\n\
 Existing installations/workspaces are refused; no daemon is started and no device is enrolled.\n\
 Only matching CPU architectures are supported; the staged binary must also run on the target.\n\
@@ -72,10 +77,47 @@ fn check_platform(value: &Value) -> io::Result<()> {
     Ok(())
 }
 
+/// The value a header names, e.g. the module file in `#define WORMINAL_RUST_FRONTEND_FILE "name.so"`.
+fn defined(header: &str, name: &str) -> Option<String> {
+    let line = header
+        .lines()
+        .find(|line| line.starts_with(&format!("#define {name} ")))?;
+    Some(line.split('"').nth(1)?.to_string())
+}
+
+/// The graphical files in publication order (modules before the launcher that loads them), keyed by role.
+fn desktop_layout() -> Vec<Value> {
+    let module = |header, name| defined(header, name).map(|file| format!("lib/worminal/{file}"));
+    let (Some(frontend), Some(browser)) = (
+        module(FRONTEND_HEADER, "WORMINAL_RUST_FRONTEND_FILE"),
+        module(BROWSER_HEADER, "WORMINAL_RUST_BROWSER_FILE"),
+    ) else {
+        return Vec::new();
+    };
+    let entry = |role: &str, path: &str, mode: u32| json!({"role": role, "base": "prefix", "path": path, "mode": mode});
+    vec![
+        entry("browser", &browser, 0o755),
+        entry("frontend", &frontend, 0o755),
+        entry("launcher", "bin/worminal", 0o755),
+        entry("desktop", "share/applications/worminal.desktop", 0o644),
+        entry(
+            "icon",
+            "share/icons/hicolor/scalable/apps/worminal.svg",
+            0o644,
+        ),
+    ]
+}
+
+fn layout() -> Value {
+    let mut layout: Value = serde_json::from_str(LAYOUT).expect("compiled installation layout");
+    layout["desktop"] = Value::Array(desktop_layout());
+    layout
+}
+
 fn code(mode: &str) -> String {
     format!(
         "import json\nLAYOUT=json.loads({})\nMODE={}\nSOURCE={}\nexec(SOURCE)\n",
-        serde_json::to_string(LAYOUT).unwrap(),
+        serde_json::to_string(&layout().to_string()).unwrap(),
         serde_json::to_string(mode).unwrap(),
         serde_json::to_string(BOOTSTRAP).unwrap()
     )
@@ -104,15 +146,77 @@ fn install(endpoint: &str) -> io::Result<Value> {
     stream.set_read_timeout(Some(Duration::from_secs(120)))?;
     stream.set_write_timeout(Some(Duration::from_secs(120)))?;
     let mut reader = BufReader::new(stream.try_clone()?);
-    check_platform(&receive(&mut reader)?)?;
-    let mut result = push(&mut stream, &mut reader)?;
+    let ready = receive(&mut reader)?;
+    check_platform(&ready)?;
+    let mut result = push(&mut stream, &mut reader, &ready)?;
     result["endpoint"] = json!(endpoint);
     result["next"] = json!(format!("Open a view with: worminal --master {endpoint}"));
     Ok(result)
 }
 
+/// One payload file: the running daemon streams from its pinned inode; everything else is already in memory.
+enum Body {
+    Running(File, u64),
+    Bytes(Vec<u8>),
+}
+impl Body {
+    fn size(&self) -> u64 {
+        match self {
+            Body::Running(_, size) => *size,
+            Body::Bytes(bytes) => bytes.len() as u64,
+        }
+    }
+    fn send(&self, stream: &mut UnixStream) -> io::Result<()> {
+        match self {
+            Body::Running(file, size) => {
+                io::copy(&mut file.try_clone()?.take(*size), stream).map(drop)
+            }
+            Body::Bytes(bytes) => stream.write_all(bytes),
+        }
+    }
+}
+
+/// The installed graphical command beside the running daemon (`PREFIX/bin/worminald`), if this node has one.
+/// Only the launcher and its two modules come from disk; the entry and icon are compiled in.
+fn desktop_bodies(layout: &[Value]) -> Option<Vec<(String, Body)>> {
+    let exe = std::fs::read_link("/proc/self/exe").ok()?;
+    let exe = exe.to_str()?.trim_end_matches(" (deleted)").to_string();
+    let prefix = std::path::Path::new(&exe).parent()?.parent()?.to_path_buf();
+    if std::path::Path::new(&exe).parent()?.file_name()? != "bin" {
+        return None;
+    }
+    layout
+        .iter()
+        .map(|file| {
+            let role = file["role"].as_str()?;
+            let body = match role {
+                "desktop" => Body::Bytes(DESKTOP_ENTRY.as_bytes().to_vec()),
+                "icon" => Body::Bytes(ICON.as_bytes().to_vec()),
+                _ => {
+                    let mut bytes = Vec::new();
+                    File::open(prefix.join(file["path"].as_str()?))
+                        .ok()?
+                        .take(LIMIT + 1)
+                        .read_to_end(&mut bytes)
+                        .ok()?;
+                    if bytes.is_empty() || bytes.len() as u64 > LIMIT {
+                        return None;
+                    }
+                    Body::Bytes(bytes)
+                }
+            };
+            Some((role.to_string(), body))
+        })
+        .collect()
+}
+
 /// Send this running daemon and manual to a peer whose bootstrap is waiting for the payload header.
-fn push(stream: &mut UnixStream, reader: &mut BufReader<UnixStream>) -> io::Result<Value> {
+/// A peer that can run graphics and has no `worminal` command also gets ours, when this node has one.
+fn push(
+    stream: &mut UnixStream,
+    reader: &mut BufReader<UnixStream>,
+    ready: &Value,
+) -> io::Result<Value> {
     // Pin the actual running inode, including when its installed pathname has been replaced.
     let binary = File::open("/proc/self/exe")?;
     let size = binary.metadata()?.len();
@@ -124,31 +228,41 @@ fn push(stream: &mut UnixStream, reader: &mut BufReader<UnixStream>) -> io::Resu
     let manual = MANUAL
         .replace("VERSION", env!("CARGO_PKG_VERSION"))
         .into_bytes();
-    let layout: Value = serde_json::from_str(LAYOUT)
-        .map_err(|_| invalid("Invalid compiled installation layout."))?;
-    let files = layout["files"]
+    let layout = layout();
+    let required = layout["files"]
         .as_array()
         .ok_or_else(|| invalid("Invalid compiled installation layout."))?;
-    let records: Vec<_> = files
+    let mut bodies = Vec::new();
+    for file in required {
+        bodies.push(match file["role"].as_str() {
+            Some("daemon") => (
+                "daemon".to_string(),
+                Body::Running(binary.try_clone()?, size),
+            ),
+            Some("manual") => ("manual".to_string(), Body::Bytes(manual.clone())),
+            _ => return Err(invalid("Unknown compiled installation resource.")),
+        });
+    }
+    let wants = |key| ready.get(key).and_then(Value::as_bool);
+    if wants("graphics") == Some(true) && wants("desktop") == Some(false) {
+        if let Some(desktop) = layout["desktop"]
+            .as_array()
+            .and_then(|layout| desktop_bodies(layout))
+        {
+            bodies.extend(desktop);
+        }
+    }
+    let records: Vec<_> = bodies
         .iter()
-        .map(|file| {
-            let role = file["role"].as_str().unwrap_or("");
-            json!({"role":role,"size":if role == "daemon" { size } else { manual.len() as u64 }})
-        })
+        .map(|(role, body)| json!({"role": role, "size": body.size()}))
         .collect();
     writeln!(stream, "{}", json!({"files":records}))?;
     stream.flush()?;
     if receive(reader)?.get("accept").and_then(Value::as_bool) != Some(true) {
         return Err(invalid("Target did not accept the installation payload."));
     }
-    for file in files {
-        match file["role"].as_str() {
-            Some("daemon") => {
-                io::copy(&mut binary.try_clone()?.take(size), &mut *stream)?;
-            }
-            Some("manual") => stream.write_all(&manual)?,
-            _ => return Err(invalid("Unknown compiled installation resource.")),
-        }
+    for (_, body) in &bodies {
+        body.send(stream)?;
     }
     stream.flush()?;
     let result = receive(reader)?;
@@ -176,7 +290,7 @@ fn upgrade(endpoint: &str) -> io::Result<Value> {
     let theirs = ready.get("version").and_then(Value::as_str);
     let mut result = match compare(theirs, env!("CARGO_PKG_VERSION"))? {
         Ordering::Less => {
-            let mut result = push(&mut stream, &mut reader)?;
+            let mut result = push(&mut stream, &mut reader, &ready)?;
             result["direction"] = json!("push");
             result
         }
@@ -324,6 +438,28 @@ pub fn run(arguments: &[OsString], upgrading: bool) -> io::Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn desktop_layout_names_the_modules_from_their_headers_in_publication_order() {
+        let roles: Vec<_> = desktop_layout()
+            .iter()
+            .map(|file| file["role"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            roles,
+            ["browser", "frontend", "launcher", "desktop", "icon"]
+        );
+        let paths: Vec<_> = desktop_layout()
+            .iter()
+            .filter_map(|file| file["path"].as_str().map(str::to_string))
+            .collect();
+        assert!(paths[0].starts_with("lib/worminal/") && paths[0].ends_with(".so"));
+        assert_eq!(
+            defined("#define A \"x.so\"\n", "A").as_deref(),
+            Some("x.so")
+        );
+        assert_eq!(defined("#define AB \"x.so\"\n", "A"), None);
+    }
 
     #[test]
     fn older_newer_and_unversioned_peers_are_ordered_against_us() {
