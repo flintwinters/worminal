@@ -187,10 +187,11 @@ impl Service {
     pub fn close(&mut self, index: usize) {
         self.closed = self.tabs[index].id;
         self.pending_replace.retain(|_, (id, _)| *id != self.closed);
-        self.fallback = self
-            .tabs
-            .get(index + 1)
-            .or_else(|| index.checked_sub(1).map(|i| &self.tabs[i]))
+        // Selection moves left, as in other tabbed UIs; only the first tab falls back to its right neighbour.
+        self.fallback = index
+            .checked_sub(1)
+            .map(|i| &self.tabs[i])
+            .or_else(|| self.tabs.get(index + 1))
             .map_or(0, |tab| tab.id);
         self.release(index);
         self.tabs.remove(index);

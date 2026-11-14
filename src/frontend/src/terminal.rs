@@ -703,18 +703,12 @@ impl Inner {
         self.widget.grab_focus();
         let (px, py) = event.position();
         let (x, y) = self.pointer(px, py);
-        if event.button() == 2 && !event.state().contains(gdk::ModifierType::SHIFT_MASK) {
-            let eligible = {
-                let state = self.state.borrow();
-                state.mode & MODE_MOUSE == 0 && state.viewport.frame().alternate == 0
-            };
-            if eligible {
-                // A press that ended autoscroll must not restart it; its release is ignored too.
-                if !release && !was_scrolling {
-                    self.start_autoscroll(py);
-                }
-                return;
+        if event.button() == 2 && self.middle_scrolls(event) {
+            // A press that ended autoscroll must not restart it; its release is ignored too.
+            if !release && !was_scrolling {
+                self.start_autoscroll(py);
             }
+            return;
         }
         // Links take button 1 before mouse reporting, as in the retired X11 frontend; Shift
         // bypasses them to select or report. Both press and release stay local.
@@ -899,6 +893,14 @@ impl Inner {
                 Err(error) => self.error(error),
             }
         }
+    }
+    /// Plain middle click autoscrolls unless the application takes the mouse or the alternate
+    /// screen has no history; Shift (and those cases) keep middle-click paste.
+    fn middle_scrolls(&self, event: &gdk::EventButton) -> bool {
+        let state = self.state.borrow();
+        !event.state().contains(gdk::ModifierType::SHIFT_MASK)
+            && state.mode & MODE_MOUSE == 0
+            && state.viewport.frame().alternate == 0
     }
     fn start_autoscroll(self: &Rc<Self>, y: f64) {
         const FRAME: Duration = Duration::from_millis(16);

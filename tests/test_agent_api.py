@@ -13,6 +13,10 @@ import test_preview_workspace as workspace
 from workspace_protocol import number, send, wait_kind
 
 
+def number_at(data, index):
+    return int.from_bytes(data[4 * index:4 * index + 4], 'big')
+
+
 class AgentApiTest(unittest.TestCase):
     def setUp(self):
         state = tempfile.TemporaryDirectory(prefix='agent-state-', dir=workspace.CHECKS)
@@ -251,6 +255,17 @@ class AgentApiTest(unittest.TestCase):
             while len(self.api('list')['tabs']) != 1:
                 self.assertLess(time.monotonic(), deadline)
             self.assertTrue(self.api('read', existing)['ok'])
+
+    def test_closing_a_tab_selects_its_left_neighbour_and_the_first_selects_its_right(self):
+        """The catalog's fallback id is what views select after a close."""
+        tabs = [self.api('open', '--', '/bin/cat')['id'] for _ in range(4)]
+        with self.session() as session:
+            send(session, 19, version=2)
+            wait_kind(session, 7, version=2)
+            for closed, fallback in ((tabs[2], tabs[1]), (tabs[0], tabs[1]), (tabs[3], tabs[1])):
+                self.api('close', closed)
+                _, catalog = wait_kind(session, 7, version=2)
+                self.assertEqual((number_at(catalog, 1), number_at(catalog, 2)), (closed, fallback))
 
     @contextmanager
     def ssh_transport(self):
