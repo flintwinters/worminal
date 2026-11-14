@@ -7,7 +7,7 @@ use worminal_protocol::*;
 pub const OVERVIEW: &str = "worminald: persistent terminal workspace service and headless agent interface
 
 Discover by topic (each prints a complete reference and needs no running daemon):
-  worminald api help                  list, open, close, read, type, key, devices, enroll, forget
+  worminald api help                  list, self, open, close, read, type, key, devices, enroll, forget
   worminald api help schema           JSON reply shapes, limits, exit codes
   worminald api help session          binary streaming protocol (worminald api --session)
   worminald config --help             how to read, edit and validate worminal.yaml (--example)
@@ -53,6 +53,8 @@ Uncertain mutations (open, close, type, key, enroll, forget) are never retried; 
 list     {"ok":true,"api_version":1,"tabs":[TAB...]}   tabs are in strip order
   TAB    {"id":N,"kind":"terminal"|"browser","title":S,"directory":S,"shell_pid":N,"url":S}
          shell_pid is 0 for browsers and exited shells; url is "" for terminals.
+self     {"ok":true,"api_version":1,"id":N,"tab":TAB}   the tab whose shell is an ancestor of the caller;
+         {"ok":false,"error":...} outside any tab. Local only: `--master` is refused (pids are local).
 read T   {"ok":true,"id":N,"columns":N,"rows":N,"cursor":{"x":N,"y":N},"scroll":N,"alternate":BOOL,
           "lines":[S...]}   one string per row; trailing spaces trimmed; x/y are zero-based;
          scroll is the offset into history; alternate is true inside a full-screen application.

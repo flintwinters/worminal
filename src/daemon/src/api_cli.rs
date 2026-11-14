@@ -12,6 +12,8 @@ use worminal_protocol::worp::{
 };
 use worminal_workspace::{socket, ssh};
 
+#[path = "api_self.rs"]
+mod identity;
 #[path = "api_open.rs"]
 mod open;
 
@@ -199,6 +201,9 @@ pub fn run(scope: &[u8], arguments: &[OsString]) -> io::Result<i32> {
     } else {
         (None, arguments)
     };
+    if arguments.len() == 1 && arguments[0] == "self" {
+        return Ok(print_result(identify_self(scope, master)));
+    }
     let result = command(arguments).and_then(|operation| {
         let devices = matches!(operation, Request::Devices);
         let mut reply = request(scope, master, operation)?;
@@ -217,17 +222,38 @@ pub fn run(scope: &[u8], arguments: &[OsString]) -> io::Result<i32> {
         }
         Ok(reply)
     });
+    Ok(print_result(
+        result.map(|reply| (reply.json, reply.success)),
+    ))
+}
+
+fn identify_self(scope: &[u8], master: Option<&OsStr>) -> io::Result<(String, bool)> {
+    if master.is_some() {
+        return Err(invalid(
+            "self identifies this machine's process; omit --master.",
+        ));
+    }
+    let list = request(scope, None, Request::List)?;
+    if !list.success {
+        return Ok((list.json, false));
+    }
+    let chain = identity::ancestors(std::process::id());
+    Ok((identity::identify(&list.json, &chain)?, true))
+}
+
+/// Prints the one JSON object every command promises and returns the exit status.
+fn print_result(result: io::Result<(String, bool)>) -> i32 {
     match result {
-        Ok(reply) => {
-            println!("{}", reply.json);
-            Ok(i32::from(!reply.success))
+        Ok((json, success)) => {
+            println!("{json}");
+            i32::from(!success)
         }
         Err(error) => {
             println!(
                 "{{\"ok\":false,\"error\":{}}}",
                 quote(error.to_string().as_bytes())
             );
-            Ok(1)
+            1
         }
     }
 }

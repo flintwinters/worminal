@@ -15,6 +15,7 @@ Usage: worminald api [--master user@host] COMMAND
   --session            Duplex binary Worp command/event session to the existing daemon.
                        Supports catalog, frames, input, focus/resize, selection and lifecycle.
   list                 List tab IDs, titles, directories and shell PIDs as JSON.
+  self                 Identify the tab running this process (local only; fails outside a tab).
   open [OPTIONS] [-- PROGRAM ARG...]  Create a terminal; default is the target user's shell.
     --cwd /ABS/PATH --title TITLE --columns N --rows N  (default size: 80x24)
   open --browser URL   Create a browser record; use an explicit URL, including file:/// paths.

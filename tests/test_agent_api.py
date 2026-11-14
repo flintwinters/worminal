@@ -145,6 +145,23 @@ class AgentApiTest(unittest.TestCase):
         self.assertIn('WORMINAL_DAEMON', subprocess.run(
             [str(workspace.DAEMON), '--help'], capture_output=True, text=True, timeout=5).stdout)
 
+    def test_self_identifies_only_the_tab_running_the_caller(self):
+        """Ancestry of the caller, matched with each shell_pid, names the tab; outsiders get an error."""
+        other = self.api('open', '--', '/bin/cat')['id']
+        tab = self.api('open', '--', '/bin/sh', '-c', '"$WORMINAL_DAEMON" api self; exec cat')['id']
+        deadline = time.monotonic() + 3
+        while True:
+            text = ''.join(self.api('read', tab)['lines'])
+            if text.endswith('}'):
+                break
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(.01)
+        reply = json.loads(text[text.index('{'):])
+        self.assertEqual((reply['ok'], reply['id'], reply['tab']['id']), (True, tab, tab))
+        self.assertNotEqual(tab, other)
+        self.assertIn('not running in a tab', self.api('self', success=False)['error'])
+        self.assertIn('--master', self.api('--master', 'nobody@invalid', 'self', success=False)['error'])
+
     def test_help_topics_document_every_reply_key_without_a_daemon(self):
         """An agent with only the executable must learn the reply shapes from `api help schema`."""
         environment = {**self.fixture.env, 'WORMINAL_SHARED_SOCKET_SCOPE': self.fixture.scope + '-absent'}
@@ -168,7 +185,8 @@ class AgentApiTest(unittest.TestCase):
         replies = [self.api('list'), self.api('read', tab), self.api('type', tab, 'x'),
                    self.api('key', tab, 'Enter'), self.api('devices'), self.api('open', '--', '/bin/cat'),
                    self.api('enroll', 'schema-node', 'schema@example.test'),
-                   self.api('forget', 'schema-node'), self.api('read', 999, success=False)]
+                   self.api('forget', 'schema-node'), self.api('read', 999, success=False),
+                   self.api('self', success=False)]
         replies.append(self.api('close', replies[5]['id']))
         def keys(value):
             if isinstance(value, dict):

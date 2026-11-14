@@ -8,6 +8,7 @@ It never starts a daemon or restores shells as a side effect of inspection.
 
 ```sh
 worminald api list
+worminald api self   # from inside a tab: which tab am I (local only)
 worminald api open --cwd /path/to/project -- /bin/sh
 worminald api open --browser https://example.org/
 worminald api close 12
