@@ -704,7 +704,7 @@ impl Inner {
         self.widget.grab_focus();
         let (px, py) = event.position();
         let (x, y) = self.pointer(px, py);
-        if event.button() == 2 && self.middle_scrolls(event) {
+        if event.button() == 2 && !shift {
             // A press that ended autoscroll must not restart it; its release is ignored too.
             if !(release || was_scrolling) {
                 self.start_autoscroll(py);
@@ -893,14 +893,6 @@ impl Inner {
             }
         }
     }
-    /// Plain middle click autoscrolls unless the application takes the mouse or the alternate
-    /// screen has no history; Shift (and those cases) keep middle-click paste.
-    fn middle_scrolls(&self, event: &gdk::EventButton) -> bool {
-        let state = self.state.borrow();
-        !event.state().contains(gdk::ModifierType::SHIFT_MASK)
-            && state.mode & MODE_MOUSE == 0
-            && state.viewport.frame().alternate == 0
-    }
     fn start_autoscroll(self: &Rc<Self>, y: f64) {
         const FRAME: Duration = Duration::from_millis(16);
         let weak = Rc::downgrade(self);
@@ -929,7 +921,7 @@ impl Inner {
             window.set_cursor(cursor.as_ref());
         }
     }
-    fn autoscroll_frame(&self, seconds: f64) {
+    fn autoscroll_frame(self: &Rc<Self>, seconds: f64) {
         let step = {
             let mut state = self.state.borrow_mut();
             let height = state
@@ -941,8 +933,9 @@ impl Inner {
                 .as_mut()
                 .and_then(|(scroll, _)| scroll.step(seconds, height))
         };
-        if let Some((up, amount)) = step {
-            self.send(CommandKind::Scroll { up, amount });
+        if let Some((up, lines)) = step {
+            let cell = self.state.borrow().pointer.unwrap_or_default();
+            self.scroll(up, lines, lines, cell, gdk::ModifierType::empty());
         }
     }
     fn wheel(self: &Rc<Self>, event: &gdk::EventScroll) {
@@ -954,18 +947,30 @@ impl Inner {
         let up = event.direction() == gdk::ScrollDirection::Up || smooth && event.delta().1 < 0.0;
         let (px, py) = event.position();
         let (x, y) = self.pointer(px, py);
+        let lines = worminal_config::get().scroll_multiplier as u32;
+        self.scroll(up, 1, lines, (x, y), event.state());
+    }
+    /// Scrolls as the wheel does: applications owning the mouse get `notches` wheel reports, the
+    /// alternate screen gets `notches` arrow keys, and otherwise the daemon scrolls `lines` of history.
+    fn scroll(
+        self: &Rc<Self>,
+        up: bool,
+        notches: u32,
+        lines: u32,
+        (x, y): (i32, i32),
+        mods: gdk::ModifierType,
+    ) {
         let (mouse, bytes, alternate, appcursor) = {
             let state = self.state.borrow();
             (
-                state.mode & MODE_MOUSE != 0
-                    && !event.state().contains(gdk::ModifierType::SHIFT_MASK),
+                state.mode & MODE_MOUSE != 0 && !mods.contains(gdk::ModifierType::SHIFT_MASK),
                 state.mouse.report(
                     state.mode,
                     state.viewport.live(),
                     if up { 64 } else { 65 },
                     x,
                     y,
-                    event.state(),
+                    mods,
                     false,
                     false,
                 ),
@@ -974,21 +979,21 @@ impl Inner {
             )
         };
         if mouse {
-            if let Some(bytes) = bytes {
-                self.input(&bytes);
+            for _ in 0..notches {
+                if let Some(bytes) = &bytes {
+                    self.input(bytes);
+                }
             }
         } else if alternate {
-            self.input(match (appcursor, up) {
+            let key: &[u8] = match (appcursor, up) {
                 (true, true) => b"\x1bOA",
                 (true, false) => b"\x1bOB",
                 (false, true) => b"\x1b[A",
                 (false, false) => b"\x1b[B",
-            });
+            };
+            self.input(&key.repeat(notches as usize));
         } else {
-            self.send(CommandKind::Scroll {
-                up,
-                amount: worminal_config::get().scroll_multiplier as u32,
-            });
+            self.send(CommandKind::Scroll { up, amount: lines });
         }
     }
 }

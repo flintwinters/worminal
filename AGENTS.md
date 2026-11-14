@@ -8,8 +8,8 @@ provides host identity and reachability for now; resources may keep their own pr
 complexity. Preserve established terminal behavior and application shortcuts. Plain Ctrl+N belongs to terminal
 applications; Ctrl+Shift+N opens a window. Ctrl+Shift+A selects screen and retained scrollback for Ctrl+Shift+C;
 Ctrl+A sends Control-A to applications. Plain middle click toggles browser-style autoscroll (pointer distance
-from the click sets speed; any press, key or focus loss ends it) unless the application owns the mouse or the alternate
-screen is shown; Shift+middle click pastes the primary selection. Keep the upstream st attribution and license intact.
+from the click sets speed; any press, key or focus loss ends it) through the same dispatch as the wheel, so
+mouse-reporting and alternate-screen applications scroll too; Shift+middle click pastes the primary selection. Keep the upstream st attribution and license intact.
 Use existing modules. Keep each shared rule or definition in one place. Enforce state rules where the state changes.
 For bugs with subtle causes, add a test that fails without the fix and explain the reason beside the code.
 
