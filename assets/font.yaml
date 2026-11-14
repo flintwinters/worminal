@@ -1,7 +1,7 @@
-# Shared defaults; explicit font settings in worminal.yaml or Alacritty config override individual fields.
+# Shared defaults (a comma-separated family list is Pango fallback order; Atkinson is used only if installed); explicit font settings in worminal.yaml or Alacritty config override individual fields.
 font:
   size: 9
   offset:
     y: -3
   normal:
-    family: Atkinson Hyperlegible Mono
+    family: DejaVu Sans Mono, Atkinson Hyperlegible Mono

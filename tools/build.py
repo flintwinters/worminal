@@ -18,8 +18,6 @@ from tools.test_runner import available_cpus
 
 ROOT = Path(__file__).resolve().parent.parent
 HEADLESS_INSTALL = json.loads((ROOT / "assets/headless-install.json").read_text())
-FONT_DIRECTORY = Path("assets/fonts/atkinson-hyperlegible-mono")
-FONT_FILES = ("AtkinsonHyperlegibleMono[wght].ttf", "AtkinsonHyperlegibleMono-Italic[wght].ttf", "OFL.txt")
 VERSION = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"]["version"]
 RUST_BROWSER_MODULE = next(line.split('"')[1]
                           for line in (ROOT / "src/gtk/rust_browser_module.h").read_text().splitlines()
@@ -310,8 +308,6 @@ def installation_files(prefix=None, *, headless_only=None):
     files += [("docs/man/worminal.1", manprefix / "man1/worminal.1", 0o644),
               ("assets/worminal.desktop", prefix / "share/applications/worminal.desktop", 0o644),
               ("assets/worminal.svg", prefix / "share/icons/hicolor/scalable/apps/worminal.svg", 0o644)]
-    files += [(str(FONT_DIRECTORY / name), prefix / "share/fonts/worminal" / name, 0o644)
-              for name in FONT_FILES]
     return [(ROOT / source, staging / str(destination).lstrip("/"), mode) for source, destination, mode in files]
 
 

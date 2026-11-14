@@ -8,8 +8,8 @@ const KEYS: &[(&str, &str, &str)] = &[
     ("font.size", "number > 0 (points)", "9"),
     (
         "font.normal.family",
-        "font family name",
-        "Atkinson Hyperlegible Mono",
+        "font family name (a comma-separated list falls back in order)",
+        "DejaVu Sans Mono, Atkinson Hyperlegible Mono",
     ),
     ("font.offset.y", "integer (pixels of line spacing)", "-3"),
     ("font.glyph_offset.y", "integer (pixels)", "0"),
@@ -84,7 +84,7 @@ font:
   size: 9
   offset: {y: -3}
   glyph_offset: {y: 0}
-  normal: {family: Atkinson Hyperlegible Mono}
+  normal: {family: 'DejaVu Sans Mono, Atkinson Hyperlegible Mono'}
 scrolling:
   history: 10000
   multiplier: 3

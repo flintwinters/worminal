@@ -55,7 +55,7 @@ class ThemeTest(unittest.TestCase):
 
     def test_defaults_ignore_every_file(self):
         result = config_json("--json", "--defaults", WORMINAL_ALACRITTY_CONFIG=str(FIXTURES / "main.toml"))
-        self.assertEqual(json.loads(result.stdout)["font_family"], "Atkinson Hyperlegible Mono")
+        self.assertEqual(json.loads(result.stdout)["font_family"], "DejaVu Sans Mono, Atkinson Hyperlegible Mono")
 
     def test_explorer_line_height_uses_terminal_metrics_and_offset(self):
         values = {"font_family": "monospace", "font_size": 14.0, "font_offset_y": -7}

@@ -215,8 +215,7 @@ class BuildTests(unittest.TestCase):
                        "build/lib/worminal/" + build.RUST_BROWSER_MODULE,
                        "build/lib/worminal/" + build.RUST_FRONTEND_MODULE,
                        "docs/man/worminal.1",
-                       "assets/worminal.desktop", "assets/worminal.svg",
-                       *(str(build.FONT_DIRECTORY / name) for name in build.FONT_FILES)):
+                       "assets/worminal.desktop", "assets/worminal.svg"):
             path = self.root / source
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("VERSION\n")
@@ -253,8 +252,7 @@ class BuildTests(unittest.TestCase):
             build.install("/opt/worminal", skip_build=True)
             compile_build.assert_not_called()
             files = build.installation_files("/opt/worminal")
-            for name in build.FONT_FILES:
-                self.assertEqual((installed / "share/fonts/worminal" / name).read_text(), "VERSION\n")
+            self.assertFalse((installed / "share/fonts").exists())
             self.assertLess(next(i for i, (source, _, _) in enumerate(files)
                                  if source.name == build.RUST_FRONTEND_MODULE),
                             next(i for i, (source, _, _) in enumerate(files) if source.name == "worminal"))

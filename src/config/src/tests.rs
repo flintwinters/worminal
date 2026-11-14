@@ -36,7 +36,7 @@ fn defaults_match_alacritty_palette_and_shared_font() {
     );
     assert_eq!(
         settings.font_family.as_deref(),
-        Some("Atkinson Hyperlegible Mono")
+        Some("DejaVu Sans Mono, Atkinson Hyperlegible Mono")
     );
     assert_eq!(
         (
@@ -59,7 +59,7 @@ fn partial_font_override_keeps_other_shared_defaults() {
     let settings = resolve(json!({"font": {"size": 12}})).unwrap();
     assert_eq!(
         settings.font_family.as_deref(),
-        Some("Atkinson Hyperlegible Mono")
+        Some("DejaVu Sans Mono, Atkinson Hyperlegible Mono")
     );
     assert_eq!((settings.font_size, settings.font_offset_y), (12.0, -3));
     let settings =

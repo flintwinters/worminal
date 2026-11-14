@@ -26,7 +26,7 @@ on-demand availability checks and no heartbeats.
 Use [`worminald install-on-remote HOST`](docs/remote-install.md) to bootstrap a new compatible headless node over SSH.
 For existing devices, [`python3 manage.py upgrade HOST`](docs/remote-upgrade.md) copies this device’s installed release.
 
-Installations include Atkinson Hyperlegible Mono as the default font, at 9 pt with a -3 pixel line offset.
+The default font is DejaVu Sans Mono (Atkinson Hyperlegible Mono if installed and DejaVu is not), at 9 pt with a -3 pixel line offset.
 Font settings in `worminal.yaml` or an Alacritty config (see [docs/config.md](docs/config.md)) and the `-f` command-line option override the defaults.
 
 Built with Rust, GTK, WebKitGTK, and a terminal engine derived from [st](https://git.suckless.org/st/); see [LICENSE](LICENSE).
