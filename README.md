@@ -30,3 +30,6 @@ The default font is DejaVu Sans Mono (Atkinson Hyperlegible Mono if installed an
 Font settings in `worminal.yaml` or an Alacritty config (see [docs/config.md](docs/config.md)) and the `-f` command-line option override the defaults.
 
 Built with Rust, GTK, WebKitGTK, and a terminal engine derived from [st](https://git.suckless.org/st/); see [LICENSE](LICENSE).
+
+For contributors: [architecture](docs/architecture.md), [development](docs/development.md),
+and [testing](docs/testing.md). `python3 manage.py --help` indexes internal tooling.

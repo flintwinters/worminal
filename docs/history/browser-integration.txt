@@ -3,7 +3,7 @@ Combined Worminal preview
 
 Historical record: this describes evaluation of the retired C GTK preview, including old commands and measurements.
 The C reference builds and dependent tests have been removed. For current Rust architecture and checks, see
-README.md, rust-migration.md and `python3 manage.py --help`.
+../../README.md, ../architecture.md and `python3 manage.py --help`.
 
 Architecture
 ------------

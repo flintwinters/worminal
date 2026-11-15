@@ -1,7 +1,7 @@
 # Shared tabs: earlier design and proof ledger
 
 This historical record describes the earlier in-process owner design and its retired proofs. The current architecture is
-described in [README.md](../README.md): `worminald` owns tabs and PTYs, and
+described in [README.md](../../README.md): `worminald` owns tabs and PTYs, and
 windows connect locally or through an SSH bridge. Its service and bridge have
 headless regression tests. The private Xvfb, KWin and remote Cinnamon results below describe the historical build.
 
@@ -44,7 +44,7 @@ started remotely over SSH against a private local Xvfb display:
    window continues draining, and forwarded command, environment, directory,
    geometry, and window ID reach its shell.
 
-These are X11 proofs on private displays. They do not establish Wayland
-behavior or performance on an active desktop. The remaining unverified item
-is **7: launch latency and memory measurement** after the shared-tab change;
-it stays deferred until that measurement is requested.
+These were X11 proofs on private displays. They did not establish Wayland
+behavior or performance on an active desktop. The September proof ledger deferred
+item 7, launch latency and memory measurement, after that shared-tab change.
+This is a historical limitation, not an outstanding task for the current architecture.

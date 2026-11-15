@@ -1,4 +1,9 @@
-# Python check workers
+# Testing
+
+Build, test, install and runtime preparation are indexed in [development.md](development.md) and
+`python3 manage.py --help`. Tests exercise the current application; historical records live under [history](history/).
+
+## Python check workers
 
 The full check command builds shared artifacts and runs native checks first:
 
