@@ -68,7 +68,11 @@ impl App {
         let link = self
             .link(index)
             .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
-        let connection = Connection::new(config.master.as_deref(), self.replacing.get())?;
+        let connection = Connection::new(
+            config.master.as_deref(),
+            self.replacing.get(),
+            link.reconnect.borrow().is_none(),
+        )?;
         *link.connection.borrow_mut() = Some(connection);
         if let (Some(master), false) = (config.master.as_deref(), self.replacing.get()) {
             // Best effort: a failed helper must never affect the connection itself.
@@ -77,7 +81,7 @@ impl App {
         link.initial_claim.set(true);
         self.watch(index, &link);
 
-        self.message(None);
+        // Keep disconnection feedback visible until a catalog confirms the SSH handshake.
         link.features.set(0);
         self.send_link(
             index,
@@ -164,13 +168,29 @@ impl App {
     /// Show another daemon's tabs in this window. `--master` hosts already present are only raised.
     pub(super) fn add_remote(self: &Rc<Self>, config: Config) -> io::Result<()> {
         let master = config.master.clone().expect("remote launch has a master");
-        let known = self.config.master.as_ref() == Some(&master)
-            || self
-                .remotes
+        let known = if self.config.master.as_ref() == Some(&master) {
+            Some(0)
+        } else {
+            self.remotes
                 .borrow()
                 .iter()
-                .any(|remote| remote.master == master);
-        if !known {
+                .find(|remote| remote.master == master)
+                .map(|remote| remote.index)
+        };
+        if let Some(index) = known {
+            let link = self.link(index).unwrap();
+            if !link.settled() {
+                // An explicit launch retries authentication; background retries never prompt.
+                link.clear();
+                let launch = !config.attach
+                    && !self
+                        .pages
+                        .borrow()
+                        .iter()
+                        .any(|page| page.id >> LINK_SHIFT == index);
+                self.establish(index, launch)?;
+            }
+        } else {
             let index = self.next_link.get();
             if index >= 1 << (32 - LINK_SHIFT) {
                 return Err(io::Error::other("too many remote hosts in one window"));
@@ -218,20 +238,20 @@ impl App {
         if link.reconnect.borrow().is_none() {
             let weak = Rc::downgrade(self);
             let link_weak = Rc::downgrade(&link);
-            *link.reconnect.borrow_mut() = Some(glib::timeout_add_local(
-                Duration::from_millis(250),
-                move || {
-                    let (Some(app), Some(link)) = (weak.upgrade(), link_weak.upgrade()) else {
-                        return glib::ControlFlow::Break;
-                    };
-                    if app.establish(index, false).is_ok() {
-                        link.reconnect.borrow_mut().take();
-                        glib::ControlFlow::Break
-                    } else {
-                        glib::ControlFlow::Continue
-                    }
-                },
-            ));
+            let delay = link.retry_delay.get();
+            link.retry_delay
+                .set((delay * 2).min(Duration::from_secs(30)));
+            *link.reconnect.borrow_mut() = Some(glib::timeout_add_local(delay, move || {
+                let (Some(app), Some(link)) = (weak.upgrade(), link_weak.upgrade()) else {
+                    return glib::ControlFlow::Break;
+                };
+                if app.establish(index, false).is_ok() {
+                    link.reconnect.borrow_mut().take();
+                    glib::ControlFlow::Break
+                } else {
+                    glib::ControlFlow::Continue
+                }
+            }));
         }
     }
     pub(super) fn send(self: &Rc<Self>, tab: u32, kind: CommandKind) {

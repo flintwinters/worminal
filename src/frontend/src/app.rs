@@ -104,13 +104,15 @@ struct Connection {
     bytes: usize,
 }
 impl Connection {
-    fn new(master: Option<&OsStr>, existing: bool) -> io::Result<Self> {
+    fn new(master: Option<&OsStr>, existing: bool, interactive: bool) -> io::Result<Self> {
         let (socket, ssh) = if let Some(master) = master {
-            let (socket, child) = if existing {
-                worminal_workspace::ssh::connect_existing(master)?
-            } else {
-                worminal_workspace::ssh::connect(master)?
-            };
+            let executable = std::env::current_exe()?;
+            let (socket, child) = worminal_workspace::ssh::connect_gui(
+                master,
+                existing,
+                executable.as_os_str(),
+                interactive,
+            )?;
             (socket, Some(child))
         } else {
             (connect()?, None)
@@ -199,6 +201,7 @@ struct Link {
     reader: RefCell<Option<glib::SourceId>>,
     writer: RefCell<Option<glib::SourceId>>,
     reconnect: RefCell<Option<glib::SourceId>>,
+    retry_delay: Cell<Duration>,
     initial_claim: Cell<bool>,
     pending_tabs: Cell<u32>,
     requested: Cell<u32>,
@@ -211,6 +214,7 @@ impl Link {
             reader: RefCell::new(None),
             writer: RefCell::new(None),
             reconnect: RefCell::new(None),
+            retry_delay: Cell::new(Duration::from_millis(250)),
             initial_claim: Cell::new(true),
             pending_tabs: Cell::new(0),
             requested: Cell::new(0),
@@ -649,6 +653,7 @@ impl App {
                 colors: tab.colors.iter().map(|color| text(color)).collect(),
             });
         }
+        link.retry_delay.set(Duration::from_millis(250));
         let initial_claim = link.initial_claim.replace(false);
         let mut replaced_active = false;
         self.syncing.set(true);
@@ -911,6 +916,9 @@ pub(crate) fn run_with_listener(
     listener: Option<std::os::unix::net::UnixListener>,
     candidate: bool,
 ) -> io::Result<()> {
+    if worminal_workspace::ssh::is_askpass(&arguments) {
+        return crate::askpass::run(&arguments[1]);
+    }
     if arguments.len() == 3 && arguments[1] == "--replace-owner" {
         return upgrade::receive(&arguments[2], candidate);
     }

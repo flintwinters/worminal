@@ -40,6 +40,16 @@ pub fn start(
     stdio: &[(BorrowedFd<'_>, i32)],
     independent_session: bool,
 ) -> io::Result<libc::pid_t> {
+    start_with_environment(arguments, stdio, independent_session, &[])
+}
+
+/// Override only the child's environment, without racing other threads through setenv.
+pub fn start_with_environment(
+    arguments: &[CString],
+    stdio: &[(BorrowedFd<'_>, i32)],
+    independent_session: bool,
+    overrides: &[(&str, &std::ffi::OsStr)],
+) -> io::Result<libc::pid_t> {
     if arguments.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -82,6 +92,12 @@ pub fn start(
         })?;
     }
     let environment: Vec<_> = std::env::vars_os()
+        .filter(|(key, _)| !overrides.iter().any(|(name, _)| key == name))
+        .chain(
+            overrides
+                .iter()
+                .map(|(key, value)| ((*key).into(), (*value).to_owned())),
+        )
         .map(|(key, value)| {
             let mut entry = key.into_encoded_bytes();
             entry.push(b'=');

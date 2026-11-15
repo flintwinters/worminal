@@ -65,7 +65,8 @@ Rust owns bounded queues, controller checks and process identities. Queue comple
 unchanged encoded rows/catalog state must not generate traffic. Negotiated row moves and cell spans preserve
 older peers; synchronized redraw retains its deadline behavior. SSH directions advance independently under
 congestion. Spawn local daemons and SSH without GUI fork hooks, in their own sessions, after validating the display. A failed launch
-must not create orphan tabs. The same-user GUI broker authenticates peers before accepting launch data or
+must not create orphan tabs. GUI SSH authentication uses Worminal’s isolated askpass dialog; background reconnects
+never prompt, back off until a catalog arrives, and retain disconnection feedback. The same-user GUI broker authenticates peers before accepting launch data or
 descriptors. Launcher and frontend share the broker's display identity; automatic and explicit X11
 join the same owner when no Wayland display is configured.
 

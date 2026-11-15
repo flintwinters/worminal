@@ -81,6 +81,7 @@ set -- $(cat /proc/$$/stat)\necho \"$1 $5 $6\" > \"$WORMINAL_TEST_SSH_ARGUMENTS.
     );
     drop(stream);
     drop(child);
+    verify_prompt_environment(&program);
     // The local service uses the same boundary after GTK starts; it must have an independent
     // session/process group without invoking the GUI's registered fork hooks.
     use std::{ffi::CString, os::fd::AsFd, os::unix::net::UnixStream};
@@ -125,4 +126,26 @@ set -- $(cat /proc/$$/stat)\necho \"$1 $5 $6\" > \"$WORMINAL_TEST_SSH_ARGUMENTS.
         worminal_workspace::spawn::wait(-1).unwrap_err().kind(),
         std::io::ErrorKind::InvalidInput
     );
+}
+
+fn verify_prompt_environment(program: &std::path::Path) {
+    // Per-child prompt policy must not mutate the multithreaded GUI owner's environment.
+    fs::write(program, b"#!/bin/sh\nprintf '%s %s %s\\n' \"$SSH_ASKPASS\" \"$SSH_ASKPASS_REQUIRE\" \"$WORMINAL_SSH_ASKPASS\"\n").unwrap();
+    let original = std::env::var_os("SSH_ASKPASS");
+    for (interactive, policy) in [(true, "force"), (false, "never")] {
+        let (mut stream, _child) = ssh::connect_gui(
+            OsStr::new("user@private"),
+            false,
+            OsStr::new("/private/worminal"),
+            interactive,
+        )
+        .unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut output = String::new();
+        stream.read_to_string(&mut output).unwrap();
+        assert_eq!(output, format!("/private/worminal {policy} 1\n"));
+        assert_eq!(std::env::var_os("SSH_ASKPASS"), original);
+    }
 }

@@ -36,7 +36,7 @@ fn run(candidate: bool) -> io::Result<()> {
             .iter()
             .any(|flag| args[1] == *flag);
     let replacing = args.len() == 3 && args[1] == "--replace-owner";
-    let listener = if local || replacing {
+    let listener = if local || replacing || worminal_workspace::ssh::is_askpass(&args) {
         None
     } else {
         let outcome = forward(&args, candidate);
