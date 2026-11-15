@@ -61,7 +61,7 @@ input, snapshots and memory safety. `check-rust-frontend` checks Rust viewports 
 `check-rust-app` tests the actual GUI and shells. `check-rust-browser` tests browser controls, file access, module
 updates, downloads, media playback, permissions, TLS rejection and recovery after a renderer crash.
 
-`check-handoff` and `check-rust-upgrade` test PTY transfers and failures during upgrades.
+`check-handoff` and `check-upgrade` test PTY transfers and failures during upgrades.
 `prove-preview-regressions` rebuilds current code with fixes removed and checks that the tests detect the bugs.
 `check-install` tests a staged installation; `check-install --installed` tests the files under `/usr/local`.
 `inventory` records running processes, windows, tabs, PTYs and installed file hashes without copying executables.

@@ -1,9 +1,9 @@
 # Shared tabs: earlier design and proof ledger
 
-This records the earlier in-process owner design. The current architecture is
+This historical record describes the earlier in-process owner design and its retired proofs. The current architecture is
 described in [README.md](../README.md): `worminald` owns tabs and PTYs, and
 windows connect locally or through an SSH bridge. Its service and bridge have
-headless regression tests; private Xvfb, KWin, and remote Cinnamon proofs pass.
+headless regression tests. The private Xvfb, KWin and remote Cinnamon results below describe the historical build.
 
 Earlier design: one owner process served one executable build, user, and X11 `DISPLAY`.
 Ordinary launches send a bounded, versioned request to that owner and open a
@@ -32,8 +32,8 @@ through the tab being parsed.
 
 ## Verified proofs
 
-`python3 manage.py proof` runs local checks and private Xvfb proofs. The
-current tree passed on 2026-09-24, including local KWin X11 and Cinnamon X11
+The former `python3 manage.py proof` ran local checks and private Xvfb proofs. The
+historical tree passed on 2026-09-24, including local KWin X11 and Cinnamon X11
 started remotely over SSH against a private local Xvfb display:
 
 1. Shared screen catch-up and terminal pixels frozen in inactive views.

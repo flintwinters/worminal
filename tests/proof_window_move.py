@@ -12,7 +12,7 @@ import unittest
 from rich.console import Console
 from Xlib import display
 
-from proof_cinnamon import wait_for_property
+from test_window_activation import wait_for
 from x11 import isolated_display
 
 
@@ -97,7 +97,8 @@ def main():
             manager = subprocess.Popen(["dbus-run-session", "--", "muffin", "--replace"],
                                        env=env, stdout=log, stderr=log, start_new_session=True)
             try:
-                wait_for_property(env, "_NET_SUPPORTING_WM_CHECK", 20, manager)
+                wait_for(lambda: "window id #" in command(env, "xprop", "-root", "_NET_SUPPORTING_WM_CHECK"),
+                         "Private Muffin did not become ready")
                 MovementTest.env = env
                 result = unittest.TextTestRunner(verbosity=2).run(
                     unittest.defaultTestLoader.loadTestsFromTestCase(MovementTest))

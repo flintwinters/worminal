@@ -1,9 +1,9 @@
 Combined Worminal preview
 =========================
 
-Status: GTK is the main release frontend (worminal/worminald, v2). Preview build names
-remain compatible; worminal-x11/worminald-x11 preserve v1 rollback and existing sessions.
-Historical measurements below describe the preview evaluation before promotion.
+Historical record: this describes evaluation of the retired C GTK preview, including old commands and measurements.
+The C reference builds and dependent tests have been removed. For current Rust architecture and checks, see
+README.md, rust-migration.md and `python3 manage.py --help`.
 
 Architecture
 ------------
