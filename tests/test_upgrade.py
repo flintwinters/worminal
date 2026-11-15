@@ -16,7 +16,7 @@ import unittest
 from unittest.mock import patch
 
 from test_handoff import HandoffFixture, ROOT, BINARIES
-from workspace_protocol import catalog_records, number, send, string, wait_kind, service_pid, rust_daemon
+from workspace_protocol import catalog_records, number, send, string, wait_kind, service_pid
 
 
 class UpgradeTest(HandoffFixture, unittest.TestCase):
@@ -27,7 +27,6 @@ class UpgradeTest(HandoffFixture, unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.binary = Path(self.directory.name) / 'worminald'
         candidate = os.environ.get("WORMINAL_TEST_UPGRADE_CANDIDATE", BINARIES[2])
-        self.rust = rust_daemon(candidate)
         shutil.copy2(candidate, self.binary)
 
     def track_receivers(self, constructor):
@@ -210,7 +209,7 @@ class UpgradeTest(HandoffFixture, unittest.TestCase):
                         str(ROOT / 'tests/upgrade_fault.c'), '-ldl'], check=True)
         env = {'LD_PRELOAD': str(library), 'WORMINAL_TEST_UPGRADE_FAULT_FILE': str(marker),
                'WORMINAL_TEST_UPGRADE_FAULT_OPERATION':
-                   'signals' if self.rust else 'transport'}
+                   'signals'}
         peer, env, parent = self.start(2, self.binary, env)
         tab, shell_pid = self.launch(peer, 2, 'setup-retained')
         self.replace()
@@ -344,13 +343,12 @@ class UpgradeTest(HandoffFixture, unittest.TestCase):
             status = Path(f'/proc/{child}/status').read_text().splitlines()
             caught = next(line.split()[1] for line in status if line.startswith('SigCgt:'))
             registered = int(caught, 16) & (1 << (signal.SIGTERM - 1))
-            if self.rust:
-                for descriptor in Path(f'/proc/{child}/fdinfo').iterdir():
-                    try: info = descriptor.read_text()
-                    except FileNotFoundError: continue
-                    registered |= any(line.startswith('sigmask:') and
-                                      int(line.split()[1], 16) & (1 << (signal.SIGTERM - 1))
-                                      for line in info.splitlines())
+            for descriptor in Path(f'/proc/{child}/fdinfo').iterdir():
+                try: info = descriptor.read_text()
+                except FileNotFoundError: continue
+                registered |= any(line.startswith('sigmask:') and
+                                  int(line.split()[1], 16) & (1 << (signal.SIGTERM - 1))
+                                  for line in info.splitlines())
             if registered: break
             if time.monotonic() >= deadline: self.fail('receiver did not register its stop signals')
             time.sleep(.01)

@@ -25,11 +25,11 @@ def command(env):
         return [installed]
     executable = RUNTIME / "usr/bin/pulseaudio"
     if not executable.is_file():
-        raise RuntimeError("Run manage.py setup-preview-audio for private browser media checks.")
+        raise RuntimeError("Run manage.py setup-audio for private browser media checks.")
     modules = list(RUNTIME.glob("usr/lib/**/modules/module-null-sink.so"))
     libraries = list(RUNTIME.glob("usr/lib/**/libpulsecore-*.so"))
     if len(modules) != 1 or len(libraries) != 1:
-        raise RuntimeError("Missing PulseAudio modules; rerun manage.py setup-preview-audio.")
+        raise RuntimeError("Missing PulseAudio modules; rerun manage.py setup-audio.")
     env["PULSE_DLPATH"] = str(modules[0].parent)
     paths = [str(libraries[0].parent), str(modules[0].parent),
              env.get("LD_LIBRARY_PATH", os.environ.get("LD_LIBRARY_PATH", ""))]

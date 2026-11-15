@@ -28,10 +28,9 @@ class BuildTests(unittest.TestCase):
             builder = build.Builder()
             with (patch.object(builder, "program") as program, patch.object(builder, "rust_program") as rust,
                   patch.object(builder, "rust_library") as library):
-                for name in ("worminal", "worminald", "worminal-preview", "worminald-preview"):
+                for name in ("worminal", "worminald"):
                     builder.target(name)
-                    rust.assert_called_with(name, "worminal-launcher" if name in
-                                            ("worminal", "worminal-preview") else "worminal-daemon")
+                    rust.assert_called_with(name, "worminal-launcher" if name == "worminal" else "worminal-daemon")
                 program.assert_not_called()
                 self.assertIn(unittest.mock.call("build/lib/worminal/" + build.RUST_FRONTEND_MODULE,
                                                 "worminal-frontend"),

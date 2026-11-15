@@ -27,14 +27,14 @@ from workspace_protocol import (TextReplica, number, string, catalog_records, se
 from perf_metrics import cpu_time, memory
 
 ROOT = Path(__file__).resolve().parent.parent
-DAEMON = runtime_binary(os.environ.get("WORMINAL_TEST_PREVIEW_DAEMON", "worminald-preview"))
+DAEMON = runtime_binary(os.environ.get("WORMINAL_TEST_PREVIEW_DAEMON", "worminald"))
 send = partial(wire_send, version=2)
 wait_kind = partial(wire_wait, version=2)
 
 
 records = partial(catalog_records, version=2)
 
-@unittest.skipUnless(DAEMON.exists(), "run manage.py build-preview first")
+@unittest.skipUnless(DAEMON.exists(), "run manage.py build first")
 class PreviewWorkspaceTest(unittest.TestCase):
     def test_pause_resume_and_disconnected_view_preserve_shell(self):
         tab = self.launch("stty raw -echo; printf READY; exec cat")
@@ -809,12 +809,11 @@ class ServiceDiagnosticsTest(unittest.TestCase):
 
     def test_event_loop_failure_records_operation_and_errno(self):
         result = subprocess.run([str(DAEMON), "--serve"],
-                                env={**self.environment(), "WORMINAL_TEST_PSELECT_FAILURE": "1"},
+                                env={**self.environment(), "WORMINAL_TEST_PPOLL_FAILURE": "1"},
                                 capture_output=True, text=True, timeout=3)
         self.assertEqual(result.returncode, 1)
         self.assertIn("JOURNAL[5] Workspace service started (protocol 2)", result.stderr)
-        from workspace_protocol import rust_daemon
-        operation = "ppoll" if rust_daemon(DAEMON) else "pselect"
+        operation = "ppoll"
         self.assertIn(f"JOURNAL[3] workspace {operation} failed:", result.stderr)
         self.assertIn("(errno 9)", result.stderr)
         self.assertIn("JOURNAL[3] Workspace service exited with status 1", result.stderr)
@@ -840,8 +839,7 @@ class ServiceDiagnosticsTest(unittest.TestCase):
                 send(peer, 1, payload=launch)
                 _, errors = service.communicate(timeout=3)
             self.assertEqual(service.returncode, 1)
-            from workspace_protocol import rust_daemon
-            operation = b"posix_openpt" if rust_daemon(DAEMON) else b"openpty"
+            operation = b"posix_openpt"
             message = operation + b" failed: Too many open files"
             self.assertIn(b"JOURNAL[3] " + message, errors)
             self.assertEqual(errors.count(message), 2)

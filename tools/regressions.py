@@ -117,8 +117,7 @@ def rust_handoff_counterfactual(directory, name, filename, before, after, test, 
     binary = ROOT / "build/cargo/debug" / package
     command = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", pattern,
                "-k", test, "-q"]
-    return (name, command, {**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(binary),
-                           "WORMINAL_TEST_RUST_DAEMON": "1"}, test.encode())
+    return (name, command, {**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(binary)}, test.encode())
 
 
 def prove(match=None):

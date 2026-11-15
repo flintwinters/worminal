@@ -1111,17 +1111,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "worminal-platform"
-version = "0.9.10"
-dependencies = [
- "cairo-rs",
- "glib",
- "gtk",
- "pango",
- "webkit2gtk",
-]
-
-[[package]]
 name = "worminal-protocol"
 version = "0.9.10"
 

@@ -35,7 +35,7 @@ ENGINE = ("terminal/engine.c", ENGINE_DEFAULTS, "terminal/engine_parser.c",
 CPPFLAGS = ("-I.", "-Isrc", "-Isrc/terminal", "-Isrc/workspace",
             f'-DVERSION="{VERSION}"', "-D_XOPEN_SOURCE=600")
 PACKAGES = ()
-PROBES = {"key_injector": ("x11", "xtst"), "latency_echo": ()}
+PROBES = {"latency_echo": ()}
 
 
 def words(name, default=""):
@@ -207,11 +207,11 @@ class Builder:
                          libs=["-shared", "-lrt"])
         elif target == "build/gui-peer.so":
             self.program(target, ["tests/gui_peer.c"], variant="gui-peer", flags=["-fPIC"], libs=["-shared", "-ldl"])
-        elif target in ("worminal", "worminal-preview"):
+        elif target == "worminal":
             self.target("build/lib/worminal/" + RUST_BROWSER_MODULE)
             self.target("build/lib/worminal/" + RUST_FRONTEND_MODULE)
             self.rust_program(target, "worminal-launcher")
-        elif target in ("worminald", "worminald-preview"):
+        elif target == "worminald":
             self.rust_program(target, "worminal-daemon")
         elif target.removeprefix("build/") in PROBES and target.startswith("build/"):
             name = target.removeprefix("build/")

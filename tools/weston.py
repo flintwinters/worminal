@@ -37,18 +37,18 @@ def command(env):
     active = LOCAL / "active-library"
     library = active.read_text().strip() if active.exists() else None
     if library and not re.fullmatch(r"libweston-\d+-\d+", library):
-        raise ValueError("Invalid local Weston selection; rerun manage.py setup-preview-wayland")
+        raise ValueError("Invalid local Weston selection; rerun manage.py setup-wayland")
     root = LOCAL / library if library else LOCAL / "root"
     executable = root / "usr/bin/weston"
     if not executable.exists():
-        raise ValueError("Run manage.py setup-preview-wayland, or set WORMINAL_WESTON to a compositor with a seat")
+        raise ValueError("Run manage.py setup-wayland, or set WORMINAL_WESTON to a compositor with a seat")
     headers = list(root.glob("usr/include/libweston-*/libweston/libweston.h"))
     if len(headers) != 1:
-        raise ValueError("Local Weston headers are absent or mixed; rerun manage.py setup-preview-wayland")
+        raise ValueError("Local Weston headers are absent or mixed; rerun manage.py setup-wayland")
     include = headers[0].parent.parent
     major = int(include.name.split("-")[1])
     if major not in SUPPORTED_ABIS or (library and major != int(library.split("-")[1])):
-        raise ValueError("Unsupported or mismatched Weston headers; rerun manage.py setup-preview-wayland")
+        raise ValueError("Unsupported or mismatched Weston headers; rerun manage.py setup-wayland")
     lib = next((root / "usr/lib").glob("*/weston/libexec_weston.so.0")).parent.parent
     backend = lib / f"libweston-{major}/headless-backend.so"
     env["LD_LIBRARY_PATH"] = f"{lib}:{lib / 'weston'}:" + env.get("LD_LIBRARY_PATH", "")

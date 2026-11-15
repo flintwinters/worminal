@@ -9,14 +9,6 @@ from pathlib import Path
 from runtime import runtime_binary
 
 
-def rust_daemon(executable):
-    """Select implementation-specific fault injection; custom C proof binaries remain C by default."""
-    explicit = os.environ.get("WORMINAL_TEST_RUST_DAEMON")
-    if explicit is not None:
-        return explicit == "1"
-    root = Path(__file__).resolve().parent.parent
-    return Path(executable).resolve() in {runtime_binary("worminald"), runtime_binary("worminald-preview"),
-                                         root / "build/cargo/release/worminal-daemon"}
 
 
 def number(value):
