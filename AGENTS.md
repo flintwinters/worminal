@@ -155,7 +155,6 @@ and preserve the contributor's configured Git identity.
 
 ## Current investigations
 
-Investigate intermittent local workspace loss after idle time; its root cause is not confirmed.
 Remote daemons older than 2fc0825 can resend full frames for idle controlled (including hidden) tabs at
 link rate; upgrade them before metered use. With negotiated focused frames, hidden tabs send nothing until revealed. Treat remote Codex scrolling separately from tested wheel modes.
 Daemon lifecycle/event-loop/fatal terminal errors go to syslog for diagnosis. Audit input, rendering, output delivery
