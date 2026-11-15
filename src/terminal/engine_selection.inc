@@ -263,21 +263,6 @@ te_selclear(TermEngine *session)
 	selection_dirty(session, sel.nb.y, sel.ne.y);
 }
 
-int
-te_tattrset(TermEngine *session, int attr)
-{
-	int i, j;
-
-	for (i = 0; i < term.row-1; i++) {
-		for (j = 0; j < term.col-1; j++) {
-			if (term.line[i][j].mode & attr)
-				return 1;
-		}
-	}
-
-	return 0;
-}
-
 void
 te_tsetdirt(TermEngine *session, int top, int bot)
 {
@@ -291,21 +276,6 @@ te_tsetdirt(TermEngine *session, int top, int bot)
 
 	for (i = top; i <= bot; i++)
 		term.dirty[i] = 1;
-}
-
-void
-te_tsetdirtattr(TermEngine *session, int attr)
-{
-	int i, j;
-
-	for (i = 0; i < term.row-1; i++) {
-		for (j = 0; j < term.col-1; j++) {
-			if (term.line[i][j].mode & attr) {
-				te_tsetdirt(session, i, i);
-				break;
-			}
-		}
-	}
 }
 
 void

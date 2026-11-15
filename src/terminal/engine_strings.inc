@@ -233,12 +233,6 @@ te_printscreen(TermEngine *session, const Arg *arg)
 	te_tdump(session);
 }
 
-void
-te_printsel(TermEngine *session, const Arg *arg)
-{
-	te_tdumpsel(session);
-}
-
 static void
 te_tdumpsel(TermEngine *session)
 {
