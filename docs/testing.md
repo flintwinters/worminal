@@ -13,8 +13,9 @@ Each entrypoint runs the gate once before Python workers start. Reports and raw 
 `network-perf-check.json` and `perf-check.json`, including failed budget results. These fixed filenames are
 replaced on the next run; preserve them before another run when investigating a regression.
 
-The initial CPU ceilings are roughly twice the development host's seven-trial median, rounded upward to allow
-CPU-frequency and machine variation. They use thread CPU time per operation, not build/test wall time. Network
+CPU ceilings use thread CPU time per operation, not build/test wall time. The queue and catalog ceilings retain
+initial machine-variation headroom; the full-frame ceiling has been tightened through measured optimizations.
+Historical baseline observations may exceed a newly tightened ceiling; they are evidence, not acceptance limits. Network
 ceilings equal the three-trial deterministic baseline: traffic, peak queue size, modeled frame age and tail drain
 time. Frame count is informational because fewer frames alone does not prove better performance. Neither suite
 measures GUI, real SSH latency or physical presentation.

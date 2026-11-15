@@ -3,7 +3,7 @@
   "baseline_revision": "d7e01acf5462c82f7207280438a7cf4306ec0d7e",
   "notes": [
     "Measured 2026-11-15 on the development host; CPU ceilings are machine dependent.",
-    "CPU full-frame ceiling tightened to 65000 ns; other CPU maxima retain initial headroom.",
+    "CPU full-frame ceiling tightened to 25000 ns; other CPU maxima retain initial headroom.",
     "Frame count is informational: fewer frames may mean better coalescing or dropped delivery.",
     "Frame age and byte budgets enforce network performance; correctness checks validate the final viewport."
   ],
@@ -23,7 +23,7 @@
         },
         "full_frame_100x40": {
           "baseline": 64408.52,
-          "maximum": 65000
+          "maximum": 25000
         }
       },
       "informational_metrics": []

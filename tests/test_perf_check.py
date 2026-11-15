@@ -25,6 +25,10 @@ class PerfCheckTests(unittest.TestCase):
         self.report["medians"]["current"]["cost"] = 11
         self.assertFalse(perf_check.evaluate(self.report, self.policy)["passed"])
 
+    def test_historical_baseline_can_exceed_a_new_optimization_target(self):
+        self.policy["metrics"]["cost"]["baseline"] = 20
+        self.assertTrue(perf_check.evaluate(self.report, self.policy)["passed"])
+
     def test_invalid_or_missing_measurements_fail_closed(self):
         for value in (None, True, -1, float("nan"), float("inf"), "1"):
             with self.subTest(value=value):
@@ -68,7 +72,8 @@ class PerfCheckTests(unittest.TestCase):
         for suite in policy["suites"].values():
             self.assertTrue(suite["metrics"])
             for budget in suite["metrics"].values():
-                self.assertLessEqual(budget["baseline"], budget["maximum"])
+                self.assertTrue(perf_check.number(budget["baseline"]))
+                self.assertTrue(perf_check.number(budget["maximum"]))
 
     def test_cli_exits_nonzero_for_over_budget_measurements_and_keeps_evidence(self):
         import manage

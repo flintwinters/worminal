@@ -156,6 +156,7 @@ impl Screen {
             || self.frame.columns != frame.columns
             || self.bytes.len() != width * rows
             || (links && self.links.len() != rows);
+        let reusable = self.frame.columns == frame.columns && self.bytes.len() == width * rows;
         let dirty: Vec<_> = (0..frame.rows)
             .map(|row| core(engine.row_dirty(row)))
             .collect::<io::Result<_>>()?;
@@ -173,15 +174,23 @@ impl Screen {
                 current_links.push(None);
                 continue;
             }
-            core(engine.row(row as i32, &mut cells))?;
-            let mut encoded = Buffer::default();
-            encoded.reserve(width)?;
-            for cell in &cells {
-                let fields = [cell.rune, cell.attributes, cell.foreground, cell.background]
-                    .map(u32::to_be_bytes);
-                encoded.put_bytes(fields.as_flattened())?;
-            }
-            current.push(Some(encoded.into_bytes()));
+            // A full request still sends every row, but clean rows already have authoritative
+            // encoded bytes. Damage and dimension changes invalidate reuse; held full claims clear
+            // the baseline. Link runs are refreshed separately because capability changes may expose them.
+            let encoded = if reusable && !dirty {
+                self.bytes[row * width..(row + 1) * width].to_vec()
+            } else {
+                core(engine.row(row as i32, &mut cells))?;
+                let mut encoded = Buffer::default();
+                encoded.reserve(width)?;
+                for cell in &cells {
+                    let fields = [cell.rune, cell.attributes, cell.foreground, cell.background]
+                        .map(u32::to_be_bytes);
+                    encoded.put_bytes(fields.as_flattened())?;
+                }
+                encoded.into_bytes()
+            };
+            current.push(Some(encoded));
             if links {
                 let any = core(engine.row_link_ids(row as i32, &mut ids))?;
                 let runs = if any {

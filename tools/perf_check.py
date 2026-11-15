@@ -30,7 +30,7 @@ def evaluate(report, policy):
         errors.append(f"metrics need a budget decision: {sorted(unexpected)}")
     for name, budget in policy["metrics"].items():
         maximum = budget["maximum"]
-        if not number(maximum) or not number(budget["baseline"]) or budget["baseline"] > maximum:
+        if not number(maximum) or not number(budget["baseline"]):
             raise ValueError(f"Invalid performance budget: {name}")
         value, raw = values.get(name), samples.get(name, [])
         valid = (number(value) and len(raw) == report.get("trials") and all(number(item) for item in raw))
