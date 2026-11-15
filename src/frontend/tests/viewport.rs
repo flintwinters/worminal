@@ -1,5 +1,6 @@
 use worminal_engine_sys::{
-    ATTR_WDUMMY, ATTR_WIDE, ATTR_WRAP, WORMINAL_DEFAULT_BACKGROUND, WORMINAL_DEFAULT_FOREGROUND,
+    ATTR_BLINK, ATTR_WDUMMY, ATTR_WIDE, ATTR_WRAP, WORMINAL_DEFAULT_BACKGROUND,
+    WORMINAL_DEFAULT_FOREGROUND,
 };
 use worminal_frontend::viewport::Viewport;
 use worminal_protocol::*;
@@ -316,4 +317,41 @@ fn raw_run(column: u32, count: u32) -> Vec<u8> {
     }
     bytes.push(b'x');
     bytes
+}
+
+#[test]
+fn blink_rows_follow_committed_spans_overlapping_moves_and_resize() {
+    let mut view = Viewport::new(4, 3).unwrap();
+    assert!(!view.row_blinks(0));
+    header(&mut view, 4, 3);
+    span(&mut view, 0, 3, "a", ATTR_BLINK);
+    assert!(!view.row_blinks(0));
+    finish(&mut view);
+    assert!(view.row_blinks(0));
+    assert!(!view.row_blinks(1));
+    header(&mut view, 4, 3);
+    view.packet(&packet(WIRE_COPY_ROWS, &[0, 1, 2])).unwrap();
+    span(&mut view, 0, 3, "a", 0);
+    finish(&mut view);
+    assert!(!view.row_blinks(0));
+    assert!(view.row_blinks(1));
+    assert!(!view.row_blinks(2));
+    header(&mut view, 4, 3);
+    span(&mut view, 1, 0, "b", ATTR_BLINK);
+    assert!(view.packet(&packet(WIRE_COPY_ROWS, &[0, 0, 4])).is_err());
+    assert!(!view.row_blinks(0));
+    header(&mut view, 3, 2);
+    finish(&mut view);
+    assert!(
+        !view.row_blinks(1),
+        "cropping removes the only blinking cell"
+    );
+    assert!(!view.row_blinks(2));
+    header(&mut view, 3, 2);
+    span(&mut view, 0, 0, "b", ATTR_BLINK);
+    finish(&mut view);
+    header(&mut view, 3, 2);
+    view.packet(&packet(WIRE_COPY_ROWS, &[1, 0, 1])).unwrap();
+    finish(&mut view);
+    assert!(!view.row_blinks(0));
 }

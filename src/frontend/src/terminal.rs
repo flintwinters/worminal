@@ -488,9 +488,7 @@ impl Inner {
                         && state.viewport.live()
                         && state.mode & MODE_HIDE == 0
                         && state.cursor & 1 != 0)
-                        || state.viewport.row(*row).is_some_and(|cells| {
-                            cells.iter().any(|cell| cell.attributes & ATTR_BLINK != 0)
-                        })
+                        || state.viewport.row_blinks(*row)
                 })
                 .collect();
             Damage { full: false, rows }
@@ -838,14 +836,17 @@ impl Inner {
         self.prepare();
         let (px, py) = event.position();
         let (x, y) = self.pointer(px, py);
-        {
+        let moved = {
             let mut state = self.state.borrow_mut();
-            state.pointer = Some((x, y));
             if let Some((scroll, _)) = &mut state.autoscroll {
                 scroll.y = py;
             }
+            state.pointer.replace((x, y)) != Some((x, y))
+        };
+        // Frame commits refresh hover separately; subcell motion cannot change the target.
+        if moved {
+            self.hover();
         }
-        self.hover();
         let result = {
             let mut state = self.state.borrow_mut();
             if state.mode & MODE_MOUSE != 0

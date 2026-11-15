@@ -2,7 +2,7 @@
 use std::{io, ops::RangeInclusive, rc::Rc};
 use worminal_engine::{Cell, Frame, Selection, SelectionRange};
 use worminal_engine_sys::{
-    ATTR_WIDE, ATTR_WRAP, WORMINAL_DEFAULT_BACKGROUND, WORMINAL_DEFAULT_FOREGROUND,
+    ATTR_BLINK, ATTR_WIDE, ATTR_WRAP, WORMINAL_DEFAULT_BACKGROUND, WORMINAL_DEFAULT_FOREGROUND,
 };
 use worminal_protocol::worp::events::{Event, EventKind};
 use worminal_protocol::worp::v2_events;
@@ -112,6 +112,8 @@ impl Pending {
 pub struct Viewport {
     frame: Frame,
     cells: Vec<Cell>,
+    /// Derived from committed cells so idle blink ticks never scan the screen.
+    blinking: Vec<bool>,
     /// Link runs per row, allocated when the first non-empty run list arrives. Rc keeps row copies cheap.
     links: Vec<Rc<[LinkRun]>>,
     pending: Option<Pending>,
@@ -130,6 +132,7 @@ impl Viewport {
                 ..Frame::default()
             },
             cells: Vec::new(),
+            blinking: Vec::new(),
             links: Vec::new(),
             pending: None,
             live: false,
@@ -152,6 +155,9 @@ impl Viewport {
         }
         let first = row * self.frame.columns as usize;
         Some(&self.cells[first..first + self.frame.columns as usize])
+    }
+    pub fn row_blinks(&self, row: usize) -> bool {
+        self.blinking.get(row).copied().unwrap_or(false)
     }
     pub fn selected(&self, column: usize, row: usize) -> bool {
         self.selected
@@ -363,6 +369,16 @@ impl Viewport {
                         damage[row] = true;
                     }
                 }
+            }
+        }
+        // Resize can retain/crop cells without row operations; moves can overlap and be followed
+        // by spans. Derive from the final cells rather than individual wire operations.
+        self.blinking.resize(rows, false);
+        for (row, dirty) in damage.iter().enumerate() {
+            if full || *dirty {
+                self.blinking[row] = self.cells[row * columns..(row + 1) * columns]
+                    .iter()
+                    .any(|cell| cell.attributes & ATTR_BLINK != 0);
             }
         }
         self.frame = frame;
