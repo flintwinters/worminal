@@ -16,7 +16,6 @@ from x11 import isolated_display
 
 ROOT = Path(__file__).resolve().parent.parent
 FRONTEND = os.environ.get("WORMINAL_FRONTEND", "worminal")
-PREVIEW = FRONTEND in ("worminal", "worminal-preview", "worminal-rust")
 DAEMON = "worminald"
 
 
@@ -81,7 +80,7 @@ def clipboard_owner(env, text, selection="clipboard"):
 
 
 class NavigationKeysTest(unittest.TestCase):
-    @unittest.skipUnless(PREVIEW and shutil.which("xclip"), "requires GTK and xclip")
+    @unittest.skipUnless(shutil.which("xclip"), "requires GTK and xclip")
     def test_select_all_retained_scrollback(self):
         for connection in ([], ["--master", "key-test"]):
             with self.subTest(connection=connection), isolated_display() as env:
@@ -152,7 +151,7 @@ class NavigationKeysTest(unittest.TestCase):
     def check_clipboard_paste(self, connection):
         with isolated_display() as env:
             if connection:
-                fixtures = ROOT / "tests/fixtures" / ("preview-master" if PREVIEW else "master")
+                fixtures = ROOT / "tests/fixtures" / "preview-master"
                 env["PATH"] = str(fixtures) + os.pathsep + env["PATH"]
                 env["WORMINAL_TEST_DAEMON"] = str(runtime_binary(DAEMON))
             for bracket in (False, True):
@@ -208,7 +207,7 @@ class NavigationKeysTest(unittest.TestCase):
     def check_alternate_scroll(self, connection):
         with isolated_display() as env:
             if connection:
-                fixtures = ROOT / "tests/fixtures" / ("preview-master" if PREVIEW else "master")
+                fixtures = ROOT / "tests/fixtures" / "preview-master"
                 env["PATH"] = str(fixtures) + os.pathsep + env["PATH"]
                 env["WORMINAL_TEST_DAEMON"] = str(runtime_binary(DAEMON))
             for appcursor, mouse_report in ((False, False), (True, False), (False, True)):
@@ -292,7 +291,7 @@ class NavigationKeysTest(unittest.TestCase):
                 while time.monotonic() < deadline:
                     result = subprocess.run(
                         ["xdotool", "search", "--onlyvisible", "--class",
-                         "worminal" if PREVIEW else "Worminal"],
+                         "worminal"],
                         env=env, capture_output=True, text=True,
                     )
                     if result.returncode == 0:
@@ -373,11 +372,10 @@ class NavigationKeysTest(unittest.TestCase):
                      for key, value in (("2", 0), ("3", 27), ("4", 28), ("5", 29),
                                         ("6", 30), ("7", 31), ("8", 127))]
         controls += [("ctrl+exclam", b"!")]
-        if PREVIEW:
-            cases += tuple(controls)
+        cases += tuple(controls)
         with isolated_display() as env:
             if connection:
-                fixtures = ROOT / "tests/fixtures" / ("preview-master" if PREVIEW else "master")
+                fixtures = ROOT / "tests/fixtures" / "preview-master"
                 env["PATH"] = str(fixtures) + os.pathsep + env["PATH"]
                 env["WORMINAL_TEST_DAEMON"] = str(runtime_binary(DAEMON))
             for appcursor, appkeypad in ((False, False), (False, True), (True, False), (True, True)):

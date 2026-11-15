@@ -128,7 +128,7 @@ def _invoke(name, args, directory, timeout):
             returncode = 124
         finally:
             # Successful workers can leave daemonized fixtures too. Retire those owners
-            # before historical binaries or private runtimes are removed, including on NFS.
+            # before copied binaries or private runtimes are removed, including on NFS.
             retire_worker(process, directory)
     text = log.read_text(errors='replace')
     counts = re.findall(r'Ran (\d+) tests? in ', text)
