@@ -1,7 +1,5 @@
 # Development
 
-
-
 ## Tooling boundaries
 
 `manage.py` is strictly internal build/test/install/maintenance tooling. Product workflows use native executables.
@@ -9,24 +7,22 @@ Rust bindings require libclang plus the matching Clang compiler and builtin head
 `check-rust-lint` (part of `check`) enforces rustfmt, a Rust file-length cap and warning-free Clippy (rustup
 component `clippy`). Lint policy lives once in the workspace `Cargo.toml`; long-function exceptions use `#[expect]`.
 
-
 ## Runtime configuration
 
 Configuration is runtime, never compiled in: `src/config` is the only resolver (`worminald config --json` for
 tools), layering `worminal.yaml` over an Alacritty config; see `docs/config.md`. Defaults in `assets/font.yaml` use
 the system DejaVu Sans Mono with Atkinson Hyperlegible Mono only as an installed fallback; no font is packaged.
-Scrollback capacity is fixed by a process's first engine; other settings apply to new processes/windows. 
+Scrollback capacity is fixed by a process's first engine; other settings apply to new processes/windows.
 
 ## Build outputs
 
-Builds and
-installs auto-detect a headless host (no GTK/WebKit/Pango via pkg-config, or `WORMINAL_HEADLESS=1`; `0` forces
+Builds and installs auto-detect a headless host (no GTK/WebKit/Pango via pkg-config, or `WORMINAL_HEADLESS=1`; `0` forces
 graphics) and then build/install only `worminald` and the manual. Cargo output and generated files belong in
 `build/`; native executables use `build/bin` and modules use `build/lib/worminal`, matching installed prefixes.
 `tools/paths.py` owns runtime/diagnostic path decisions. Diagnostics belong in `build/checks`; optional Python
 virtualenvs use `build/venv`. `clean` preserves diagnostics/virtualenvs while removing compiled output.
 Analysis/dependency configuration lives under `tools`. Management suppresses Python bytecode caches. Never test
-under /tmp or inject test input into the desktop. 
+under /tmp or inject test input into the desktop.
 
 ## Private checks
 
@@ -36,13 +32,11 @@ automatically use project-local tmpfs on UID-remapping filesystems, preserve dia
 requires passwordless sudo. `manage.py` drops desktop display variables. `manage.py check` runs the full
 private-display suite. Native Wayland checks use project-local Weston with matching virtual-seat ABI and no X11
 fallback. Prepare optional private Muffin/Weston through their setup commands. Performance checks measure private
-software presentation, not desktop compositing or physical display latency. 
+software presentation, not desktop compositing or physical display latency.
 
 The retired C applications and their Git-built reference infrastructure are removed. Build and test the current Rust
 application and C engine directly; do not reconstruct old applications or require historical Git revisions. Roll
 back code from Git rather than keeping executable backups. Keep user profiles and diagnostic records.
-
-
 
 ## Updates
 
@@ -54,8 +48,6 @@ tmpfs mounts use sudo; checks run as the user. `manage.py auto-update --timer in
 systemd user timer: it builds and checks the tip of `origin/main` in a private clone under `build/auto-update`,
 installs to /usr/local only if everything passes, and skips unchanged tips. It shares the checkout update pipeline
 and needs passwordless sudo for the install step.
-
-
 
 ## Installation and live processes
 
