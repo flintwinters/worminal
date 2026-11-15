@@ -42,6 +42,7 @@ te_tmoveato(TermEngine *session, int x, int y)
 void
 te_tmoveto(TermEngine *session, int x, int y)
 {
+    if (y < term.c.y) session->output_epoch++;
 	int miny, maxy;
 
 	if (term.c.state & CURSOR_ORIGIN) {
@@ -581,6 +582,7 @@ te_csihandle(TermEngine *session)
 		te_tputtab(session, csiescseq.arg[0]);
 		break;
 	case 'J': /* ED -- Clear screen */
+        session->output_epoch++;
 		switch (csiescseq.arg[0]) {
 		case 0: /* below */
 			te_tclearregion(session, term.c.x, term.c.y, term.col-1, term.c.y);
@@ -607,6 +609,7 @@ te_csihandle(TermEngine *session)
 				free(term.hist);
 				term.hist = NULL;
 			}
+			session->output_epoch++;
 			term.histlen = term.histi = term.scr = 0;
 			te_tfulldirt(session);
 			break;

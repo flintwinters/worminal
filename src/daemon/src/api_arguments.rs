@@ -41,6 +41,16 @@ pub(super) fn parse(arguments: &[OsString]) -> io::Result<Option<Request>> {
             .to_string();
         rest.drain(..2);
     }
+    let mut following = Vec::new();
+    if operation == "type" && rest.first() == Some(&"--then") {
+        following.push(
+            rest.get(1)
+                .ok_or_else(|| invalid("--then requires KEY."))?
+                .to_string(),
+        );
+        worminal_engine::keys::named(&following[0], 0).map_err(invalid)?;
+        rest.drain(..2);
+    }
     let literal = rest.first() == Some(&"--");
     if literal {
         rest.remove(0);
@@ -59,19 +69,20 @@ pub(super) fn parse(arguments: &[OsString]) -> io::Result<Option<Request>> {
         }));
     }
     if !literal && rest == ["--stdin"] {
-        let mut bytes = Vec::new();
-        io::stdin()
-            .lock()
-            .take(MAX_INPUT_BYTES as u64 + 1)
-            .read_to_end(&mut bytes)?;
-        if bytes.len() > MAX_INPUT_BYTES {
-            return Err(invalid("stdin exceeds 65536 bytes."));
-        }
-        let text = String::from_utf8(bytes).map_err(|_| invalid("stdin must be UTF-8."))?;
-        return Ok(Some(Request::Paste {
-            tab: id,
-            text,
-            guard,
+        let text = stdin_text()?;
+        return Ok(Some(if following.is_empty() {
+            Request::Paste {
+                tab: id,
+                text,
+                guard,
+            }
+        } else {
+            Request::PasteKeys {
+                tab: id,
+                text,
+                names: following,
+                guard,
+            }
         }));
     }
     if rest.len() != 1 {
@@ -81,6 +92,14 @@ pub(super) fn parse(arguments: &[OsString]) -> io::Result<Option<Request>> {
         return Err(invalid(
             "TEXT must contain no control characters; use key or --stdin.",
         ));
+    }
+    if !following.is_empty() {
+        return Ok(Some(Request::PasteKeys {
+            tab: id,
+            text: rest[0].into(),
+            names: following,
+            guard,
+        }));
     }
     if guard.is_empty() {
         return Ok(Some(Request::Input {
@@ -97,6 +116,25 @@ pub(super) fn parse(arguments: &[OsString]) -> io::Result<Option<Request>> {
 
 fn observe(args: &[&str]) -> io::Result<Option<Request>> {
     if args[0] == "read" {
+        if args.len() == 4 && matches!(args[2], "--since" | "--command") {
+            let (since, command_id) = if args[2] == "--since" {
+                (args[3].into(), 0)
+            } else {
+                (
+                    String::new(),
+                    args[3]
+                        .parse()
+                        .ok()
+                        .filter(|n| *n > 0)
+                        .ok_or_else(|| invalid("Command ID must be positive."))?,
+                )
+            };
+            return Ok(Some(Request::ReadOutput {
+                tab: tab(args[1])?,
+                since,
+                command_id,
+            }));
+        }
         if args.len() == 2 {
             return Ok(Some(Request::Read { tab: tab(args[1])? }));
         }
@@ -119,6 +157,28 @@ fn observe(args: &[&str]) -> io::Result<Option<Request>> {
         return Ok(Some(Request::ReadMany { tabs, tail }));
     }
     if args[0] == "wait" {
+        if args.len() == 8
+            && args[2] == "--command"
+            && args[4] == "--workspace"
+            && args[6] == "--timeout"
+        {
+            let command_id = args[3]
+                .parse()
+                .ok()
+                .filter(|n| *n > 0)
+                .ok_or_else(|| invalid("Command ID must be positive."))?;
+            let seconds = args[7]
+                .parse::<u32>()
+                .ok()
+                .filter(|n| *n <= 60)
+                .ok_or_else(|| invalid("Timeout is 0..60 seconds."))?;
+            return Ok(Some(Request::WaitCommand {
+                tab: tab(args[1])?,
+                workspace: args[5].into(),
+                command_id,
+                timeout_ms: seconds * 1000,
+            }));
+        }
         if args.len() != 6 || args[2] != "--after" || args[4] != "--timeout" {
             return Err(invalid(
                 "Usage: wait TAB --after REVISION --timeout SECONDS (0..60).",
@@ -136,4 +196,16 @@ fn observe(args: &[&str]) -> io::Result<Option<Request>> {
         }));
     }
     unreachable!("observation command checked by caller")
+}
+
+fn stdin_text() -> io::Result<String> {
+    let mut bytes = Vec::new();
+    io::stdin()
+        .lock()
+        .take(MAX_INPUT_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > MAX_INPUT_BYTES {
+        return Err(invalid("stdin exceeds 65536 bytes."));
+    }
+    String::from_utf8(bytes).map_err(|_| invalid("stdin must be UTF-8."))
 }

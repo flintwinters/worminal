@@ -26,6 +26,7 @@ pub(crate) fn io_failure(error: &io::Error) -> Reply {
             "incompatible_reply",
             Some("Check daemon versions with api doctor --json."),
         ),
+        io::ErrorKind::Unsupported => ("unsupported_operation", Some("Upgrade the target daemon.")),
         io::ErrorKind::PermissionDenied => ("permission_denied", None),
         _ => (
             "transport_error",
@@ -51,8 +52,7 @@ pub(super) fn doctor(scope: &[u8], master: Option<&OsStr>) -> Reply {
         "client_version":env!("CARGO_PKG_VERSION"),
         "scope":String::from_utf8_lossy(scope),
         "target":master.map_or("local".into(), |host| host.to_string_lossy()),
-        "socket":if master.is_none() { Some(format!("@{}-{}-{}",
-            worminal_protocol::WORKSPACE_ENDPOINT.to_string_lossy(), crate::process::uid(), String::from_utf8_lossy(scope))) } else { None },
+        "socket":if master.is_none() { worminal_workspace::socket::endpoint(crate::process::uid(), scope).ok() } else { None },
         "compatible":value["api_version"].as_u64().map(|v| v == 1),
         "shell_markers":value["tabs"].as_array().map(|tabs| tabs.iter().filter(|t| t["kind"] == "terminal")
             .map(|t| serde_json::json!({"id":t["id"],"available":!t["state"]["shell"]["phase"].is_null()})).collect::<Vec<_>>())

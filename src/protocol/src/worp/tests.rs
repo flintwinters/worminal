@@ -18,6 +18,28 @@ impl Handler for Echo {
 
 fn requests() -> Vec<Request> {
     vec![
+        Request::PasteKeys {
+            tab: 1,
+            text: "literal\n世界".into(),
+            names: vec!["Enter".into()],
+            guard: "guard".into(),
+        },
+        Request::WaitCommand {
+            tab: 1,
+            workspace: "workspace".into(),
+            command_id: u64::MAX,
+            timeout_ms: 60000,
+        },
+        Request::ReadOutput {
+            tab: 1,
+            since: "cursor".into(),
+            command_id: 0,
+        },
+        Request::ReadOutput {
+            tab: 1,
+            since: String::new(),
+            command_id: u64::MAX,
+        },
         Request::List,
         Request::ReadMany {
             tabs: vec![12, 13],
@@ -226,6 +248,9 @@ fn extended_requests_reject_invalid_bounds_and_trailing_data() {
         matches!(
             r,
             Request::ReadMany { .. }
+                | Request::PasteKeys { .. }
+                | Request::WaitCommand { .. }
+                | Request::ReadOutput { .. }
                 | Request::Keys { .. }
                 | Request::Paste { .. }
                 | Request::GuardedInput { .. }

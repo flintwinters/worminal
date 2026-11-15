@@ -3,6 +3,7 @@ mod api;
 mod api_cli;
 mod api_help;
 mod api_observe;
+mod api_output;
 mod api_wait;
 mod cli;
 mod commands;

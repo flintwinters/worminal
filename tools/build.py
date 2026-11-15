@@ -31,7 +31,7 @@ RUST_FRONTEND_SYMBOL = next(line.split('"')[1]
 ENGINE_DEFAULTS = "terminal/engine_defaults.c"
 ENGINE = ("terminal/engine.c", ENGINE_DEFAULTS, "terminal/engine_parser.c",
           "terminal/engine_events.c", "terminal/engine_sync.c", "terminal/engine_snapshot.c",
-          "terminal/engine_view_selection.c")
+          "terminal/engine_view_selection.c", "terminal/engine_output.c")
 CPPFLAGS = ("-I.", "-Isrc", "-Isrc/terminal", "-Isrc/workspace",
             f'-DVERSION="{VERSION}"', "-D_XOPEN_SOURCE=600")
 PACKAGES = ()

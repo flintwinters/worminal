@@ -3,6 +3,7 @@ use std::ptr::NonNull;
 use worminal_engine_sys as sys;
 
 pub type Cell = sys::WorminalCell;
+pub type OutputPosition = sys::WorminalOutputPosition;
 pub type Frame = sys::WorminalFrame;
 pub type TransportState = sys::WorminalTransportState;
 
@@ -143,6 +144,39 @@ impl Engine {
         })?;
         data.truncate(size);
         Ok((data, total))
+    }
+
+    pub fn output_position(&mut self) -> Result<OutputPosition, Error> {
+        let mut position = OutputPosition::default();
+        check(unsafe {
+            sys::worminal_engine_output_position(self.handle.as_ptr(), &mut position)
+        })?;
+        Ok(position)
+    }
+
+    pub fn output(
+        &mut self,
+        start: OutputPosition,
+        end: OutputPosition,
+    ) -> Result<(Vec<u8>, OutputPosition, u32), Error> {
+        let mut bytes = vec![0; 256 * 1024];
+        let mut size = 0;
+        let mut next = OutputPosition::default();
+        let mut flags = 0;
+        check(unsafe {
+            sys::worminal_engine_output(
+                self.handle.as_ptr(),
+                start,
+                end,
+                bytes.as_mut_ptr(),
+                bytes.len(),
+                &mut size,
+                &mut next,
+                &mut flags,
+            )
+        })?;
+        bytes.truncate(size);
+        Ok((bytes, next, flags))
     }
 
     pub fn all_text(&mut self) -> Result<Vec<u8>, Error> {

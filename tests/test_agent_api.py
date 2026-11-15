@@ -69,6 +69,89 @@ class AgentApiTest(unittest.TestCase):
         self.assertEqual((result.returncode, value['code']), (1, 'unavailable'))
         self.assertIsNone(value['diagnostics']['compatible'])
 
+    def test_atomic_paste_then_key_checks_guard_and_preserves_order(self):
+        script = ('import os,tty; tty.setraw(0); '
+                  'os.write(1,b"\\x1b[?2004hREADY"); '
+                  'exec("while True:\\n b=os.read(0,65536)\\n os.write(1,b.hex().encode()+b\\"\\\\r\\\\n\\")")')
+        # Use the existing byte observer, collecting across reads because PTYs may split writes.
+        tab = self.api('open', '--', '/usr/bin/python3', '-c', script)['id']
+        before = self.await_read(tab, lambda v: 'READY' in ''.join(v['lines']))
+        guard = before['state']['input_guard']
+        reply = self.api('type', tab, '--guard', guard, '--then', 'Enter', 'hello')
+        self.assertEqual(reply['queued_bytes'], 18)  # bracketed envelope + text + CR
+        self.await_read(tab, lambda v: '1b5b3230307e68656c6c6f1b5b3230317e0d' in ''.join(v['lines']))
+        rejected = self.api('type', tab, '--guard', 'stale', '--then', 'Enter', 'BAD', success=False)
+        self.assertEqual(rejected['code'], 'stale_guard')
+        self.api('type', tab, '--then', 'Unknown', 'BAD', success=False)
+        self.assertNotIn('424144', ''.join(self.api('read', tab)['lines']))
+
+    def test_incremental_output_and_command_scoped_reads(self):
+        tab = self.fixture.launch('stty raw -echo; printf READY; exec cat')
+        baseline = self.api('read', tab)
+        self.assertEqual(self.api('read', tab, '--since', baseline['output_cursor'])['lines'], [])
+        self.api('type', tab, 'new')
+        fresh = self.await_read(tab, lambda v: 'READYnew' in ''.join(v['lines']))
+        delta = self.api('read', tab, '--since', baseline['output_cursor'])
+        self.assertEqual(delta['lines'], ['READYnew'])
+        self.assertTrue(delta['replace_last_line'])
+        self.assertFalse(delta['gap'])
+        foreign = self.api('read', tab, '--since', 'foreign')
+        self.assertTrue(foreign['gap'])
+        send(self.fixture.peer, 23, tab, number(42) + number(5), version=2)
+        wait_kind(self.fixture.peer, 10, tab, version=2)
+        self.assertTrue(self.api('read', tab, '--since', fresh['output_cursor'])['gap'])
+        # Feed shell markers in a single write: parser effect boundaries must capture before later prompts.
+        command = self.fixture.start_tab('printf "\\033]133;C\\007alpha\\r\\nbeta\\033]133;D;7\\007PROMPT"; exec cat')
+        observed = self.await_read(command, lambda v: 'PROMPT' in ''.join(v['lines']))
+        output = self.api('read', command, '--command', 1)
+        self.assertEqual(output['lines'], ['alpha', 'beta'])
+        self.assertEqual((output['completed'], output['exit_status'], output['gap']), (True, 7, False))
+        complete = self.api('wait', command, '--command', 1, '--workspace', observed['workspace'], '--timeout', 0)
+        self.assertTrue(complete['completed'])
+        self.assertFalse(complete['timed_out'])
+        self.assertEqual(complete['exit_status'], 7)
+        self.assertEqual(self.api('wait', command, '--command', 1, '--workspace', 'old', '--timeout', 0,
+                                  success=False)['code'], 'workspace_changed')
+        self.assertEqual(self.api('wait', tab, '--command', 1, '--workspace', observed['workspace'], '--timeout', 0,
+                                  success=False)['code'], 'shell_integration_unavailable')
+        self.assertEqual(self.api('read', command, '--command', 99, success=False)['code'], 'command_unavailable')
+        future = self.api('wait', command, '--command', 2, '--workspace', observed['workspace'], '--timeout', 0)
+        self.assertTrue(future['timed_out'])
+        with self.ssh_transport():
+            self.assertEqual(self.api('--master', 'fixture-host', 'read', command, '--command', 1), output)
+            self.assertTrue(self.api('--master', 'fixture-host', 'wait', command, '--command', 1,
+                                     '--workspace', observed['workspace'], '--timeout', 0)['completed'])
+
+    def test_command_wait_defers_without_blocking_and_keeps_older_status(self):
+        tab = self.fixture.start_tab('printf "\\033]133;C\\007RUNNING"; read line; '
+                                  'printf "DONE\\033]133;D;7\\007"; exec cat')
+        baseline = self.await_read(tab, lambda v: v['state']['shell']['phase'] == 'running')
+        active = self.api('read', tab, '--command', 1)
+        self.assertFalse(active['completed'])
+        process = subprocess.Popen([str(workspace.DAEMON), 'api', 'wait', str(tab), '--command', '1',
+                                    '--workspace', baseline['workspace'], '--timeout', '2'],
+                                   env=self.fixture.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            self.assertTrue(self.api('list')['ok'])  # waiting cannot block service dispatch
+            self.api('key', tab, 'Enter')
+            stdout, stderr = process.communicate(timeout=4)
+            self.assertEqual(process.returncode, 0, stdout + stderr)
+            self.assertEqual((json.loads(stdout)['completed'], json.loads(stdout)['exit_status']), (True, 7))
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate()
+        many = self.fixture.launch('i=1; while [ "$i" -le 17 ]; do '
+            'printf "\\033]133;C\\007%s\\033]133;D;%s\\007" "$i" "$i"; i=$((i+1)); done; '
+            'printf READY; exec cat')
+        observed = self.await_read(many, lambda v: 'READY' in ''.join(v['lines']))
+        self.assertEqual(self.api('read', many, '--command', 1, success=False)['code'], 'command_unavailable')
+        older = self.api('wait', many, '--command', 2, '--workspace', observed['workspace'], '--timeout', 0)
+        self.assertEqual(older['exit_status'], 2)
+        self.assertEqual(self.api('read', many, '--command', 2)['lines'], ['2'])
+        self.assertEqual(self.api('wait', many, '--command', 1, '--workspace', observed['workspace'], '--timeout', 0,
+                                  success=False)['code'], 'command_unavailable')
+
     def test_history_batch_reads_and_state_preserve_view(self):
         tab = self.fixture.launch("printf 'first\\r\\nsecond\\r\\nthird\\r\\nfourth\\r\\nfifth READY'; exec cat")
         before = self.await_read(tab, lambda v: 'fifth' in ''.join(v['lines']))
@@ -205,7 +288,8 @@ class AgentApiTest(unittest.TestCase):
         script = 'printf "\\033]133;C\\007\\033]133;D;7\\007\\033]133;A\\007\\033]133;B\\007READY"; exec cat'
         tab = self.fixture.launch(script)
         state = self.await_read(tab, lambda v: 'READY' in ''.join(v['lines']))['state']['shell']
-        self.assertEqual(state, {'phase': 'input', 'command_id': 1, 'exit_status': 7})
+        self.assertEqual(state, {'phase': 'input', 'command_id': 1, 'exit_status': 7,
+                                 'completed_command_id': 1, 'completed_exit_status': 7})
         plain = self.api('open', '--', '/bin/cat')['id']
         self.assertIsNone(self.api('read', plain)['state']['shell']['phase'])
 

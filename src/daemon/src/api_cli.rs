@@ -67,7 +67,9 @@ fn command(arguments: &[OsString]) -> io::Result<Request> {
 
 fn request(scope: &[u8], master: Option<&OsStr>, request: Request) -> io::Result<Reply> {
     let seconds = match &request {
-        Request::Wait { timeout_ms, .. } => u64::from(*timeout_ms).div_ceil(1000),
+        Request::Wait { timeout_ms, .. } | Request::WaitCommand { timeout_ms, .. } => {
+            u64::from(*timeout_ms).div_ceil(1000)
+        }
         _ => 0,
     } + if master.is_some() { 13 } else { 3 };
     request_with_timeout(scope, master, request, seconds)
@@ -181,9 +183,19 @@ fn resolve_self(
     let mut args = arguments.to_vec();
     let operation = args.first().and_then(|a| a.to_str()).unwrap_or("");
     let positions: Vec<_> = match operation {
-        "read" => (1..args.len())
-            .take_while(|i| !args[*i].to_string_lossy().starts_with("--"))
-            .collect(),
+        "read" => {
+            let mut positions = Vec::new();
+            let mut i = 1;
+            while i < args.len() {
+                if args[i].to_string_lossy().starts_with("--") {
+                    i += 2;
+                } else {
+                    positions.push(i);
+                    i += 1;
+                }
+            }
+            positions
+        }
         "close" | "wait" | "type" | "key" => vec![1],
         _ => Vec::new(),
     };

@@ -26,6 +26,35 @@ pub(super) fn decode(operation: u32, tab: u32, bytes: &[u8]) -> io::Result<Reque
     } else {
         let guard = text(&mut fields)?;
         match operation {
+            WORP_PASTE_KEYS => {
+                let text = text(&mut fields)?;
+                let count = fields.u32()?;
+                if count > 256 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "At most 256 keys.",
+                    ));
+                }
+                Request::PasteKeys {
+                    tab,
+                    guard,
+                    text,
+                    names: (0..count)
+                        .map(|_| self::text(&mut fields))
+                        .collect::<io::Result<_>>()?,
+                }
+            }
+            WORP_WAIT_COMMAND => Request::WaitCommand {
+                tab,
+                workspace: guard,
+                command_id: number(&mut fields)?,
+                timeout_ms: fields.u32()?,
+            },
+            WORP_READ_OUTPUT => Request::ReadOutput {
+                tab,
+                since: guard,
+                command_id: number(&mut fields)?,
+            },
             WORP_WAIT => Request::Wait {
                 tab,
                 after: guard,
@@ -67,4 +96,10 @@ pub(super) fn decode(operation: u32, tab: u32, bytes: &[u8]) -> io::Result<Reque
     };
     fields.finish()?;
     Ok(request)
+}
+
+fn number(fields: &mut Payload<'_>) -> io::Result<u64> {
+    text(fields)?
+        .parse()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Expected u64 decimal."))
 }

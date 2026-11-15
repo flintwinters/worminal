@@ -35,7 +35,20 @@ impl Service {
             Ok(Some(command)) => self.command(client, command),
             Ok(None) => Ok(()),
             Err(error) if unary => {
-                self.reply(client, tab, crate::api::failure(&error.to_string()));
+                let code = if error.kind() == io::ErrorKind::Unsupported {
+                    "unsupported_operation"
+                } else {
+                    "invalid_request"
+                };
+                self.reply(
+                    client,
+                    tab,
+                    crate::api::failure_code(
+                        code,
+                        &error.to_string(),
+                        Some("Check api help session and target daemon version."),
+                    ),
+                );
                 Ok(())
             }
             Err(error) if launch => Err(error),
@@ -76,7 +89,30 @@ impl Service {
                 after,
                 timeout_ms,
             }) => {
-                return self.start_api_wait(client, tab, after, timeout_ms, now);
+                return self.start_api_wait(
+                    client,
+                    tab,
+                    crate::api_wait::Condition::Revision(after),
+                    timeout_ms,
+                    now,
+                );
+            }
+            CommandKind::Call(worp::Request::WaitCommand {
+                tab,
+                workspace,
+                command_id,
+                timeout_ms,
+            }) => {
+                return self.start_api_wait(
+                    client,
+                    tab,
+                    crate::api_wait::Condition::Command {
+                        workspace,
+                        id: command_id,
+                    },
+                    timeout_ms,
+                    now,
+                );
             }
             CommandKind::Call(request) => {
                 let reply = self.handle(request)?;

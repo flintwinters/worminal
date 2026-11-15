@@ -3,7 +3,7 @@ mod ffi;
 pub mod keys;
 mod paste;
 mod selection;
-pub use ffi::{Cell, Engine, Error, Event, Frame, TransportState};
+pub use ffi::{Cell, Engine, Error, Event, Frame, OutputPosition, TransportState};
 pub use paste::{paste_begin, paste_end, PasteFilter};
 pub use selection::{Selection, SelectionRange};
 pub use worminal_engine_sys::{ATTR_WDUMMY, WORMINAL_PENDING_BYTES};
@@ -17,3 +17,6 @@ pub use worminal_engine_sys::{
 pub use worminal_engine_sys::{
     WORMINAL_DEFAULT_BACKGROUND, WORMINAL_DEFAULT_CURSOR, WORMINAL_DEFAULT_FOREGROUND,
 };
+
+#[cfg(test)]
+mod output_tests;

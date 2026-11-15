@@ -53,6 +53,8 @@ It compares only the Cargo version, so bump it with any change remote daemons mu
 Every tab's environment carries `WORMINAL_DAEMON`, the serving worminald's path: an agent learns it is in a tab and where to start discovery.
 Inspection never takes control or starts a daemon; one-shot input preserves the existing view/controller.
 Agent reads expose bounded history/batches and opaque observation revisions; deferred waits never block the service.
+Output cursors reference retained physical cells and report gaps across eviction/layout changes; bounded command
+snapshots and completion waits follow explicit OSC 133 boundaries. Atomic paste/key requests validate once before queueing.
 Optional OSC 133 shell markers report command boundaries/status without inferring completion from idle output.
 Input guards bind the workspace instance and foreground process identity; they do not certify processing.
 The daemon atomically saves ordered terminal directories and browser URLs, scoped by protocol/workspace under

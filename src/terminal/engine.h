@@ -141,6 +141,13 @@ int worminal_engine_selection(WorminalEngine *, uint8_t *, size_t, size_t *);
 /* Last N physical rows of retained history + active screen, without changing selection/viewport.
  * total counts available physical rows; alternate screens exclude primary history. */
 int worminal_engine_tail(WorminalEngine *, int32_t, uint8_t *, size_t, size_t *, int32_t *);
+/* Ephemeral physical-row anchors; reset/reflow/screen swaps invalidate the epoch. */
+typedef struct { uint64_t epoch, row; int32_t column; } WorminalOutputPosition;
+int worminal_engine_output_position(WorminalEngine *, WorminalOutputPosition *);
+/* Bounded current cell text between anchors, never a raw PTY transcript. next resumes pagination.
+ * flags: bit 0 gap (eviction/invalidation), bit 1 more retained rows. No selection/view mutation. */
+int worminal_engine_output(WorminalEngine *, WorminalOutputPosition, WorminalOutputPosition,
+                           uint8_t *, size_t, size_t *, WorminalOutputPosition *, uint32_t *);
 int worminal_engine_all_text(WorminalEngine *, uint8_t *, size_t, size_t *);
 int worminal_engine_frame(WorminalEngine *, int64_t, WorminalFrame *);
 int worminal_engine_row(WorminalEngine *, int32_t, WorminalCell *, size_t, size_t *, int32_t *);

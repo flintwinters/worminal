@@ -68,6 +68,7 @@ typedef struct { Line *lines; size_t cap, count; int col, x; } Reflow;
 typedef struct EngineEventNode EngineEventNode;
 struct WorminalEngine {
 	Term term;
+	uint64_t output_epoch, output_base;
 	Selection sel;
 	CSIEscape csiescseq;
 	STREscape strescseq;

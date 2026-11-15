@@ -26,8 +26,11 @@ Usage: worminald api [--master user@host] COMMAND
   devices --no-check   List enrollment only; no network probes.
   forget NAME          Remove enrollment; never stops the device or its sessions.
   read TAB [TAB...] [--tail N]  Viewport or last N retained physical rows (1..1000); no control.
+  read TAB --since CURSOR | --command N  Incremental rows or bounded command output.
+  wait TAB --command N --workspace WORKSPACE --timeout S  Wait for an explicit completion marker.
   wait TAB --after REV --timeout S  Wait for a changed observation, up to 60 seconds.
   type TAB [--guard TOKEN] TEXT|--stdin  Literal text or stdin paste; no appended Enter.
+  type TAB [--guard TOKEN] --then KEY TEXT|--stdin  Atomic paste followed by a named key.
   key TAB [--guard TOKEN] KEY...  Named keys incl. arrows, navigation, F1..F35 and modifiers.
   help keys|observe    Key names, batch/history reads, revisions, wait, input guards and limits.
   help shell-bash|shell-zsh  Optional runnable shell integration and setup comments.
@@ -133,7 +136,11 @@ pub(crate) fn success(json: String) -> Reply {
 impl Handler for Service {
     fn handle(&mut self, request: Request) -> io::Result<Reply> {
         if let Err(error) = request.validate() {
-            return Ok(failure(&error.to_string()));
+            return Ok(failure_code(
+                "invalid_request",
+                &error.to_string(),
+                Some("Run api help."),
+            ));
         }
         if let Some(reply) = self.tab_operation(&request, self.now())? {
             return Ok(reply);

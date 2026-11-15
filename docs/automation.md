@@ -176,3 +176,51 @@ Failures retain `error` and add stable `code` and nullable `hint`; scripts shoul
 `api help schema` lists codes. `doctor --json` returns list/error plus caller scope/target/socket,
 client/daemon versions, API compatibility and observed per-terminal shell-marker availability.
 It never starts a daemon; an unreachable target has unknown compatibility and a failure exit status.
+
+## Atomic input and command observations
+
+`type TAB [--guard TOKEN] --then KEY TEXT|--stdin` filters a paste and encodes the following named key
+against the target mode, validates the entire request, then queues it as one input operation. For example:
+
+```sh
+worminald api type 12 --guard INPUT_GUARD --then Enter 'cargo test'
+worminald api wait 12 --command 42 --workspace WORKSPACE --timeout 30
+worminald api read 12 --command 42
+```
+
+`--then` follows `--guard` and precedes the payload. Enter is explicit; multiline paste still requires
+bracketed paste. Combined encoded bytes, including the envelope and key, must fit the existing input limit.
+This prevents interleaving inside the queued operation; it does not certify application consumption.
+
+Command waits require the workspace from the observation that supplied the command ID. They use the same
+bounded deferred mechanism as revision waits, returning `completed`, `exit_status`, and `timed_out`.
+A D marker completes a command even if no valid exit status was supplied. Missing shell integration,
+a changed workspace, closed tabs, and expired command observations are explicit failures. Future command
+IDs can be waited for after shell integration has been observed. Quiet output never implies completion.
+
+Command reads expose cells between the C and D marker positions, excluding later prompts. Running commands
+return their current retained cells. At D, the daemon captures at most 1000 physical rows/256 KiB, retaining
+at most 16 completed commands and 256 KiB total per tab. `gap` means a boundary was invalidated or evicted;
+`truncated` means the bound omitted output. Neither result is a complete transcript in those cases.
+Completed captures survive later screen edits, but reset with daemon handoff/restart.
+
+## Incremental retained output
+
+Every read supplies an opaque `output_cursor`, distinct from the change-wait `revision`:
+
+```sh
+worminald api read 12
+worminald api read 12 --since OUTPUT_CURSOR
+```
+
+`--since` returns newly retained physical rows in `lines`. When `replace_last_line` is true and lines are
+nonempty, replace the previous unfinished physical row before appending. When seeding from a viewport
+read, that row is its cursor row; trailing unused viewport rows are not an output transcript. This handles carriage-return
+progress updates and text appended to an existing line. Rows reflect current terminal cells, not raw PTY
+bytes or an immutable transcript. Changes before the anchor invalidate it conservatively.
+
+Each reply is bounded to 1000 rows/256 KiB. While `truncated` is true, repeat using its returned
+`output_cursor` to continue; the cursor advances only through returned rows. `gap` is true after history
+eviction, screen/layout invalidation, or a foreign cursor, and the reply resumes from retained cells.
+A screen reset, resize/reflow, or alternate-screen transition invalidates old anchors. Inspection preserves
+selection, scrolling, geometry, focus and controller ownership. The same requests work over SSH.

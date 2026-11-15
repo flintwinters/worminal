@@ -18,6 +18,9 @@ pub fn encode_request(request: &Request) -> io::Result<Packet> {
     let mut body = Buffer::default();
     body.put_u32(match request {
         Request::List => WORP_LIST,
+        Request::PasteKeys { .. } => WORP_PASTE_KEYS,
+        Request::WaitCommand { .. } => WORP_WAIT_COMMAND,
+        Request::ReadOutput { .. } => WORP_READ_OUTPUT,
         Request::ReadMany { .. } => WORP_READ_MANY,
         Request::Keys { .. } => WORP_KEYS,
         Request::Paste { .. } => WORP_PASTE,
@@ -33,6 +36,32 @@ pub fn encode_request(request: &Request) -> io::Result<Packet> {
         Request::Forget { .. } => WORP_FORGET,
     })?;
     match request {
+        Request::PasteKeys {
+            text, names, guard, ..
+        } => {
+            body.put_string(guard.as_bytes())?;
+            body.put_string(text.as_bytes())?;
+            body.put_u32(names.len() as u32)?;
+            for name in names {
+                body.put_string(name.as_bytes())?;
+            }
+        }
+        Request::WaitCommand {
+            workspace,
+            command_id,
+            timeout_ms,
+            ..
+        } => {
+            body.put_string(workspace.as_bytes())?;
+            body.put_string(command_id.to_string().as_bytes())?;
+            body.put_u32(*timeout_ms)?;
+        }
+        Request::ReadOutput {
+            since, command_id, ..
+        } => {
+            body.put_string(since.as_bytes())?;
+            body.put_string(command_id.to_string().as_bytes())?;
+        }
         Request::ReadMany { tabs, tail } => {
             body.put_u32(*tail)?;
             body.put_u32(tabs.len() as u32)?;
@@ -126,7 +155,8 @@ pub fn decode_request(packet: &Packet) -> io::Result<Request> {
             fields.finish()?;
             Request::OpenBrowser { url }
         }
-        WORP_READ_MANY | WORP_KEYS | WORP_PASTE | WORP_GUARDED_INPUT | WORP_WAIT => {
+        WORP_READ_MANY | WORP_KEYS | WORP_PASTE | WORP_GUARDED_INPUT | WORP_WAIT
+        | WORP_PASTE_KEYS | WORP_WAIT_COMMAND | WORP_READ_OUTPUT => {
             super::v2_agent::decode(operation, packet.tab, bytes)?
         }
         WORP_CLOSE if bytes.is_empty() => Request::Close { tab: packet.tab },
@@ -154,7 +184,12 @@ pub fn decode_request(packet: &Packet) -> io::Result<Request> {
             fields.finish()?;
             request
         }
-        _ => return Err(invalid("Invalid Worp operation; run worminald api help.")),
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "Unsupported Worp operation; upgrade the daemon or run api help.",
+            ))
+        }
     };
     request.validate()?;
     Ok(request)

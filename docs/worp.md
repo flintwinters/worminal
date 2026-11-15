@@ -52,3 +52,9 @@ for the PTY, not processed by an application. These semantics stay the same acro
 See [the agent interface](automation.md) for commands and the v2 stream binding.
 Run `python3 manage.py check-agent-api` for retained Worp, daemon and private-workspace checks, including identical
 in-process/Unix/TCP operation results and SSH-stdio forwarding through an isolated transport fixture.
+
+Unary extensions retain existing operation payloads: 15 atomically pastes text followed by named keys;
+16 waits for an explicit command completion in a specified workspace; 17 reads retained output since a
+cursor or for a command ID. `worminald api help session` describes their bounded string/u32 layouts.
+`Request` remains the transport-independent authority. Replies add stable failure `code`/nullable `hint`;
+older peers can still use unchanged operations. Command IDs are u64 decimal strings on the wire.

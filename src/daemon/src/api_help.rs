@@ -67,7 +67,8 @@ pub fn topic(name: &str) -> Option<String> {
 const SCHEMA: &str = r#"Every command prints exactly one JSON object on stdout.
 Success: "ok": true, exit status 0. Failure: "ok": false, "error": "message", "code":S, "hint":S|null, exit status 1.
 Codes: operation_failed, invalid_arguments, unavailable, timeout, incompatible_reply, permission_denied,
-transport_error, tab_not_found, terminal_required, process_exited, stale_guard.
+transport_error, tab_not_found, terminal_required, process_exited, stale_guard, workspace_changed,
+shell_integration_unavailable, command_unavailable, wait_limit, unsupported_operation, invalid_request, reply_limit.
 Uncertain mutations (open, close, type, key, enroll, forget) are never retried; list/read before repeating.
 
 list     {"ok":true,"api_version":1,"tabs":[TAB...]}   tabs are in strip order
@@ -95,9 +96,18 @@ Additional fields (additive to the shapes above):
 doctor --json adds "diagnostics":{"client_version":S,"scope":S,"target":S,"socket":S|null,
  "compatible":BOOL|null,"shell_markers":[{"id":N,"available":BOOL}...]|null} to list/error.
 Compatibility describes API version, not exact feature support. Shell markers indicate observations, not trust.
+read also includes "output_cursor":S, an opaque retained-output position for --since (distinct from revision).
+read TAB --since CURSOR replaces lines and adds "text_source":"since", "gap":BOOL,"truncated":BOOL,
+ "replace_last_line":BOOL. Replace the prior unfinished physical row when true, then append rows.
+Repeat --since with the returned output_cursor while truncated; gaps mean prior text is no longer reconstructable.
+read TAB --command N adds "text_source":"command","command_id":N,"completed":BOOL,"exit_status":N|null,
+ "gap":BOOL,"truncated":BOOL. Captured cells between C/D; running commands expose current retained cells.
+wait TAB --command N --workspace WORKSPACE --timeout S adds "command_id":N,"completed":BOOL,
+ "exit_status":N|null,"timed_out":BOOL to a viewport read. Explicit D marker completes, even without a status.
 list "daemon_version":S, "workspace":S; TAB "state":STATE. read "workspace":S, "revision":S, "state":STATE, "directory":S, "title":S, "text_source":"viewport".
 STATE {"busy":BOOL,"controlled":BOOL,"shown":BOOL,"foreground":FOREGROUND|null,"input_guard":S|null,
-       "shell":{"phase":null|"prompt"|"input"|"running"|"finished","command_id":N,"exit_status":N|null}}
+       "shell":{"phase":null|"prompt"|"input"|"running"|"finished","command_id":N,"exit_status":N|null,
+        "completed_command_id":N,"completed_exit_status":N|null}}
 FOREGROUND {"process_group":N,"start_time":N,"executable":S,"identity":S}; start_time is Linux clock ticks since boot.
 read TAB... [--tail N] {"ok":BOOL,"results":[READ_OR_ERROR...]}; per-tab errors retain request order.
 Tail results replace lines with physical rows, "text_source":"tail", "total_lines":N,"truncated":BOOL.
@@ -195,6 +205,9 @@ fn session() -> String {
          11: guard string (empty unguarded), count u32, count key-name strings; envelope tab=target.\n\
          12: guard string, UTF-8 paste string; 13: guard string, raw input string.\n\
          14: after-revision string, timeout-ms u32 (0..60000); deferred reply on same tab.\n\
+         15: guard string, paste string, key-count u32, key-name strings (atomic paste + keys).\n\
+         16: workspace string, command-id decimal string (u64), timeout-ms u32 (command wait).\n\
+         17: since-cursor string, command-id decimal string (u64); exactly one nonempty/nonzero.\n\
          Client -> daemon (kind, id, body):\n{commands}\n\
          Daemon -> client:\n{events}",
         features = features.join(" "),
@@ -220,6 +233,10 @@ const OBSERVE: &str = r#"Passive inspection: no focus, resize, selection or scro
   type TAB [--guard TOKEN] TEXT     literal text, no Enter
   type TAB [--guard TOKEN] --stdin  bounded UTF-8 paste, no appended Enter
   key TAB [--guard TOKEN] KEY...    named application keys
+  type TAB [--guard TOKEN] --then KEY TEXT|--stdin  one atomic paste followed by a named key
+  read TAB --since CURSOR           newly retained rows, replacing the last unfinished row
+  read TAB --command N              bounded output observed between command markers
+  wait TAB --command N --workspace WORKSPACE --timeout S  explicit command completion
 Batch replies use results[] even for one tab with --tail. Each result has its own ok/error;
 outer ok is false if any result fails. Reply-budget errors ask for fewer tabs/rows. Tail includes active screen blank rows, excludes primary
 history on alternate screens, preserves soft-wrap row boundaries, and reports total_lines/truncated.
@@ -241,5 +258,13 @@ OSC 133 A/B/C/D records prompt/input/running/finished and D's exit status. comma
 exit_status is null until a valid D status. These are program-reported, untrusted observations;
 without markers phase is null. Status survives the next prompt, clears at the next command,
 and is not restored across daemon handoff/restart. No automatic shell startup modification.
+Command waits bind the workspace from read/list and never infer completion from quiet output.
+Missing markers fail explicitly. Future command IDs may time out; expired command observations fail.
+Output cursors differ from observation revisions. --since reports gap after eviction, reset, reflow,
+screen switch, or a foreign cursor; truncated pages resume through the returned output_cursor.
+The current physical row may be replaced; these are current terminal cells, not an immutable transcript.
+Completed commands capture up to 1000 rows/256 KiB at D; retain at most 16 commands/256 KiB per tab.
+A gap or truncated command is incomplete. History resets on daemon handoff/restart. Command IDs alone
+are workspace scoped; use the workspace from the same observation when waiting.
 Working directory uses the existing daemon process-directory resolver, including without shell hooks.
 "#;

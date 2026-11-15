@@ -130,3 +130,7 @@ pub const WORP_KEYS: u32 = 11;
 pub const WORP_PASTE: u32 = 12;
 pub const WORP_GUARDED_INPUT: u32 = 13;
 pub const WORP_WAIT: u32 = 14;
+
+pub const WORP_PASTE_KEYS: u32 = 15;
+pub const WORP_WAIT_COMMAND: u32 = 16;
+pub const WORP_READ_OUTPUT: u32 = 17;

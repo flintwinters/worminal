@@ -105,6 +105,8 @@ pub(crate) struct ShellState {
     pub phase: Option<&'static str>,
     pub command_id: u64,
     pub exit_status: Option<i32>,
+    pub completed_command_id: u64,
+    pub completed_exit_status: Option<i32>,
 }
 impl ShellState {
     fn event(&mut self, marker: i32, data: &[u8]) {
@@ -122,6 +124,8 @@ impl ShellState {
                     .ok()
                     .and_then(|s| s.parse().ok())
                     .filter(|status| (0..=255).contains(status));
+                self.completed_command_id = self.command_id;
+                self.completed_exit_status = self.exit_status;
             }
             _ => {}
         }
@@ -132,6 +136,7 @@ pub(crate) struct Tab {
     pub id: u32,
     pub output_revision: u64,
     pub shell: ShellState,
+    pub output: crate::api_output::History,
     pub terminal: Option<Terminal>,
     pub title: Vec<u8>,
     pub initial_title: Vec<u8>,
@@ -219,6 +224,7 @@ impl Tab {
             terminal: None,
             output_revision: 0,
             shell: ShellState::default(),
+            output: crate::api_output::History::default(),
             title: title.to_vec(),
             initial_title: title.to_vec(),
             directory: Vec::new(),
@@ -575,7 +581,12 @@ impl Tab {
                         ));
                     }
                 }
-                terminal::WORMINAL_SHELL => self.shell.event(event.argument, &event.data),
+                terminal::WORMINAL_SHELL => {
+                    self.shell.event(event.argument, &event.data);
+                    let engine = &mut self.terminal.as_mut().unwrap().engine;
+                    self.output
+                        .event(event.argument as u8, &self.shell, engine)?;
+                }
                 terminal::WORMINAL_NOTIFICATION => {
                     if let Some(client) = self.controller {
                         notices.push(Notice::Event(
