@@ -147,7 +147,37 @@ pub struct Style<'a> {
 pub struct Painter {
     layout: pango::Layout,
     font: Font,
-    ascii: Vec<Option<pango::Layout>>,
+    ascii: Vec<Option<ShapedText>>,
+}
+// Retain the layout as well as its line: Pango lines borrow their creating layout.
+// ASCII entries are immutable until set_font clears the entire cache.
+#[derive(Clone)]
+struct ShapedText {
+    layout: pango::Layout,
+    line: Option<pango::LayoutLine>,
+    baseline: f64,
+}
+impl ShapedText {
+    fn new(layout: pango::Layout) -> Self {
+        let line = (layout.line_count() == 1)
+            .then(|| layout.line_readonly(0))
+            .flatten();
+        let baseline = f64::from(layout.baseline()) / f64::from(pango::SCALE);
+        Self {
+            layout,
+            line,
+            baseline,
+        }
+    }
+    fn draw(&self, cr: &cairo::Context, left: f64, top: f64) {
+        if let Some(line) = &self.line {
+            cr.move_to(left, top + self.baseline);
+            graphics_ffi::show_line(cr, line);
+        } else {
+            cr.move_to(left, top);
+            graphics_ffi::show_layout(cr, &self.layout);
+        }
+    }
 }
 pub(crate) fn source(cr: &cairo::Context, color: &RGBA) {
     cr.set_source_rgba(color.red(), color.green(), color.blue(), color.alpha());
@@ -232,49 +262,40 @@ impl Painter {
             | (usize::from(attributes & ATTR_ITALIC != 0) << 1);
         let cached = (value.len() == 1 && (b' '..=b'~').contains(&value.as_bytes()[0]))
             .then(|| style * 95 + usize::from(value.as_bytes()[0] - b' '));
-        let existing = cached.and_then(|index| self.ascii[index].clone());
-        let layout = if let Some(layout) = existing {
-            layout
-        } else {
-            let layout = if cached.is_some() {
-                pango::Layout::new(&self.layout.context())
-            } else {
-                self.layout.clone()
-            };
-            let mut font = self.font.description.clone();
-            font.set_weight(if attributes & ATTR_BOLD != 0 {
-                pango::Weight::Bold
-            } else {
-                pango::Weight::Normal
-            });
-            font.set_style(if attributes & ATTR_ITALIC != 0 {
-                pango::Style::Italic
-            } else {
-                pango::Style::Normal
-            });
-            layout.set_font_description(Some(&font));
-            layout.set_text(value);
-            if let Some(index) = cached {
-                self.ascii[index] = Some(layout.clone());
-            }
-            layout
-        };
         let metrics = self.font.metrics;
-        let top =
-            2 + (y as i32 + 1) * metrics.height - metrics.ink_height - theme::get().glyph_offset_y;
-        if cached.is_some() || layout.line_count() == 1 {
-            cr.move_to(
-                f64::from(2 + x as i32 * metrics.width),
-                f64::from(top) + f64::from(layout.baseline()) / f64::from(pango::SCALE),
-            );
-            if let Some(line) = layout.line_readonly(0) {
-                graphics_ffi::show_line(cr, &line);
-            }
+        let left = f64::from(2 + x as i32 * metrics.width);
+        let top = f64::from(
+            2 + (y as i32 + 1) * metrics.height - metrics.ink_height - theme::get().glyph_offset_y,
+        );
+        if let Some(shaped) = cached.and_then(|index| self.ascii[index].as_ref()) {
+            shaped.draw(cr, left, top);
+            return;
+        }
+        let layout = if cached.is_some() {
+            pango::Layout::new(&self.layout.context())
         } else {
-            cr.move_to(f64::from(2 + x as i32 * metrics.width), f64::from(top));
-            graphics_ffi::show_layout(cr, &layout);
+            self.layout.clone()
+        };
+        let mut font = self.font.description.clone();
+        font.set_weight(if attributes & ATTR_BOLD != 0 {
+            pango::Weight::Bold
+        } else {
+            pango::Weight::Normal
+        });
+        font.set_style(if attributes & ATTR_ITALIC != 0 {
+            pango::Style::Italic
+        } else {
+            pango::Style::Normal
+        });
+        layout.set_font_description(Some(&font));
+        layout.set_text(value);
+        let shaped = ShapedText::new(layout);
+        shaped.draw(cr, left, top);
+        if let Some(index) = cached {
+            self.ascii[index] = Some(shaped);
         }
     }
+
     fn background(
         &self,
         cr: &cairo::Context,
