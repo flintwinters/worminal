@@ -24,6 +24,7 @@ pub struct Tab {
     pub ssh: bool,
     /// A task in the terminal is reporting progress.
     pub busy: bool,
+    pub background_job: bool,
 }
 /// What the strip asks of the window. A tab is selected when its button is released, so a drag that
 /// starts on it leaves the panes it is dragged over on screen.
@@ -105,12 +106,14 @@ fn colors(
             palette.color(BG),
         );
     }
-    let fill = if selected {
+    let fill = if entry.background_job {
+        Some(palette.color(6))
+    } else if selected {
         Some(palette.color(if entry.ssh { SSH } else { FG }))
     } else {
         entry.busy.then(|| palette.color(BUSY))
     };
-    let text = palette.color(if selected {
+    let text = palette.color(if selected || entry.background_job {
         BG
     } else if entry.ssh {
         SSH
@@ -464,6 +467,7 @@ mod tests {
             remote: false,
             ssh: false,
             busy,
+            background_job: false,
         }
     }
     #[test]
@@ -482,6 +486,21 @@ mod tests {
             colors(&palette, &tab(true), false, ATTENTION_HELP).0,
             Some(palette.color(severity_color(ATTENTION_HELP)))
         );
+    }
+    #[test]
+    fn background_jobs_are_cyan_including_selected_and_busy_tabs() {
+        let palette = Palette::default();
+        let mut entry = tab(true);
+        entry.background_job = true;
+        for selected in [false, true] {
+            let (fill, text) = colors(&palette, &entry, selected, 0);
+            assert_eq!(fill, Some(palette.color(6)));
+            assert_eq!(text, palette.color(super::BG));
+            assert_eq!(
+                colors(&palette, &entry, selected, ATTENTION_HELP).0,
+                Some(palette.color(severity_color(ATTENTION_HELP)))
+            );
+        }
     }
     #[test]
     fn tabs_wrap_in_order_and_oversized_tab_sits_alone() {

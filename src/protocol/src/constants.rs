@@ -13,6 +13,9 @@ pub const WORKSPACE_INITIAL_CURSOR: u32 = 2;
 /// Rune, attributes, foreground, background: independent of native cell layout.
 pub const WIRE_CELL_BYTES: u32 = 4 * 4;
 
+/// Daemon-owned catalog mode: a live shell job outside the foreground process group.
+pub const MODE_BACKGROUND_JOB: u32 = 1 << 20;
+
 // Service bounds and deadlines.
 pub const WORKSPACE_CLIENT_QUEUE_BYTES: u32 = 4 * 1024 * 1024;
 pub const WORKSPACE_INPUT_QUEUE_BYTES: u32 = 1024 * 1024;

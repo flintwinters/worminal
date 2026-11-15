@@ -255,6 +255,7 @@ struct Page {
     ssh_user: Option<String>,
     /// A task in the terminal reports progress (OSC 9;4), as an agent does while it works.
     busy: bool,
+    background_job: bool,
     browser: bool,
     url: String,
     view: Rc<RefCell<Option<crate::browser::Browser>>>,
@@ -727,6 +728,7 @@ impl App {
                     directory: PathBuf::new(),
                     ssh_user: None,
                     busy: false,
+                    background_job: false,
                     browser: record.browser,
                     url: record.url.clone(),
                     view: Rc::new(RefCell::new(None)),
@@ -774,6 +776,7 @@ impl App {
                 page.directory = record.directory.clone();
                 page.ssh_user = record.ssh_user.clone();
                 page.busy = record.mode & MODE_BUSY != 0;
+                page.background_job = record.mode & worminal_protocol::MODE_BACKGROUND_JOB != 0;
             }
         }
         {

@@ -298,6 +298,18 @@ impl Tab {
             self.catalog_dirty = true;
             self.regroup = true;
         }
+        let background = terminal.pty.fd().is_some_and(|fd| {
+            crate::ssh::foreground_group(fd)
+                .is_some_and(|foreground| crate::jobs::background(pid, foreground))
+        });
+        let bit = worminal_protocol::MODE_BACKGROUND_JOB;
+        let next = if background {
+            self.mode | bit
+        } else {
+            self.mode & !bit
+        };
+        self.catalog_dirty |= self.mode != next;
+        self.mode = next;
         // A task that exits without withdrawing its OSC 9;4 progress would leave the tab busy forever.
         // The shell leads its own process group, so the shell in the foreground means nothing is running.
         if self.mode & terminal::MODE_BUSY != 0

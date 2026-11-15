@@ -12,6 +12,7 @@ mod device_probes;
 mod frames;
 mod handoff;
 mod handoff_io;
+mod jobs;
 pub mod process;
 pub mod queue;
 mod reactor;

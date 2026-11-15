@@ -33,6 +33,7 @@ fn tabs(args: &[String]) {
             remote: false,
             ssh: false,
             busy: false,
+            background_job: false,
             label: String::from_utf8(body.string().unwrap().to_vec()).unwrap(),
         })
         .collect();

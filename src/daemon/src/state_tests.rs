@@ -289,3 +289,30 @@ fn catalog_lists_palette_overrides_only_through_the_last_one() {
     tab.feed(b"\x1b]104;1\x07", 4).unwrap();
     assert!(tab.metadata(5).unwrap().ends_with(&none));
 }
+
+#[test]
+fn background_job_catalog_clears_when_the_job_exits() {
+    let mut fixture = Fixture::running(vec![
+        "/bin/bash".into(),
+        "-c".into(),
+        "set -m; sleep 0.4 & wait; exec sleep 10".into(),
+    ]);
+    let bit = worminal_protocol::MODE_BACKGROUND_JOB;
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        fixture.tab.refresh_directory(1);
+        if fixture.tab.mode & bit != 0 {
+            break;
+        }
+        assert!(Instant::now() < deadline, "background job was not observed");
+        thread::sleep(Duration::from_millis(5));
+    }
+    fixture.tab.metadata(2).unwrap();
+    assert!(!fixture.tab.catalog_dirty);
+    while fixture.tab.mode & bit != 0 {
+        assert!(Instant::now() < deadline, "exited job retained cyan status");
+        thread::sleep(Duration::from_millis(10));
+        fixture.tab.refresh_directory(3);
+    }
+    assert!(fixture.tab.catalog_dirty);
+}

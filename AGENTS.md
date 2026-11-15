@@ -24,7 +24,8 @@ packets carry each row's URIs inline, and snapshots drop them. Clicks open only 
 text (newline executes) into the same tab. The Rust wrapper manages C handles and screen buffers, and normalizes clipboard paste in place.
 OSC 99 metadata/payload events go only to capable controlling views; those views assemble bounded title/body
 notifications and deliver them asynchronously on their desktop, including for remote tabs. OSC 7501 agent status (working) and OSC 9;4 progress (normal or indeterminate) set the engine's `MODE_BUSY` bit, carried in the catalog mode word
-to every view; the daemon clears it when the shell regains the foreground. Busy tabs get a static gray background. Click targets
+to every view; the daemon clears it when the shell regains the foreground. Busy tabs get a static gray background; live background or stopped
+shell jobs get cyan, observed by the daemon through shell child process groups. Click targets
 retain weak window ownership and use the existing tab-selection and platform activation paths.
 The Rust engine wrapper owns ordered terminal key encoding shared by the frontend and headless API;
 the frontend owns GUI shortcuts. Shell defaults live with Rust PTY creation;
