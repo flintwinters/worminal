@@ -16,10 +16,13 @@ use worminal_protocol::worp::{
 };
 use worminal_protocol::{WORKSPACE_MAX_COLS, WORKSPACE_MAX_ROWS};
 
+mod scroll;
+
 #[derive(Debug)]
 pub enum Action {
     Send(CommandKind),
     Claim,
+    CycleTab(bool),
     Resized(u32, u32),
     Print(Vec<u8>),
     Error(String),
@@ -31,6 +34,7 @@ struct State {
     timer: Option<glib::SourceId>,
     keyboard: Keyboard,
     mouse: Mouse,
+    tab_scroll: f64,
     /// Middle-click autoscroll and its frame timer; any later press, key or focus loss ends it.
     autoscroll: Option<(Autoscroll, glib::SourceId)>,
     mode: u32,
@@ -84,6 +88,7 @@ impl Terminal {
                 timer: None,
                 keyboard: Keyboard::default(),
                 mouse: Mouse::default(),
+                tab_scroll: 0.0,
                 autoscroll: None,
                 mode: 0,
                 cursor: 2,
@@ -151,10 +156,7 @@ impl Terminal {
             glib::clone!(@weak inner => @default-return glib::Propagation::Proceed,
             move |_, _| { inner.state.borrow_mut().pointer = None; inner.hover(); glib::Propagation::Proceed }),
         );
-        inner.widget.connect_scroll_event(
-            glib::clone!(@weak inner => @default-return glib::Propagation::Proceed,
-            move |_, event| { inner.wheel(event); glib::Propagation::Stop }),
-        );
+        inner.connect_wheel();
         inner.widget.connect_focus_in_event(
             glib::clone!(@weak inner => @default-return glib::Propagation::Proceed,
             move |_, _| { inner.focus(true); glib::Propagation::Proceed }),
@@ -937,64 +939,6 @@ impl Inner {
         if let Some((up, lines)) = step {
             let cell = self.state.borrow().pointer.unwrap_or_default();
             self.scroll(up, lines, lines, cell, gdk::ModifierType::empty());
-        }
-    }
-    fn wheel(self: &Rc<Self>, event: &gdk::EventScroll) {
-        self.prepare();
-        let smooth = event.direction() == gdk::ScrollDirection::Smooth;
-        if smooth && event.delta().1 == 0.0 {
-            return;
-        }
-        let up = event.direction() == gdk::ScrollDirection::Up || smooth && event.delta().1 < 0.0;
-        let (px, py) = event.position();
-        let (x, y) = self.pointer(px, py);
-        let lines = worminal_config::get().scroll_multiplier as u32;
-        self.scroll(up, 1, lines, (x, y), event.state());
-    }
-    /// Scrolls as the wheel does: applications owning the mouse get `notches` wheel reports, the
-    /// alternate screen gets `notches` arrow keys, and otherwise the daemon scrolls `lines` of history.
-    fn scroll(
-        self: &Rc<Self>,
-        up: bool,
-        notches: u32,
-        lines: u32,
-        (x, y): (i32, i32),
-        mods: gdk::ModifierType,
-    ) {
-        let (mouse, bytes, alternate, appcursor) = {
-            let state = self.state.borrow();
-            (
-                state.mode & MODE_MOUSE != 0 && !mods.contains(gdk::ModifierType::SHIFT_MASK),
-                state.mouse.report(
-                    state.mode,
-                    state.viewport.live(),
-                    if up { 64 } else { 65 },
-                    x,
-                    y,
-                    mods,
-                    false,
-                    false,
-                ),
-                state.viewport.frame().alternate != 0 && state.mode & MODE_ALTSCROLL != 0,
-                state.mode & MODE_APPCURSOR != 0,
-            )
-        };
-        if mouse {
-            for _ in 0..notches {
-                if let Some(bytes) = &bytes {
-                    self.input(bytes);
-                }
-            }
-        } else if alternate {
-            let key: &[u8] = match (appcursor, up) {
-                (true, true) => b"\x1bOA",
-                (true, false) => b"\x1bOB",
-                (false, true) => b"\x1b[A",
-                (false, false) => b"\x1b[B",
-            };
-            self.input(&key.repeat(notches as usize));
-        } else {
-            self.send(CommandKind::Scroll { up, amount: lines });
         }
     }
 }

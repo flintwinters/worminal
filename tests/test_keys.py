@@ -252,6 +252,11 @@ class NavigationKeysTest(unittest.TestCase):
                                    env=env, check=True)
                     subprocess.run(["xdotool", "mousemove", "--window", window, "20", "80"],
                                    env=env, check=True)
+                    # Tab cycling consumes the wheel even when the application owns mouse input.
+                    for button in ("4", "5"):
+                        subprocess.run(["xdotool", "keydown", "ctrl", "click", button,
+                                        "keyup", "ctrl"], env=env, check=True)
+                    self.assertEqual(read_bytes(terminal.stdout, 1), b"")
                     for button, normal, application in (
                         ("4", b"\033[A", b"\033OA"),
                         ("5", b"\033[B", b"\033OB"),

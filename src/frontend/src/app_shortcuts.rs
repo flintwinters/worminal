@@ -70,15 +70,7 @@ impl App {
         if (state == Mod::CONTROL_MASK || state == control_shift)
             && [key::Tab, key::ISO_Left_Tab].contains(&value)
         {
-            let count = self.notebook().n_pages();
-            if count != 0 {
-                let current = self.notebook().current_page().unwrap_or(0);
-                self.select_index(if state == control_shift {
-                    (current + count - 1) % count
-                } else {
-                    (current + 1) % count
-                });
-            }
+            self.cycle_tab(state == control_shift);
             return true;
         }
         let mut zoom = self.fonts.borrow().zoom();
@@ -174,5 +166,17 @@ impl App {
         }
         self.refresh_tabs();
         true
+    }
+
+    pub(super) fn cycle_tab(self: &Rc<Self>, previous: bool) {
+        let count = self.notebook().n_pages();
+        if count != 0 {
+            let current = self.notebook().current_page().unwrap_or(0);
+            self.select_index(if previous {
+                (current + count - 1) % count
+            } else {
+                (current + 1) % count
+            });
+        }
     }
 }

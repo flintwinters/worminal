@@ -20,7 +20,7 @@ import unittest
 from unittest.mock import patch
 
 os.environ['WORMINAL_FRONTEND'] = 'worminal-rust'
-from test_keys import NavigationKeysTest, read_bytes, read_through
+from test_keys import NavigationKeysTest, read_bytes, read_through, wait_title
 from workspace_protocol import send, wait_kind, catalog_records, service_pid
 from x11 import isolated_display, close_window
 from preview import profile, service, wayland_display
@@ -194,6 +194,13 @@ class RustApplicationTest(unittest.TestCase):
                                               text=True).strip() != 'Rust vertical':
                     self.assertLess(time.monotonic(), deadline, 'tab shortcut did not return to the original shell')
                     time.sleep(.01)
+                # Both directions wrap, using the same tab order as Ctrl+Tab.
+                subprocess.run(['xdotool', 'mousemove', '--window', wid, '20', '80'], env=env, check=True)
+                for button, expected in (('5', 'Worminal'), ('5', 'Rust vertical'),
+                                         ('4', 'Worminal'), ('4', 'Rust vertical')):
+                    subprocess.run(['xdotool', 'keydown', 'ctrl', 'click', button, 'keyup', 'ctrl'],
+                                   env=env, check=True)
+                    wait_title(env, wid, expected)
                 subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+shift+n'], env=env, check=True)
                 deadline = time.monotonic() + 5
                 while len(catalog_records(wait_kind(observer, 7, version=2)[1])) != 3:
