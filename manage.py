@@ -117,7 +117,7 @@ def run_native_checks():
     from tools.engine_checks import check
     code = check()
     return (code or run_rust_lint() or run_rust_workspace_checks() or run_rust_process_checks()
-            or run_rust_frontend_tests())
+            or run_rust_frontend_tests() or run_perf_check())
 
 
 def run_headless_checks():
@@ -125,7 +125,7 @@ def run_headless_checks():
     code = run_native_checks()
     if code:
         return code
-    patterns = ("test_build.py", "test_perf_metrics.py", "test_cli.py", "test_workspace.py",
+    patterns = ("test_build.py", "test_perf_metrics.py", "test_perf_check.py", "test_cli.py", "test_workspace.py",
                 "test_preview_workspace.py", "test_agent_api.py", "test_remote_install.py", "test_remote_upgrade.py", "test_theme.py", "test_config_sync.py", "test_running.py", "test_update_flow.py",
                 "test_handoff.py", "test_restore.py", "test_upgrade.py")
     for pattern in patterns:
@@ -166,6 +166,18 @@ def daemon_perf(label: str = typer.Option(..., help="Filename label for retained
     """Measure release daemon queue, catalog and frame CPU costs without a display."""
     from tools.daemon_perf import measure
     measure(label, trials, compare)
+
+
+def run_perf_check(limits=ROOT / "tools/perf_limits.json"):
+    from tools.perf_check import check
+    return check(limits)
+
+
+@app.command("check-perf")
+def check_perf(limits: Path = typer.Option(ROOT / "tools/perf_limits.json",
+                                          help="Reviewed CPU/network ceilings JSON; never updated by checks.")):
+    """Fail when warmed release daemon CPU or deterministic network measurements exceed fixed ceilings."""
+    raise typer.Exit(run_perf_check(limits))
 
 
 @app.command("network-perf")

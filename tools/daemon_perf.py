@@ -116,3 +116,4 @@ def measure(label, trials, compare=None, *, network=False):
     destination.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report["medians"], indent=2))
     print(f"Saved {destination.relative_to(build.ROOT)}")
+    return report

@@ -72,6 +72,7 @@ Use `python3 manage.py --help` as the command index. The main routes are:
 | `build` | Current launcher, daemon and graphics modules, or the daemon alone on headless hosts |
 | `check` | Current engine, Rust and private-display regression suites |
 | `check-engine` | Sanitized C engine boundaries and Rust wrapper ownership |
+| `check-perf` | Enforce reviewed daemon CPU and deterministic network ceilings (also part of `check`) |
 | `check-rust-frontend` | Viewport import and frame publication |
 | `check-rust-app` | Terminal GUI, keyboard input, module loading and reattachment |
 | `check-rust-browser` | Browser controls, local-file capabilities, media and renderer recovery |

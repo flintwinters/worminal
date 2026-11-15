@@ -38,6 +38,7 @@ broker identities, including names containing `preview`. Release Rust borrows be
 API and configuration contracts without repository access. `manage.py` is internal development tooling only.
 Remote version sync compares Cargo versions: bump the version when remote daemons need a runtime change; equal
 versions never upgrade. Tests target the current Rust app and C engine, without historical application builds.
+Full checks enforce reviewed daemon CPU and network performance ceilings; never raise them automatically.
 
 Read [development.md](docs/development.md) for build/test/install workflows and [testing.md](docs/testing.md) for
 private test workers. Use only project-local test runtimes and private displays; never inject into the desktop or

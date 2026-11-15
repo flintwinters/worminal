@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "baseline_revision": "d7e01acf5462c82f7207280438a7cf4306ec0d7e",
+  "notes": [
+    "Measured 2026-11-15 on the development host; CPU ceilings are machine dependent.",
+    "CPU maxima round to about twice the seven-trial median. Network maxima match three deterministic trials.",
+    "Frame count is informational: fewer frames may mean better coalescing or dropped delivery.",
+    "Frame age and byte budgets enforce network performance; correctness checks validate the final viewport."
+  ],
+  "suites": {
+    "daemon": {
+      "workload_sha256": "742d44178a770d5a59a9532967365600a8a6702e4768bfb3c2ee9b65da2f7447",
+      "unit": "thread CPU nanoseconds per iteration",
+      "trials": 7,
+      "metrics": {
+        "congested_queue": {
+          "baseline": 256.515,
+          "maximum": 500
+        },
+        "cached_catalog_64_tabs": {
+          "baseline": 1219.265,
+          "maximum": 2500
+        },
+        "full_frame_100x40": {
+          "baseline": 64408.52,
+          "maximum": 130000
+        }
+      },
+      "informational_metrics": []
+    },
+    "network": {
+      "workload_sha256": "7c626dd0409abec5dd297bb09ee2f8daac0fdf0195294b3086fb5ec17c056d03",
+      "unit": "metric suffix (bytes, ms, frames)",
+      "trials": 3,
+      "metrics": {
+        "hidden_busy_tab_zlib_bytes": {
+          "baseline": 0,
+          "maximum": 0
+        },
+        "sparse_zlib_bytes": {
+          "baseline": 1231,
+          "maximum": 1231
+        },
+        "idle_hidden_tabs_zlib_bytes": {
+          "baseline": 16593,
+          "maximum": 16593
+        },
+        "congested_zlib_bytes": {
+          "baseline": 24084,
+          "maximum": 24084
+        },
+        "sparse_bytes_per_frame": {
+          "baseline": 98,
+          "maximum": 98
+        },
+        "congested_peak_queue_bytes": {
+          "baseline": 181468,
+          "maximum": 181468
+        },
+        "congested_p95_frame_age_ms": {
+          "baseline": 704,
+          "maximum": 704
+        },
+        "congested_tail_ms": {
+          "baseline": 480,
+          "maximum": 480
+        },
+        "congested_protocol_bytes": {
+          "baseline": 1144852,
+          "maximum": 1144852
+        },
+        "idle_hidden_tabs_bytes": {
+          "baseline": 1482240,
+          "maximum": 1482240
+        },
+        "hidden_busy_tab_bytes": {
+          "baseline": 0,
+          "maximum": 0
+        },
+        "hidden_busy_reveal_bytes": {
+          "baseline": 528,
+          "maximum": 528
+        }
+      },
+      "informational_metrics": [
+        "congested_frames"
+      ]
+    }
+  }
+}

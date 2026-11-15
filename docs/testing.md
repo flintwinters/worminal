@@ -3,6 +3,27 @@
 Build, test, install and runtime preparation are indexed in [development.md](development.md) and
 `python3 manage.py --help`. Tests exercise the current application; historical records live under [history](history/).
 
+## Performance ceilings
+
+`python3 manage.py check-perf` runs the existing warmed release daemon CPU and deterministic network workloads,
+then fails if any median exceeds its fixed maximum in `tools/perf_limits.json`. It also runs in the native
+phase of full `check` and `check-headless`, before Python workers start. A selected `check-python` does not run
+benchmarks. Reports and raw samples are retained in `build/checks/daemon-perf-check.json`,
+`network-perf-check.json` and `perf-check.json`, including failed budget results. These fixed filenames are
+replaced on the next run; preserve them before another run when investigating a regression.
+
+The initial CPU ceilings are roughly twice the development host's seven-trial median, rounded upward to allow
+CPU-frequency and machine variation. They use thread CPU time per operation, not build/test wall time. Network
+ceilings equal the three-trial deterministic baseline: traffic, peak queue size, modeled frame age and tail drain
+time. Frame count is informational because fewer frames alone does not prove better performance. Neither suite
+measures GUI, real SSH latency or physical presentation.
+
+Limits never update automatically. Investigate failures before changing a ceiling. To review a deliberate change,
+run `daemon-perf --label NAME --trials 7` and `network-perf --label NAME --trials 3`, inspect their retained samples,
+then explicitly edit the baseline values, maxima and workload hashes with an explanation in the commit. Workload
+hash or unit changes, missing/invalid samples and new metrics without a budget decision fail closed. Use
+`check-perf --limits PATH` for a reviewed machine-specific policy; ordinary checks always use the checked-in file.
+
 ## Python check workers
 
 The full check command builds shared artifacts and runs native checks first:
