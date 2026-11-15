@@ -80,7 +80,7 @@ def profile(env):
         runtime.mkdir(mode=0o700)
         yield {**env, "XDG_RUNTIME_DIR": str(runtime), "XDG_DATA_HOME": str(base / "data"),
                "XDG_CACHE_HOME": str(base / "cache"), "XDG_STATE_HOME": str(base / "state"),
-               "NO_AT_BRIDGE": "1", "SHELL": "/bin/sh",
+               "NO_AT_BRIDGE": "1", "SHELL": "/bin/sh", "GIO_USE_VFS": "local",
                # Browser GPU helpers can finish cache writes after the UI process exits.
                "MESA_SHADER_CACHE_DISABLE": "true",
                "WEBKIT_DISABLE_DMABUF_RENDERER": "1", "G_DEBUG": "fatal-criticals"}
