@@ -1,4 +1,4 @@
-use crate::api::{quote, HELP};
+use crate::api::HELP;
 use crate::api_help;
 use std::{
     ffi::{OsStr, OsString},
@@ -14,6 +14,8 @@ use worminal_workspace::{socket, ssh};
 
 #[path = "api_arguments.rs"]
 mod arguments;
+#[path = "api_diagnostics.rs"]
+pub(crate) mod diagnostics;
 #[path = "api_self.rs"]
 mod identity;
 #[path = "api_open.rs"]
@@ -100,8 +102,10 @@ fn request_with_timeout(
 struct Local<'a>(&'a [u8]);
 impl Handler for Local<'_> {
     fn handle(&mut self, operation: Request) -> io::Result<Reply> {
-        Ok(request(self.0, None, operation)
-            .unwrap_or_else(|error| crate::api::failure(&error.to_string())))
+        Ok(
+            request(self.0, None, operation)
+                .unwrap_or_else(|error| diagnostics::io_failure(&error)),
+        )
     }
 }
 
@@ -139,27 +143,70 @@ pub fn run(scope: &[u8], arguments: &[OsString]) -> io::Result<i32> {
     if arguments.len() == 1 && arguments[0] == "self" {
         return Ok(print_result(identify_self(scope, master)));
     }
-    let result = command(arguments).and_then(|operation| {
-        let devices = matches!(operation, Request::Devices);
-        let mut reply = request(scope, master, operation)?;
-        if devices && reply.success {
-            let mut value: serde_json::Value = serde_json::from_str(&reply.json)
-                .map_err(|_| invalid("Invalid registry JSON reply."))?;
-            crate::device_probes::validate(&value)?;
-            value["registry_authority"] =
-                serde_json::json!(master.map_or("local".into(), |host| host.to_string_lossy()));
-            if arguments.len() == 1 {
-                crate::device_probes::check(&mut value, |endpoint| {
-                    request_with_timeout(scope, Some(OsStr::new(endpoint)), Request::List, 3)
-                })?;
+    if arguments == [OsString::from("doctor"), OsString::from("--json")] {
+        let reply = diagnostics::doctor(scope, master);
+        return Ok(print_result(Ok((reply.json, reply.success))));
+    }
+    let result = resolve_self(scope, master, arguments)
+        .and_then(|args| command(&args))
+        .and_then(|operation| {
+            let devices = matches!(operation, Request::Devices);
+            let mut reply = request(scope, master, operation)?;
+            if devices && reply.success {
+                let mut value: serde_json::Value = serde_json::from_str(&reply.json)
+                    .map_err(|_| invalid("Invalid registry JSON reply."))?;
+                crate::device_probes::validate(&value)?;
+                value["registry_authority"] =
+                    serde_json::json!(master.map_or("local".into(), |host| host.to_string_lossy()));
+                if arguments.len() == 1 {
+                    crate::device_probes::check(&mut value, |endpoint| {
+                        request_with_timeout(scope, Some(OsStr::new(endpoint)), Request::List, 3)
+                    })?;
+                }
+                reply.json = value.to_string();
             }
-            reply.json = value.to_string();
-        }
-        Ok(reply)
-    });
+            Ok(reply)
+        });
     Ok(print_result(
         result.map(|reply| (reply.json, reply.success)),
     ))
+}
+
+/// Resolve only tab operand positions; literal payloads named "self" stay literal.
+fn resolve_self(
+    scope: &[u8],
+    master: Option<&OsStr>,
+    arguments: &[OsString],
+) -> io::Result<Vec<OsString>> {
+    let mut args = arguments.to_vec();
+    let operation = args.first().and_then(|a| a.to_str()).unwrap_or("");
+    let positions: Vec<_> = match operation {
+        "read" => (1..args.len())
+            .take_while(|i| !args[*i].to_string_lossy().starts_with("--"))
+            .collect(),
+        "close" | "wait" | "type" | "key" => vec![1],
+        _ => Vec::new(),
+    };
+    let mut id = None;
+    for position in positions {
+        if args.get(position).is_some_and(|a| a == "self") {
+            if id.is_none() {
+                let (json, success) = identify_self(scope, master)?;
+                if !success {
+                    return Err(io::Error::other(json));
+                }
+                let value: serde_json::Value = serde_json::from_str(&json)?;
+                id = Some(
+                    value["id"]
+                        .as_u64()
+                        .ok_or_else(|| invalid("Invalid self reply."))?
+                        .to_string(),
+                );
+            }
+            args[position] = id.as_ref().unwrap().into();
+        }
+    }
+    Ok(args)
 }
 
 fn identify_self(scope: &[u8], master: Option<&OsStr>) -> io::Result<(String, bool)> {
@@ -184,10 +231,7 @@ fn print_result(result: io::Result<(String, bool)>) -> i32 {
             i32::from(!success)
         }
         Err(error) => {
-            println!(
-                "{{\"ok\":false,\"error\":{}}}",
-                quote(error.to_string().as_bytes())
-            );
+            println!("{}", diagnostics::io_failure(&error).json);
             1
         }
     }
@@ -196,6 +240,7 @@ fn print_result(result: io::Result<(String, bool)>) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::quote;
 
     fn args(values: &[&str]) -> Vec<OsString> {
         values.iter().map(OsString::from).collect()

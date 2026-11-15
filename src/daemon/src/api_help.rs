@@ -65,7 +65,9 @@ pub fn topic(name: &str) -> Option<String> {
 }
 
 const SCHEMA: &str = r#"Every command prints exactly one JSON object on stdout.
-Success: "ok": true, exit status 0. Failure: "ok": false, "error": "message", exit status 1.
+Success: "ok": true, exit status 0. Failure: "ok": false, "error": "message", "code":S, "hint":S|null, exit status 1.
+Codes: operation_failed, invalid_arguments, unavailable, timeout, incompatible_reply, permission_denied,
+transport_error, tab_not_found, terminal_required, process_exited, stale_guard.
 Uncertain mutations (open, close, type, key, enroll, forget) are never retried; list/read before repeating.
 
 list     {"ok":true,"api_version":1,"tabs":[TAB...]}   tabs are in strip order
@@ -90,7 +92,10 @@ Limits: type/key input 65536 bytes per request; terminal size 1..=400 columns, 1
 enrolled devices; local timeout 3s, --master timeout 13s. Tab ids are per running daemon; re-list after restart.
 Targeting: WORMINAL_SHARED_SOCKET_SCOPE picks the local workspace; --master user@host uses SSH instead.
 Additional fields (additive to the shapes above):
-list "workspace":S; TAB "state":STATE. read "workspace":S, "revision":S, "state":STATE, "directory":S, "title":S, "text_source":"viewport".
+doctor --json adds "diagnostics":{"client_version":S,"scope":S,"target":S,"socket":S|null,
+ "compatible":BOOL|null,"shell_markers":[{"id":N,"available":BOOL}...]|null} to list/error.
+Compatibility describes API version, not exact feature support. Shell markers indicate observations, not trust.
+list "daemon_version":S, "workspace":S; TAB "state":STATE. read "workspace":S, "revision":S, "state":STATE, "directory":S, "title":S, "text_source":"viewport".
 STATE {"busy":BOOL,"controlled":BOOL,"shown":BOOL,"foreground":FOREGROUND|null,"input_guard":S|null,
        "shell":{"phase":null|"prompt"|"input"|"running"|"finished","command_id":N,"exit_status":N|null}}
 FOREGROUND {"process_group":N,"start_time":N,"executable":S,"identity":S}; start_time is Linux clock ticks since boot.

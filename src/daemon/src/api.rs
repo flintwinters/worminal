@@ -15,6 +15,7 @@ Usage: worminald api [--master user@host] COMMAND
   --session            Duplex binary Worp command/event session to the existing daemon.
                        Supports catalog, frames, input, focus/resize, selection and lifecycle.
   list                 List tab IDs, titles, directories and shell PIDs as JSON.
+  doctor --json        Diagnose scope, endpoint, versions and shell-marker availability.
   self                 Identify the tab running this process (local only; fails outside a tab).
   open [OPTIONS] [-- PROGRAM ARG...]  Create a terminal; default is the target user's shell.
     --cwd /ABS/PATH --title TITLE --columns N --rows N  (default size: 80x24)
@@ -52,6 +53,7 @@ Browser records load only when displayed. Close removes the tab and initiates te
 Open/close are mutations; do not automatically retry uncertain replies. List again to inspect the outcome.
 Input targets a tab, preserves its view/controller and size, and may execute commands.
 Input success means queued for the PTY, not that the application processed it.
+TAB accepts self for local caller ancestry (including batch reads); --master refuses self.
 Tab IDs belong to the current daemon workspace; list again after a restart.
 WORMINAL_SHARED_SOCKET_SCOPE selects the same workspace as graphical clients.
 Enrollment is per authority user across scopes; no heartbeats or automatic enrollment.
@@ -116,11 +118,10 @@ pub(crate) fn read(tab: &mut Tab, now: i64) -> io::Result<String> {
 }
 
 pub fn failure(message: &str) -> Reply {
-    Reply {
-        success: false,
-        json: format!("{{\"ok\":false,\"error\":{}}}", quote(message.as_bytes())),
-    }
+    failure_code("operation_failed", message, None)
 }
+
+pub(crate) use crate::api_cli::diagnostics::failure as failure_code;
 
 pub(crate) fn success(json: String) -> Reply {
     Reply {
@@ -181,7 +182,8 @@ impl Handler for Service {
                 .map(|tab| record(tab, now, &self.workspace_id))
                 .collect();
             let json = format!(
-                "{{\"ok\":true,\"api_version\":1,\"workspace\":{},\"tabs\":[{}]}}",
+                "{{\"ok\":true,\"api_version\":1,\"daemon_version\":{},\"workspace\":{},\"tabs\":[{}]}}",
+                quote(env!("CARGO_PKG_VERSION").as_bytes()),
                 quote(self.workspace_id.as_bytes()),
                 tabs.join(",")
             );
@@ -189,10 +191,18 @@ impl Handler for Service {
         }
         let tab = request.tab();
         let Some(index) = self.index(tab) else {
-            return Ok(failure("Tab not found; run worminald api list."));
+            return Ok(crate::api::failure_code(
+                "tab_not_found",
+                "Tab not found; run worminald api list.",
+                Some("Run worminald api list."),
+            ));
         };
         let Some(_) = self.tabs[index].terminal.as_ref() else {
-            return Ok(failure("This operation requires a terminal tab."));
+            return Ok(crate::api::failure_code(
+                "terminal_required",
+                "This operation requires a terminal tab.",
+                Some("Choose a terminal from api list."),
+            ));
         };
         let Request::Input { bytes, .. } = request else {
             return self.observe(tab, 0, now);
@@ -210,10 +220,18 @@ impl Service {
         now: i64,
     ) -> io::Result<Reply> {
         let Some(index) = self.index(tab) else {
-            return Ok(failure("Tab not found; run worminald api list."));
+            return Ok(crate::api::failure_code(
+                "tab_not_found",
+                "Tab not found; run worminald api list.",
+                Some("Run worminald api list."),
+            ));
         };
         let Some(terminal) = self.tabs[index].terminal.as_ref() else {
-            return Ok(failure("This operation requires a terminal tab."));
+            return Ok(crate::api::failure_code(
+                "terminal_required",
+                "This operation requires a terminal tab.",
+                Some("Choose a terminal from api list."),
+            ));
         };
         // Engine LNM can double CR bytes. Detached writers reject overflow before mutation;
         // a controlling stream retains the established overload error/affected-tab stop policy.
@@ -225,7 +243,11 @@ impl Service {
             ));
         }
         if owner.is_none() && terminal.pty.fd().is_none() {
-            return Ok(failure("Terminal process has exited."));
+            return Ok(crate::api::failure_code(
+                "process_exited",
+                "Terminal process has exited.",
+                Some("Open a new terminal."),
+            ));
         }
         // Acquiring control is explicit; detached input preserves the current viewport.
         if let Some(owner) = owner {

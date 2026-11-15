@@ -45,6 +45,30 @@ class AgentApiTest(unittest.TestCase):
             self.assertLess(time.monotonic(), deadline, value)
             time.sleep(.01)
 
+    def test_diagnostics_error_codes_and_self_operands(self):
+        doctor = self.api('doctor', '--json')
+        self.assertTrue(doctor['diagnostics']['compatible'])
+        self.assertEqual(doctor['diagnostics']['shell_markers'], [])
+        self.assertTrue(doctor['diagnostics']['socket'].startswith('@'))
+        self.assertEqual(self.api('read', 999, success=False)['code'], 'tab_not_found')
+        self.assertEqual(self.api('read', 0, success=False)['code'], 'invalid_arguments')
+        tab = self.api('open', '--', '/bin/sh', '-c',
+                       '"$WORMINAL_DAEMON" api read self; exec cat')['id']
+        observed = self.await_read(tab, lambda v: '"text_source"' in ''.join(v['lines']))
+        text = ''.join(observed['lines'])
+        reply = json.loads(text[text.index('{'):])
+        self.assertEqual(reply['id'], tab)
+        self.assertEqual(self.api('--master', 'invalid', 'read', 'self', success=False)['code'],
+                         'invalid_arguments')
+        with self.ssh_transport():
+            self.assertTrue(self.api('--master', 'fixture-host', 'doctor', '--json')['diagnostics']['compatible'])
+        environment = {**self.fixture.env, 'WORMINAL_SHARED_SOCKET_SCOPE': self.fixture.scope + '-absent'}
+        result = subprocess.run([str(workspace.DAEMON), 'api', 'doctor', '--json'],
+                                env=environment, capture_output=True, text=True, timeout=5)
+        value = json.loads(result.stdout)
+        self.assertEqual((result.returncode, value['code']), (1, 'unavailable'))
+        self.assertIsNone(value['diagnostics']['compatible'])
+
     def test_history_batch_reads_and_state_preserve_view(self):
         tab = self.fixture.launch("printf 'first\\r\\nsecond\\r\\nthird\\r\\nfourth\\r\\nfifth READY'; exec cat")
         before = self.await_read(tab, lambda v: 'fifth' in ''.join(v['lines']))

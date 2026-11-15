@@ -63,11 +63,19 @@ pub(crate) fn state(tab: &Tab, workspace: &str) -> serde_json::Value {
 impl Service {
     pub(crate) fn observe(&mut self, tab: u32, tail: u32, now: i64) -> io::Result<Reply> {
         let Some(index) = self.index(tab) else {
-            return Ok(failure("Tab not found; run worminald api list."));
+            return Ok(crate::api::failure_code(
+                "tab_not_found",
+                "Tab not found; run worminald api list.",
+                Some("Run worminald api list."),
+            ));
         };
         let tab = &mut self.tabs[index];
         if tab.terminal.is_none() {
-            return Ok(failure("This operation requires a terminal tab."));
+            return Ok(crate::api::failure_code(
+                "terminal_required",
+                "This operation requires a terminal tab.",
+                Some("Choose a terminal from api list."),
+            ));
         }
         tab.refresh_directory(now);
         let mut value: serde_json::Value = serde_json::from_str(&super::api::read(tab, now)?)?;
@@ -124,7 +132,11 @@ impl Service {
             }
             Request::Keys { tab, names, guard } => {
                 let Some(index) = self.index(*tab) else {
-                    return Ok(Some(failure("Tab not found.")));
+                    return Ok(Some(crate::api::failure_code(
+                        "tab_not_found",
+                        "Tab not found.",
+                        Some("Run worminald api list."),
+                    )));
                 };
                 let mut bytes = Vec::new();
                 for name in names {
@@ -137,7 +149,11 @@ impl Service {
             }
             Request::Paste { tab, text, guard } => {
                 let Some(index) = self.index(*tab) else {
-                    return Ok(Some(failure("Tab not found.")));
+                    return Ok(Some(crate::api::failure_code(
+                        "tab_not_found",
+                        "Tab not found.",
+                        Some("Run worminald api list."),
+                    )));
                 };
                 // Multiline input needs bracketed paste: ordinary LF would submit commands.
                 let bracketed = self.tabs[index].mode & worminal_engine::MODE_BRCKTPASTE != 0;
@@ -161,8 +177,10 @@ impl Service {
                 state(&self.tabs[i], &self.workspace_id)["input_guard"].as_str() == Some(guard)
             });
             if !matches {
-                return Ok(Some(failure(
+                return Ok(Some(crate::api::failure_code(
+                    "stale_guard",
                     "Input guard no longer matches the workspace/foreground process; read again.",
+                    Some("Read the tab again before deciding whether to send input."),
                 )));
             }
         }

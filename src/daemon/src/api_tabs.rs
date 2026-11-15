@@ -46,7 +46,11 @@ impl Service {
             }
             Request::Close { tab } => {
                 let Some(index) = self.index(*tab) else {
-                    return Ok(Some(failure("Tab not found; run worminald api list.")));
+                    return Ok(Some(crate::api::failure_code(
+                        "tab_not_found",
+                        "Tab not found; run worminald api list.",
+                        Some("Run worminald api list."),
+                    )));
                 };
                 self.close(index);
                 self.publish(now)?;

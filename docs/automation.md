@@ -7,6 +7,7 @@ It never starts a daemon or restores shells as a side effect of inspection.
 [Install a new remote node](remote-install.md) with the separate native `install-on-remote` bootstrap command.
 
 ```sh
+worminald api doctor --json  # passive connection/version/shell-marker diagnostics
 worminald api list
 worminald api self   # from inside a tab: which tab am I (local only)
 worminald api open --cwd /path/to/project -- /bin/sh
@@ -168,3 +169,10 @@ UTF-8 text string); 13 guards raw input (guard string, bytes string); 14 waits (
 timeout milliseconds u32). Empty guards mean unguarded input. `api help session` describes these fields
 from the executable. A wait reply is deferred on the same connection and tab; avoid multiple outstanding
 unary operations with the same tab because unary framing has no independent request identifier.
+
+Tab operands accept `self` locally, including batch reads, close, wait and input. Resolution uses the same
+caller ancestry as `api self`; text/key payloads remain literal. Remote `--master` rejects `self`.
+Failures retain `error` and add stable `code` and nullable `hint`; scripts should branch on `code`.
+`api help schema` lists codes. `doctor --json` returns list/error plus caller scope/target/socket,
+client/daemon versions, API compatibility and observed per-terminal shell-marker availability.
+It never starts a daemon; an unreachable target has unknown compatibility and a failure exit status.
