@@ -54,11 +54,20 @@ def widen(layout, value):
     return layout
 
 
-def desktop_runs(paths, layout):
-    """The staged launcher runs here (it needs only GLib; modules are loaded later by the frontend)."""
-    launcher = paths[[item['role'] for item in layout['desktop']].index('launcher')]
+def desktop_runs(paths, layout, directory):
+    """The staged launcher runs here, with its modules where it looks for them (`../lib/worminal`).
+
+    Even `--version` enters the native layer, which loads the frontend module, so the launcher alone cannot pass.
+    """
+    root = Path(directory) / 'probe'
+    for item, path in zip(layout['desktop'], paths):
+        if item['role'] in ('launcher', 'frontend', 'browser'):
+            target = root / item['path']
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, target)
     try:
-        return subprocess.run([str(launcher), '--version'], capture_output=True, timeout=10).returncode == 0
+        return subprocess.run([str(root / 'bin/worminal'), '--version'], capture_output=True,
+                              timeout=10).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
 
@@ -287,7 +296,7 @@ def bootstrap(layout, source, replace=False):
                              'Nothing was installed.') from error
         if result.returncode or b'Worp' not in result.stdout:
             raise ValueError('The staged daemon cannot run here (runtime/libc incompatibility). Nothing was installed.')
-        if layout is not base and not desktop_runs(paths[len(base['files']):], layout):
+        if layout is not base and not desktop_runs(paths[len(base['files']):], layout, directory):
             # A half-present graphics stack must not cost the node its daemon: install the required files only.
             layout, records, paths = base, records[:len(base['files'])], paths[:len(base['files'])]
         if not replace:

@@ -164,7 +164,11 @@ class RemoteCommandTest(unittest.TestCase):
         for directory in ('bin', 'lib/worminal'):
             (controller/directory).mkdir(parents=True)
         shutil.copy(DAEMON, controller/'bin/worminald')
-        (controller/'bin/worminal').write_text('#!/bin/sh\n[ "$1" = --version ] && echo worminal\nexit 0\n')
+        # Like the real launcher, even --version fails unless the frontend module sits at ../lib/worminal
+        # (subtle: staging the launcher alone on a target without modules once silently dropped the desktop files).
+        (controller/'bin/worminal').write_text(
+            f'#!/bin/sh\n[ -f "$(dirname "$0")/../lib/worminal/{MODULES[0]}" ] || exit 1\n'
+            '[ "$1" = --version ] && echo worminal\nexit 0\n')
         (controller/'bin/worminal').chmod(0o755)
         for module in MODULES:
             (controller/'lib/worminal'/module).write_bytes(b'module ' + module.encode())
