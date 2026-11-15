@@ -111,7 +111,8 @@ enum worminal_event_type {
 	WORMINAL_PRINT,
 	WORMINAL_DIAGNOSTIC,
 	WORMINAL_WRITE,
-	WORMINAL_NOTIFICATION
+	WORMINAL_NOTIFICATION,
+	WORMINAL_SHELL
 };
 enum worminal_control { WORMINAL_TOGGLE_PRINTER = 0, WORMINAL_PRINT_SCREEN = 1 };
 
@@ -137,6 +138,9 @@ int worminal_engine_allow_alternate(WorminalEngine *, int32_t);
 int worminal_engine_control(WorminalEngine *, uint32_t);
 int worminal_engine_selection(WorminalEngine *, uint8_t *, size_t, size_t *);
 /* Snapshot retained history and the active screen, preserving selection and scroll position. */
+/* Last N physical rows of retained history + active screen, without changing selection/viewport.
+ * total counts available physical rows; alternate screens exclude primary history. */
+int worminal_engine_tail(WorminalEngine *, int32_t, uint8_t *, size_t, size_t *, int32_t *);
 int worminal_engine_all_text(WorminalEngine *, uint8_t *, size_t, size_t *);
 int worminal_engine_frame(WorminalEngine *, int64_t, WorminalFrame *);
 int worminal_engine_row(WorminalEngine *, int32_t, WorminalCell *, size_t, size_t *, int32_t *);

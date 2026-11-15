@@ -1,15 +1,15 @@
 //! Ordered terminal key mappings. Exact modifiers must precede wildcard entries.
-use super::{key, Key, KeyEntry, Mod};
+use super::{key, KeyEntry};
 
-const SHIFT: u32 = Mod::SHIFT_MASK.bits();
-const CTRL: u32 = Mod::CONTROL_MASK.bits();
-const ALT: u32 = Mod::MOD1_MASK.bits();
-const SUPER: u32 = Mod::MOD4_MASK.bits();
-const MOD3: u32 = Mod::MOD3_MASK.bits();
+const SHIFT: u32 = 1;
+const CTRL: u32 = 4;
+const ALT: u32 = 8;
+const SUPER: u32 = 64;
+const MOD3: u32 = 32;
 const ANY: u32 = u32::MAX;
 const NONE: u32 = 0;
 
-const fn entry(key: Key, mask: u32, bytes: &'static [u8], appkey: i32, appcursor: i32) -> KeyEntry {
+const fn entry(key: u32, mask: u32, bytes: &'static [u8], appkey: i32, appcursor: i32) -> KeyEntry {
     KeyEntry {
         key,
         mask,

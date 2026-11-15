@@ -120,3 +120,10 @@ pub const WIRE_FEATURE_ATTENTION: u32 = 1 << 7;
 /// leaves exactly one tab shown. The daemon advertises the feature; views never send the packet without it.
 pub const WIRE_PANE: u32 = 38;
 pub const WIRE_FEATURE_PANES: u32 = 1 << 8;
+
+// Extended unary agent operations; older operations keep their original payloads.
+pub const WORP_READ_MANY: u32 = 10;
+pub const WORP_KEYS: u32 = 11;
+pub const WORP_PASTE: u32 = 12;
+pub const WORP_GUARDED_INPUT: u32 = 13;
+pub const WORP_WAIT: u32 = 14;

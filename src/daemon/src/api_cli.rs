@@ -12,6 +12,8 @@ use worminal_protocol::worp::{
 };
 use worminal_workspace::{socket, ssh};
 
+#[path = "api_arguments.rs"]
+mod arguments;
 #[path = "api_self.rs"]
 mod identity;
 #[path = "api_open.rs"]
@@ -21,119 +23,52 @@ fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message.to_owned())
 }
 
-fn key(name: &str) -> io::Result<Vec<u8>> {
-    match name.to_ascii_lowercase().as_str() {
-        "enter" => Ok(vec![b'\r']),
-        "tab" => Ok(vec![b'\t']),
-        "escape" | "esc" => Ok(vec![27]),
-        "backspace" => Ok(vec![127]),
-        name if name.starts_with("ctrl-")
-            && name.len() == 6
-            && name.as_bytes()[5].is_ascii_lowercase() =>
-        {
-            Ok(vec![name.as_bytes()[5] - b'a' + 1])
-        }
-        _ => Err(invalid(
-            "Unknown key. Use Enter, Tab, Escape, Backspace, or Ctrl-A through Ctrl-Z.",
-        )),
-    }
-}
-
 fn command(arguments: &[OsString]) -> io::Result<Request> {
+    if let Some(request) = arguments::parse(arguments)? {
+        request.validate()?;
+        return Ok(request);
+    }
     let operation = arguments.first().and_then(|arg| arg.to_str()).unwrap_or("");
-    let (is_read, tab, input) = match (operation, arguments.len()) {
-        ("list", 1) => return Ok(Request::List),
-        ("open", _) => return open::parse(&arguments[1..]),
-        ("close", 2) => {
-            let tab = arguments[1]
-                .to_str()
-                .and_then(|id| id.parse::<u32>().ok())
-                .ok_or_else(|| invalid("TAB must be a positive ID from worminald api list."))?;
-            let request = Request::Close { tab };
-            request.validate()?;
-            return Ok(request);
-        }
-        ("devices", 1) => return Ok(Request::Devices),
-        ("devices", 2) if arguments[1] == "--no-check" => return Ok(Request::Devices),
-        ("enroll", 3) => {
-            let device = Device {
-                name: arguments[1]
-                    .to_str()
-                    .ok_or_else(|| invalid("NAME must be UTF-8."))?
-                    .to_owned(),
-                endpoint: arguments[2]
-                    .to_str()
-                    .ok_or_else(|| invalid("ENDPOINT must be UTF-8."))?
-                    .to_owned(),
-            };
-            device.validate()?;
-            return Ok(Request::Enroll { device });
-        }
-        ("forget", 2) => {
-            let request = Request::Forget {
-                name: arguments[1]
-                    .to_str()
-                    .ok_or_else(|| invalid("NAME must be UTF-8."))?
-                    .to_owned(),
-            };
-            request.validate()?;
-            return Ok(request);
-        }
-        ("read", 2) | ("type", 3) | ("key", 3..) => {
-            let tab = arguments[1]
-                .to_str()
-                .and_then(|id| id.parse::<u32>().ok())
-                .filter(|id| *id != 0)
-                .ok_or_else(|| invalid("TAB must be a positive ID from worminald api list."))?;
-            let input = match operation {
-                "type" => {
-                    let text = arguments[2]
-                        .to_str()
-                        .ok_or_else(|| invalid("TEXT must be UTF-8."))?;
-                    // Literal typing cannot silently smuggle Enter or other control keystrokes.
-                    // Use the explicit key operation to submit a prompt or interrupt a process.
-                    if text.chars().any(char::is_control) {
-                        return Err(invalid(
-                            "TEXT must contain no control characters; use worminald api key.",
-                        ));
-                    }
-                    text.as_bytes().to_vec()
-                }
-                "key" => {
-                    let mut input = Vec::new();
-                    for value in &arguments[2..] {
-                        input.extend(key(value
-                            .to_str()
-                            .ok_or_else(|| invalid("KEY must be UTF-8."))?)?);
-                    }
-                    input
-                }
-                _ => Vec::new(),
-            };
-            (operation == "read", tab, input)
-        }
+    let text = |index: usize| {
+        arguments[index]
+            .to_str()
+            .ok_or_else(|| invalid("Arguments must be UTF-8."))
+    };
+    let request = match (operation, arguments.len()) {
+        ("list", 1) => Request::List,
+        ("open", _) => open::parse(&arguments[1..])?,
+        ("close", 2) => Request::Close {
+            tab: text(1)?
+                .parse()
+                .map_err(|_| invalid("TAB must be a positive ID from api list."))?,
+        },
+        ("devices", 1) => Request::Devices,
+        ("devices", 2) if arguments[1] == "--no-check" => Request::Devices,
+        ("enroll", 3) => Request::Enroll {
+            device: Device {
+                name: text(1)?.into(),
+                endpoint: text(2)?.into(),
+            },
+        },
+        ("forget", 2) => Request::Forget {
+            name: text(1)?.into(),
+        },
         _ => {
             return Err(invalid(
                 "Unknown command or arguments; run worminald api help.",
             ))
         }
     };
-    let request = if is_read {
-        Request::Read { tab }
-    } else {
-        Request::Input { tab, bytes: input }
-    };
     request.validate()?;
     Ok(request)
 }
 
 fn request(scope: &[u8], master: Option<&OsStr>, request: Request) -> io::Result<Reply> {
-    request_with_timeout(
-        scope,
-        master,
-        request,
-        if master.is_some() { 13 } else { 3 },
-    )
+    let seconds = match &request {
+        Request::Wait { timeout_ms, .. } => u64::from(*timeout_ms).div_ceil(1000),
+        _ => 0,
+    } + if master.is_some() { 13 } else { 3 };
+    request_with_timeout(scope, master, request, seconds)
 }
 
 fn request_with_timeout(
@@ -276,12 +211,20 @@ mod tests {
                 bytes: "hello 世界".as_bytes().to_vec()
             }
         );
+        assert_eq!(
+            command(&args(&["type", "12", "--", "--stdin"])).unwrap(),
+            Request::Input {
+                tab: 12,
+                bytes: b"--stdin".to_vec()
+            }
+        );
         let packet = command(&args(&["key", "12", "Enter", "Ctrl-C"])).unwrap();
         assert_eq!(
             packet,
-            Request::Input {
+            Request::Keys {
                 tab: 12,
-                bytes: b"\r\x03".to_vec()
+                names: vec!["Enter".into(), "Ctrl-C".into()],
+                guard: String::new()
             }
         );
         for values in [

@@ -7,7 +7,8 @@ use worminal_protocol::*;
 pub const OVERVIEW: &str = "worminald: persistent terminal workspace service and headless agent interface
 
 Discover by topic (each prints a complete reference and needs no running daemon):
-  worminald api help                  list, self, open, close, read, type, key, devices, enroll, forget
+  worminald api help                  list, self, open, close, read, wait, type, key, devices, enroll, forget
+  worminald api help observe          history, batch reads, wait, guarded input and shell integration
   worminald api help schema           JSON reply shapes, limits, exit codes
   worminald api help session          binary streaming protocol (worminald api --session)
   worminald config --help             how to read, edit and validate worminal.yaml (--example)
@@ -19,7 +20,20 @@ Environment: every Worminal tab sets WORMINAL_DAEMON to this executable's path (
 Manual: man worminal. Inspection and `api` never start a daemon or restore shells.
 ";
 
-const TOPICS: [(&str, &str); 2] = [
+const TOPICS: [(&str, &str); 6] = [
+    ("keys", "named keys, modifiers and target terminal modes"),
+    (
+        "observe",
+        "scrollback, batch reads, revisions, wait and guarded input",
+    ),
+    (
+        "shell-bash",
+        "optional runnable Bash integration; eval in interactive .bashrc",
+    ),
+    (
+        "shell-zsh",
+        "optional runnable Zsh integration; eval in interactive .zshrc",
+    ),
     (
         "schema",
         "JSON reply shapes, key names, errors and exit codes",
@@ -41,6 +55,10 @@ pub fn index() -> String {
 pub fn topic(name: &str) -> Option<String> {
     match name {
         "schema" => Some(SCHEMA.to_owned()),
+        "keys" => Some(KEYS.to_owned()),
+        "observe" => Some(OBSERVE.to_owned()),
+        "shell-bash" => Some(include_str!("../../../assets/shell/worminal.bash").to_owned()),
+        "shell-zsh" => Some(include_str!("../../../assets/shell/worminal.zsh").to_owned()),
         "session" => Some(session()),
         _ => None,
     }
@@ -71,7 +89,19 @@ Failures also happen without a daemon: {"ok":false,"error":"No workspace service
 Limits: type/key input 65536 bytes per request; terminal size 1..=400 columns, 1..=200 rows; at most 32
 enrolled devices; local timeout 3s, --master timeout 13s. Tab ids are per running daemon; re-list after restart.
 Targeting: WORMINAL_SHARED_SOCKET_SCOPE picks the local workspace; --master user@host uses SSH instead.
-Keys: Enter, Tab, Escape (Esc), Backspace, Ctrl-A..Ctrl-Z (case-insensitive); several may follow one `key`.
+Additional fields (additive to the shapes above):
+list "workspace":S; TAB "state":STATE. read "workspace":S, "revision":S, "state":STATE, "directory":S, "title":S, "text_source":"viewport".
+STATE {"busy":BOOL,"controlled":BOOL,"shown":BOOL,"foreground":FOREGROUND|null,"input_guard":S|null,
+       "shell":{"phase":null|"prompt"|"input"|"running"|"finished","command_id":N,"exit_status":N|null}}
+FOREGROUND {"process_group":N,"start_time":N,"executable":S,"identity":S}; start_time is Linux clock ticks since boot.
+read TAB... [--tail N] {"ok":BOOL,"results":[READ_OR_ERROR...]}; per-tab errors retain request order.
+Tail results replace lines with physical rows, "text_source":"tail", "total_lines":N,"truncated":BOOL.
+wait adds "changed":BOOL,"timed_out":BOOL to a viewport read. Timeout is ok:true.
+Extended limits: batch 1..16 tabs, tail 1..1000 rows; aggregate replies fit the 4 MiB stream queue.
+Keys 1..256 names, each at most 64 bytes; guard at most 1024 bytes; revision at most 256 bytes.
+Wait timeout 0..60000 milliseconds (CLI accepts whole seconds 0..60); 32 waits per workspace.
+Guards/revisions are opaque; see api help observe. State is observational, not application readiness.
+Keys: api help keys lists named keys and supported modifiers; several may follow one key command.
 "#;
 
 /// Name, wire id, body layout.
@@ -97,7 +127,7 @@ const COMMANDS: [Row; 21] = [
     ("SERVICE_INFO", WIRE_SERVICE_INFO, "empty. The daemon answers with its pid."),
     ("STOP", WIRE_STOP, "empty. Shuts the daemon down; use with care."),
     ("HELLO/NEW", WIRE_HELLO, "launch record (HELLO is 1, NEW is 2). Unused here: create tabs with `worminald api open`."),
-    ("WORP", WIRE_WORP, "u32 operation then fields: 0 list, 1 read, 2 input, 3 devices, 4 enroll, 5 forget, 6/9 open, 7 open browser, 8 close. Same results as the unary commands; the reply is a WORP packet: u32 status (1 ok, 0 failure) + the JSON of `api help schema`."),
+    ("WORP", WIRE_WORP, "u32 operation then fields: 0 list, 1 read, 2 input, 3 devices, 4 enroll, 5 forget, 6/9 open, 7 open browser, 8 close, 10 batch/tail read, 11 keys, 12 paste, 13 guarded input, 14 wait. Same results as the unary commands; the reply is a WORP packet: u32 status (1 ok, 0 failure) + the JSON of `api help schema`."),
     ("TRANSFER", WIRE_HANDOFF, "internal daemon upgrade handoff (HANDIN is 26, HANDOFF 27); not for clients."),
 ];
 
@@ -155,6 +185,11 @@ fn session() -> String {
          FRAME_FINISH. Later frames are deltas against the previous one; a viewer keeps its own baseline.\n\
          Cell: 16 bytes = u32 rune, u32 attributes, u32 foreground, u32 background (at most {WORKSPACE_MAX_COLS} columns, {WORKSPACE_MAX_ROWS} rows).\n\
          Feature bits (daemon offers PANES, clients advertise the rest): {features}\n\n\
+         Extended WORP payloads (all string fields are length-prefixed):\n\
+         10: tail u32 (0 viewport), count u32, count tab u32s; envelope tab=0.\n\
+         11: guard string (empty unguarded), count u32, count key-name strings; envelope tab=target.\n\
+         12: guard string, UTF-8 paste string; 13: guard string, raw input string.\n\
+         14: after-revision string, timeout-ms u32 (0..60000); deferred reply on same tab.\n\
          Client -> daemon (kind, id, body):\n{commands}\n\
          Daemon -> client:\n{events}",
         features = features.join(" "),
@@ -162,3 +197,44 @@ fn session() -> String {
         events = table(&EVENTS),
     )
 }
+
+const KEYS: &str = r#"key TAB [--guard TOKEN] KEY...
+Names (case-insensitive): Enter/Return, Tab, Escape/Esc, Backspace, Up, Down, Left, Right,
+Home, End, Insert, Delete, PageUp, PageDown, F1..F35; Ctrl-A..Ctrl-Z and Alt-A..Alt-Z.
+Prefixes: Ctrl-, Alt-, Shift-, Super-, combinable (for example Ctrl-Shift-Left).
+Supported combinations use the GUI's ordered key table; unsupported combinations fail before any input.
+Target daemon encodes keys using the terminal's current application-cursor/keypad modes.
+Keys send application input directly; GUI shortcuts such as Shift-PageUp do not scroll the view.
+For explicit input safety use the latest read reply's state.input_guard; see api help observe.
+"#;
+
+const OBSERVE: &str = r#"Passive inspection: no focus, resize, selection or scroll changes.
+  read TAB                         viewport snapshot
+  read TAB... [--tail N]            batch of 1..16 tabs, optional last 1..1000 physical rows
+  wait TAB --after REV --timeout S  wait for observable change (0..60 seconds)
+  type TAB [--guard TOKEN] TEXT     literal text, no Enter
+  type TAB [--guard TOKEN] --stdin  bounded UTF-8 paste, no appended Enter
+  key TAB [--guard TOKEN] KEY...    named application keys
+Batch replies use results[] even for one tab with --tail. Each result has its own ok/error;
+outer ok is false if any result fails. Reply-budget errors ask for fewer tabs/rows. Tail includes active screen blank rows, excludes primary
+history on alternate screens, preserves soft-wrap row boundaries, and reports total_lines/truncated.
+A single read returns workspace, revision and state; list records also expose state.
+Revisions are opaque viewport/metadata/output-generation tokens scoped to the daemon instance.
+Wait returns a current viewport with changed/timed_out; a timeout is successful, not completion.
+Wait is deferred in the daemon, checked at most every 50ms; at most 32 waits, one per connection.
+A closed/missing tab fails. Disconnect cancels. Daemon upgrades/restarts invalidate tokens; re-read.
+input_guard identifies workspace, tab and foreground group leader (start time/executable/argv).
+It is null when identity is unavailable. --guard checks immediately before queueing input and rejects
+stale identities; it cannot eliminate a process changing after the check or certify consumption.
+Foreground means the process-group leader, not every process in a pipeline or a remote SSH application.
+Busy is advisory OSC status, never proof of readiness or completion. controlled/shown describe view ownership.
+stdin accepts at most 65536 UTF-8 bytes (text, tabs, CR/LF). It uses the existing paste filter and
+bracketed envelope when enabled. Multiline stdin is rejected without bracketed paste because newline
+could submit commands. Use key Enter explicitly. Envelope bytes count toward the input queue limit.
+Optional shell integration: api help shell-bash / shell-zsh prints runnable source with setup comments.
+OSC 133 A/B/C/D records prompt/input/running/finished and D's exit status. command_id advances at C;
+exit_status is null until a valid D status. These are program-reported, untrusted observations;
+without markers phase is null. Status survives the next prompt, clears at the next command,
+and is not restored across daemon handoff/restart. No automatic shell startup modification.
+Working directory uses the existing daemon process-directory resolver, including without shell hooks.
+"#;

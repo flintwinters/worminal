@@ -74,6 +74,18 @@ and
 lists existing tabs as JSON.
 .B worminald api read TAB
 reads a terminal viewport without changing its view or terminal size.
+.B worminald api read TAB... --tail N
+reads bounded retained history without moving the view; batch results preserve request order.
+.B worminald api wait TAB --after REVISION --timeout SECONDS
+waits passively for a changed observation. Timeouts do not imply command completion.
+.B worminald api help observe
+explains revisions, foreground identity, input guards, stdin paste and their limits.
+.B worminald api help keys
+lists application key names and modifiers, encoded using the target terminal mode.
+.B worminald api help shell-bash
+and
+.B worminald api help shell-zsh
+print runnable opt-in shell integration with setup comments for command boundaries and exit status.
 .B worminald api type TAB TEXT
 sends literal UTF-8 text without Enter; use
 .B worminald api key TAB Enter

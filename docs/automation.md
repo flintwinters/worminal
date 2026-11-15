@@ -13,6 +13,11 @@ worminald api open --cwd /path/to/project -- /bin/sh
 worminald api open --browser https://example.org/
 worminald api close 12
 worminald api read 12
+worminald api read 12 15 --tail 200
+worminald api wait 12 --after REVISION --timeout 30
+worminald api type 12 --guard INPUT_GUARD 'text'
+worminald api type 12 --stdin < message.txt
+worminald api key 12 Ctrl-Left F5
 worminald api type 12 'What are you working on?'
 worminald api key 12 Enter
 ```
@@ -67,12 +72,60 @@ mutations and are never retried automatically. A lost reply can leave the outcom
 issuing another open or close. Titles/URLs are descriptive metadata, not globally unique tab identities.
 
 `type` sends literal UTF-8 text with no automatic Enter. Control characters are rejected; `key` sends explicitly
-named keystrokes: Enter, Tab, Escape (Esc), Backspace, and Ctrl-A through Ctrl-Z, case-insensitively. Multiple keys
+named keystrokes including arrows, navigation, F1..F35 and Ctrl-/Alt-/Shift-/Super- modifiers; `api help keys` is the complete reference. Encoding uses the target terminal mode and the same table as GUI input. Multiple keys
 are sent in the supplied order. Input is limited to 65536 bytes per request. Input goes to the selected tab's PTY
 without taking its graphical controller or resizing it. Sending Enter may submit a command or prompt; Ctrl-C may
 interrupt work. These commands do not detect whether the intended application still owns the terminal.
 
-All operations return one JSON object on stdout. Success has `"ok": true` and exit status 0; failures have
+## Observation, waiting and input safety
+
+`api help observe` documents passive inspection and its limits; `api help keys` lists application keys.
+`read TAB... [--tail N]` returns ordered `results`, each with its own success/error. Batch reads accept
+1..16 tabs; `--tail` accepts 1..1000 physical rows and includes the active screen's blank rows. Tail reads
+preserve soft-wrap boundaries and report `total_lines` and `truncated`. Alternate screens exclude primary
+history. These reads never move the user's viewport or selection. A batch that exhausts the stream reply budget reports per-tab errors; request fewer tabs or rows.
+
+Read replies include an opaque `revision`, a daemon-instance `workspace`, and `state`; list records also
+include state. State reports advisory busy status, view ownership, the foreground process-group leader,
+an opaque `input_guard`, and optional shell phase/command counter/exit status. Unknown identities/statuses
+are null. The group leader does not identify every pipeline member or an application beyond SSH.
+
+`wait TAB --after REVISION --timeout SECONDS` waits inside the daemon without taking control or repeatedly
+opening SSH sessions. It returns a current viewport with `changed` and `timed_out`; an unchanged timeout
+is successful. Deadlines are bounded to 60 seconds. Changes are checked at most every 50ms while waits
+are pending, with one pending wait per connection and at most 32 per workspace. Disconnect cancels the wait;
+closed tabs fail. Re-read after daemon upgrade/restart. Revisions include output generation, so output that
+only enters history still wakes a waiter. A quiet screen never proves command completion.
+
+`type` and `key` accept `--guard TOKEN` before their payload. Copy `state.input_guard` from a recent read;
+the daemon rejects input if its workspace/tab/foreground identity has changed. Identity includes the group
+leader's PID, start time, executable and argv. This check occurs before queueing, but programs can still
+change afterward; receipts never certify application consumption. A null guard means identity is unavailable.
+
+`type TAB --stdin` reads bounded UTF-8, allowing tabs and line endings. It reuses native paste filtering
+and bracketed paste. Multiline text requires the target to enable bracketed paste, otherwise it is rejected
+to avoid implicit command submission. No Enter is appended. Input including the envelope must fit the
+65536-byte limit. Use `--` before literal TEXT that could be mistaken for an option.
+
+## Optional shell integration
+
+The executable supplies opt-in integration; no shell startup files are edited automatically. Add the relevant
+line to your interactive startup file:
+
+```sh
+# Bash 4.4+, ~/.bashrc
+[[ -n ${WORMINAL_DAEMON-} ]] && eval "$("$WORMINAL_DAEMON" api help shell-bash)"
+# Zsh, ~/.zshrc
+[[ -n ${WORMINAL_DAEMON-} ]] && eval "$("$WORMINAL_DAEMON" api help shell-zsh)"
+```
+
+The snippets install prompt/execution hooks only inside Worminal and only once per shell. OSC 133 A/B/C/D
+reports prompt/input/running/finished; D carries an exit status. `state.shell.command_id` advances on C,
+and `exit_status` survives the next prompt and clears at the next command. Working directory continues
+through the existing process-directory resolver. Other applications may emit the same markers; these
+are untrusted observations, not authenticated command receipts. Handoff/restart clears shell observations.
+
+All operations return one JSON object on stdout (help topics print reference text or shell source). Success has `"ok": true` and exit status 0; failures have
 `"ok": false`, an `error` message and exit status 1. Input acknowledgements report bytes queued for the PTY;
 they do not certify application processing or a reply. Re-read the screen to observe the result. Retries can
 repeat input: callers should inspect uncertain outcomes before sending again.
@@ -108,3 +161,10 @@ Operation 8 closes a tab (`tab=id`, no fields). Registry responses carry members
 are a caller-side operation, outside the daemon loop. Replies use message 33 and the same tab ID, with
 a big-endian status u32 (1 success, 0 failure), followed by the UTF-8 JSON object. JSON `api_version` is currently
 1 in list replies. Unknown operations and missing tabs return explicit errors. Read/input require a terminal; close accepts both kinds.
+
+Extended operations preserve all older payloads: 10 reads a batch/tail (tail u32, count u32, tab IDs u32;
+envelope tab=0); 11 sends named keys (guard string, count u32, key strings); 12 pastes (guard string,
+UTF-8 text string); 13 guards raw input (guard string, bytes string); 14 waits (revision string,
+timeout milliseconds u32). Empty guards mean unguarded input. `api help session` describes these fields
+from the executable. A wait reply is deferred on the same connection and tab; avoid multiple outstanding
+unary operations with the same tab because unary framing has no independent request identifier.

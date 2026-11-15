@@ -305,13 +305,15 @@ def check_agent_api():
     """Check headless agent discovery, screen reads and keystrokes on a private workspace."""
     native_build.Builder().target("build/libworminal_engine.a")
     code = run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-protocol",
-                "-p", "worminal-daemon", "--lib"])
+                "-p", "worminal-daemon", "-p", "worminal-engine", "--lib"])
     if not code:
         code = run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-workspace", "--test", "devices"])
     if not code:
         # Registry publication shares the recovery writer; these existing boundary checks need no C oracle.
         code = run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-workspace",
                     "--test", "state", "invalid_"])
+    if not code:
+        code = run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-engine", "--test", "selection"])
     if not code:
         candidate = build_rust_daemon()
         code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",

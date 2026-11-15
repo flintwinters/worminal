@@ -16,7 +16,7 @@ impl Service {
 
     pub(crate) fn created_reply(&mut self, index: usize, now: i64) -> io::Result<Reply> {
         let id = self.tabs[index].id;
-        let metadata = record(&mut self.tabs[index], now);
+        let metadata = record(&mut self.tabs[index], now, &self.workspace_id);
         self.publish(now)?;
         Ok(success(format!(
             "{{\"ok\":true,\"id\":{id},\"created\":true,\"tab\":{metadata}}}"

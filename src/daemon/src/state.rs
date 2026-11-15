@@ -100,8 +100,38 @@ pub(crate) struct Screen {
     pub links: Vec<Vec<u8>>,
 }
 
+#[derive(Default)]
+pub(crate) struct ShellState {
+    pub phase: Option<&'static str>,
+    pub command_id: u64,
+    pub exit_status: Option<i32>,
+}
+impl ShellState {
+    fn event(&mut self, marker: i32, data: &[u8]) {
+        match marker as u8 {
+            b'A' => self.phase = Some("prompt"),
+            b'B' => self.phase = Some("input"),
+            b'C' => {
+                self.phase = Some("running");
+                self.command_id = self.command_id.saturating_add(1);
+                self.exit_status = None;
+            }
+            b'D' => {
+                self.phase = Some("finished");
+                self.exit_status = std::str::from_utf8(data)
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .filter(|status| (0..=255).contains(status));
+            }
+            _ => {}
+        }
+    }
+}
+
 pub(crate) struct Tab {
     pub id: u32,
+    pub output_revision: u64,
+    pub shell: ShellState,
     pub terminal: Option<Terminal>,
     pub title: Vec<u8>,
     pub initial_title: Vec<u8>,
@@ -187,6 +217,8 @@ impl Tab {
         Self {
             id,
             terminal: None,
+            output_revision: 0,
+            shell: ShellState::default(),
             title: title.to_vec(),
             initial_title: title.to_vec(),
             directory: Vec::new(),
@@ -353,6 +385,7 @@ impl Tab {
         if self.terminal.is_none() {
             return Ok(Vec::new());
         }
+        self.output_revision = self.output_revision.saturating_add(1);
         let mut notices = Vec::new();
         if self.terminal.as_ref().unwrap().pending.len() >= 4 {
             // Native compatibility snapshots permit a larger unparsed buffer than a live UTF-8 suffix.
@@ -530,6 +563,7 @@ impl Tab {
                         ));
                     }
                 }
+                terminal::WORMINAL_SHELL => self.shell.event(event.argument, &event.data),
                 terminal::WORMINAL_NOTIFICATION => {
                     if let Some(client) = self.controller {
                         notices.push(Notice::Event(

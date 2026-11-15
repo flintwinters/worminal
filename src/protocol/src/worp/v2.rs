@@ -18,6 +18,11 @@ pub fn encode_request(request: &Request) -> io::Result<Packet> {
     let mut body = Buffer::default();
     body.put_u32(match request {
         Request::List => WORP_LIST,
+        Request::ReadMany { .. } => WORP_READ_MANY,
+        Request::Keys { .. } => WORP_KEYS,
+        Request::Paste { .. } => WORP_PASTE,
+        Request::GuardedInput { .. } => WORP_GUARDED_INPUT,
+        Request::Wait { .. } => WORP_WAIT,
         Request::OpenTerminal { .. } => WORP_OPEN_TERMINAL,
         Request::OpenBrowser { .. } => WORP_OPEN_BROWSER,
         Request::Close { .. } => WORP_CLOSE,
@@ -28,6 +33,34 @@ pub fn encode_request(request: &Request) -> io::Result<Packet> {
         Request::Forget { .. } => WORP_FORGET,
     })?;
     match request {
+        Request::ReadMany { tabs, tail } => {
+            body.put_u32(*tail)?;
+            body.put_u32(tabs.len() as u32)?;
+            for tab in tabs {
+                body.put_u32(*tab)?;
+            }
+        }
+        Request::Wait {
+            after, timeout_ms, ..
+        } => {
+            body.put_string(after.as_bytes())?;
+            body.put_u32(*timeout_ms)?;
+        }
+        Request::Keys { names, guard, .. } => {
+            body.put_string(guard.as_bytes())?;
+            body.put_u32(names.len() as u32)?;
+            for name in names {
+                body.put_string(name.as_bytes())?;
+            }
+        }
+        Request::Paste { text, guard, .. } => {
+            body.put_string(guard.as_bytes())?;
+            body.put_string(text.as_bytes())?;
+        }
+        Request::GuardedInput { bytes, guard, .. } => {
+            body.put_string(guard.as_bytes())?;
+            body.put_string(bytes)?;
+        }
         Request::Input { bytes, .. } => body.put_bytes(bytes)?,
         Request::OpenTerminal { options } => {
             body.put_u32(options.columns)?;
@@ -92,6 +125,9 @@ pub fn decode_request(packet: &Packet) -> io::Result<Request> {
             let url = text(&mut fields)?;
             fields.finish()?;
             Request::OpenBrowser { url }
+        }
+        WORP_READ_MANY | WORP_KEYS | WORP_PASTE | WORP_GUARDED_INPUT | WORP_WAIT => {
+            super::v2_agent::decode(operation, packet.tab, bytes)?
         }
         WORP_CLOSE if bytes.is_empty() => Request::Close { tab: packet.tab },
         WORP_READ if bytes.is_empty() => Request::Read { tab: packet.tab },

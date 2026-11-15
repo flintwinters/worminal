@@ -26,7 +26,8 @@ OSC 99 metadata/payload events go only to capable controlling views; those views
 notifications and deliver them asynchronously on their desktop, including for remote tabs. OSC 7501 agent status (working) and OSC 9;4 progress (normal or indeterminate) set the engine's `MODE_BUSY` bit, carried in the catalog mode word
 to every view; the daemon clears it when the shell regains the foreground. Busy tabs get a static gray background. Click targets
 retain weak window ownership and use the existing tab-selection and platform activation paths.
-The frontend owns its ordered keyboard mappings in Rust. Shell defaults live with Rust PTY creation;
+The Rust engine wrapper owns ordered terminal key encoding shared by the frontend and headless API;
+the frontend owns GUI shortcuts. Shell defaults live with Rust PTY creation;
 browser defaults live with Rust target resolution. C headers retain only engine snapshot and module ABIs:
 `src/protocol` owns wire constants and framing, `src/workspace` owns recovery/handoff formats, and `src/gtk`
 contains module/D-Bus definitions and browser scripts/templates. The Rust crates under `src` contain the launcher, daemon, frontend, browser
@@ -50,6 +51,9 @@ the new file. It needs the same CPU, sudo and /usr/local on both sides, and neve
 It compares only the Cargo version, so bump it with any change remote daemons must receive; equal versions never upgrade.
 Every tab's environment carries `WORMINAL_DAEMON`, the serving worminald's path: an agent learns it is in a tab and where to start discovery.
 Inspection never takes control or starts a daemon; one-shot input preserves the existing view/controller.
+Agent reads expose bounded history/batches and opaque observation revisions; deferred waits never block the service.
+Optional OSC 133 shell markers report command boundaries/status without inferring completion from idle output.
+Input guards bind the workspace instance and foreground process identity; they do not certify processing.
 The daemon atomically saves ordered terminal directories and browser URLs, scoped by protocol/workspace under
 XDG_STATE_HOME. Restart recovery creates fresh shells with the one-shot WORMINAL_RESTORE=1 marker, never replays
 commands or restores processes/scrollback. Real shell startup must respect that marker.

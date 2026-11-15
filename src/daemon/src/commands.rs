@@ -71,6 +71,13 @@ impl Service {
         let peer_pid = peer.pid;
         let now = self.now();
         match command.kind {
+            CommandKind::Call(worp::Request::Wait {
+                tab,
+                after,
+                timeout_ms,
+            }) => {
+                return self.start_api_wait(client, tab, after, timeout_ms, now);
+            }
             CommandKind::Call(request) => {
                 let reply = self.handle(request)?;
                 self.reply(client, command.tab, reply);

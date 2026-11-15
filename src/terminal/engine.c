@@ -231,6 +231,27 @@ worminal_engine_all_text(WorminalEngine *engine, uint8_t *output, size_t capacit
 }
 
 int
+worminal_engine_tail(WorminalEngine *engine, int32_t count, uint8_t *output,
+                     size_t capacity, size_t *bytes, int32_t *total)
+{
+    if (!engine || !total || count < 1 || count > 1000) return WORMINAL_INVALID;
+    Selection saved = engine->sel;
+    int scroll = engine->term.scr;
+    *total = engine->term.row + (engine->term.mode & MODE_ALTSCREEN ? 0 : engine->term.histlen);
+    int first = engine->term.row - (count < *total ? count : *total);
+    engine->term.scr = 0;
+    /* Rectangular selection preserves physical rows, including soft wraps and blank rows. */
+    engine->sel = (Selection){.type = SEL_RECTANGULAR,
+        .ob = {0, first}, .nb = {0, first},
+        .oe = {engine->term.col - 1, engine->term.row - 1},
+        .ne = {engine->term.col - 1, engine->term.row - 1}};
+    int status = copy_selection(engine, output, capacity, bytes, 0);
+    engine->sel = saved;
+    engine->term.scr = scroll;
+    return status;
+}
+
+int
 worminal_engine_frame(WorminalEngine *engine, int64_t now, WorminalFrame *frame)
 {
 	if (!engine || !frame || now < engine->now || now < 0) return WORMINAL_INVALID;

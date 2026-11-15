@@ -36,6 +36,155 @@ class AgentApiTest(unittest.TestCase):
         self.assertEqual(value['ok'], success)
         return value
 
+    def await_read(self, tab, predicate):
+        deadline = time.monotonic() + 3
+        while True:
+            value = self.api('read', tab)
+            if predicate(value):
+                return value
+            self.assertLess(time.monotonic(), deadline, value)
+            time.sleep(.01)
+
+    def test_history_batch_reads_and_state_preserve_view(self):
+        tab = self.fixture.launch("printf 'first\\r\\nsecond\\r\\nthird\\r\\nfourth\\r\\nfifth READY'; exec cat")
+        before = self.await_read(tab, lambda v: 'fifth' in ''.join(v['lines']))
+        self.assertNotIn('first', before['lines'])
+        result = self.api('read', tab, '--tail', 20)['results'][0]
+        self.assertIn('first', result['lines'])
+        self.assertFalse(result['truncated'])
+        tail = self.api('read', tab, '--tail', 2)['results'][0]
+        self.assertEqual(len(tail['lines']), 2)
+        self.assertTrue(tail['truncated'])
+        self.assertEqual(self.api('read', tab), before)
+        state = before['state']
+        self.assertTrue(state['controlled'])
+        self.assertIsNotNone(state['foreground'])
+        self.assertIsNotNone(state['input_guard'])
+        batch = self.api('read', tab, 999, success=False)
+        self.assertTrue(batch['results'][0]['ok'])
+        self.assertFalse(batch['results'][1]['ok'])
+        with self.ssh_transport():
+            self.assertEqual(self.api('--master', 'fixture-host', 'read', tab, '--tail', 20),
+                             self.api('read', tab, '--tail', 20))
+
+    def test_wait_is_passive_times_out_wakes_and_reports_closed_tabs(self):
+        tab = self.fixture.launch('stty raw -echo; printf READY; exec cat')
+        baseline = self.api('read', tab)
+        timeout = self.api('wait', tab, '--after', baseline['revision'], '--timeout', 0)
+        self.assertTrue(timeout['timed_out'])
+        self.assertFalse(timeout['changed'])
+        with self.ssh_transport():
+            process = subprocess.Popen([str(workspace.DAEMON), 'api', '--master', 'fixture-host',
+                'wait', str(tab), '--after', baseline['revision'], '--timeout', '2'],
+                env=self.fixture.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                self.api('type', tab, 'wake')
+                stdout, stderr = process.communicate(timeout=4)
+                self.assertEqual(process.returncode, 0, stderr + stdout)
+                reply = json.loads(stdout)
+                self.assertTrue(reply['changed'])
+                self.assertFalse(reply['timed_out'])
+                self.assertEqual(reply['state']['controlled'], baseline['state']['controlled'])
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.communicate()
+        # Remote stdio forwarding must also extend its local socket timeout beyond the default 3s.
+        with self.ssh_transport():
+            fresh_remote = self.api('read', tab)
+            result = subprocess.run([str(workspace.DAEMON), 'api', '--master', 'fixture-host',
+                'wait', str(tab), '--after', fresh_remote['revision'], '--timeout', '4'],
+                env=self.fixture.env, capture_output=True, text=True, timeout=7)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(json.loads(result.stdout)['timed_out'])
+        fresh = self.api('read', tab)
+        started = time.monotonic()
+        self.assertTrue(self.api('wait', tab, '--after', fresh['revision'], '--timeout', 1)['timed_out'])
+        self.assertGreaterEqual(time.monotonic() - started, .9)
+        self.api('close', tab)
+        self.api('wait', tab, '--after', fresh['revision'], '--timeout', 0, success=False)
+
+    def test_guarded_input_checks_workspace_tab_and_exec_identity(self):
+        tab = self.fixture.launch('stty raw -echo; printf READY; exec cat')
+        guard = self.api('read', tab)['state']['input_guard']
+        self.api('type', tab, '--guard', guard, 'guarded')
+        self.await_read(tab, lambda v: 'guarded' in ''.join(v['lines']))
+        self.api('type', tab, '--guard', 'other-workspace:' + guard, 'BAD', success=False)
+        other = self.api('open', '--', '/bin/cat')['id']
+        self.api('key', other, '--guard', guard, 'Enter', success=False)
+        self.assertNotIn('BAD', ''.join(self.api('read', tab)['lines']))
+        changing = self.api('open', '--', '/bin/sh', '-c',
+            'printf BEFORE; read line; exec /bin/cat')['id']
+        before = self.await_read(changing, lambda v: 'BEFORE' in ''.join(v['lines']))
+        self.api('key', changing, 'Enter')
+        self.await_read(changing, lambda v: v['state']['input_guard'] != before['state']['input_guard'])
+        self.api('type', changing, '--guard', before['state']['input_guard'], 'BAD', success=False)
+
+    def test_named_keys_use_target_mode_and_stdin_is_bounded_bracketed_paste(self):
+        # Hex output makes exact PTY bytes observable without feeding escape sequences back to the parser.
+        script = ('import os,tty; tty.setraw(0); '
+                  'os.write(1,b"\\x1b[?1h\\x1b[?2004hREADY"); '
+                  'exec("while True:\\n b=os.read(0,65536)\\n os.write(1,b.hex().encode()+b\\"\\\\r\\\\n\\")")')
+        tab = self.api('open', '--', '/usr/bin/python3', '-c', script)['id']
+        self.await_read(tab, lambda v: 'READY' in ''.join(v['lines']))
+        self.api('key', tab, 'Up', 'Ctrl-Left', 'F5')
+        self.await_read(tab, lambda v: '1b4f411b5b313b35441b5b31357e' in ''.join(v['lines']))
+        result = subprocess.run([str(workspace.DAEMON), 'api', 'type', str(tab), '--stdin'],
+            input='one\ntwo', text=True, capture_output=True, env=self.fixture.env, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.await_read(tab, lambda v: '1b5b3230307e6f6e650a74776f1b5b3230317e' in ''.join(v['lines']))
+        ordinary = self.fixture.launch('stty raw -echo; printf READY; exec cat')
+        for payload in ('one\ntwo', 'x' * 65537, '\x1b', '\x00'):
+            result = subprocess.run([str(workspace.DAEMON), 'api', 'type', str(ordinary), '--stdin'],
+                input=payload, text=True, capture_output=True, env=self.fixture.env, timeout=5)
+            self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertNotIn('one', ''.join(self.api('read', ordinary)['lines']))
+
+    def test_optional_shell_source_reports_real_exit_status_and_is_discoverable(self):
+        import shutil
+        for shell in ('bash', 'zsh'):
+            executable = shutil.which(shell)
+            if executable is None:
+                continue
+            with self.subTest(shell=shell):
+                argv = [executable, '--noprofile', '--norc', '-i'] if shell == 'bash' else [executable, '-f', '-i']
+                tab = self.api('open', '--', '/usr/bin/env', 'HISTFILE=/dev/null', 'INPUTRC=/dev/null', *argv)['id']
+                setup = f'eval "$("$WORMINAL_DAEMON" api help shell-{shell})"'
+                self.api('type', tab, setup)
+                self.api('key', tab, 'Enter')
+                self.await_read(tab, lambda v: v['state']['shell']['phase'] == 'input')
+                # A second source must not install duplicate execution hooks.
+                self.api('type', tab, setup)
+                self.api('key', tab, 'Enter')
+                initial = self.await_read(tab, lambda v: v['state']['shell']['exit_status'] == 0)
+                self.api('type', tab, 'false')
+                self.api('key', tab, 'Enter')
+                failed = self.await_read(tab, lambda v: v['state']['shell']['exit_status'] == 1)
+                self.assertEqual(failed['state']['shell']['command_id'], initial['state']['shell']['command_id'] + 1)
+                self.api('type', tab, 'printf "WORMINAL_STATUS=%s\\n" "$?"')
+                self.api('key', tab, 'Enter')
+                reported = self.await_read(tab, lambda v: 'WORMINAL_STATUS=1' in '\n'.join(v['lines'])
+                                           and v['state']['shell']['phase'] == 'input')
+                self.api('type', tab, 'cd /; true')
+                self.api('key', tab, 'Enter')
+                finished = self.await_read(tab, lambda v: v['state']['shell']['exit_status'] == 0 and v['directory'] == '/')
+                self.assertEqual(finished['state']['shell']['command_id'], reported['state']['shell']['command_id'] + 1)
+                self.api('close', tab)
+        help_text = subprocess.check_output([str(workspace.DAEMON), 'api', 'help'], text=True)
+        for topic in ('keys', 'observe', 'shell-bash', 'shell-zsh'):
+            self.assertIn('api help ' + topic, help_text)
+        observe = subprocess.check_output([str(workspace.DAEMON), 'api', 'help', 'observe'], text=True)
+        for word in ('--tail', '--after', '--guard', '--stdin', 'command_id', 'exit_status'):
+            self.assertIn(word, observe)
+
+    def test_shell_markers_are_explicit_and_status_survives_prompt(self):
+        script = 'printf "\\033]133;C\\007\\033]133;D;7\\007\\033]133;A\\007\\033]133;B\\007READY"; exec cat'
+        tab = self.fixture.launch(script)
+        state = self.await_read(tab, lambda v: 'READY' in ''.join(v['lines']))['state']['shell']
+        self.assertEqual(state, {'phase': 'input', 'command_id': 1, 'exit_status': 7})
+        plain = self.api('open', '--', '/bin/cat')['id']
+        self.assertIsNone(self.api('read', plain)['state']['shell']['phase'])
+
     def test_read_and_input_preserve_live_view_and_geometry(self):
         tab = self.fixture.launch('stty raw -echo; printf READY; exec cat')
         record = self.api('list')['tabs'][0]
@@ -192,6 +341,9 @@ class AgentApiTest(unittest.TestCase):
                    self.api('forget', 'schema-node'), self.api('read', 999, success=False),
                    self.api('self', success=False)]
         replies.append(self.api('close', replies[5]['id']))
+        replies.append(self.api('read', tab, '--tail', 20))
+        revision = self.api('read', tab)['revision']
+        replies.append(self.api('wait', tab, '--after', revision, '--timeout', 0))
         def keys(value):
             if isinstance(value, dict):
                 for key, item in value.items():

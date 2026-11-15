@@ -5,17 +5,6 @@ use gtk::gdk::{
 };
 use worminal_engine_sys::*;
 
-struct KeyEntry {
-    key: Key,
-    mask: u32,
-    bytes: &'static [u8],
-    appkey: i32,
-    appcursor: i32,
-}
-#[path = "keymap.rs"]
-mod keymap;
-use keymap::KEYS;
-
 #[derive(Debug, PartialEq, Eq)]
 pub enum KeyAction {
     Bytes(Vec<u8>),
@@ -108,23 +97,7 @@ impl Keyboard {
                 | Mod::MOD4_MASK
                 | Mod::MOD3_MASK))
             .bits();
-        KEYS.iter()
-            .find(|entry| {
-                entry.key == value
-                    && (entry.mask == u32::MAX || entry.mask == mask)
-                    && (if mode & MODE_APPKEYPAD != 0 {
-                        entry.appkey >= 0
-                    } else {
-                        entry.appkey <= 0
-                    })
-                    && !(self.numlock && entry.appkey == 2)
-                    && (if mode & MODE_APPCURSOR != 0 {
-                        entry.appcursor >= 0
-                    } else {
-                        entry.appcursor <= 0
-                    })
-            })
-            .map(|entry| entry.bytes)
+        worminal_engine::keys::mapping(*value, mask, mode, self.numlock)
     }
 }
 
@@ -262,7 +235,9 @@ mod tests {
         // Freeze the observable C-table behavior before moving its source to Rust.
         // Cover every mapped key, all supported modifier combinations and both
         // application modes with Num Lock on/off. Ordering and wildcard masks matter.
-        let mut keys: Vec<_> = KEYS.iter().map(|entry| entry.key).collect();
+        let mut keys: Vec<_> = worminal_engine::keys::mapped_keys()
+            .map(Key::from)
+            .collect();
         keys.sort_by_key(|key| **key);
         keys.dedup();
         let modifiers = [

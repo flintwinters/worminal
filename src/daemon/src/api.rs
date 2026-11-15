@@ -24,9 +24,12 @@ Usage: worminald api [--master user@host] COMMAND
   devices              List enrollment and check Worp reachability from this caller.
   devices --no-check   List enrollment only; no network probes.
   forget NAME          Remove enrollment; never stops the device or its sessions.
-  read TAB             Read the current viewport as JSON, without taking control.
-  type TAB TEXT        Send literal UTF-8 text; does not append Enter.
-  key TAB KEY...       Send Enter, Tab, Escape, Backspace, or Ctrl-A through Ctrl-Z.
+  read TAB [TAB...] [--tail N]  Viewport or last N retained physical rows (1..1000); no control.
+  wait TAB --after REV --timeout S  Wait for a changed observation, up to 60 seconds.
+  type TAB [--guard TOKEN] TEXT|--stdin  Literal text or stdin paste; no appended Enter.
+  key TAB [--guard TOKEN] KEY...  Named keys incl. arrows, navigation, F1..F35 and modifiers.
+  help keys|observe    Key names, batch/history reads, revisions, wait, input guards and limits.
+  help shell-bash|shell-zsh  Optional runnable shell integration and setup comments.
 Examples:
   worminald api list
   worminald api open --cwd /path/to/project -- /bin/sh
@@ -58,14 +61,14 @@ pub fn quote(bytes: &[u8]) -> String {
     serde_json::to_string(&String::from_utf8_lossy(bytes)).expect("UTF-8 strings serialize to JSON")
 }
 
-fn record(tab: &mut Tab, now: i64) -> String {
+fn record(tab: &mut Tab, now: i64, workspace: &str) -> String {
     tab.refresh_directory(now);
     let pid = tab
         .terminal
         .as_mut()
         .map_or(0, |terminal| terminal.pty.live_pid());
     format!(
-        "{{\"id\":{},\"kind\":{},\"title\":{},\"directory\":{},\"shell_pid\":{},\"url\":{}}}",
+        "{{\"id\":{},\"kind\":{},\"title\":{},\"directory\":{},\"shell_pid\":{},\"url\":{},\"state\":{}}}",
         tab.id,
         quote(if tab.terminal.is_some() {
             b"terminal"
@@ -75,11 +78,12 @@ fn record(tab: &mut Tab, now: i64) -> String {
         quote(&tab.title),
         quote(&tab.directory),
         pid,
-        quote(tab.url.as_deref().unwrap_or_default())
+        quote(tab.url.as_deref().unwrap_or_default()),
+        crate::api_observe::state(tab, workspace)
     )
 }
 
-fn read(tab: &mut Tab, now: i64) -> io::Result<String> {
+pub(crate) fn read(tab: &mut Tab, now: i64) -> io::Result<String> {
     let terminal = tab.terminal.as_mut().unwrap();
     let frame = core(terminal.engine.frame(now))?;
     let mut cells = Vec::new();
@@ -118,7 +122,7 @@ pub fn failure(message: &str) -> Reply {
     }
 }
 
-fn success(json: String) -> Reply {
+pub(crate) fn success(json: String) -> Reply {
     Reply {
         success: true,
         json,
@@ -131,6 +135,9 @@ impl Handler for Service {
             return Ok(failure(&error.to_string()));
         }
         if let Some(reply) = self.tab_operation(&request, self.now())? {
+            return Ok(reply);
+        }
+        if let Some(reply) = self.extended(&request, self.now())? {
             return Ok(reply);
         }
         match &request {
@@ -168,9 +175,14 @@ impl Handler for Service {
         }
         let now = self.now();
         if request == Request::List {
-            let tabs: Vec<_> = self.tabs.iter_mut().map(|tab| record(tab, now)).collect();
+            let tabs: Vec<_> = self
+                .tabs
+                .iter_mut()
+                .map(|tab| record(tab, now, &self.workspace_id))
+                .collect();
             let json = format!(
-                "{{\"ok\":true,\"api_version\":1,\"tabs\":[{}]}}",
+                "{{\"ok\":true,\"api_version\":1,\"workspace\":{},\"tabs\":[{}]}}",
+                quote(self.workspace_id.as_bytes()),
                 tabs.join(",")
             );
             return Ok(success(json));
@@ -183,7 +195,7 @@ impl Handler for Service {
             return Ok(failure("This operation requires a terminal tab."));
         };
         let Request::Input { bytes, .. } = request else {
-            return Ok(success(read(&mut self.tabs[index], now)?));
+            return self.observe(tab, 0, now);
         };
         self.input_operation(tab, &bytes, None, now)
     }

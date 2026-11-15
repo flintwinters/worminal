@@ -115,6 +115,36 @@ impl Engine {
         self.read_text(false)
     }
 
+    pub fn tail(&mut self, count: i32) -> Result<(Vec<u8>, i32), Error> {
+        let (mut size, mut total) = (0, 0);
+        let status = unsafe {
+            sys::worminal_engine_tail(
+                self.handle.as_ptr(),
+                count,
+                std::ptr::null_mut(),
+                0,
+                &mut size,
+                &mut total,
+            )
+        };
+        if status != sys::WORMINAL_CAPACITY as i32 {
+            check(status)?;
+        }
+        let mut data = vec![0; size];
+        check(unsafe {
+            sys::worminal_engine_tail(
+                self.handle.as_ptr(),
+                count,
+                data.as_mut_ptr(),
+                data.len(),
+                &mut size,
+                &mut total,
+            )
+        })?;
+        data.truncate(size);
+        Ok((data, total))
+    }
+
     pub fn all_text(&mut self) -> Result<Vec<u8>, Error> {
         self.read_text(true)
     }

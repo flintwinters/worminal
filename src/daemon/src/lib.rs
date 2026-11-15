@@ -2,6 +2,8 @@
 mod api;
 mod api_cli;
 mod api_help;
+mod api_observe;
+mod api_wait;
 mod cli;
 mod commands;
 mod config_cli;

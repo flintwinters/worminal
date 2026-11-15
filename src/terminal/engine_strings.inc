@@ -70,6 +70,14 @@ te_strhandle(TermEngine *session)
 			         !strcmp(p, "state=blocked") || !strcmp(p, "state=clear"))
 				te_xsetmode(session, 0, MODE_BUSY);
 			return;
+        case 133: /* Optional shell integration: prompt, input, execution, completion. */
+            if (narg >= 2 && strlen(strescseq.args[1]) == 1 &&
+                strchr("ABCD", strescseq.args[1][0])) {
+                const char *status = narg >= 3 ? strescseq.args[2] : "";
+                te_emit(session, WORMINAL_SHELL, strescseq.args[1][0], 0,
+                        status, strlen(status));
+            }
+            return;
 		case 8: /* hyperlink: OSC 8 ; params ; URI */
 			te_oschyperlink(session);
 			return;
