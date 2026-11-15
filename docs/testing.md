@@ -7,8 +7,9 @@ Build, test, install and runtime preparation are indexed in [development.md](dev
 
 `python3 manage.py check-perf` runs the existing warmed release daemon CPU and deterministic network workloads,
 then fails if any median exceeds its fixed maximum in `tools/perf_limits.json`. It also runs in the native
-phase of full `check` and `check-headless`, before Python workers start. A selected `check-python` does not run
-benchmarks. Reports and raw samples are retained in `build/checks/daemon-perf-check.json`,
+phase of full `check` and `check-headless`, and before every `check-python` run, including filtered selections.
+Each entrypoint runs the gate once before Python workers start. Reports and raw samples remain in
+`build/checks/daemon-perf-check.json`,
 `network-perf-check.json` and `perf-check.json`, including failed budget results. These fixed filenames are
 replaced on the next run; preserve them before another run when investigating a regression.
 
@@ -48,11 +49,12 @@ python3 manage.py check-python --jobs 2 --match retained
 
 `--module` can be repeated and takes a top-level module name without `.py`. `--match` retains unittest's `-k`
 semantics. Without `--module`, discovery still covers all tests, including unreviewed/nested modules in the serial
-tail. Every selected case remains scheduled; worker failures propagate as a nonzero exit status after other
+tail. After the performance gate passes, every selected case remains scheduled; worker failures propagate after other
 scheduled tests finish. Reviewed parallel modules have a 180-second worker timeout; a timed-out worker and its
 explicitly tagged private fixtures are retired, with a failed result and preserved logs. The serial tail retains
-its existing test timeouts. This command does not build prerequisites or install dependencies. Use the full `check`
-command first, or the relevant project build command.
+its existing test timeouts. Python checks use existing application artifacts and do not install dependencies.
+Use the full `check` command first, or the relevant project build command. The performance gate builds its own
+release benchmark prerequisites.
 
 Workers remove inherited desktop display/session-bus variables, use local GIO, and receive separate project-local
 XDG state/cache/data/runtime and diagnostic directories. Tests that need graphics create their private Xvfb/Wayland

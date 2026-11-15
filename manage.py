@@ -388,9 +388,9 @@ def check(match: str = typer.Option(None, help="Run matching Python checks; full
 def check_python(jobs: int = typer.Option(None, min=1, show_default="available CPUs // 2 + 1"),
                  match: str = typer.Option(None),
                  module: list[str] = typer.Option(None, help="Top-level module; repeat to select several.")):
-    """Run Python checks against existing build artifacts; use check to build prerequisites first."""
+    """Enforce performance ceilings, then run Python checks; use check to build other prerequisites first."""
     from tools.test_runner import run_python
-    raise typer.Exit(run_python(jobs=jobs, match=match, modules=module or ()))
+    raise typer.Exit(run_perf_check() or run_python(jobs=jobs, match=match, modules=module or ()))
 
 
 @app.command("check-keys")

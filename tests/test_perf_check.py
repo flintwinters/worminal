@@ -98,3 +98,17 @@ class PerfCheckTests(unittest.TestCase):
             check = stack.enter_context(patch.object(manage, "run_perf_check", return_value=1))
             self.assertEqual(manage.run_native_checks(), 1)
             check.assert_called_once_with()
+
+    def test_python_cli_enforces_gate_even_for_filtered_tests(self):
+        import manage
+        for status in (0, 1):
+            with self.subTest(status=status), patch.object(manage, "run_perf_check", return_value=status) as gate:
+                with patch("tools.test_runner.run_python", return_value=0) as python:
+                    result = CliRunner().invoke(manage.app, ["check-python", "--module", "test_perf_check",
+                                                            "--match", "ceiling", "--jobs", "1"])
+                self.assertEqual(result.exit_code, status, result.output)
+                gate.assert_called_once_with()
+                if status:
+                    python.assert_not_called()
+                else:
+                    python.assert_called_once_with(jobs=1, match="ceiling", modules=["test_perf_check"])
