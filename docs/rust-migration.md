@@ -38,11 +38,8 @@ The old C frontends, daemon and application support code have been removed. Git 
 do not keep copies of old executables. Existing v1 processes are not stopped or migrated automatically. Rolling
 back a live daemon requires a compatible PTY transfer, not a shell restart.
 
-Some tests compare behavior with the old C version. `tools/reference.py` retrieves that code from Git and compiles
-it in a temporary directory under `build/`. Some old tests include source files directly, so the script also adds
-temporary links for those files. It removes the links and build directory when the test process exits.
-`manage.py clean` removes links left by interrupted tests. Normal application builds do not retrieve old code.
-These tests need the Git history and Xft headers.
+Historical C reference builds and their dependent comparison tests have been removed. Checks exercise the current
+Rust application and its C engine directly; they do not need historical Git revisions.
 
 ## Build and test
 
@@ -59,13 +56,13 @@ Use `manage.py` for development tools and native executables to run the app.
 `clean` removes compiled output but keeps diagnostics and the Python environment. Installation uses the same
 `bin`/`lib` structure under `/usr/local`.
 
-`check` runs the full test suite on private displays. `check-engine` compares parser behavior and checks malformed
-input, snapshots and memory safety. `check-rust-frontend` compares C and Rust rendering pixels on X11 and Wayland.
+`check` runs the full test suite on private displays. `check-engine` checks malformed
+input, snapshots and memory safety. `check-rust-frontend` checks Rust viewports and frame publication.
 `check-rust-app` tests the actual GUI and shells. `check-rust-browser` tests browser controls, file access, module
 updates, downloads, media playback, permissions, TLS rejection and recovery after a renderer crash.
 
 `check-handoff` and `check-rust-upgrade` test PTY transfers and failures during upgrades.
-`prove-preview-regressions` rebuilds code with fixes removed and checks that the tests detect the bugs.
+`prove-preview-regressions` rebuilds current code with fixes removed and checks that the tests detect the bugs.
 `check-install` tests a staged installation; `check-install --installed` tests the files under `/usr/local`.
 `inventory` records running processes, windows, tabs, PTYs and installed file hashes without copying executables.
 

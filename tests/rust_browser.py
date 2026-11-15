@@ -375,7 +375,7 @@ class RustBrowserTest(unittest.TestCase):
             env.update(GDK_BACKEND='x11')
             env.pop('WAYLAND_DISPLAY', None)
             with (CHECKS / "rust-browser-broker.log").open('wb') as log:
-                broker_check(env, url, log, daemon, rust=True)
+                broker_check(env, url, log, daemon)
 
     def test_selected_local_document_capability_and_explicit_reload(self):
         with (isolated_display() as display, profile(display) as env,

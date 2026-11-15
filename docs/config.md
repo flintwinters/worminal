@@ -52,5 +52,5 @@ automatically, once per host, right after `upgrade-remote` (the outcome goes to 
   `--json` prints the resolved settings and `--json --defaults` the built-in values.
 - Appearance applies to windows started afterwards. Scrollback capacity is fixed when a process creates its first
   terminal, so changing `scrolling.history` needs a daemon restart (shells are preserved by the usual handoff).
-- `src/config` is the only resolver. Python tooling (explorer font, the historical C reference build) calls
+- `src/config` is the only resolver. Python tooling (explorer font) calls
   `worminald config --json` instead of reimplementing the rules.

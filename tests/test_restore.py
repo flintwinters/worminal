@@ -54,9 +54,7 @@ class RestoreTest(unittest.TestCase):
             self.process.communicate(timeout=4)
 
     def start(self):
-        executable = 'worminald-preview' if self.version == 2 else 'worminald-x11'
-        if self.version == 2:
-            executable = os.environ.get('WORMINAL_TEST_PREVIEW_DAEMON', executable)
+        executable = os.environ.get('WORMINAL_TEST_PREVIEW_DAEMON', 'worminald')
         self.latest = None
         self.process = subprocess.Popen([str(runtime_binary(executable)), '--serve'], env=self.env,
                                         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -236,7 +234,3 @@ class RestoreTest(unittest.TestCase):
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0][2], url)
         self.assertEqual(rows[1][1], str(self.default))
-
-
-class LegacyRestoreTest(RestoreTest):
-    version = 1

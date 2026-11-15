@@ -89,12 +89,6 @@ class MovementTest(unittest.TestCase):
     def test_undecorated_control(self):
         check_drag(self.env, True, control=True)
 
-    def test_decorated_x11(self):
-        check_drag(self.env, False, frontend="worminal-x11")
-
-    def test_undecorated_x11(self):
-        check_drag(self.env, True, frontend="worminal-x11")
-
 
 def main():
     with isolated_display() as env:

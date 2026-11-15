@@ -35,24 +35,6 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class RustApplicationTest(unittest.TestCase):
-    def test_rust_view_uses_historical_c_v2_service_without_restarting_its_shell(self):
-        with isolated_display() as display, profile(display) as env:
-            env.update(GDK_BACKEND='x11', WORMINAL_TEST_PREVIEW_DAEMON=str(ROOT / 'build/worminald-c-v2'))
-            env.pop('WAYLAND_DISPLAY', None)
-            with service(env):
-                app = subprocess.Popen([str(runtime_binary("worminal-rust")), '-T', 'C service attachment', '-o', '-',
-                    '-e', '/bin/sh', '-c', "stty raw -echo; printf 'C:%s\\n' $$; exec cat"], env=env,
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                self.addCleanup(lambda: self.stop(app))
-                shell = int(read_through(app.stdout, b'\n')[2:].strip())
-                tty = os.readlink(f'/proc/{shell}/fd/0')
-                wid = window(env, app)
-                subprocess.run(['xdotool', 'windowfocus', '--sync', wid, 'type', '--clearmodifiers', 'peer'],
-                               env=env, check=True)
-                self.assertEqual(read_bytes(app.stdout, 4), b'peer')
-                close_window(env, 'C service attachment')
-                self.assertEqual(app.wait(timeout=5), 0)
-                self.assertEqual(os.readlink(f'/proc/{shell}/fd/0'), tty)
 
     def test_empty_attach_can_open_its_first_terminal(self):
         with isolated_display() as env:

@@ -35,8 +35,7 @@ ENGINE = ("terminal/engine.c", ENGINE_DEFAULTS, "terminal/engine_parser.c",
 CPPFLAGS = ("-I.", "-Isrc", "-Isrc/terminal", "-Isrc/workspace",
             f'-DVERSION="{VERSION}"', "-D_XOPEN_SOURCE=600")
 PACKAGES = ()
-PROBES = {"key_injector": ("x11", "xtst"), "placement_wm": ("x11",),
-          "overlap_probe": ("x11",), "border_probe": ("x11",), "icon_probe": ("x11",), "latency_echo": ()}
+PROBES = {"key_injector": ("x11", "xtst"), "latency_echo": ()}
 
 
 def words(name, default=""):
@@ -180,7 +179,7 @@ class Builder:
 
     def independent(self, target):
         """C-only targets whose outputs and inputs no other target shares, so they can build alongside any other."""
-        return (target in ("build/engine_test", "build/browser_cpu.so", "build/gui-peer.so", "build/scrollback_test")
+        return (target in ("build/engine_test", "build/browser_cpu.so", "build/gui-peer.so")
                 or target.startswith("build/") and target.removeprefix("build/") in PROBES)
 
     def target(self, target):
@@ -219,27 +218,8 @@ class Builder:
             packages = PROBES[name]
             step(target, [*self.cc, "-O2", *pkg_flags("--cflags", packages), f"tests/{name}.c",
                           *pkg_flags("--libs", packages)], [f"tests/{name}.c"])
-        elif target == "build/scrollback_test":
-            support = ("terminal/defaults.c", *__getattr__("SESSION_SUPPORT"))
-            self.program(target, ["tests/scrollback.c", *(f"src/{source}" for source in support)],
-                         variant="scrollback_test", flags=["-O1", "-g", "-fsanitize=address,undefined",
-                         "-ffunction-sections", "-fdata-sections"],
-                         libs=["-fsanitize=address,undefined", "-Wl,--gc-sections", "-lm"])
         else:
-            from tools.reference import target as historical_target
-            historical_target(target)
-
-
-def __getattr__(name):
-    # Test fixtures inherit their historical build decisions from Git; shipping builds never enter here.
-    if name in ("SESSION_SUPPORT", "PREVIEW_PACKAGES", "TERMINAL_PACKAGES", "BROWSER_MODULE",
-                "SERVER", "CLIENT", "COMMON", "PREVIEW", "SOURCES"):
-        from tools.reference import module
-        historical = module()
-        if name == "SESSION_SUPPORT":
-            return (*[source for source in historical.SESSION_SUPPORT if source not in historical.ENGINE], *ENGINE)
-        return getattr(historical, name)
-    raise AttributeError(name)
+            raise ValueError(f"Unknown build target: {target}")
 
 
 def run_all(builder, targets):
@@ -251,7 +231,7 @@ def build_targets(*targets):
     builder = Builder()
     core = ("worminald",) if headless() else ("worminal", "worminald")
     targets = list(dict.fromkeys((*core, *targets)))
-    # Cargo, shared C outputs and historical (Git-built) targets stay in order on one lane; it runs beside
+    # Cargo and shared C outputs stay in order on one lane; it runs beside
     # the independent C targets. Rust build steps need the engine archive, so it exists before either lane starts.
     builder.target("build/libworminal_engine.a")
     lane = [target for target in targets if not builder.independent(target)]
@@ -267,10 +247,6 @@ def analyze():
 
 
 def clean():
-    from tools import reference
-    if ROOT == reference.ROOT:
-        reference.cleanup()
-    reference.remove_fixture_links(ROOT)
     # Preserve diagnostics and user-owned virtualenvs; compiled output and caches are disposable.
     directory = ROOT / 'build'
     if directory.exists():

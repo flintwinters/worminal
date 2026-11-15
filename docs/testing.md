@@ -7,7 +7,7 @@ python3 manage.py check
 ```
 
 Only reviewed independent Python modules overlap. Each module runs in its own process; cases within a module
-remain serial. Shared build/reference checks, unreviewed modules and standalone GUI suites remain serial. The
+remain serial. Shared build checks, unreviewed modules and standalone GUI suites remain serial. The
 reviewed set includes private daemon handoff/upgrade checks and private-display window replacement checks, whose
 socket scopes, copied binaries and process cleanup are independent. Adding a test module does not automatically
 make it parallel. Resource ownership must be reviewed before adding it to `tools/test_runner.py::INDEPENDENT`.
@@ -26,8 +26,7 @@ tail. Every selected case remains scheduled; worker failures propagate as a nonz
 scheduled tests finish. Reviewed parallel modules have a 180-second worker timeout; a timed-out worker and its
 explicitly tagged private fixtures are retired, with a failed result and preserved logs. The serial tail retains
 its existing test timeouts. This command does not build prerequisites or install dependencies. Use the full `check`
-command first, or the relevant project build command. Historical C aliases live only for their build owner’s
-lifetime; use the full check command for suites requiring those disposable artifacts.
+command first, or the relevant project build command.
 
 Workers remove inherited desktop display/session-bus variables, use local GIO, and receive separate project-local
 XDG state/cache/data/runtime and diagnostic directories. Tests that need graphics create their private Xvfb/Wayland

@@ -127,12 +127,9 @@ checks use project-local Weston with matching virtual-seat ABI and no X11 fallba
 Muffin/Weston through their setup commands. Performance checks measure private software presentation, not desktop
 compositing or physical display latency. Launch latency is not a migration acceptance target.
 
-The old C applications are no longer maintained or installed. Roll back code from Git; do not keep executable
-backups. Some tests still need the old C code. `tools/reference.py` gets it from Git, builds it under `build/`,
-and creates temporary source links for those tests. It removes the files and links when the test process exits.
-Normal builds do not use this code. `manage.py clean` removes links left by interrupted tests.
-Keep behavior checks when changing tests. Some tests check fixes by removing them and requiring a failure.
-Keep user profiles and diagnostic records when cleaning up code.
+The retired C applications and their Git-built reference infrastructure are removed. Build and test the current
+Rust application and C engine directly; do not reconstruct old applications or require historical Git revisions.
+Roll back code from Git rather than keeping executable backups. Keep user profiles and diagnostic records.
 
 `manage.py setup-check-runtime` prepares private browser audio and Weston without changing desktop packages;
 update workflows run it automatically. New runtimes stay under `build/dependencies` across diagnostic cleanup.

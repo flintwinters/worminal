@@ -27,13 +27,12 @@ class BuildTests(unittest.TestCase):
         with patch.object(build, "pkg_flags", return_value=[]), patch.object(build, "step"):
             builder = build.Builder()
             with (patch.object(builder, "program") as program, patch.object(builder, "rust_program") as rust,
-                  patch.object(builder, "rust_library") as library, patch('tools.reference.target') as historical):
+                  patch.object(builder, "rust_library") as library):
                 for name in ("worminal", "worminald", "worminal-preview", "worminald-preview"):
                     builder.target(name)
                     rust.assert_called_with(name, "worminal-launcher" if name in
                                             ("worminal", "worminal-preview") else "worminal-daemon")
                 program.assert_not_called()
-                historical.assert_not_called()
                 self.assertIn(unittest.mock.call("build/lib/worminal/" + build.RUST_FRONTEND_MODULE,
                                                 "worminal-frontend"),
                               library.call_args_list)
@@ -67,10 +66,10 @@ class BuildTests(unittest.TestCase):
         with (patch.object(build, "headless", return_value=True),
               patch.object(build.Builder, "__init__", lambda self: None),
               patch.object(build.Builder, "target", target)):
-            build.build_targets("build/engine_test", "build/historical_probe")
+            build.build_targets("build/engine_test", "build/ordered_probe")
         self.assertEqual(events[0], "build/libworminal_engine.a")
-        self.assertCountEqual(events[1:], ["worminald", "build/historical_probe", "build/engine_test"])
-        self.assertLess(events.index("worminald"), events.index("build/historical_probe"))
+        self.assertCountEqual(events[1:], ["worminald", "build/ordered_probe", "build/engine_test"])
+        self.assertLess(events.index("worminald"), events.index("build/ordered_probe"))
 
     def test_headless_target_builds_and_installs_only_the_daemon(self):
         names = lambda: {destination.name for _, destination, _ in build.installation_files("/usr/local")}
@@ -88,15 +87,6 @@ class BuildTests(unittest.TestCase):
             with patch.object(build.subprocess, "run", side_effect=subprocess.CalledProcessError(1, "pkg-config")):
                 self.assertTrue(build.headless())
 
-    def test_historical_c_targets_delegate_to_disposable_git_fixtures(self):
-        with patch.object(build, "pkg_flags", return_value=[]), patch('tools.reference.target') as historical:
-            builder = build.Builder()
-            with patch.object(builder, 'program') as program:
-                for name in ('worminal-x11', 'worminald-x11', 'build/worminald-c-v2',
-                             'build/frontend.so', 'build/browser.so', 'build/worminal-gtk-c'):
-                    builder.target(name)
-                    historical.assert_called_with(name)
-                program.assert_not_called()
 
     def test_first_rust_publication_creates_bin_and_module_directories(self):
         source = self.root / "compiled"

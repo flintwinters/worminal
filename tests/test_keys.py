@@ -15,9 +15,9 @@ from x11 import isolated_display
 
 
 ROOT = Path(__file__).resolve().parent.parent
-FRONTEND = os.environ.get("WORMINAL_FRONTEND", "worminal-x11")
+FRONTEND = os.environ.get("WORMINAL_FRONTEND", "worminal")
 PREVIEW = FRONTEND in ("worminal", "worminal-preview", "worminal-rust")
-DAEMON = "worminald" if PREVIEW else "worminald-x11"
+DAEMON = "worminald"
 
 
 def read_bytes(stream, count):

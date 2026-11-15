@@ -48,29 +48,6 @@ class CommandLineTest(unittest.TestCase):
         for name in ("libgtk", "libgdk", "libpango", "libwebkit"):
             self.assertNotIn(name, dependencies)
 
-    def test_browser_resolves_against_frontend_module_boundary(self):
-        script = """
-import ctypes, os, sys
-frontend = ctypes.CDLL(sys.argv[1], mode=os.RTLD_NOW | os.RTLD_LOCAL)
-browser = ctypes.CDLL(sys.argv[2], mode=os.RTLD_NOW)
-assert frontend.worminal_frontend_v1 and browser.worminal_browser_module
-for name in ('app_send', 'wire_put_string'):
-    try:
-        getattr(frontend, name)
-    except AttributeError:
-        pass
-    else:
-        raise AssertionError('frontend leaks browser callbacks: ' + name)
-try:
-    frontend.tsessionnew
-except AttributeError:
-    pass
-else:
-    raise AssertionError('frontend exports the owner/parser constructor')
-"""
-        result = subprocess.run([sys.executable, "-c", script, str(ROOT / "build/frontend.so"),
-                                 str(ROOT / "build/browser.so")], capture_output=True, text=True, timeout=10)
-        self.assertEqual(result.returncode, 0, result.stderr)
 
     def invoke(self, option):
         env = {key: value for key, value in os.environ.items()

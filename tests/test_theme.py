@@ -1,4 +1,4 @@
-"""Runtime configuration as seen by tools: the `worminald config` resolver, explorer font and C reference header.
+"""Runtime configuration as seen by tools: the `worminald config` resolver and explorer font.
 
 Resolution rules themselves are unit-tested in src/config; these checks cover the CLI contract and adapters.
 """
@@ -66,17 +66,6 @@ class ThemeTest(unittest.TestCase):
             values["font_offset_y"] = -100
             self.assertEqual(theme.explorer_font()["lineHeight"], 1)
         self.assertGreater(theme.font_height("monospace", 14), 14)
-
-    def test_legacy_header_quotes_family_and_keeps_unset_slots_out(self):
-        values = {"font_family": 'Aé "Font" \\ family', "font_size": 13.5, "font_offset_y": -3,
-                  "glyph_offset_y": 0, "history_size": 64, "scroll_multiplier": 5, "bold_bright": True,
-                  "colors": ["#000000", None, "#ffffff"]}
-        header = theme.legacy_header(values)
-        self.assertIn('theme_font_family = "Aé \\"Font\\" \\\\ family";', header)
-        self.assertIn("theme_font_size = 13.5;", header)
-        self.assertIn("theme_bold_bright = 1;", header)
-        self.assertIn('[2] = "#ffffff",', header)
-        self.assertNotIn("[1] =", header)
 
 
 if __name__ == "__main__":
