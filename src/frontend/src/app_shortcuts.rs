@@ -155,7 +155,9 @@ impl App {
         } else {
             return false;
         }
-        self.fonts.borrow_mut().set_zoom(zoom.clamp(-10.0, 40.0));
+        // Every page must receive the same bounded zoom, including browser views.
+        let zoom = zoom.clamp(-10.0, 40.0);
+        self.fonts.borrow_mut().set_zoom(zoom);
         let terminals: Vec<_> = self
             .pages
             .borrow()
