@@ -30,6 +30,7 @@ from test_notifications import NotificationTests
 from runtime import copy_runtime, window, stop_application
 from rust_module import RustModuleTest
 from test_runtime import RuntimeCleanupTest
+from test_file_drop import FileDropTest
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -297,6 +298,11 @@ class RustApplicationTest(unittest.TestCase):
             for step in range(1, 11):
                 xdo('mousemove', '--window', wid, str(12 + 876 * step // 10), str(8 + 250 * step // 10))
                 time.sleep(.02)
+            deadline = time.monotonic() + 3
+            while pixel(.75, .75) == blue:
+                self.assertLess(time.monotonic(), deadline, 'split target highlight did not paint over content')
+                time.sleep(.02)
+            self.assertEqual(pixel(.25, .75), blue, 'split target highlight covered the wrong half')
             xdo('mouseup', '1')
             # The anchor stays left; the dropped tab takes the right half and focus.
             wait_for(blue, red, 'dropping a tab on the right edge did not split the window')
@@ -331,6 +337,7 @@ class RustApplicationTest(unittest.TestCase):
 
 def main():
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(RustApplicationTest)
+    suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(FileDropTest))
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(WindowStateTest))
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(WindowActivationTests))
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(RustModuleTest))

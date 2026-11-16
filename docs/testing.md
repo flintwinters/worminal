@@ -48,6 +48,9 @@ python3 manage.py check-python --jobs 2 --module test_theme --module test_http_f
 python3 manage.py check-python --jobs 2 --match retained
 ```
 
+Use `python3 manage.py check-rust-app --match external_file_drop` for the real cross-application file-drop
+regression on a private X11 display. `--match` accepts a unittest name pattern for other application checks too.
+
 `--module` can be repeated and takes a top-level module name without `.py`. `--match` retains unittest's `-k`
 semantics. Without `--module`, discovery still covers all tests, including unreviewed/nested modules in the serial
 tail. After the performance gate passes, every selected case remains scheduled; worker failures propagate after other

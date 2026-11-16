@@ -235,11 +235,14 @@ def check_test_runtime(prove: bool = typer.Option(False, help="Also require fail
 
 @app.command("check-rust-app")
 def check_rust_app(module_only: bool = typer.Option(
-        False, help="Run only launcher/module and GUI broker checks on private displays.")):
+        False, help="Run only launcher/module and GUI broker checks on private displays."),
+        match: str = typer.Option(None, help="Run application tests matching this unittest name pattern.")):
     """Check the actual Rust app: private shell input, clipboard, tabs and surviving-session reattachment."""
     native_build.build_targets("worminal", "worminal-rust", "build/gui-peer.so")
     arguments = (["-m", "unittest", "discover", "-s", "tests", "-p", "rust_module.py", "-q"]
                  if module_only else ["tests/rust_app.py"])
+    if match:
+        arguments = ["-m", "unittest", "discover", "-s", "tests", "-p", "rust_app.py", "-k", match, "-v"]
     raise typer.Exit(run([sys.executable, *arguments]))
 
 
