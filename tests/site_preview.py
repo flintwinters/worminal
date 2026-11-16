@@ -93,21 +93,26 @@ class SitePreview(unittest.TestCase):
                         self.assertEqual(devtools.value('innerWidth'), width)
                         self.assertLessEqual(devtools.value('document.documentElement.scrollWidth'), width,
                                              f'{label} layout overflows horizontally')
-                        self.assertLessEqual(devtools.value('document.documentElement.scrollHeight'), height,
-                                             'Only pane bodies may scroll; the document must fit the viewport')
-                        devtools.value('document.querySelector("[data-tab=agents]").click()')
-                        self.assertFalse(devtools.value('document.getElementById("panel-agents").hidden'))
-                        self.assertTrue(devtools.value('document.getElementById("panel-sessions").hidden'))
-                        devtools.value('document.querySelector("[data-tab=agents]").dispatchEvent('
-                                       'new KeyboardEvent("keydown", {key: "ArrowLeft", bubbles: true}))')
-                        self.assertFalse(devtools.value('document.getElementById("panel-web").hidden'))
+                        self.assertGreater(devtools.value('document.documentElement.scrollHeight'), height,
+                                           'The landing page must scroll naturally')
+                        self.assertTrue(devtools.value('[...document.querySelectorAll("[data-panel]")].every('
+                            'panel => !panel.hidden && getComputedStyle(panel).display !== "none")'))
+                        self.assertEqual(devtools.value(
+                            'getComputedStyle(document.querySelector(".table-scroll")).overflowY'), 'visible')
+                        devtools.call('Page.bringToFront')
+                        devtools.value('document.querySelector("a.tab[href=\\"#panel-agents\\"]").focus()')
+                        for event in ('keyDown', 'keyUp'):
+                            devtools.call('Input.dispatchKeyEvent', type=event, key='Enter', code='Enter',
+                                          windowsVirtualKeyCode=13)
+                        self.assertEqual(devtools.value('location.hash'), '#panel-agents')
+                        self.assertGreater(devtools.value('scrollY'), 0)
                         devtools.value('document.getElementById("find").value = "guarded"; '
                                        'document.getElementById("find").dispatchEvent(new Event("input"))')
                         self.assertEqual(devtools.value(
                             'document.querySelectorAll("#capabilities tbody tr:not([hidden])").length'), 1)
                         devtools.value('document.getElementById("find").value = ""; '
                                        'document.getElementById("find").dispatchEvent(new Event("input")); '
-                                       'document.querySelector("[data-tab=sessions]").click()')
+                                       'document.querySelector("a.tab[href=\\"#panel-sessions\\"]").click()')
                         devtools.call('Browser.grantPermissions',
                                       origin=f'http://127.0.0.1:{server.server_port}',
                                       permissions=['clipboardReadWrite', 'clipboardSanitizedWrite'])
@@ -122,20 +127,27 @@ class SitePreview(unittest.TestCase):
                         copied = devtools.call('Runtime.evaluate', expression='navigator.clipboard.readText()',
                                                userGesture=True, awaitPromise=True, returnByValue=True)
                         self.assertEqual(copied['result']['value'], 'worminal --attach')
-                        devtools.value('document.querySelector("[data-tab=sessions]").click()')
+                        devtools.value('scrollTo(0, 0)')
                         result = devtools.call('Page.captureScreenshot', format='png', captureBeyondViewport=False)
                         (diagnostics / f'{label}.png').write_bytes(base64.b64decode(result['data']))
                         if label == 'desktop':
                             devtools.call('Emulation.setDeviceMetricsOverride', width=1050, height=850,
                                           deviceScaleFactor=1, mobile=False)
-                            self.assertEqual(devtools.value(
+                            self.assertNotEqual(devtools.value(
                                 'getComputedStyle(document.querySelector(".reference-pane")).display'), 'none')
                             self.assertNotEqual(devtools.value(
                                 'getComputedStyle(document.querySelector(".index-pane")).display'), 'none')
                             self.assertLessEqual(devtools.value('document.documentElement.scrollWidth'), 1050)
-                            self.assertLessEqual(devtools.value('document.documentElement.scrollHeight'), 850)
+                            self.assertGreater(devtools.value('document.documentElement.scrollHeight'), 850)
                             result = devtools.call('Page.captureScreenshot', format='png', captureBeyondViewport=False)
                             (diagnostics / 'middle.png').write_bytes(base64.b64decode(result['data']))
+                        devtools.value('document.getElementById("get-worminal").scrollIntoView()')
+                        self.assertGreater(devtools.value('scrollY'), 0)
+                        self.assertLess(devtools.value(
+                            'document.getElementById("get-worminal").getBoundingClientRect().top'),
+                            devtools.value('innerHeight'))
+                        result = devtools.call('Page.captureScreenshot', format='png', captureBeyondViewport=False)
+                        (diagnostics / f'{label}-bottom.png').write_bytes(base64.b64decode(result['data']))
                     finally:
                         if devtools is not None:
                             devtools.socket.close()

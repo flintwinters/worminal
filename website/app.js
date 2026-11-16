@@ -1,23 +1,17 @@
 (() => {
-  const tabs = [...document.querySelectorAll('[data-tab]')];
-  const panels = [...document.querySelectorAll('[data-panel]')];
-  const index = [...document.querySelectorAll('[data-view]')];
+  const links = [...document.querySelectorAll('[data-section]')];
+  const sections = [...document.querySelectorAll('[data-panel]')];
   const status = document.getElementById('status-message');
   const find = document.getElementById('find');
   const rows = [...document.querySelectorAll('#capabilities tbody tr')];
   const filters = [...document.querySelectorAll('[data-filter]')];
   let group = 'all';
 
-  function select(view, focus = false) {
-    for (const tab of tabs) {
-      const active = tab.dataset.tab === view;
-      tab.setAttribute('aria-selected', String(active));
-      tab.tabIndex = active ? 0 : -1;
-      if (active && focus) tab.focus();
+  function markSection(view) {
+    for (const link of links) {
+      if (link.dataset.section === view) link.setAttribute('aria-current', 'location');
+      else link.removeAttribute('aria-current');
     }
-    for (const panel of panels) panel.hidden = panel.dataset.panel !== view;
-    for (const item of index) item.setAttribute('aria-current', String(item.dataset.view === view));
-    status.textContent = `Explore ${view} · / to find a capability`;
   }
 
   function filter() {
@@ -43,24 +37,17 @@
     }
   }
 
-  for (const tab of tabs) {
-    tab.addEventListener('click', () => select(tab.dataset.tab));
-    tab.addEventListener('keydown', event => {
-      const current = tabs.indexOf(tab);
-      const next = { ArrowRight: (current + 1) % tabs.length,
-        ArrowLeft: (current + tabs.length - 1) % tabs.length, Home: 0, End: tabs.length - 1 }[event.key];
-      if (next === undefined) return;
-      event.preventDefault();
-      select(tabs[next].dataset.tab, true);
-    });
+  function followFragment() {
+    const section = sections.find(item => '#' + item.id === location.hash);
+    markSection(section ? section.dataset.panel : 'sessions');
   }
-  for (const item of index) item.addEventListener('click', () => select(item.dataset.view));
+  window.addEventListener('hashchange', followFragment);
   for (const button of filters) button.addEventListener('click', () => {
     group = button.dataset.filter;
     filter();
   });
   for (const button of document.querySelectorAll('[data-copy]')) button.addEventListener('click', () => {
-    copy(document.getElementById(button.dataset.copy).textContent);
+    copy(document.getElementById(button.dataset.copy).textContent.replace(/\s+/g, ' ').trim());
   });
   document.getElementById('copy-site').addEventListener('click', () => {
     copy(document.querySelector('link[rel="canonical"]').href);
@@ -80,5 +67,6 @@
     }
   });
   filter();
-  select('sessions');
+  followFragment();
+  status.textContent = 'Persistent sessions · SSH · web tools · agent API';
 })();

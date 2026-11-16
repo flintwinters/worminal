@@ -15,6 +15,9 @@ class Page(HTMLParser):
         super().__init__()
         self.nodes, self.text, self.schemas = [], [], []
         self.schema = None
+        self.ignore = None
+        self.headings = []
+        self.heading = None
         self.feed(source)
 
     def handle_starttag(self, tag, attrs):
@@ -22,17 +25,28 @@ class Page(HTMLParser):
         self.nodes.append((tag, attributes))
         if tag == 'script' and attributes.get('type') == 'application/ld+json':
             self.schema = ''
+        elif tag in ('script', 'style'):
+            self.ignore = tag
+        if tag in ('h1', 'h2', 'h3'):
+            self.heading = [tag, '']
 
     def handle_data(self, data):
         if self.schema is not None:
             self.schema += data
-        else:
+        elif self.ignore is None:
             self.text.append(data)
+            if self.heading is not None:
+                self.heading[1] += data
 
     def handle_endtag(self, tag):
         if tag == 'script' and self.schema is not None:
             self.schemas.append(json.loads(self.schema))
             self.schema = None
+        if tag == self.ignore:
+            self.ignore = None
+        if self.heading is not None and tag == self.heading[0]:
+            self.headings.append(tuple(self.heading))
+            self.heading = None
 
 
 class SiteTests(unittest.TestCase):
@@ -73,6 +87,7 @@ class SiteTests(unittest.TestCase):
         self.assertIn('width=device-width', metas['viewport'])
         self.assertEqual(metas['theme-color'], site.palette()['background'])
         self.assertTrue(metas['description'])
+        self.assertIn('Linux terminal', next(text for tag, text in self.page.headings if tag == 'h1'))
         self.assertNotIn('noindex', metas.get('robots', ''))
         canonical = [a['href'] for t, a in self.page.nodes if t == 'link' and a.get('rel') == 'canonical']
         self.assertEqual(canonical, [site.URL])
@@ -98,6 +113,18 @@ class SiteTests(unittest.TestCase):
         self.assertTrue(any(t == 'table' and a.get('id') == 'capabilities' for t, a in self.page.nodes))
         self.assertIn('SSH', ''.join(self.page.text))
         self.assertLess(sum(p.stat().st_size for p in self.output.iterdir() if p.is_file()), 250_000)
+
+    def test_product_copy_and_navigation_exist_without_javascript(self):
+        topics = [attrs for tag, attrs in self.page.nodes if tag == 'section' and 'data-panel' in attrs]
+        self.assertEqual(len(topics), 4)
+        self.assertTrue(all('hidden' not in topic for topic in topics))
+        navigation = [attrs for _, attrs in self.page.nodes if 'data-section' in attrs]
+        self.assertTrue(navigation)
+        self.assertTrue(all(attrs.get('href', '').startswith('#panel-') for attrs in navigation))
+        text = ' '.join(''.join(self.page.text).split())
+        for feature in ('Persistent terminal sessions', 'Local and SSH sessions', 'HTML tools',
+                        'native API for terminal agents', 'Get Worminal'):
+            self.assertIn(feature, text)
 
     def test_unknown_pages_do_not_index_or_break_under_nested_urls(self):
         page = Page((self.output / '404.html').read_text())

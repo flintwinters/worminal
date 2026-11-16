@@ -3,11 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Worminal — Linux terminal with persistent sessions, SSH &amp; web tools</title>
+  <title>Worminal — Persistent Linux terminal, SSH &amp; web tools</title>
   <meta name="description" content="Keep shells running after windows close. Worminal brings persistent local and SSH
     sessions, browser tools, split panes and an agent API to a small Linux terminal.">
   <meta name="theme-color" content="{{THEME_COLOR}}">
   <meta name="color-scheme" content="dark">
+  <meta name="robots" content="index,follow,max-image-preview:large">
   <link rel="canonical" href="{{SITE_URL}}">
   <link rel="icon" href="{{FAVICON}}" type="image/svg+xml">
   <style>
@@ -61,13 +62,13 @@
 
   <main id="main" class="mosaic" tabindex="-1">
     <aside class="pane index-pane" aria-labelledby="index-title">
-      <header class="title-strip"><span class="plaque">00</span><h2 id="index-title">INDEX</h2></header>
+      <header class="title-strip"><span class="plaque">00</span><span class="pane-title" id="index-title">INDEX</span></header>
       <nav class="pane-body index-body" aria-label="Workspace index">
         <p class="index-heading">EXPLORE</p>
-        <button class="index-item" data-view="sessions" aria-current="true"><span>01</span>Sessions</button>
-        <button class="index-item" data-view="remote" aria-current="false"><span>02</span>Remote / SSH</button>
-        <button class="index-item" data-view="web" aria-current="false"><span>03</span>HTML tools</button>
-        <button class="index-item" data-view="agents" aria-current="false"><span>04</span>Agent API</button>
+        <a class="index-item" href="#panel-sessions" data-section="sessions"><span>01</span>Sessions</a>
+        <a class="index-item" href="#panel-remote" data-section="remote"><span>02</span>Remote / SSH</a>
+        <a class="index-item" href="#panel-web" data-section="web"><span>03</span>HTML tools</a>
+        <a class="index-item" href="#panel-agents" data-section="agents"><span>04</span>Agent API</a>
         <hr class="index-divider">
         <p class="index-heading">REFERENCE</p>
         <a class="index-item" href="https://github.com/flintwinters/worminal/blob/main/docs/config.md">Configuration
@@ -82,27 +83,23 @@
     </aside>
 
     <section class="pane workspace-pane" aria-labelledby="workspace-title">
-      <header class="title-strip"><span class="plaque">01</span><h2 id="workspace-title">WORKSPACE</h2><span
+      <header class="title-strip"><span class="plaque">01</span><span class="pane-title" id="workspace-title">WORKSPACE</span><span
         class="title-meta">LOCAL + SSH</span></header>
       <div class="pane-body workspace-body">
         <div class="introduction">
-          <h1>Worminal</h1>
+          <h1>Worminal: a persistent Linux terminal</h1>
           <p class="tagline">Close the window. Keep the work.</p>
-          <p>Your shells, web tools and remote machines, together in a small Linux terminal.</p>
+          <p>A small Linux terminal emulator for persistent shells, web tools and remote machines.</p>
         </div>
-        <div class="tabs" role="tablist" aria-label="Explore Worminal">
-          <button class="tab" role="tab" id="tab-sessions" aria-controls="panel-sessions" aria-selected="true"
-            data-tab="sessions">Sessions</button>
-          <button class="tab" role="tab" id="tab-remote" aria-controls="panel-remote" aria-selected="false"
-            data-tab="remote" tabindex="-1">SSH</button>
-          <button class="tab" role="tab" id="tab-web" aria-controls="panel-web" aria-selected="false" data-tab="web"
-            tabindex="-1">Web tools</button>
-          <button class="tab" role="tab" id="tab-agents" aria-controls="panel-agents" aria-selected="false"
-            data-tab="agents" tabindex="-1">Agents</button>
-        </div>
+        <nav class="tabs" aria-label="Jump to a Worminal feature">
+          <a class="tab" href="#panel-sessions" data-section="sessions">Sessions</a>
+          <a class="tab" href="#panel-remote" data-section="remote">SSH</a>
+          <a class="tab" href="#panel-web" data-section="web">Web tools</a>
+          <a class="tab" href="#panel-agents" data-section="agents">Agents</a>
+        </nav>
         <div class="workspace-content">
-          <section role="tabpanel" id="panel-sessions" aria-labelledby="tab-sessions" data-panel="sessions">
-            <h3>Your work outlives its windows.</h3>
+          <section id="panel-sessions" aria-labelledby="heading-sessions" data-panel="sessions">
+            <h2 id="heading-sessions">Persistent terminal sessions.</h2>
             <p>Close every window. Come back to the same tabs, shells and running programs. The background service
               owns your terminal sessions; windows are views into them.</p>
             <div class="command-line"><span class="prompt" aria-hidden="true">$</span><code
@@ -114,8 +111,8 @@
               href="https://github.com/flintwinters/worminal/blob/main/docs/development.md">Build &amp; install
               ↗</a></div>
           </section>
-          <section role="tabpanel" id="panel-remote" aria-labelledby="tab-remote" data-panel="remote">
-            <h3>Multiple machines. One interface.</h3>
+          <section id="panel-remote" aria-labelledby="heading-remote" data-panel="remote">
+            <h2 id="heading-remote">Local and SSH sessions, together.</h2>
             <p>Keep local and SSH-backed tabs in the same window. Remote shells live in their host’s daemon and keep
               running when the view disconnects. A headless Linux host needs only the service.</p>
             <div class="command-line"><span class="prompt" aria-hidden="true">$</span><code
@@ -128,8 +125,8 @@
               ↗</a><a href="https://github.com/flintwinters/worminal/blob/main/docs/devices.md">Enrolled devices
               ↗</a></div>
           </section>
-          <section role="tabpanel" id="panel-web" aria-labelledby="tab-web" data-panel="web">
-            <h3>Make a web document part of your workflow.</h3>
+          <section id="panel-web" aria-labelledby="heading-web" data-panel="web">
+            <h2 id="heading-web">HTML tools beside your shell.</h2>
             <p>Open a web page or local HTML tool beside your shells. A shell command can turn its current tab into a
               browser view. Build a file explorer, report or dashboard as a document you can edit and reload.</p>
             <div class="command-line"><span class="prompt" aria-hidden="true">$</span><code id="command-web">worminal
@@ -140,8 +137,8 @@
               href="https://github.com/flintwinters/worminal/blob/main/docs/architecture.md">Browser capabilities
               ↗</a></div>
           </section>
-          <section role="tabpanel" id="panel-agents" aria-labelledby="tab-agents" data-panel="agents">
-            <h3>Agents can work with your actual sessions.</h3>
+          <section id="panel-agents" aria-labelledby="heading-agents" data-panel="agents">
+            <h2 id="heading-agents">A native API for terminal agents.</h2>
             <p>A discoverable native API lets agents find tabs, read screens and retained output, wait for changes,
               and send guarded input locally or over SSH. Inspection preserves your focus, scroll position and
               terminal size.</p>
@@ -158,6 +155,7 @@
       </div>
     </section>
 
+    <div class="context-column">
     <section class="pane survival-pane" aria-labelledby="survival-title">
       <header class="title-strip"><span class="plaque">02</span><h2 id="survival-title">SESSION LIFETIME</h2></header>
       <div class="pane-body survival-body">
@@ -178,6 +176,32 @@
           contract ↗</a>
       </div>
     </section>
+    <aside class="pane reference-pane" aria-labelledby="reference-title">
+      <header class="title-strip"><span class="plaque">04</span><h2 id="reference-title">FIELD NOTES</h2></header>
+      <div class="pane-body reference-body">
+        <h3>SMALL ON PURPOSE</h3>
+        <dl>
+          <dt>Platform</dt><dd>Linux · Wayland · X11</dd>
+          <dt>Application</dt><dd>Rust / GTK / WebKitGTK</dd>
+          <dt>Terminal engine</dt><dd>Derived from st</dd>
+          <dt>License</dt><dd>MIT / X Consortium</dd>
+          <dt>Agent discovery</dt><dd><code>worminald api help</code></dd>
+          <dt>Configuration discovery</dt><dd><code>worminald config --help</code></dd>
+        </dl>
+        <h3>READ THE CONTRACTS</h3>
+        <ul class="reference-links">
+          <li><a href="https://github.com/flintwinters/worminal/blob/main/docs/development.md">Build &amp;
+            installation ↗</a></li>
+          <li><a href="https://github.com/flintwinters/worminal/blob/main/docs/automation.md">Agent interface ↗</a></li>
+          <li><a href="https://github.com/flintwinters/worminal/blob/main/docs/config.md">Configuration ↗</a></li>
+          <li><a href="https://github.com/flintwinters/worminal/blob/main/docs/remote-install.md">Remote installation
+            ↗</a></li>
+        </ul>
+        <p class="reference-note">Browser pages reload during updates. Unsaved forms, page memory and active media are
+          not preserved.</p>
+      </div>
+    </aside>
+    </div>
 
     <section class="pane ledger-pane" aria-labelledby="ledger-title">
       <header class="title-strip"><span class="plaque">03</span><h2 id="ledger-title">CAPABILITY LEDGER</h2><span
@@ -191,7 +215,7 @@
           <label class="find-label" for="find">Find</label><input type="search" id="find" autocomplete="off"
             placeholder="capability…">
         </div>
-        <div class="table-scroll" tabindex="0" aria-label="Scrollable capability reference">
+        <div class="table-scroll" tabindex="0" aria-label="Worminal capability reference">
           <table class="capabilities" id="capabilities">
             <caption>What Worminal does. Select a capability to read its contract.</caption>
             <thead><tr><th scope="col">Capability</th><th scope="col">Behavior</th><th scope="col"
@@ -248,31 +272,22 @@
       </div>
     </section>
 
-    <aside class="pane reference-pane" aria-labelledby="reference-title">
-      <header class="title-strip"><span class="plaque">04</span><h2 id="reference-title">FIELD NOTES</h2></header>
-      <div class="pane-body reference-body">
-        <h3>SMALL ON PURPOSE</h3>
-        <dl>
-          <dt>Platform</dt><dd>Linux · Wayland · X11</dd>
-          <dt>Application</dt><dd>Rust / GTK / WebKitGTK</dd>
-          <dt>Terminal engine</dt><dd>Derived from st</dd>
-          <dt>License</dt><dd>MIT / X Consortium</dd>
-          <dt>Agent discovery</dt><dd><code>worminald api help</code></dd>
-          <dt>Configuration discovery</dt><dd><code>worminald config --help</code></dd>
-        </dl>
-        <h3>READ THE CONTRACTS</h3>
-        <ul class="reference-links">
-          <li><a href="https://github.com/flintwinters/worminal/blob/main/docs/development.md">Build &amp;
-            installation ↗</a></li>
-          <li><a href="https://github.com/flintwinters/worminal/blob/main/docs/automation.md">Agent interface ↗</a></li>
-          <li><a href="https://github.com/flintwinters/worminal/blob/main/docs/config.md">Configuration ↗</a></li>
-          <li><a href="https://github.com/flintwinters/worminal/blob/main/docs/remote-install.md">Remote installation
-            ↗</a></li>
-        </ul>
-        <p class="reference-note">Browser pages reload during updates. Unsaved forms, page memory and active media are
-          not preserved.</p>
+    <section class="pane get-pane" id="get-worminal" aria-labelledby="get-title">
+      <header class="title-strip"><span class="plaque">05</span><h2 id="get-title">GET WORMINAL FOR LINUX</h2></header>
+      <div class="pane-body get-body">
+        <h3>Make it your terminal.</h3>
+        <p>Worminal is free, open-source software for Linux, with native Wayland and X11 support.
+          Get the source and follow the build and installation instructions.</p>
+        <div class="get-actions">
+          <a class="command" href="https://github.com/flintwinters/worminal">Get Worminal on GitHub ↗</a>
+          <a class="command" href="https://github.com/flintwinters/worminal/blob/main/docs/development.md">Build &amp;
+            install ↗</a>
+          <a class="command" href="https://github.com/flintwinters/worminal/blob/main/docs/remote-install.md">Set up a
+            remote host ↗</a>
+        </div>
+        <p class="annotation">MIT / X Consortium license. Terminal engine derived from st.</p>
       </div>
-    </aside>
+    </section>
   </main>
 
   <footer class="status">

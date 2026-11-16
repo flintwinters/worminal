@@ -46,9 +46,10 @@ test under `/tmp`. Await all private owners before removing their files. Preserv
 Build artifacts belong in `build/`; diagnostic paths belong to `tools/paths.py`. Keep installation destinations in
 environment configuration and preserve the contributor's Git identity. Roll back from Git, not executable backups.
 
-The public product console is authored in `website/` and follows `UI.md` when present. `manage.py` builds its
-self-contained HTML and checks it independently of native dependencies. GitHub Actions publishes `build/site`
-to Pages; `tools/site.py` owns its canonical URL and embeds the shared logo, styles and interactions.
+The public landing page in `website/` uses `UI.md`'s Gruvbox pane chrome with natural document scrolling. Keep core
+product copy visible without interaction and navigation crawlable. `manage.py` builds and checks self-contained
+HTML independently of native dependencies. GitHub Actions publishes `build/site` to Pages; `tools/site.py` owns
+the canonical URL and embeds the shared logo, styles and interactions.
 
 Public contracts and subsystem details:
 
