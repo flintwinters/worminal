@@ -52,17 +52,26 @@ fn ensure(scope: &[u8]) -> io::Result<(std::os::unix::net::UnixStream, Option<Ch
 }
 
 pub(crate) fn bridge(scope: &[u8], existing: bool) -> io::Result<()> {
-    let (mut socket, mut child) = if existing {
+    let (socket, mut child) = if existing {
         (connect(scope)?, None)
     } else {
         ensure(scope)?
     };
+    let result = relay(socket);
+    if let Some(child) = &mut child {
+        let _ = child.try_wait();
+    }
+    result
+}
+
+/// Bounded bidirectional transport, shared by local bridges and authenticated remote views.
+pub(crate) fn relay(mut socket: std::os::unix::net::UnixStream) -> io::Result<()> {
     socket.set_nonblocking(true)?;
     let mut input = process::StdioDescriptor::new(0)?;
     let mut output = process::StdioDescriptor::new(1)?;
     let mut incoming = Queue::new(WORKSPACE_IO_BYTES as usize);
     let mut outgoing = Queue::new(WORKSPACE_IO_BYTES as usize);
-    let result = (|| loop {
+    loop {
         let interests = [
             Interest {
                 fd: 0,
@@ -115,11 +124,7 @@ pub(crate) fn bridge(scope: &[u8], existing: bool) -> io::Result<()> {
                 outgoing.flush(&mut output, WORKSPACE_IO_BYTES as usize)?;
             }
         }
-    })();
-    if let Some(child) = &mut child {
-        let _ = child.try_wait();
     }
-    result
 }
 
 fn request(scope: &[u8], kind: CommandKind) -> io::Result<i32> {
@@ -150,6 +155,15 @@ fn request(scope: &[u8], kind: CommandKind) -> io::Result<i32> {
 pub fn run(arguments: &[OsString]) -> io::Result<i32> {
     let scope = std::env::var_os("WORMINAL_SHARED_SOCKET_SCOPE").unwrap_or_default();
     let scope = scope.as_os_str().as_bytes();
+    if arguments.get(1).is_some_and(|value| value == "--ssh-child") {
+        return crate::remote_connect::ssh_child(&arguments[2..]);
+    }
+    if arguments
+        .get(1)
+        .is_some_and(|value| value == "--connect-master")
+    {
+        return crate::remote_connect::run(&arguments[2..]);
+    }
     if arguments
         .get(1)
         .is_some_and(|value| value == "install-on-remote")

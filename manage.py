@@ -288,22 +288,25 @@ def check_agent_api():
     raise typer.Exit(code)
 
 
+def run_remote_checks(pattern):
+    from tools.update_storage import verification_environment
+    candidate = build_rust_daemon()
+    with verification_environment(ROOT) as env:
+        return run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                    "-p", pattern, "-q"],
+                   env={**env, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate)})
+
+
 @app.command("check-remote-install")
 def check_remote_install():
-    """Check native remote-install bootstrap against private mock-SSH targets, without root or live hosts."""
-    candidate = build_rust_daemon()
-    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
-                         "-p", "test_remote_install.py", "-q"],
-                        env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate)}))
+    """Check native remote bootstrap and authenticated view ordering on private mock-SSH targets."""
+    raise typer.Exit(run_remote_checks("test_remote_install.py"))
 
 
 @app.command("check-remote-upgrade")
 def check_remote_upgrade():
     """Check private mock-SSH upgrades, publication rollback and live daemon session preservation."""
-    candidate = build_rust_daemon()
-    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
-                         "-p", "test_remote_upgrade.py", "-q"],
-                        env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate)}))
+    raise typer.Exit(run_remote_checks("test_remote_upgrade.py"))
 
 
 @app.command("check-rust-daemon")

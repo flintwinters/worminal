@@ -53,7 +53,11 @@ Use [`python3 manage.py upgrade HOST`](remote-upgrade.md) for nodes that already
 worminald upgrade-remote felix@disciple
 ```
 
-Views run this automatically, once per host per window owner, when they connect to a `--master`. It is symmetric:
+Every view connection to a `--master`, including reconnects and replacement owners, checks versions immediately
+after SSH authentication. The update finishes before configuration sync, bridge startup, workspace restoration,
+subscription or tab creation. These phases share one authenticated SSH connection; a failed update leaves the
+view disconnected and never opens a workspace. The GUI remains responsive and background retries never prompt.
+It is symmetric:
 the node with the older Cargo version is updated from the newer one. A newer local daemon is pushed over the same
 bootstrap as `install-on-remote`; a newer remote daemon is pulled through that bootstrap run locally. A daemon that
 predates `--version` counts as older. Equal versions change nothing.

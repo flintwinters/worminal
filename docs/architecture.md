@@ -55,8 +55,11 @@ existing v2 stream protocol. Device enrollment is explicit per authority user, s
 independently of tabs; `docs/devices.md` defines membership and caller-side availability. Never add heartbeats or
 block the daemon on probes. `worminald install-on-remote` bootstraps new compatible nodes over SSH, adding the
 `worminal` command when the target has the graphics stack; see `docs/remote-install.md`. It must refuse existing
-installations/workspaces and preserve state. Version sync is the separate `worminald upgrade-remote`: views run it
-once per host when they connect, and it updates whichever side has the older Cargo version, pushing or pulling the
+installations/workspaces and preserve state. Version sync is also exposed as `worminald upgrade-remote`. Every GUI
+master connection first runs the shared
+update bootstrap immediately after SSH authentication, before config sync or any bridge/workspace operation.
+The same authenticated stream becomes the bridge only after synchronization succeeds; failures disconnect the view.
+It updates whichever side has the older Cargo version, pushing or pulling the
 daemon with atomic replacement so the running daemon's watch hands live shells to the new file. It needs the same
 CPU, sudo and /usr/local on both sides, and never touches a v1 workspace. It compares only the Cargo version, so
 bump it with any change remote daemons must receive; equal versions never upgrade. Every tab's environment carries

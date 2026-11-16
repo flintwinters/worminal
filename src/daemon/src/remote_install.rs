@@ -26,7 +26,7 @@ Make this node and an installed peer run the same worminald, whichever is older.
 Compares Cargo versions; a newer local daemon is pushed to the peer, a newer peer daemon is pulled here.\n\
 Both sides must be Linux on the same CPU, with Python 3 and non-interactive sudo, installed in /usr/local.\n\
 Files are replaced atomically; a running daemon hands its shells to the new file without restarting them.\n\
-Active v1 workspaces are never touched. Views run this automatically once per host when they connect.\n";
+Active v1 workspaces are never touched. Views update immediately after SSH authentication, before opening the bridge.\n";
 const HELP: &str = "Usage: worminald install-on-remote SSH_ENDPOINT\n\
 Install this daemon and its manual on a new compatible Linux node over SSH.\n\
 A target with GTK/WebKit also gets the worminal command, modules, desktop entry and icon.\n\
@@ -39,7 +39,7 @@ fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::other(message.into())
 }
 
-fn receive(reader: &mut impl Read) -> io::Result<Value> {
+pub(super) fn receive(reader: &mut impl Read) -> io::Result<Value> {
     let mut bytes = Vec::new();
     for _ in 0..HEADER_LIMIT {
         let mut byte = [0];
@@ -114,7 +114,7 @@ fn layout() -> Value {
     layout
 }
 
-fn code(mode: &str) -> String {
+pub(super) fn code(mode: &str) -> String {
     format!(
         "import json\nLAYOUT=json.loads({})\nMODE={}\nSOURCE={}\nexec(SOURCE)\n",
         serde_json::to_string(&layout().to_string()).unwrap(),
@@ -283,21 +283,27 @@ fn timeouts(stream: &UnixStream) -> io::Result<()> {
 fn upgrade(endpoint: &str) -> io::Result<Value> {
     validate_endpoint(endpoint)?;
     let (mut stream, _child) = ssh::connect_python(endpoint.as_ref(), &code("upgrade"))?;
-    timeouts(&stream)?;
+    let mut result = upgrade_stream(&mut stream)?;
+    result["endpoint"] = json!(endpoint);
+    Ok(result)
+}
+
+/// Version negotiation is shared by the explicit command and the authenticated view gate.
+pub(super) fn upgrade_stream(stream: &mut UnixStream) -> io::Result<Value> {
+    timeouts(stream)?;
     let mut reader = BufReader::new(stream.try_clone()?);
     let ready = receive(&mut reader)?;
     check_platform(&ready)?;
     let theirs = ready.get("version").and_then(Value::as_str);
-    let mut result = match compare(theirs, env!("CARGO_PKG_VERSION"))? {
+    let result = match compare(theirs, env!("CARGO_PKG_VERSION"))? {
         Ordering::Less => {
-            let mut result = push(&mut stream, &mut reader, &ready)?;
+            let mut result = push(stream, &mut reader, &ready)?;
             result["direction"] = json!("push");
             result
         }
-        Ordering::Equal => finish_current(&mut stream, &mut reader)?,
-        Ordering::Greater => pull(&mut stream, &mut reader, theirs.unwrap_or(""))?,
+        Ordering::Equal => finish_current(stream, &mut reader)?,
+        Ordering::Greater => pull(stream, &mut reader, theirs.unwrap_or(""))?,
     };
-    result["endpoint"] = json!(endpoint);
     Ok(result)
 }
 

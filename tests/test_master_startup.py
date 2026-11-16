@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import select
 import signal
+import socket
 import subprocess
 import time
 import unittest
@@ -79,7 +80,7 @@ class MasterStartupTest(unittest.TestCase):
     def test_password_prompt_cancel_and_retry_in_existing_window(self):
         from tempfile import TemporaryDirectory
         from preview import profile
-        from workspace_protocol import stop_workspace
+        from workspace_protocol import stop_workspace, send, wait_kind, catalog_records
         from runtime import window
 
         if os.environ.get('WORMINAL_TEST_REAL_MASTER'):
@@ -93,14 +94,14 @@ class MasterStartupTest(unittest.TestCase):
             ssh = base/'ssh'
             ssh.write_text('#!/usr/bin/python3\nimport os,sys,subprocess\n'
                 'from pathlib import Path\n'
-                # upgrade-remote is independent of the view authentication under test.
-                'if sys.argv[-1] not in ("--bridge","--bridge-existing"): sys.exit(1)\n'
                 f'with open({str(attempts)!r},"a") as f: f.write("attempt\\n")\n'
                 'if os.environ.get("SSH_ASKPASS_REQUIRE")!="force": sys.exit(255)\n'
                 'reply=subprocess.run([os.environ["SSH_ASKPASS"],"fixture password:"],capture_output=True)\n'
                 'if reply.returncode or reply.stdout!=b"fixture-secret\\n": sys.exit(255)\n'
                 f'Path({str(accepted)!r}).touch()\n'
-                f'os.execv({daemon!r},[{daemon!r},"--bridge"])\n')
+                f'sys.path.insert(0,{str(ROOT / "tests/fixtures")!r})\n'
+                'from master_ssh import run\n'
+                f'run({daemon!r})\n')
             ssh.chmod(0o700)
             env.update(GDK_BACKEND='x11', PATH=str(base)+os.pathsep+env['PATH'])
             env.pop('DBUS_SESSION_BUS_ADDRESS', None)
@@ -125,6 +126,16 @@ class MasterStartupTest(unittest.TestCase):
                 def key(wid, *keys):
                     subprocess.run(['xdotool','windowfocus','--sync',wid,'key','--clearmodifiers',*keys],
                                    env=env,check=True,stdout=log,stderr=log)
+                def connected():
+                    with socket.socket(socket.AF_UNIX) as peer:
+                        peer.settimeout(1)
+                        try:
+                            peer.connect(f'\0worminal-workspace-v2-{os.getuid()}-'
+                                         + env['WORMINAL_SHARED_SOCKET_SCOPE'])
+                        except ConnectionRefusedError:
+                            return False
+                        send(peer, 19, version=2)
+                        return bool(catalog_records(wait_kind(peer, 7, version=2)[1]))
                 try:
                     prompt = wait(prompts, 'initial password dialog')[0]
                     key(prompt, 'Escape')
@@ -145,6 +156,7 @@ class MasterStartupTest(unittest.TestCase):
                     key(prompt, 'Return')
                     wait(accepted.exists, 'password delivered privately to SSH')
                     wait(lambda: not prompts(), 'password dialog closes')
+                    wait(connected, 'version/config sync and master tab setup finish')
                     self.assertEqual(window(env,app),owner_window,'Authentication replaced the window')
                     self.assertNotIn('fixture-secret',log_path.read_text(errors='replace'))
                 finally:

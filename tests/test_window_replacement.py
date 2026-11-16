@@ -9,7 +9,7 @@ import tempfile
 import time
 import unittest
 from preview import profile, service, fixture, Fixture
-from runtime import CHECKS, copy_runtime, module_path, runtime_binary, RUST_FRONTEND_MODULE, RUST_BROWSER_MODULE
+from runtime import ROOT, CHECKS, copy_runtime, module_path, runtime_binary, RUST_FRONTEND_MODULE, RUST_BROWSER_MODULE
 from x11 import isolated_display
 
 
@@ -135,9 +135,11 @@ class ReplacementTest(unittest.TestCase):
             ssh.write_text('#!/usr/bin/python3\nimport os,sys\n'
                 'assert sys.argv[1:4]==["-T","-C","-oConnectTimeout=10"]\n'
                 f'scopes={scopes!r}\n'
-                'assert sys.argv[4] in scopes and sys.argv[-1] in ("--bridge","--bridge-existing")\n'
+                'assert sys.argv[4] in scopes\n'
                 'os.environ["WORMINAL_SHARED_SOCKET_SCOPE"]=scopes[sys.argv[4]]\n'
-                f'os.execv({daemon!r},[{daemon!r},sys.argv[-1]])\n')
+                f'sys.path.insert(0,{str(ROOT / "tests/fixtures")!r})\n'
+                'from master_ssh import run\n'
+                f'run({daemon!r})\n')
             ssh.chmod(0o700)
             env = {**env, 'GDK_BACKEND': 'x11', 'PATH': str(base)+os.pathsep+env['PATH']}
             env.pop('DBUS_SESSION_BUS_ADDRESS', None)

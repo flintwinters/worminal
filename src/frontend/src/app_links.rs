@@ -74,10 +74,6 @@ impl App {
             link.reconnect.borrow().is_none(),
         )?;
         *link.connection.borrow_mut() = Some(connection);
-        if let (Some(master), false) = (config.master.as_deref(), self.replacing.get()) {
-            // Best effort: a failed helper must never affect the connection itself.
-            let _ = crate::startup::sync_versions(master);
-        }
         link.initial_claim.set(true);
         self.watch(index, &link);
 

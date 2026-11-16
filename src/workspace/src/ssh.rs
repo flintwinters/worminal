@@ -37,8 +37,25 @@ fn connect_command(master: &OsStr, command: &[&[u8]]) -> io::Result<(UnixStream,
 
 /// Fixed bootstrap command; user data is sent on stdin, never interpolated into a remote shell.
 pub fn connect_python(master: &OsStr, code: &str) -> io::Result<(UnixStream, Child)> {
+    connect_python_with_guard(master, code, None)
+}
+
+/// A proxy owns this SSH child; its death must also close the authenticated remote connection.
+pub fn connect_python_guarded(
+    master: &OsStr,
+    code: &str,
+    guard: &OsStr,
+) -> io::Result<(UnixStream, Child)> {
+    connect_python_with_guard(master, code, Some(guard))
+}
+
+fn connect_python_with_guard(
+    master: &OsStr,
+    code: &str,
+    guard: Option<&OsStr>,
+) -> io::Result<(UnixStream, Child)> {
     let quoted = format!("'{}'", code.replace('\'', "'\\''"));
-    connect_program(master, b"python3", &[b"-c", quoted.as_bytes()])
+    connect_program_with_guard(master, b"python3", &[b"-c", quoted.as_bytes()], guard)
 }
 
 /// GUI connections supply their own prompt helper; headless callers keep normal SSH policy.
@@ -48,14 +65,22 @@ pub fn connect_gui(
     askpass: &OsStr,
     interactive: bool,
 ) -> io::Result<(UnixStream, Child)> {
-    connect_program_with_environment(
-        master,
-        WORKSPACE_DAEMON.to_bytes(),
-        &[if existing {
-            b"--bridge-existing"
+    let daemon = std::path::Path::new(askpass).with_file_name("worminald");
+    let (parent, remote) = UnixStream::pair()?;
+    let arguments = [
+        CString::new(daemon.as_os_str().as_bytes())?,
+        CString::new("--connect-master")?,
+        CString::new(master.as_bytes())?,
+        CString::new(if existing {
+            "--bridge-existing"
         } else {
-            b"--bridge"
-        }],
+            "--bridge"
+        })?,
+    ];
+    let pid = crate::spawn::start_with_environment(
+        &arguments,
+        &[(remote.as_fd(), 0), (remote.as_fd(), 1)],
+        true,
         &[
             ("SSH_ASKPASS", askpass),
             (
@@ -64,7 +89,8 @@ pub fn connect_gui(
             ),
             ("WORMINAL_SSH_ASKPASS", OsStr::new("1")),
         ],
-    )
+    )?;
+    Ok((parent, crate::spawn::own(pid, "worminal-master-reap")?))
 }
 
 /// OpenSSH invokes the helper with a single prompt argument, outside the GUI broker.
@@ -78,14 +104,14 @@ fn connect_program(
     program: &[u8],
     command: &[&[u8]],
 ) -> io::Result<(UnixStream, Child)> {
-    connect_program_with_environment(master, program, command, &[])
+    connect_program_with_guard(master, program, command, None)
 }
 
-fn connect_program_with_environment(
+fn connect_program_with_guard(
     master: &OsStr,
     program: &[u8],
     command: &[&[u8]],
-    overrides: &[(&str, &OsStr)],
+    guard: Option<&OsStr>,
 ) -> io::Result<(UnixStream, Child)> {
     let bytes = master.as_bytes();
     if bytes.is_empty() || bytes[0] == b'-' || bytes.contains(&b'\n') {
@@ -95,28 +121,31 @@ fn connect_program_with_environment(
         ));
     }
     let (parent, remote) = UnixStream::pair()?;
-    let arguments = [
-        b"ssh".as_slice(),
-        b"-T",
-        b"-C",
-        b"-oConnectTimeout=10",
-        bytes,
-        program,
-    ]
-    .into_iter()
-    .chain(command.iter().copied())
-    .map(CString::new)
-    .collect::<Result<Vec<_>, _>>()?;
+    let owner_pid = std::process::id().to_string();
+    let prefix = guard.map(|guard| [guard.as_bytes(), b"--ssh-child", owner_pid.as_bytes()]);
+    let arguments = prefix
+        .into_iter()
+        .flatten()
+        .chain([
+            b"ssh".as_slice(),
+            b"-T",
+            b"-C",
+            b"-oConnectTimeout=10",
+            bytes,
+            program,
+        ])
+        .chain(command.iter().copied())
+        .map(CString::new)
+        .collect::<Result<Vec<_>, _>>()?;
     // SSH leads its own session, with no controlling terminal. The GUI owner inherits the
     // desktop's terminal and process group (e.g. startx on tty1 shares one group with the window
     // manager). An SSH host-key or password prompt then opened /dev/tty from a background group,
     // and the kernel stopped that whole group with SIGTTOU/SIGTTIN, freezing the desktop.
     // Detached, SSH cannot prompt on a terminal: it fails, or uses a configured SSH_ASKPASS.
-    let pid = crate::spawn::start_with_environment(
+    let pid = crate::spawn::start(
         &arguments,
         &[(remote.as_fd(), 0), (remote.as_fd(), 1)],
         true,
-        overrides,
     )?;
     let child = crate::spawn::own(pid, "worminal-ssh-reap")?;
     Ok((parent, child))

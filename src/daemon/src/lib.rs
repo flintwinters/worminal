@@ -17,6 +17,7 @@ mod jobs;
 pub mod process;
 pub mod queue;
 mod reactor;
+mod remote_connect;
 mod remote_install;
 mod service;
 mod service_handoff;

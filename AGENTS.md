@@ -36,6 +36,7 @@ broker identities, including names containing `preview`. Release Rust borrows be
 
 `src/config` is the only runtime configuration resolver. Native executables must teach agents their public CLI,
 API and configuration contracts without repository access. `manage.py` is internal development tooling only.
+Master views finish version sync immediately after SSH authentication, before workspace access.
 Remote version sync compares Cargo versions: bump the version when remote daemons need a runtime change; equal
 versions never upgrade. Tests target the current Rust app and C engine, without historical application builds.
 Full checks enforce reviewed daemon CPU and network performance ceilings; never raise them automatically.

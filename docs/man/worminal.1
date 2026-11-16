@@ -118,7 +118,9 @@ No credentials, configuration or user state are copied. No daemon is started and
 Open a view afterward with worminal --master user@host; enroll the route explicitly if desired.
 Run worminald install-on-remote --help for details. SSH failure can leave the outcome uncertain; no retry occurs.
 .B worminald upgrade-remote user@host
-runs automatically when a view connects with --master. Whichever of this node and the host has the older
+also supplies version sync for every --master view connection, immediately after SSH authentication.
+Version sync completes before configuration sync, bridge startup or workspace restoration; failure disconnects
+the view. All phases share the authenticated SSH connection. Whichever of this node and the host has the older
 daemon version is updated from the newer one (pushed or pulled), with the same CPU, Python 3, sudo and /usr/local
 requirements. Running shells are handed to the new file, not restarted. Active v1 workspaces are never touched.
 .SH DAEMON UPGRADES

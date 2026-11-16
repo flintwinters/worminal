@@ -34,7 +34,8 @@ the local user, since `~/.ssh/config` is not consulted).
 ## Sync between devices
 
 `worminald config sync [--prefer local|remote] SSH_ENDPOINT` merges `worminal.yaml` with a peer's. Views run it
-automatically, once per host, right after `upgrade-remote` (the outcome goes to the daemon log).
+automatically on each master connection, after version sync and before the bridge opens. Conflicts go to the
+daemon log.
 
 - Each node remembers, per peer, the last agreed copy (`$XDG_STATE_HOME/worminal/config-sync/`); the merge is
   three-way per dotted key. A key changed on one side takes that side; the same change on both agrees; deleting a
