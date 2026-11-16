@@ -65,6 +65,19 @@ configuration and preserve the contributor's configured Git identity.
 
 ## Check entrypoints
 
+The public GitHub Pages site lives in `website/`. `manage.py build-site` produces `build/site` with the shared
+logo and canonical URL from `tools/site.py`; normal builds need no website packages or native application build.
+`manage.py check-site` validates links, metadata, structured data and deployment paths. Add `--browser` for private
+desktop/mobile Chromium captures (optional `websocket-client`) under `build/checks/site-preview`; profiles and
+diagnostics are preserved.
+`build-site --refresh-card` redraws the checked-in sharing image using optional Pillow and system DejaVu Sans.
+`.github/workflows/pages.yml` checks and deploys site changes on `main`; GitHub Pages uses the Actions source.
+Search metadata follows Google's [SEO starter guide](https://developers.google.com/search/docs/fundamentals/seo-starter-guide)
+and [AI search guidance](https://developers.google.com/search/docs/appearance/ai-features). Visible, useful HTML,
+canonical URLs and accurate schema take priority over keyword repetition. No fabricated ratings or special AI files.
+The project site cannot control `robots.txt` at the account domain root. Submit the generated `sitemap.xml` in a
+verified Search Console URL-prefix property to monitor indexing; account verification remains a separate owner action.
+
 Use `python3 manage.py --help` as the command index. The main routes are:
 
 | Command | Purpose |

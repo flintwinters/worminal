@@ -142,6 +142,24 @@ def build():
     native_build.build_targets()
 
 
+@app.command("build-site")
+def build_site(refresh_card: bool = typer.Option(False, help="Regenerate the sharing image; requires Pillow.")):
+    """Build the public static website under build/site, without native application dependencies."""
+    from tools import site
+    if refresh_card:
+        site.render_social_card()
+    site.build()
+
+
+@app.command("check-site")
+def check_site(browser: bool = typer.Option(False, help="Also capture desktop/mobile in private headless Chromium.")):
+    """Check site links, metadata, structured data and deployment paths; no native build needed."""
+    code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_site.py", "-v"])
+    if not code and browser:
+        code = run([sys.executable, "tests/site_preview.py"])
+    raise typer.Exit(code)
+
+
 @app.command("check-engine")
 def check_engine():
     """Check sanitized engine boundaries and the Rust owning wrapper."""

@@ -46,6 +46,9 @@ test under `/tmp`. Await all private owners before removing their files. Preserv
 Build artifacts belong in `build/`; diagnostic paths belong to `tools/paths.py`. Keep installation destinations in
 environment configuration and preserve the contributor's Git identity. Roll back from Git, not executable backups.
 
+The public landing site is static HTML/CSS in `website/`, built and checked through `manage.py` independently of
+native dependencies. GitHub Actions publishes `build/site` to Pages; `tools/site.py` owns its canonical URL.
+
 Public contracts and subsystem details:
 
 - [Agent interface](docs/automation.md), [Worp](docs/worp.md), [devices](docs/devices.md).

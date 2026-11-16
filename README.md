@@ -6,6 +6,8 @@
 
 Your shells, web tools and remote machines, together in a small Linux terminal.
 
+[Visit the website](https://flintwinters.github.io/worminal/).
+
 Worminal keeps your workspace alive independently of its windows. Use it yourself, let an agent work alongside you,
 and come back without starting over.
 
