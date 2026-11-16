@@ -1,5 +1,5 @@
 """Prepare an optional private activation-test window manager without installing system packages."""
-from tools.paths import CHECKS
+from tools.paths import BUILD
 
 from pathlib import Path
 import os
@@ -8,7 +8,8 @@ import subprocess
 from tools.debian_runtime import unpack
 
 ROOT = Path(__file__).resolve().parent.parent
-LOCAL = CHECKS / "muffin"
+# Private diagnostic workers must see the runtime prepared before they were spawned.
+LOCAL = BUILD / "dependencies/muffin"
 RUNTIME = LOCAL / "root"
 
 

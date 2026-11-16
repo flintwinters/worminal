@@ -40,7 +40,7 @@ back code from Git rather than keeping executable backups. Keep user profiles an
 
 ## Updates
 
-`manage.py setup-check-runtime` prepares private browser audio and Weston without changing desktop packages; update
+`manage.py setup-check-runtime` prepares private browser audio, Weston and Muffin without changing desktop packages; update
 workflows run it automatically. New runtimes stay under `build/dependencies` across diagnostic cleanup. `manage.py
 update` builds the current checkout, installs to /usr/local, then verifies the installed artifacts on private
 displays; it does not run the test suite (`update --check` does, as auto-update does). Installation and any private

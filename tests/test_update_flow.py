@@ -1,5 +1,7 @@
 """Guards that keep checked updates from failing for environmental reasons."""
 import os
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import time
@@ -7,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from tools import auto_update, explorer
-from tools.paths import CHECKS
+from tools.paths import CHECKS, ROOT
 from tools.update_storage import release_stale
 
 
@@ -16,6 +18,14 @@ class UpdateFlowTests(unittest.TestCase):
         directory = tempfile.TemporaryDirectory(dir=CHECKS, prefix="update-flow-")
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
+
+    def test_private_workers_share_prepared_muffin_runtime(self):
+        worker = self.root / "worker"
+        worker.mkdir()
+        result = subprocess.check_output(
+            [sys.executable, "-c", "from tools.muffin import LOCAL; print(LOCAL)"],
+            cwd=ROOT, env={**os.environ, "WORMINAL_TEST_CHECKS_DIR": str(worker)}, text=True)
+        self.assertEqual(Path(result.strip()), ROOT / "build/dependencies/muffin")
 
     def test_second_update_of_a_checkout_is_refused_not_interleaved(self):
         with auto_update.exclusive(self.root):

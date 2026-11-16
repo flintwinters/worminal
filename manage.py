@@ -355,7 +355,7 @@ def setup_audio():
 
 @app.command("setup-check-runtime")
 def setup_check_runtime():
-    """Prepare everything the full suite needs: explorer build, project-local audio and Weston; idempotent."""
+    """Prepare explorer, audio and private Weston/Muffin runtimes; idempotent."""
     if native_build.headless():
         return
     from tools import explorer
@@ -367,6 +367,9 @@ def setup_check_runtime():
         weston.command(os.environ.copy())
     except ValueError:
         weston.setup()
+    from tools import muffin
+    if not muffin.available():
+        muffin.setup()
 
 
 @app.command("prove-regressions")
