@@ -230,9 +230,6 @@ class RustApplicationTest(unittest.TestCase):
         # Typing through the agent API would take the window's control of the tab, so no tab is typed into.
         fill = lambda color: "while :; do printf '\\033[48;2;%d;%d;%dm\\033[2J'; sleep .2; done" % color
         with isolated_display() as env, ExitStack() as cleanup:
-            # Terminal labels use directory basenames, not OSC titles. Keep the strip
-            # probe beyond one short label regardless of the checkout's directory name.
-            cwd = cleanup.enter_context(tempfile.TemporaryDirectory(prefix='', dir=CHECKS))
             script = CHECKS / 'split-shell.sh'
             script.write_text(f'#!/bin/sh\n{fill(blue)}\n')
             script.chmod(0o755)
@@ -240,7 +237,7 @@ class RustApplicationTest(unittest.TestCase):
             env.pop('WAYLAND_DISPLAY', None)
             app = subprocess.Popen([str(runtime_binary("worminal-rust")), '-T', 'Rust split', '-o', '-',
                                     '-e', '/bin/sh', '-c', fill(red)],
-                                   cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                                   env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             self.addCleanup(lambda: self.stop(app))
             wid = window(env, app)
             xdo = lambda *args: subprocess.run(['xdotool', *args], env=env, check=True)
@@ -295,6 +292,11 @@ class RustApplicationTest(unittest.TestCase):
                 time.sleep(.05)
             # The new tab is selected and fills the window.
             wait_for(blue, blue, 'second tab did not fill the window')
+            # Locate the selected second label rather than assuming a particular font
+            # size or directory basename width. Its right edge must clear the first label.
+            background = (24, 24, 24)
+            second_label = max(x for x in range(900) if pixel(x / 900, 4 / 500) != background) - 2
+            self.assertLess(second_label, 450, 'fixture labels must fit in one half-width strip')
             # Drag the first tab's label onto the right edge of the pane.
             xdo('mousemove', '--window', wid, '12', '8', 'mousedown', '1')
             for step in range(1, 11):
@@ -305,9 +307,8 @@ class RustApplicationTest(unittest.TestCase):
             wait_for(blue, red, 'dropping a tab on the right edge did not split the window')
             # Each pane has its own strip holding only its tabs: the dropped tab is selected in the right strip,
             # and the left strip no longer has the second tab where the shared strip had it.
-            background = (24, 24, 24)
             self.assertNotEqual(pixel(.505, 4 / 500), background, 'the right pane has no tab strip of its own')
-            self.assertEqual(pixel(100 / 900, 4 / 500), background, 'the left strip still lists the dropped tab')
+            self.assertEqual(pixel(second_label / 900, 4 / 500), background, 'the left strip still lists the dropped tab')
             # Dragging the right pane's tab onto the left strip puts it back there and ends the split.
             xdo('mousemove', '--window', wid, '462', '8', 'mousedown', '1')
             for step in range(1, 11):
