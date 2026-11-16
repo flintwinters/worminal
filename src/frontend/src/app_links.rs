@@ -188,7 +188,12 @@ impl App {
                         .borrow()
                         .iter()
                         .any(|page| page.id >> LINK_SHIFT == index);
+                let reattaching_primary = index == 0 && self.primary_detached.get();
                 self.establish(index, launch)?;
+                if reattaching_primary {
+                    // An explicit reattachment selects the returning host when its catalog arrives.
+                    self.active.set(0);
+                }
             }
         } else {
             let index = self.next_link.get();
@@ -244,9 +249,7 @@ impl App {
                     tabs: Vec::new(),
                 },
             )?;
-            if app.pages.borrow().is_empty() {
-                app.window.close();
-            }
+            app.close_empty_window();
         }
         if found {
             Ok(())
@@ -255,6 +258,12 @@ impl App {
                 io::ErrorKind::NotFound,
                 "Master is not connected",
             ))
+        }
+    }
+    pub(super) fn close_empty_window(&self) {
+        // An empty view may still be waiting for another host's first catalog or new tab.
+        if self.pages.borrow().is_empty() && self.links().iter().all(|link| link.settled()) {
+            self.window.close();
         }
     }
     pub(super) fn drop_remote(&self, index: u32) {

@@ -30,6 +30,7 @@ fn transfers_multiple_windows_and_descriptor_ownership() {
     let lease = File::open("/dev/null").unwrap();
     let (mut sender, mut receiver) = UnixStream::pair().unwrap();
     let mut first = window(0x0300000b);
+    first.flags |= gui_handoff::PRIMARY_DETACHED;
     first.links.push(gui_handoff::Link {
         index: 3,
         request: window(0).request,

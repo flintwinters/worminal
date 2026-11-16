@@ -31,6 +31,7 @@ from runtime import copy_runtime, window, stop_application
 from rust_module import RustModuleTest
 from test_runtime import RuntimeCleanupTest
 from test_file_drop import FileDropTest
+from test_master_detach import MasterDetachTest
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -338,6 +339,7 @@ class RustApplicationTest(unittest.TestCase):
 def main():
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(RustApplicationTest)
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(FileDropTest))
+    suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(MasterDetachTest))
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(WindowStateTest))
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(WindowActivationTests))
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(RustModuleTest))

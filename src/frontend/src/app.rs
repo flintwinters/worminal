@@ -850,9 +850,7 @@ impl App {
             } else {
                 self.window.set_title(&page.title);
             }
-        } else if (closed != 0 && index == 0)
-            || (self.primary_detached.get() && self.pages.borrow().is_empty())
-        {
+        } else if closed != 0 && index == 0 {
             self.window.close();
         } else {
             self.message(Some("No tabs. Ctrl+Shift+T opens a terminal."));
@@ -874,6 +872,9 @@ impl App {
         }
         self.refresh_tabs();
         window_state::changed();
+        if self.primary_detached.get() {
+            self.close_empty_window();
+        }
         Ok(())
     }
     fn new_tab(self: &Rc<Self>) {
