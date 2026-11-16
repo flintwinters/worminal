@@ -368,48 +368,6 @@ button:disabled {
   font-size: 16px;
 }
 
-.survival-pane .title-strip {
-  --hue: var(--green);
-}
-.survival-body {
-  padding: 12px;
-}
-.section-kicker {
-  color: var(--muted);
-  font-size: 16px;
-  letter-spacing: .9px;
-  margin: 0 0 6px;
-}
-.lifecycle {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 16px;
-}
-.lifecycle th, .lifecycle td {
-  border-bottom: 1px solid #484848;
-  padding: 5px 2px;
-  text-align: left;
-  font-weight: 400;
-}
-.lifecycle td {
-  text-align: right;
-  white-space: nowrap;
-}
-.nominal {
-  color: var(--green);
-}
-.caution {
-  color: var(--yellow);
-}
-.critical {
-  color: var(--red);
-}
-.lifecycle-note {
-  color: var(--muted);
-  font-size: 16px;
-  line-height: 1.5;
-  margin: 5px 0 6px;
-}
 .ledger-pane {
   grid-area: ledger;
 }
@@ -628,12 +586,6 @@ html {
     "index ledger"
     "index get";
   }
-  .lifecycle {
-    max-width: 600px;
-  }
-  .lifecycle-note {
-    max-width: 80ch;
-  }
   .reference-body {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -765,19 +717,12 @@ html {
   }
 }
 
-.context-column {
-  grid-area: context;
-  display: grid;
-  gap: 24px;
-  min-width: 0;
-  align-content: start;
-}
 
 /* A topic boundary is deliberately wider than any gap within its explanation. */
 .workspace-content section + section { padding-top: var(--space-topic); }
-.lifecycle tr:nth-child(4) > *, .lifecycle tr:nth-child(6) > * { padding-top: 16px; }
 .reference-body dt:first-child { margin-top: 0; }
 @media (max-width: 700px) {
   :root { --space-topic: 32px; --space-section: 36px; }
-  .context-column { gap: 18px; }
 }
+
+.reference-pane { grid-area: context; }

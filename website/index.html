@@ -149,26 +149,6 @@
       </div>
     </section>
 
-    <div class="context-column">
-    <section class="pane survival-pane" aria-labelledby="survival-title">
-      <header class="title-strip"><h2 id="survival-title">WHEN PROGRAMS KEEP RUNNING</h2></header>
-      <div class="pane-body survival-body">
-        <p class="section-kicker">Action and effect on terminal programs</p>
-        <table class="lifecycle" aria-label="Session behavior reference">
-          <tbody>
-            <tr><th scope="row">Close a window</th><td class="nominal">KEEP RUNNING</td></tr>
-            <tr><th scope="row">Disconnect a view</th><td class="nominal">KEEP RUNNING</td></tr>
-            <tr><th scope="row">Live update</th><td class="nominal">KEEP RUNNING</td></tr>
-            <tr><th scope="row">Close a terminal tab</th><td class="critical">PROGRAMS STOP</td></tr>
-            <tr><th scope="row">Stop the service</th><td class="critical">PROGRAMS STOP</td></tr>
-            <tr><th scope="row">Restart the machine</th><td class="caution">NEW SHELLS</td></tr>
-          </tbody>
-        </table>
-        <p class="lifecycle-note">Recovery remembers directories and browser URLs. It does not restore running
-          processes, replay commands or recover scrollback.</p>
-        <a href="https://github.com/flintwinters/worminal/blob/main/docs/architecture.md">Sessions and restart recovery ↗</a>
-      </div>
-    </section>
     <aside class="pane reference-pane" aria-labelledby="reference-title">
       <header class="title-strip"><h2 id="reference-title">SOFTWARE &amp; DOCUMENTATION</h2></header>
       <div class="pane-body reference-body">
@@ -194,7 +174,6 @@
           not preserved.</p>
       </div>
     </aside>
-    </div>
 
     <section class="pane ledger-pane" aria-labelledby="ledger-title">
       <header class="title-strip"><h2 id="ledger-title">ALL FEATURES</h2><span

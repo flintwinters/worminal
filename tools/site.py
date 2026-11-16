@@ -72,16 +72,11 @@ def render_social_card():
         draw.line((x, y + 28, right, y + 28), fill=tuple(round(value * .8) for value in rgb))
         draw.text((x + 10, y + 3), label, font=face(16), fill=colors['background'])
 
-    strip((16, 55, 782, 398), 'FEATURES', 'blue')
+    strip((16, 55, 1184, 398), 'FEATURES', 'blue')
     draw.text((42, 110), 'Worminal', font=face(54), fill=colors['text'])
     draw.text((43, 203), 'Shells keep running', font=face(37), fill=colors['yellow'])
     draw.text((43, 256), 'when windows close.', font=face(37), fill=colors['text'])
     draw.text((43, 342), '$ worminal --attach', font=face(23), fill=colors['aqua'])
-    strip((792, 55, 1184, 398), 'RUNNING PROGRAMS', 'green')
-    for index, text in enumerate(('WINDOW CLOSE', '  shells keep running', 'LIVE UPDATE', '  programs keep running',
-                                  'REBOOT', '  fresh shells')):
-        draw.text((810, 109 + index * 41), text, font=face(19),
-                  fill=colors['muted'] if index % 2 == 0 else colors['text'])
     strip((16, 410, 1184, 576), 'ALL FEATURES', 'purple')
     for index, text in enumerate(('Persistent sessions / local + SSH', 'Web tools / split panes / agent API')):
         draw.text((42, 461 + index * 45), text, font=face(25), fill=colors['text'])
