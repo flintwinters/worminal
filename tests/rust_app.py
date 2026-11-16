@@ -228,9 +228,11 @@ class RustApplicationTest(unittest.TestCase):
         red, blue = (200, 30, 30), (20, 40, 210)
         # Each terminal repaints its whole screen continuously: resizing keeps text but not erased background.
         # Typing through the agent API would take the window's control of the tab, so no tab is typed into.
-        # Shell-derived titles include the checkout path and can cover strip probe pixels.
-        fill = lambda color: "printf '\\033]0;Tab\\007'; while :; do printf '\\033[48;2;%d;%d;%dm\\033[2J'; sleep .2; done" % color
+        fill = lambda color: "while :; do printf '\\033[48;2;%d;%d;%dm\\033[2J'; sleep .2; done" % color
         with isolated_display() as env, ExitStack() as cleanup:
+            # Terminal labels use directory basenames, not OSC titles. Keep the strip
+            # probe beyond one short label regardless of the checkout's directory name.
+            cwd = cleanup.enter_context(tempfile.TemporaryDirectory(prefix='', dir=CHECKS))
             script = CHECKS / 'split-shell.sh'
             script.write_text(f'#!/bin/sh\n{fill(blue)}\n')
             script.chmod(0o755)
@@ -238,7 +240,7 @@ class RustApplicationTest(unittest.TestCase):
             env.pop('WAYLAND_DISPLAY', None)
             app = subprocess.Popen([str(runtime_binary("worminal-rust")), '-T', 'Rust split', '-o', '-',
                                     '-e', '/bin/sh', '-c', fill(red)],
-                                   env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                                   cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             self.addCleanup(lambda: self.stop(app))
             wid = window(env, app)
             xdo = lambda *args: subprocess.run(['xdotool', *args], env=env, check=True)
