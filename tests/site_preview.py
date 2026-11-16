@@ -91,6 +91,9 @@ class SitePreview(unittest.TestCase):
                             self.assertLess(time.monotonic(), deadline, 'Site did not finish loading')
                             time.sleep(.05)
                         self.assertEqual(devtools.value('innerWidth'), width)
+                        self.assertGreaterEqual(devtools.value(
+                            'parseFloat(getComputedStyle(document.querySelector(".workspace-content p")).fontSize)'),
+                            18, 'Main reading text must stay comfortably sized on every viewport')
                         self.assertLessEqual(devtools.value('document.documentElement.scrollWidth'), width,
                                              f'{label} layout overflows horizontally')
                         self.assertGreater(devtools.value('document.documentElement.scrollHeight'), height,
@@ -141,6 +144,14 @@ class SitePreview(unittest.TestCase):
                             self.assertGreater(devtools.value('document.documentElement.scrollHeight'), 850)
                             result = devtools.call('Page.captureScreenshot', format='png', captureBeyondViewport=False)
                             (diagnostics / 'middle.png').write_bytes(base64.b64decode(result['data']))
+                        else:
+                            devtools.call('Emulation.setDeviceMetricsOverride', width=320, height=800,
+                                          deviceScaleFactor=1, mobile=True)
+                            self.assertEqual(devtools.value('innerWidth'), 320)
+                            self.assertLessEqual(devtools.value('document.documentElement.scrollWidth'), 320,
+                                                 'Larger type must still fit a narrow phone')
+                            result = devtools.call('Page.captureScreenshot', format='png', captureBeyondViewport=False)
+                            (diagnostics / 'mobile-small.png').write_bytes(base64.b64decode(result['data']))
                         devtools.value('document.getElementById("get-worminal").scrollIntoView()')
                         self.assertGreater(devtools.value('scrollY'), 0)
                         self.assertLess(devtools.value(

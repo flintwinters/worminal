@@ -126,6 +126,20 @@ class SiteTests(unittest.TestCase):
                         'native API for terminal agents', 'Get Worminal'):
             self.assertIn(feature, text)
 
+    def test_reading_text_has_strong_contrast_on_page_surfaces(self):
+        def luminance(color):
+            values = [int(color[index:index + 2], 16) / 255 for index in (1, 3, 5)]
+            linear = [value / 12.92 if value <= .04045 else ((value + .055) / 1.055) ** 2.4
+                      for value in values]
+            return sum(value * weight for value, weight in zip(linear, (.2126, .7152, .0722)))
+
+        colors = site.palette()
+        for foreground in ('text', 'muted'):
+            for background in ('background', 'panel', 'well', 'raised'):
+                first, second = sorted((luminance(colors[foreground]), luminance(colors[background])))
+                self.assertGreaterEqual((second + .05) / (first + .05), 7,
+                                        f'{foreground} lacks reading contrast on {background}')
+
     def test_unknown_pages_do_not_index_or_break_under_nested_urls(self):
         page = Page((self.output / '404.html').read_text())
         self.assertIn(('meta', {'name': 'robots', 'content': 'noindex'}), page.nodes)

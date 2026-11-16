@@ -60,7 +60,7 @@ def render_social_card():
     draw = ImageDraw.Draw(image)
     fonts = Path("/usr/share/fonts/truetype/dejavu")
     face = lambda size: ImageFont.truetype(str(fonts / "DejaVuSansMono.ttf"), size)
-    draw.rectangle((0, 0, 1200, 42), fill='#32302f')
+    draw.rectangle((0, 0, 1200, 42), fill='#343434')
     draw.text((22, 9), 'WORMINAL / LINUX TERMINAL', font=face(20), fill=colors['text'])
 
     def strip(bounds, label, color):
