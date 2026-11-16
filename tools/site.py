@@ -4,6 +4,7 @@ import hashlib
 import re
 import shutil
 from xml.sax.saxutils import escape
+from urllib.parse import quote
 
 from tools.paths import BUILD, ROOT
 
@@ -22,18 +23,25 @@ def build():
     if OUTPUT.exists():
         shutil.rmtree(OUTPUT)
     OUTPUT.mkdir(parents=True, exist_ok=True)
-    for source in SOURCE.iterdir():
-        if source.is_file():
-            shutil.copyfile(source, OUTPUT / source.name)
-    shutil.copyfile(ROOT / "assets/worminal.svg", OUTPUT / "worminal.svg")
+    for name in ('index.html', '404.html', 'social.png'):
+        shutil.copyfile(SOURCE / name, OUTPUT / name)
+    logo = (ROOT / 'assets/worminal.svg').read_text()
+    replacements = {
+        '{{SITE_URL}}': URL,
+        '{{THEME_COLOR}}': palette()['background'],
+        '{{SITE_CSS}}': (SOURCE / 'style.css').read_text(),
+        '{{SITE_JS}}': (SOURCE / 'app.js').read_text(),
+        '{{LOGO_SVG}}': logo,
+        '{{FAVICON}}': 'data:image/svg+xml,' + quote(logo, safe=''),
+    }
     for name in ("index.html", "404.html"):
         path = OUTPUT / name
-        content = path.read_text().replace("{{SITE_URL}}", URL)
-        content = content.replace("{{THEME_COLOR}}", palette()['background'])
-        # GitHub Pages caches assets: new colors must not reuse the previous CSS/card URL.
-        for asset in ('style.css', 'social.png'):
-            digest = hashlib.sha256((OUTPUT / asset).read_bytes()).hexdigest()[:12]
-            content = content.replace(f'{asset}"', f'{asset}?v={digest}"')
+        content = path.read_text()
+        for key, value in replacements.items():
+            content = content.replace(key, value)
+        # The console is self-contained; only off-page sharing uses a separate image.
+        digest = hashlib.sha256((OUTPUT / 'social.png').read_bytes()).hexdigest()[:12]
+        content = content.replace('social.png"', f'social.png?v={digest}"')
         path.write_text(content)
     (OUTPUT / ".nojekyll").touch()
     (OUTPUT / "sitemap.xml").write_text(
@@ -51,16 +59,34 @@ def render_social_card():
     image = Image.new("RGB", (1200, 630), colors['background'])
     draw = ImageDraw.Draw(image)
     fonts = Path("/usr/share/fonts/truetype/dejavu")
-    face = lambda size: ImageFont.truetype(str(fonts / "DejaVuSans.ttf"), size)
-    draw.rounded_rectangle((60, 55, 1140, 575), radius=24, fill=colors['panel'])
-    draw.text((105, 92), "~  Worminal", font=face(42), fill=colors['pink'])
-    draw.text((105, 205), "Close the window.", font=face(66), fill=colors['text'])
-    draw.text((105, 290), "Keep the work.", font=face(66), fill=colors['lavender'])
-    position = 108
-    font = face(29)
-    for text, color in (("Persistent shells.  ", "green"), ("Remote machines.  ", "blue"),
-                        ("Web tools.", "peach")):
-        draw.text((position, 442), text, font=font, fill=colors[color])
-        position += draw.textlength(text, font=font)
+    face = lambda size: ImageFont.truetype(str(fonts / "DejaVuSansMono.ttf"), size)
+    draw.rectangle((0, 0, 1200, 42), fill='#32302f')
+    draw.text((22, 9), '~ WORMINAL / PERSISTENT TERMINAL WORKSPACE', font=face(20), fill=colors['text'])
+
+    def strip(bounds, number, label, color):
+        x, y, right, bottom = bounds
+        draw.rectangle(bounds, fill=colors['panel'])
+        draw.rectangle((x, y, right, y + 28), fill=colors[color])
+        rgb = tuple(bytes.fromhex(colors[color][1:]))
+        draw.line((x, y, right, y), fill=tuple(round(value * .88 + 255 * .12) for value in rgb))
+        draw.line((x, y + 28, right, y + 28), fill=tuple(round(value * .8) for value in rgb))
+        draw.rectangle((x + 5, y + 4, x + 39, y + 23), fill=colors['background'])
+        draw.text((x + 9, y + 4), number, font=face(13), fill=colors['text'])
+        draw.text((x + 48, y + 3), label, font=face(16), fill=colors['background'])
+
+    strip((16, 55, 782, 398), '01', 'WORKSPACE', 'blue')
+    draw.text((42, 110), 'Worminal', font=face(54), fill=colors['text'])
+    draw.text((43, 203), 'Close the window.', font=face(37), fill=colors['yellow'])
+    draw.text((43, 256), 'Keep the work.', font=face(37), fill=colors['text'])
+    draw.text((43, 342), '$ worminal --attach', font=face(23), fill=colors['aqua'])
+    strip((792, 55, 1184, 398), '02', 'SESSION LIFETIME', 'green')
+    for index, text in enumerate(('WINDOW CLOSE', '  shells keep running', 'LIVE UPDATE', '  sessions transfer',
+                                  'REBOOT', '  fresh shells')):
+        draw.text((810, 109 + index * 41), text, font=face(19),
+                  fill=colors['muted'] if index % 2 == 0 else colors['text'])
+    strip((16, 410, 1184, 576), '03', 'CAPABILITY LEDGER', 'purple')
+    for index, text in enumerate(('Persistent sessions / local + SSH', 'Web tools / split panes / agent API')):
+        draw.text((42, 461 + index * 45), text, font=face(25), fill=colors['text'])
+    draw.text((18, 597), 'LINUX / WAYLAND + X11', font=face(17), fill=colors['orange'])
     image.save(SOURCE / "social.png", optimize=True)
 

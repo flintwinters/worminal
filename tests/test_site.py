@@ -93,8 +93,9 @@ class SiteTests(unittest.TestCase):
         self.assertEqual(schema['url'], site.URL)
         self.assertNotIn('aggregateRating', schema)
         self.assertNotIn('review', schema)
-        self.assertFalse(any(t == 'script' and a.get('type') != 'application/ld+json'
-                             for t, a in self.page.nodes), 'Marketing content must work without JavaScript')
+        self.assertFalse(any(t == 'script' and 'src' in a for t, a in self.page.nodes))
+        self.assertFalse(any(t == 'link' and a.get('rel') == 'stylesheet' for t, a in self.page.nodes))
+        self.assertTrue(any(t == 'table' and a.get('id') == 'capabilities' for t, a in self.page.nodes))
         self.assertIn('SSH', ''.join(self.page.text))
         self.assertLess(sum(p.stat().st_size for p in self.output.iterdir() if p.is_file()), 250_000)
 
@@ -103,13 +104,15 @@ class SiteTests(unittest.TestCase):
         self.assertIn(('meta', {'name': 'robots', 'content': 'noindex'}), page.nodes)
         for tag, attrs in page.nodes:
             if tag in ('a', 'link'):
-                self.assertTrue(attrs['href'].startswith(site.URL))
+                self.assertTrue(attrs['href'].startswith((site.URL, 'data:image/svg+xml,')))
 
     def test_build_excludes_stale_artifacts(self):
         stale = self.output / 'obsolete.html'
         stale.write_text('This page must not be published')
         site.build()
         self.assertFalse(stale.exists())
+        self.assertFalse((self.output / 'style.css').exists())
+        self.assertFalse((self.output / 'app.js').exists())
 
 
 if __name__ == '__main__':

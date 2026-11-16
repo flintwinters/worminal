@@ -65,8 +65,10 @@ configuration and preserve the contributor's configured Git identity.
 
 ## Check entrypoints
 
-The public GitHub Pages site lives in `website/`. `manage.py build-site` produces `build/site` with the shared
-logo and canonical URL from `tools/site.py`; normal builds need no website packages or native application build.
+The public GitHub Pages product console lives in `website/`. `manage.py build-site` produces `build/site` with
+styles, interactions, the shared logo and favicon embedded in each HTML document; normal builds need no website
+packages or native application build. `tools/site.py` owns the canonical URL. The capability ledger is static HTML;
+the small embedded script supplies tabs, filtering and clipboard controls. Only data-heavy pane bodies scroll.
 `manage.py check-site` validates links, metadata, structured data and deployment paths. Add `--browser` for private
 desktop/mobile Chromium captures (optional `websocket-client`) under `build/checks/site-preview`; profiles and
 diagnostics are preserved.
