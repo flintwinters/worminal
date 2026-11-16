@@ -228,7 +228,8 @@ class RustApplicationTest(unittest.TestCase):
         red, blue = (200, 30, 30), (20, 40, 210)
         # Each terminal repaints its whole screen continuously: resizing keeps text but not erased background.
         # Typing through the agent API would take the window's control of the tab, so no tab is typed into.
-        fill = lambda color: "while :; do printf '\\033[48;2;%d;%d;%dm\\033[2J'; sleep .2; done" % color
+        # Shell-derived titles include the checkout path and can cover strip probe pixels.
+        fill = lambda color: "printf '\\033]0;Tab\\007'; while :; do printf '\\033[48;2;%d;%d;%dm\\033[2J'; sleep .2; done" % color
         with isolated_display() as env, ExitStack() as cleanup:
             script = CHECKS / 'split-shell.sh'
             script.write_text(f'#!/bin/sh\n{fill(blue)}\n')

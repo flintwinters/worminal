@@ -100,7 +100,8 @@ class RustModuleTest(unittest.TestCase):
         entry = getattr(module, RUST_FRONTEND_SYMBOL)
         entry.argtypes = [ctypes.c_int32, ctypes.POINTER(ctypes.c_char_p), ctypes.c_int32, ctypes.c_uint32]
         entry.restype = ctypes.c_int32
-        with tempfile.TemporaryDirectory(prefix='rust-module-abi-', dir=CHECKS) as directory:
+        from tools.paths import socket_directory
+        with socket_directory() as directory:
             for index, (argc, arguments, flags, expected) in enumerate(((0, None, 1, 1), (1, [None], 1, 1),
                     (2, [b'worminal-rust', b'--unsupported-module-option'], 1, 2),
                     (1, [b'worminal-rust'], 0x80000000, 1))):

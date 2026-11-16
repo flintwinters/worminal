@@ -21,6 +21,7 @@ import time
 from http_fixture import serving
 from x11 import isolated_display
 from tools import explorer
+from tools.paths import socket_directory
 from workspace_protocol import send as wire_send, wait_kind as wire_wait, service_pid
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -74,10 +75,10 @@ def fixture(tls=False, handler=Fixture):
 def profile(env):
     checks = CHECKS
     checks.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="preview-", dir=checks) as directory:
+    with (tempfile.TemporaryDirectory(prefix="preview-", dir=checks) as directory,
+          socket_directory() as runtime_directory):
         base = Path(directory)
-        runtime = base / "runtime"
-        runtime.mkdir(mode=0o700)
+        runtime = Path(runtime_directory)
         yield {**env, "XDG_RUNTIME_DIR": str(runtime), "XDG_DATA_HOME": str(base / "data"),
                "XDG_CACHE_HOME": str(base / "cache"), "XDG_STATE_HOME": str(base / "state"),
                "NO_AT_BRIDGE": "1", "SHELL": "/bin/sh", "GIO_USE_VFS": "local",

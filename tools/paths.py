@@ -1,5 +1,6 @@
 """Local builds and installations use the same bin/lib directories."""
 import os
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -10,6 +11,13 @@ if directory := os.environ.get('WORMINAL_TEST_CHECKS_DIR'):
     if not private.is_relative_to(CHECKS.resolve()) or private == CHECKS.resolve():
         raise ValueError('Worker diagnostics must remain below project build/checks.')
     CHECKS = private
+
+
+def socket_directory():
+    """Keep AF_UNIX addresses short even inside nested checkout/diagnostic workers."""
+    directory = BUILD / "sockets"
+    directory.mkdir(parents=True, exist_ok=True)
+    return tempfile.TemporaryDirectory(prefix="", dir=directory)
 
 
 def runtime_binary(name, *, prefix=None):

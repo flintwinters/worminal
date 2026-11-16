@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from tools import auto_update, explorer
-from tools.paths import CHECKS, ROOT
+from tools.paths import CHECKS, ROOT, socket_directory
 from tools.update_storage import release_stale
 
 
@@ -26,6 +26,14 @@ class UpdateFlowTests(unittest.TestCase):
             [sys.executable, "-c", "from tools.muffin import LOCAL; print(LOCAL)"],
             cwd=ROOT, env={**os.environ, "WORMINAL_TEST_CHECKS_DIR": str(worker)}, text=True)
         self.assertEqual(Path(result.strip()), ROOT / "build/dependencies/muffin")
+
+    def test_socket_fixture_binds_outside_nested_worker_diagnostics(self):
+        import socket
+        with socket_directory() as directory, socket.socket(socket.AF_UNIX) as listener:
+            address = Path(directory) / "worminal-test"
+            listener.bind(str(address))
+            self.assertFalse(address.is_relative_to(CHECKS))
+        self.assertFalse(Path(directory).exists())
 
     def test_second_update_of_a_checkout_is_refused_not_interleaved(self):
         with auto_update.exclusive(self.root):
