@@ -90,7 +90,11 @@ pub(super) fn serve(listener: UnixListener, candidate: bool) -> io::Result<Rc<Se
                                 => return ControlFlow::Continue,
                             result => {
                                 let result = result.and_then(|request| {
-                                    match Config::parse(&request.expect("complete launch"), candidate)? {
+                                    let request = request.expect("complete launch");
+                                    if let Some(master) = broker::detach_master(&request.args)? {
+                                        return App::detach_master(master);
+                                    }
+                                    match Config::parse(&request, candidate)? {
                                         Some(config) => App::launch(config).map(|_| ()), None => Ok(()),
                                     }
                                 });

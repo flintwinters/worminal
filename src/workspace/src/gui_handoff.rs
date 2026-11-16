@@ -15,6 +15,8 @@ pub const TIMEOUT_SECONDS: u64 = 15;
 const VERSION: u32 = 2;
 const MAX_DESCRIPTORS: usize = 128;
 pub const MAX_LINKS: usize = 16;
+/// Keep the original host available for explicit reattachment, without reconnecting on replacement.
+pub const PRIMARY_DETACHED: u32 = 8;
 
 pub struct Link {
     pub index: u32,
@@ -53,7 +55,7 @@ pub fn encode(windows: &[Window]) -> io::Result<Vec<u8>> {
     for window in windows {
         if window.geometry[2] <= 0
             || window.geometry[3] <= 0
-            || window.flags > 7
+            || window.flags > (7 | PRIMARY_DETACHED)
             || !window.zoom.is_finite()
             || !(-10.0..=40.0).contains(&window.zoom)
         {

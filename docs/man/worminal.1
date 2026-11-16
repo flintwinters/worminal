@@ -60,6 +60,10 @@ to stop it and end its tabs.
 connects over SSH to a service on that host; the remote account needs
 .B worminald
 in its PATH. Further hosts can be reached with ordinary SSH inside a tab.
+.B --detach-master user@host
+removes that master's tabs from every window in this display/workspace and disconnects its SSH views.
+Use the exact host spelling passed to --master. Remote tabs and shells keep running; windows left empty close.
+Reconnect with worminal --master user@host --attach. An absent master or GUI owner returns failure.
 .SH AUTOMATION
 Run
 .B worminald --help

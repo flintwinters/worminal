@@ -132,7 +132,8 @@ fn snapshot() -> io::Result<Vec<Window>> {
                 .unwrap_or_else(gtk::gdk::WindowState::empty);
             let flags = u32::from(app.window.is_maximized())
                 | (u32::from(state.contains(gtk::gdk::WindowState::FULLSCREEN)) << 1)
-                | (u32::from(app.window.is_active()) << 2);
+                | (u32::from(app.window.is_active()) << 2)
+                | (u32::from(app.primary_detached.get()) * gui_handoff::PRIMARY_DETACHED);
             let zoom = app.fonts.borrow().zoom();
             Ok(Window {
                 request: app.config.replacement_request()?,
@@ -158,7 +159,7 @@ fn snapshot() -> io::Result<Vec<Window>> {
 fn stable_state() -> io::Result<Vec<u8>> {
     let mut state = snapshot()?;
     for window in &mut state {
-        window.flags &= 3;
+        window.flags &= !4;
     }
     gui_handoff::encode(&state)
 }
@@ -668,7 +669,11 @@ pub(super) fn receive(token: &OsStr, candidate: bool) -> io::Result<()> {
         config.command.clear();
         config.browser_url = None;
         config.zoom = state.zoom;
-        let app = App::open_mode(config, true)?;
+        let app = App::open_mode(
+            config,
+            true,
+            state.flags & gui_handoff::PRIMARY_DETACHED != 0,
+        )?;
         for link in state.links {
             let Some(mut config) = Config::parse(&link.request, candidate)? else {
                 return Err(io::Error::other("Invalid remote update launch"));

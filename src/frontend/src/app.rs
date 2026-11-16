@@ -291,6 +291,7 @@ struct App {
     active: Cell<u32>,
     syncing: Cell<bool>,
     primary: Rc<Link>,
+    primary_detached: Cell<bool>,
     remotes: RefCell<Vec<Rc<Remote>>>,
     next_link: Cell<u32>,
     closing: Cell<bool>,
@@ -325,7 +326,7 @@ impl App {
         Self::open(config)
     }
     fn open(config: Config) -> io::Result<Rc<Self>> {
-        Self::open_mode(config, false)
+        Self::open_mode(config, false, false)
     }
     fn replacement_window(config: &Config) -> gtk::Window {
         if let Some(class) = &config.class {
@@ -340,7 +341,7 @@ impl App {
         window.set_resizable(!config.fixed);
         window
     }
-    fn open_mode(config: Config, staged: bool) -> io::Result<Rc<Self>> {
+    fn open_mode(config: Config, staged: bool, primary_detached: bool) -> io::Result<Rc<Self>> {
         // New launches may arrive in an existing GTK owner after service loss. The shared
         // posix_spawn boundary can recover the service here without GUI-process fork hooks.
         if config.master.is_none() && !staged {
@@ -369,6 +370,7 @@ impl App {
             active: Cell::new(0),
             syncing: Cell::new(false),
             primary: Link::new(),
+            primary_detached: Cell::new(primary_detached),
             remotes: RefCell::new(Vec::new()),
             next_link: Cell::new(1),
             closing: Cell::new(false),
@@ -410,9 +412,11 @@ impl App {
                     if windows.len() != previous && windows.is_empty() { gtk::main_quit(); } });
                 window_state::changed();
             }));
-        if let Err(error) = app.establish(0, !app.config.attach) {
-            app.window.close();
-            return Err(error);
+        if !primary_detached {
+            if let Err(error) = app.establish(0, !app.config.attach) {
+                app.window.close();
+                return Err(error);
+            }
         }
         WINDOWS.with(|windows| windows.borrow_mut().push(app.clone()));
         window_state::changed();
@@ -846,7 +850,9 @@ impl App {
             } else {
                 self.window.set_title(&page.title);
             }
-        } else if closed != 0 && index == 0 {
+        } else if (closed != 0 && index == 0)
+            || (self.primary_detached.get() && self.pages.borrow().is_empty())
+        {
             self.window.close();
         } else {
             self.message(Some("No tabs. Ctrl+Shift+T opens a terminal."));
@@ -925,6 +931,15 @@ pub(crate) fn run_with_listener(
     }
     worminal_workspace::browser_target::command(&arguments)?;
     let request = worminal_workspace::broker::Request::capture(arguments)?;
+    if worminal_workspace::broker::detach_master(&request.args)?.is_some() {
+        return match broker::forward(&request)? {
+            None => Ok(()),
+            Some(_) => Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "No connected GUI owner",
+            )),
+        };
+    }
     let Some(config) = Config::parse(&request, candidate)? else {
         return Ok(());
     };

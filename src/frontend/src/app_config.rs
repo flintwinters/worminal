@@ -99,6 +99,7 @@ impl Config {
                         Ctrl+= / Ctrl+-: zoom in/out  Ctrl+Shift+Home: reset zoom\n\
                         Drag a tab to a pane edge: split  Ctrl+Shift+X: gather panes\n\
                         Middle click: autoscroll  Shift+middle click: paste selection\n\n\
+                        --detach-master HOST: detach its tabs in this display/workspace; remote shells keep running\n\
                         --surf URL|FILE: open a browser window (--browser is an alias)\n\
                         --new-browser-tab URL|FILE: replace this terminal with a browser\n\
                         Automation and agents: run `worminald --help`, then `worminald api help`\n\

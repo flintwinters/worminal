@@ -23,6 +23,7 @@ impl App {
     /// The launch configuration of one link: the window's own, or the one its `--master` was opened with.
     pub(super) fn links(&self) -> Vec<Rc<Link>> {
         std::iter::once(self.primary.clone())
+            .filter(|_| !self.primary_detached.get())
             .chain(
                 self.remotes
                     .borrow()
@@ -73,6 +74,9 @@ impl App {
             self.replacing.get(),
             link.reconnect.borrow().is_none(),
         )?;
+        if index == 0 {
+            self.primary_detached.set(false);
+        }
         *link.connection.borrow_mut() = Some(connection);
         link.initial_claim.set(true);
         self.watch(index, &link);
@@ -206,6 +210,52 @@ impl App {
         }
         self.window.present();
         Ok(())
+    }
+    /// Detachment imports an empty view catalog, never a daemon Close command.
+    pub(super) fn detach_master(master: &std::ffi::OsStr) -> io::Result<()> {
+        let apps = super::WINDOWS.with(|windows| windows.borrow().clone());
+        let mut found = false;
+        for app in apps.into_iter().filter(|app| !app.closing.get()) {
+            let index =
+                if app.config.master.as_deref() == Some(master) && !app.primary_detached.get() {
+                    Some(0)
+                } else {
+                    app.remotes
+                        .borrow()
+                        .iter()
+                        .find(|remote| remote.master == master)
+                        .map(|remote| remote.index)
+                };
+            let Some(index) = index else { continue };
+            found = true;
+            let link = app.link(index).unwrap();
+            // Stop readers, writers and reconnect timers before changing widgets: GTK can reenter.
+            link.clear();
+            link.pending_tabs.set(0);
+            link.requested.set(0);
+            if index == 0 {
+                app.primary_detached.set(true);
+            }
+            app.catalog(
+                index,
+                &worminal_protocol::worp::events::Catalog {
+                    closed: 0,
+                    fallback: 0,
+                    tabs: Vec::new(),
+                },
+            )?;
+            if app.pages.borrow().is_empty() {
+                app.window.close();
+            }
+        }
+        if found {
+            Ok(())
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "Master is not connected",
+            ))
+        }
     }
     pub(super) fn drop_remote(&self, index: u32) {
         if let Some(link) = self.link(index).filter(|_| index != 0) {
