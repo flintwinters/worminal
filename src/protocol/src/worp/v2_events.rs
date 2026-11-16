@@ -182,6 +182,19 @@ pub fn decode(packet: Packet) -> io::Result<Option<Event>> {
             body.finish()?;
             EventKind::Bell
         }
+        WIRE_NOTIFY => {
+            let urgency = Urgency::from_wire(body.u32()?).ok_or_else(invalid)?;
+            let occasion = Occasion::from_wire(body.u32()?).ok_or_else(invalid)?;
+            let title = string(&mut body)?;
+            let text = string(&mut body)?;
+            body.finish()?;
+            EventKind::Notify(Notification {
+                urgency,
+                occasion,
+                title,
+                body: text,
+            })
+        }
         WIRE_PRINT => {
             return Ok(Some(Event {
                 tab: packet.tab,
@@ -259,6 +272,10 @@ fn encode_links(row: u32, runs: &[LinkRun], body: &mut Buffer) -> io::Result<u32
     Ok(WIRE_ROW_LINKS)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "One exhaustive binding table keeps event encoding beside each wire variant."
+)]
 pub fn encode(event: &Event) -> io::Result<Packet> {
     if let EventKind::Reply(reply) = &event.kind {
         return v2::encode_reply(event.tab, reply);
@@ -321,6 +338,13 @@ pub fn encode(event: &Event) -> io::Result<Packet> {
             WIRE_CLIPBOARD
         }
         EventKind::Bell => WIRE_BELL,
+        EventKind::Notify(notification) => {
+            body.put_u32(notification.urgency as u32)?;
+            body.put_u32(notification.occasion as u32)?;
+            body.put_string(&notification.title)?;
+            body.put_string(&notification.body)?;
+            WIRE_NOTIFY
+        }
         EventKind::Print(bytes) => {
             body.put_bytes(bytes)?;
             WIRE_PRINT

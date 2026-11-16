@@ -30,6 +30,8 @@ mod browser_views;
 mod chrome;
 #[path = "app_links.rs"]
 mod links;
+#[path = "app_notify.rs"]
+mod notify;
 #[path = "app_shortcuts.rs"]
 mod shortcuts;
 
@@ -283,6 +285,7 @@ struct App {
     defer_navigation: Cell<bool>,
     geometry_pending: Cell<bool>,
     early_keys: RefCell<VecDeque<gdk::EventKey>>,
+    notices: notify::Shown,
 }
 impl App {
     fn print(&self, bytes: &[u8]) -> io::Result<()> {
@@ -364,6 +367,7 @@ impl App {
             defer_navigation: Cell::new(staged),
             geometry_pending: Cell::new(true),
             early_keys: RefCell::new(VecDeque::new()),
+            notices: notify::Shown::default(),
         });
         app.tabstrip.connect_selected(
             glib::clone!(@weak app => move |id| app.select_id(id)),
@@ -422,6 +426,12 @@ impl App {
     fn message(&self, message: Option<&str>) {
         self.status.set_text(message.unwrap_or(""));
         self.status.set_visible(message.is_some());
+    }
+    fn attention(&self, tab: u32) {
+        self.tabstrip.alert(tab);
+        if !self.window.is_active() {
+            self.window.set_urgency_hint(true);
+        }
     }
     fn terminal(&self, id: u32) -> Option<Terminal> {
         self.pages
@@ -546,10 +556,11 @@ impl App {
             }
             EventKind::Bell => {
                 self.window.error_bell();
-                self.tabstrip.alert(event.tab);
-                if !self.window.is_active() {
-                    self.window.set_urgency_hint(true);
-                }
+                self.attention(event.tab);
+            }
+            EventKind::Notify(notification) => {
+                self.attention(event.tab);
+                self.notify(event.tab, notification);
             }
             EventKind::Print(bytes) => self.print(bytes)?,
             EventKind::Clipboard(bytes) => {
@@ -630,6 +641,7 @@ impl App {
             self.pages
                 .borrow_mut()
                 .retain(|current| current.id != page.id);
+            self.notices.borrow_mut().remove(&page.id);
             if let Some(index) = self.notebook.page_num(&page.widget) {
                 self.notebook.remove_page(Some(index));
             }

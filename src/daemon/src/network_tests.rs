@@ -276,6 +276,43 @@ fn hidden_tab_bell_still_reaches_its_controller() {
     );
 }
 
+/// An OSC 99 notification reaches a negotiating view with its text; older views, which would drop
+/// the unknown packet, still receive BEL so their tab asks for attention.
+#[test]
+fn notifications_carry_text_only_to_views_that_negotiated_them() {
+    use worminal_protocol::worp::{
+        events::{Event, EventKind, Notification, Occasion, Urgency},
+        v2_events::decode,
+    };
+    for (features, text) in [(9 | WIRE_FEATURE_NOTIFY, true), (9, false)] {
+        let mut fixture = Fixture::with_features(features);
+        let now = fixture.service.now();
+        let input =
+            b"\x1b]99;i=1:d=0;Claude\x1b\\\x1b]99;i=1:p=body:u=2:o=unfocused;needs you\x1b\\";
+        let notices = fixture.service.tabs[0].feed(input, now).unwrap();
+        fixture.service.notices(1, notices);
+        let mut bytes = fixture.output().pending();
+        let mut decoder = Decoder::default();
+        let mut events = Vec::new();
+        while !bytes.is_empty() {
+            let (used, packet) = decoder.push(bytes).unwrap();
+            bytes = &bytes[used..];
+            events.extend(packet.and_then(|packet| decode(packet).unwrap()));
+        }
+        let kind = if text {
+            EventKind::Notify(Notification {
+                urgency: Urgency::Critical,
+                occasion: Occasion::Unfocused,
+                title: b"Claude".to_vec(),
+                body: b"needs you".to_vec(),
+            })
+        } else {
+            EventKind::Bell
+        };
+        assert_eq!(events, [Event { tab: 1, kind }]);
+    }
+}
+
 #[test]
 fn hidden_tabs_defer_frames_and_reveal_with_a_delta() {
     let full = 40 * (120 * 16 + 4);

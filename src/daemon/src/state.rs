@@ -21,6 +21,26 @@ pub(crate) fn core<T>(value: Result<T, terminal::Error>) -> io::Result<T> {
     value.map_err(|error| io::Error::other(format!("terminal engine status {}", error.0)))
 }
 
+/// The engine reports the title length, urgency | occasion << 8, and the title followed by the body.
+fn notification(event: &Event) -> Option<worminal_protocol::worp::events::Notification> {
+    use worminal_protocol::worp::events::{Notification, Occasion, Urgency};
+    let (title, body) = event
+        .data
+        .split_at_checked(usize::try_from(event.argument).ok()?)?;
+    let occasion = match event.flags >> 8 {
+        terminal::WORMINAL_NOTIFY_ALWAYS => Occasion::Always,
+        terminal::WORMINAL_NOTIFY_UNFOCUSED => Occasion::Unfocused,
+        terminal::WORMINAL_NOTIFY_INVISIBLE => Occasion::Invisible,
+        _ => return None,
+    };
+    Some(Notification {
+        urgency: Urgency::from_wire(event.flags & 0xff)?,
+        occasion,
+        title: title.to_vec(),
+        body: body.to_vec(),
+    })
+}
+
 pub(crate) struct Client {
     pub id: ClientId,
     pub socket: std::os::unix::net::UnixStream,
@@ -495,6 +515,16 @@ impl Tab {
                         notices.push(Notice::Event(
                             client,
                             worminal_protocol::worp::events::EventKind::Bell,
+                        ));
+                    }
+                }
+                terminal::WORMINAL_NOTIFY => {
+                    if let (Some(client), Some(notification)) =
+                        (self.controller, notification(&event))
+                    {
+                        notices.push(Notice::Event(
+                            client,
+                            worminal_protocol::worp::events::EventKind::Notify(notification),
                         ));
                     }
                 }

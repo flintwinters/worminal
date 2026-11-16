@@ -12,6 +12,13 @@ extern "C" {
 
 pub(crate) fn show_window(window: &gtk::Window) {
     use gtk::prelude::*;
+    window.show_all();
+    present_window(window);
+}
+
+/// Raise a window for an action the user took outside it, such as clicking its notification.
+pub(crate) fn present_window(window: &gtk::Window) {
+    use gtk::prelude::*;
     #[allow(unused_mut)]
     let mut time = gtk::gdk::ffi::GDK_CURRENT_TIME as u32;
     #[cfg(worminal_gdk_x11)]
@@ -29,7 +36,6 @@ pub(crate) fn show_window(window: &gtk::Window) {
             }
         }
     }
-    window.show_all();
     window.present_with_time(time);
 }
 

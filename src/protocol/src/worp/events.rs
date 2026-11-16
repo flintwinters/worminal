@@ -33,6 +33,7 @@ pub enum EventKind {
     FrameFinish,
     Clipboard(Vec<u8>),
     Bell,
+    Notify(Notification),
     Print(Vec<u8>),
     Released,
     Error(Vec<u8>),
@@ -46,6 +47,44 @@ pub enum EventKind {
         text: Vec<u8>,
     },
     Reply(Reply),
+}
+
+/// A terminal application's request for attention (OSC 99). Text is untrusted and not validated UTF-8.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Notification {
+    pub urgency: Urgency,
+    pub occasion: Occasion,
+    pub title: Vec<u8>,
+    pub body: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Urgency {
+    Low,
+    Normal,
+    Critical,
+}
+impl Urgency {
+    pub fn from_wire(value: u32) -> Option<Self> {
+        [Self::Low, Self::Normal, Self::Critical]
+            .into_iter()
+            .find(|urgency| *urgency as u32 == value)
+    }
+}
+
+/// When the application wants its notification displayed, relative to the view of its tab.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Occasion {
+    Always,
+    Unfocused,
+    Invisible,
+}
+impl Occasion {
+    pub fn from_wire(value: u32) -> Option<Self> {
+        [Self::Always, Self::Unfocused, Self::Invisible]
+            .into_iter()
+            .find(|occasion| *occasion as u32 == value)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

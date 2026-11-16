@@ -664,6 +664,14 @@ def check_window_state():
                          "-p", "test_window_state.py", "-v"]))
 
 
+@app.command("check-notifications")
+def check_notifications():
+    """Check OSC 99 desktop notifications against a private notification service and display."""
+    native_build.build_targets()
+    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                         "-p", "test_notifications.py", "-v"]))
+
+
 @app.command("check-window-activation")
 def check_window_activation():
     """Check new-window focus under Cinnamon's Muffin on a private display."""

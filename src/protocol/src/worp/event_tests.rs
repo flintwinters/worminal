@@ -53,6 +53,12 @@ fn every_event_roundtrips_and_catalog_keeps_filename_bytes() {
         EventKind::FrameFinish,
         EventKind::Clipboard(b"clipboard".to_vec()),
         EventKind::Bell,
+        EventKind::Notify(Notification {
+            urgency: Urgency::Critical,
+            occasion: Occasion::Invisible,
+            title: b"title".to_vec(),
+            body: vec![b'b', 0xff],
+        }),
         EventKind::Print(vec![0, 255]),
         EventKind::Released,
         EventKind::Error(b"error".to_vec()),

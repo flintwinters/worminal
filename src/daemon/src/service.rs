@@ -93,7 +93,18 @@ impl Service {
     pub fn notices(&mut self, tab: u32, notices: Vec<Notice>) {
         for notice in notices {
             match notice {
-                Notice::Event(client, kind) => self.emit(client, Event { tab, kind }),
+                Notice::Event(client, kind) => {
+                    // Views that predate NOTIFY still learn that the tab wants attention.
+                    let text = self
+                        .clients
+                        .get(&client)
+                        .is_some_and(|client| client.features & WIRE_FEATURE_NOTIFY != 0);
+                    let kind = match kind {
+                        EventKind::Notify(_) if !text => EventKind::Bell,
+                        kind => kind,
+                    };
+                    self.emit(client, Event { tab, kind });
+                }
                 Notice::Diagnostic(bytes) => process::diagnostic(&String::from_utf8_lossy(&bytes)),
             }
         }

@@ -65,6 +65,8 @@ pub const WIRE_ROW_SPAN: u32 = 32;
 pub const WIRE_WORP: u32 = 33;
 /// Row, then zero or more link runs (column, count, URI) replacing that row's links; zero runs clear them.
 pub const WIRE_ROW_LINKS: u32 = 34;
+/// Desktop notification from a terminal application: urgency, occasion, title string, body string.
+pub const WIRE_NOTIFY: u32 = 35;
 pub const WORP_LIST: u32 = 0;
 pub const WORP_READ: u32 = 1;
 pub const WORP_INPUT: u32 = 2;
@@ -87,6 +89,8 @@ pub const WIRE_FEATURE_ROW_SPAN: u32 = 1 << 3;
 pub const WIRE_FEATURE_FOCUSED_FRAMES: u32 = 1 << 4;
 // ROW_LINKS packets follow a row's cells. Peers that did not negotiate it receive today's bytes exactly.
 pub const WIRE_FEATURE_ROW_LINKS: u32 = 1 << 5;
+// NOTIFY packets carry an application's notification text. Peers that did not negotiate it receive BELL.
+pub const WIRE_FEATURE_NOTIFY: u32 = 1 << 6;
 
 pub const WIRE_SELECTION_START: u32 = 0;
 pub const WIRE_SELECTION_NEXT: u32 = 1;
