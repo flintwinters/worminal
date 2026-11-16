@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 import select
 import signal
-import socket
+import json
 import subprocess
 import time
 import unittest
@@ -80,7 +80,7 @@ class MasterStartupTest(unittest.TestCase):
     def test_password_prompt_cancel_and_retry_in_existing_window(self):
         from tempfile import TemporaryDirectory
         from preview import profile
-        from workspace_protocol import stop_workspace, send, wait_kind, catalog_records
+        from workspace_protocol import stop_workspace
         from runtime import window
 
         if os.environ.get('WORMINAL_TEST_REAL_MASTER'):
@@ -127,15 +127,9 @@ class MasterStartupTest(unittest.TestCase):
                     subprocess.run(['xdotool','windowfocus','--sync',wid,'key','--clearmodifiers',*keys],
                                    env=env,check=True,stdout=log,stderr=log)
                 def connected():
-                    with socket.socket(socket.AF_UNIX) as peer:
-                        peer.settimeout(1)
-                        try:
-                            peer.connect(f'\0worminal-workspace-v2-{os.getuid()}-'
-                                         + env['WORMINAL_SHARED_SOCKET_SCOPE'])
-                        except ConnectionRefusedError:
-                            return False
-                        send(peer, 19, version=2)
-                        return bool(catalog_records(wait_kind(peer, 7, version=2)[1]))
+                    result = subprocess.run([daemon, 'api', 'list'], env=env,
+                                            capture_output=True, text=True, timeout=3)
+                    return result.returncode == 0 and bool(json.loads(result.stdout).get('tabs'))
                 try:
                     prompt = wait(prompts, 'initial password dialog')[0]
                     key(prompt, 'Escape')

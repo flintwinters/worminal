@@ -480,13 +480,19 @@ def check_master_startup(
 ):
     """Check native --master startup and input on private Xvfb, using an isolated workspace."""
     native_build.build_targets()
-    env = dict(os.environ)
-    if executable:
-        env["WORMINAL_TEST_EXECUTABLE"] = str(executable.resolve())
-    if master:
-        env["WORMINAL_TEST_REAL_MASTER"] = master
-    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
-                         "-p", "test_master_startup.py", "-q"], env=env))
+    from tools.update_storage import verification_environment
+    from tools.test_runner import retire_worker
+    with verification_environment(ROOT) as env:
+        if executable:
+            env["WORMINAL_TEST_EXECUTABLE"] = str(executable.resolve())
+        if master:
+            env["WORMINAL_TEST_REAL_MASTER"] = master
+        process = subprocess.Popen([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                                    "-p", "test_master_startup.py", "-q"], env=env)
+        try:
+            raise typer.Exit(process.wait())
+        finally:
+            retire_worker(process, Path(env["WORMINAL_TEST_CHECKS_DIR"]))
 
 
 @app.command("check-network")
