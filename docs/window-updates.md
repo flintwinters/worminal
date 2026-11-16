@@ -14,6 +14,9 @@ commands. Remote windows require a daemon supporting `--bridge-existing`; an old
 postpones the update rather than restoring shells. The first upgrade from an owner predating this feature still
 requires closing that old owner once.
 
+Connections reconnecting, queued input and pending window launches defer staging; the owner retries the same
+installed build once they settle. Replacement notices are recorded in syslog as well as shown in the window.
+
 Browser pages reload. Volatile DOM, unsaved form contents, JavaScript memory, back/forward history and active media
 are lost. Tabs, URLs and the existing persistent browser profile remain. Cookies are transferred over the private,
 same-user update socket in memory, including session cookies and HttpOnly/SameSite attributes; they are never logged

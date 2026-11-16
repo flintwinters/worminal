@@ -125,6 +125,12 @@ class ReplacementTest(unittest.TestCase):
                     stop_fixture(env)
 
     def test_multihost_links_and_selected_remote_tab_survive_replacement(self):
+        self.multihost_replacement(reconnect=False)
+
+    def test_replacement_retries_after_remote_link_recovers(self):
+        self.multihost_replacement(reconnect=True)
+
+    def multihost_replacement(self, *, reconnect):
         with isolated_display() as display, profile(display) as env, service(env), \
                 tempfile.TemporaryDirectory(prefix='replacement-links-', dir=CHECKS) as directory:
             executable = copy_runtime(directory, browser=True)
@@ -132,10 +138,13 @@ class ReplacementTest(unittest.TestCase):
             scopes = {host: env['WORMINAL_SHARED_SOCKET_SCOPE']+'-'+host for host in ('remotea', 'remoteb')}
             ssh = base/'ssh'
             daemon = str(runtime_binary('worminald'))
-            ssh.write_text('#!/usr/bin/python3\nimport os,sys\n'
+            ssh.write_text('#!/usr/bin/python3\nimport os,sys,time\nfrom pathlib import Path\n'
                 'assert sys.argv[1:4]==["-T","-C","-oConnectTimeout=10"]\n'
                 f'scopes={scopes!r}\n'
                 'assert sys.argv[4] in scopes and sys.argv[-1] in ("--bridge","--bridge-existing")\n'
+                f'base=Path({str(base)!r})\n'
+                '(base/("bridge-"+sys.argv[4])).write_text(str(os.getpid()))\n'
+                'while (base/"pause-bridge").exists(): time.sleep(.02)\n'
                 'os.environ["WORMINAL_SHARED_SOCKET_SCOPE"]=scopes[sys.argv[4]]\n'
                 f'os.execv({daemon!r},[{daemon!r},sys.argv[-1]])\n')
             ssh.chmod(0o700)
@@ -168,16 +177,30 @@ class ReplacementTest(unittest.TestCase):
                     wait(lambda: len(visible())==1,'Remote hosts opened extra windows')
                     previous = owner()
                     identities = {host:(base/host).read_text().strip() for host in ('local','remotea','remoteb')}
+                    # Updating while a link reconnects must defer, then retry the same
+                    # installed files; no further file event should be necessary.
+                    if reconnect:
+                        gate = base/'pause-bridge'
+                        bridge = base/'bridge-remotea'
+                        previous_bridge = bridge.read_text()
+                        gate.touch()
+                        os.kill(int(previous_bridge), signal.SIGTERM)
+                        wait(lambda: bridge.read_text() != previous_bridge, 'Remote link did not reconnect')
                     pending = module_path(RUST_FRONTEND_MODULE,prefix=base).with_suffix('.pending')
                     shutil.copy2(module_path(RUST_FRONTEND_MODULE,prefix=base),pending)
                     pending.replace(module_path(RUST_FRONTEND_MODULE,prefix=base))
+                    if reconnect:
+                        time.sleep(1.2)  # Let the 600 ms update debounce observe the blocked link.
+                        gate.unlink()
                     def replacement_owner():
                         current = owner()
                         return current if current and current != previous else None
                     wait(replacement_owner,'Multi-host window did not replace')
                     self.assertEqual(len(visible()),1)
                     name = subprocess.check_output(['xdotool','getwindowname',visible()[0]],env=env,text=True).strip()
-                    self.assertEqual(name,'remoteb','Selected remote tab was not restored')
+                    # Reattaching a link currently selects its restored tab before handoff.
+                    self.assertEqual(name,'remotea' if reconnect else 'remoteb',
+                                     'Selected remote tab was not restored')
                     for host, pid in identities.items():
                         os.kill(int(pid),0)
                         self.assertEqual((base/host).read_text().strip(),pid,'Update replayed remote launch')

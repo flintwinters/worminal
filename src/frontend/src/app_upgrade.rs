@@ -102,6 +102,9 @@ fn windows() -> Vec<Rc<App>> {
 }
 /// Update status appears in every window and, when configured, once on the desktop.
 fn notice(text: &str) {
+    if let Ok(message) = std::ffi::CString::new(text) {
+        unsafe { libc::syslog(libc::LOG_INFO, c"%s".as_ptr(), message.as_ptr()) };
+    }
     let apps = windows();
     if let Some(app) = apps
         .first()
@@ -119,7 +122,8 @@ fn snapshot() -> io::Result<Vec<Window>> {
         .into_iter()
         .map(|app| {
             if !app.links().iter().all(|link| link.settled()) {
-                return Err(io::Error::other(
+                return Err(io::Error::new(
+                    io::ErrorKind::WouldBlock,
                     "Windows are reconnecting or have pending input",
                 ));
             }
@@ -318,6 +322,7 @@ pub(super) struct Watcher {
     timer: RefCell<Option<glib::SourceId>>,
     due: Cell<Instant>,
     attempted: RefCell<Vec<Option<Identity>>>,
+    deferred: Cell<bool>,
     transaction: RefCell<Option<Transaction>>,
 }
 impl Drop for Watcher {
@@ -354,7 +359,10 @@ impl Watcher {
     }
     fn begin(&self) -> io::Result<()> {
         if !self.broker.borrow().idle() {
-            return Err(io::Error::other("A window launch is pending"));
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "A window launch is pending",
+            ));
         }
         let state = snapshot()?;
         let encoded = stable_state()?;
@@ -423,11 +431,23 @@ impl Watcher {
             {
                 return false;
             }
-            *self.attempted.borrow_mut() = current;
             if let Err(error) = self.begin() {
+                // Connection/launch readiness can change without another installation
+                // event. Do not consume this build's attempt until staging can begin.
+                if error.kind() == io::ErrorKind::WouldBlock {
+                    if !self.deferred.replace(true) {
+                        notice(&format!("Update pending: {error}."));
+                    }
+                    self.due.set(Instant::now() + Duration::from_secs(1));
+                    return true;
+                }
+                *self.attempted.borrow_mut() = current;
                 notice(&format!("Update pending: {error}."));
                 return false;
             }
+            self.deferred.set(false);
+            *self.attempted.borrow_mut() = current;
+            notice("Update started: replacement owner is being prepared.");
         }
         let mut slot = self.transaction.borrow_mut();
         let transaction = slot.as_mut().unwrap();
@@ -618,6 +638,7 @@ pub(super) fn watch(broker: Rc<broker::Server>, candidate: bool) -> io::Result<R
         timer: RefCell::new(None),
         due: Cell::new(Instant::now()),
         attempted: RefCell::new(Vec::new()),
+        deferred: Cell::new(false),
         transaction: RefCell::new(None),
     });
     let directories: std::collections::BTreeSet<_> = RUNTIME.with(|slot| {
