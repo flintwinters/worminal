@@ -71,6 +71,7 @@ class SiteTests(unittest.TestCase):
         self.assertTrue(any(tag == 'html' and attrs.get('lang') == 'en' for tag, attrs in self.page.nodes))
         metas = {a.get('name', a.get('property')): a.get('content') for t, a in self.page.nodes if t == 'meta'}
         self.assertIn('width=device-width', metas['viewport'])
+        self.assertEqual(metas['theme-color'], site.palette()['background'])
         self.assertTrue(metas['description'])
         self.assertNotIn('noindex', metas.get('robots', ''))
         canonical = [a['href'] for t, a in self.page.nodes if t == 'link' and a.get('rel') == 'canonical']
