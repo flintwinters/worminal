@@ -296,8 +296,8 @@ class RustApplicationTest(unittest.TestCase):
             Image.frombuffer('RGB', (900, 500), data, 'raw', 'BGRX', 0, 1).save(CHECKS / 'split-before.png')
             # Locate the selected second label rather than assuming a particular font
             # size or directory basename width. Its right edge must clear the first label.
-            background = (24, 24, 24)
-            second_label = max(x for x in range(900) if pixel(x / 900, 4 / 500) != background) - 2
+            background = pixel(.49, 4 / 500)
+            second_label = max(x for x in range(2, 440) if pixel(x / 900, 4 / 500) != background) - 2
             self.assertLess(second_label, 450, 'fixture labels must fit in one half-width strip')
             # Drag the first tab's label onto the right edge of the pane.
             xdo('mousemove', '--window', wid, '12', '8', 'mousedown', '1')
@@ -336,6 +336,12 @@ class RustApplicationTest(unittest.TestCase):
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-k')
+    match = parser.parse_args().k
+    if match:
+        unittest.defaultTestLoader.testNamePatterns = [f'*{match}*']
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(RustApplicationTest)
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(WindowStateTest))
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(WindowActivationTests))
@@ -344,7 +350,8 @@ def main():
     for name in ('test_navigation_keys', 'test_alternate_scroll_sends_cursor_keys',
                  'test_clipboard_paste_bytes', 'test_ctrl_end_in_micro', 'test_master_navigation_keys',
                  'test_master_alternate_scroll_sends_cursor_keys', 'test_master_clipboard_paste_bytes'):
-        suite.addTest(NavigationKeysTest(name))
+        if not match or match in name:
+            suite.addTest(NavigationKeysTest(name))
     with (private_bus(os.environ) as env,
           patch.dict(os.environ, {'DBUS_SESSION_BUS_ADDRESS': env['DBUS_SESSION_BUS_ADDRESS']})):
         return 0 if unittest.TextTestRunner(verbosity=1).run(suite).wasSuccessful() else 1
