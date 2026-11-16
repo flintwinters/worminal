@@ -292,6 +292,8 @@ class RustApplicationTest(unittest.TestCase):
                 time.sleep(.05)
             # The new tab is selected and fills the window.
             wait_for(blue, blue, 'second tab did not fill the window')
+            data = root.get_image(0, 0, 900, 500, X.ZPixmap, 0xffffffff).data
+            Image.frombuffer('RGB', (900, 500), data, 'raw', 'BGRX', 0, 1).save(CHECKS / 'split-before.png')
             # Locate the selected second label rather than assuming a particular font
             # size or directory basename width. Its right edge must clear the first label.
             background = (24, 24, 24)
