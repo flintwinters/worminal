@@ -22,10 +22,11 @@
         || !row.textContent.toLocaleLowerCase().includes(query);
       if (!row.hidden) visible++;
     }
-    document.getElementById('result-count').textContent = `${visible} / ${rows.length}`;
+    const summary = visible === rows.length ? `${visible} features` : `${visible} of ${rows.length} features`;
+    document.getElementById('result-count').textContent = summary;
     document.getElementById('empty-result').hidden = visible !== 0;
     for (const button of filters) button.setAttribute('aria-pressed', String(button.dataset.filter === group));
-    status.textContent = `${visible} of ${rows.length} capabilities · ${group}${query ? ` / ${query}` : ''}`;
+    status.textContent = `${summary} shown${query ? ` matching “${query}”` : ''}`;
   }
 
   async function copy(text) {
@@ -68,5 +69,5 @@
   });
   filter();
   followFragment();
-  status.textContent = 'Persistent sessions · SSH · web tools · agent API';
+  status.textContent = 'Press / to search features.';
 })();

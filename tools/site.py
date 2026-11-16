@@ -61,30 +61,28 @@ def render_social_card():
     fonts = Path("/usr/share/fonts/truetype/dejavu")
     face = lambda size: ImageFont.truetype(str(fonts / "DejaVuSansMono.ttf"), size)
     draw.rectangle((0, 0, 1200, 42), fill='#32302f')
-    draw.text((22, 9), '~ WORMINAL / PERSISTENT TERMINAL WORKSPACE', font=face(20), fill=colors['text'])
+    draw.text((22, 9), 'WORMINAL / LINUX TERMINAL', font=face(20), fill=colors['text'])
 
-    def strip(bounds, number, label, color):
+    def strip(bounds, label, color):
         x, y, right, bottom = bounds
         draw.rectangle(bounds, fill=colors['panel'])
         draw.rectangle((x, y, right, y + 28), fill=colors[color])
         rgb = tuple(bytes.fromhex(colors[color][1:]))
         draw.line((x, y, right, y), fill=tuple(round(value * .88 + 255 * .12) for value in rgb))
         draw.line((x, y + 28, right, y + 28), fill=tuple(round(value * .8) for value in rgb))
-        draw.rectangle((x + 5, y + 4, x + 39, y + 23), fill=colors['background'])
-        draw.text((x + 9, y + 4), number, font=face(13), fill=colors['text'])
-        draw.text((x + 48, y + 3), label, font=face(16), fill=colors['background'])
+        draw.text((x + 10, y + 3), label, font=face(16), fill=colors['background'])
 
-    strip((16, 55, 782, 398), '01', 'WORKSPACE', 'blue')
+    strip((16, 55, 782, 398), 'FEATURES', 'blue')
     draw.text((42, 110), 'Worminal', font=face(54), fill=colors['text'])
-    draw.text((43, 203), 'Close the window.', font=face(37), fill=colors['yellow'])
-    draw.text((43, 256), 'Keep the work.', font=face(37), fill=colors['text'])
+    draw.text((43, 203), 'Shells keep running', font=face(37), fill=colors['yellow'])
+    draw.text((43, 256), 'when windows close.', font=face(37), fill=colors['text'])
     draw.text((43, 342), '$ worminal --attach', font=face(23), fill=colors['aqua'])
-    strip((792, 55, 1184, 398), '02', 'SESSION LIFETIME', 'green')
-    for index, text in enumerate(('WINDOW CLOSE', '  shells keep running', 'LIVE UPDATE', '  sessions transfer',
+    strip((792, 55, 1184, 398), 'RUNNING PROGRAMS', 'green')
+    for index, text in enumerate(('WINDOW CLOSE', '  shells keep running', 'LIVE UPDATE', '  programs keep running',
                                   'REBOOT', '  fresh shells')):
         draw.text((810, 109 + index * 41), text, font=face(19),
                   fill=colors['muted'] if index % 2 == 0 else colors['text'])
-    strip((16, 410, 1184, 576), '03', 'CAPABILITY LEDGER', 'purple')
+    strip((16, 410, 1184, 576), 'ALL FEATURES', 'purple')
     for index, text in enumerate(('Persistent sessions / local + SSH', 'Web tools / split panes / agent API')):
         draw.text((42, 461 + index * 45), text, font=face(25), fill=colors['text'])
     draw.text((18, 597), 'LINUX / WAYLAND + X11', font=face(17), fill=colors['orange'])

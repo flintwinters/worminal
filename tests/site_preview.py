@@ -106,7 +106,7 @@ class SitePreview(unittest.TestCase):
                                           windowsVirtualKeyCode=13)
                         self.assertEqual(devtools.value('location.hash'), '#panel-agents')
                         self.assertGreater(devtools.value('scrollY'), 0)
-                        devtools.value('document.getElementById("find").value = "guarded"; '
+                        devtools.value('document.getElementById("find").value = "foreground"; '
                                        'document.getElementById("find").dispatchEvent(new Event("input"))')
                         self.assertEqual(devtools.value(
                             'document.querySelectorAll("#capabilities tbody tr:not([hidden])").length'), 1)
