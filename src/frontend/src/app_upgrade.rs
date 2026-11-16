@@ -159,10 +159,14 @@ fn snapshot() -> io::Result<Vec<Window>> {
         })
         .collect()
 }
-fn stable_state() -> io::Result<Vec<u8>> {
+fn stable_state(with_geometry: bool) -> io::Result<Vec<u8>> {
     let mut state = snapshot()?;
     for window in &mut state {
         window.flags &= 3;
+        if !with_geometry {
+            // Mapping the candidate lets tiling WMs resize the donor before it exits.
+            window.geometry = [0, 0, 1, 1];
+        }
     }
     gui_handoff::encode(&state)
 }
@@ -302,6 +306,7 @@ struct Transaction {
     child: Option<spawn::Child>,
     state: Option<Vec<Window>>,
     encoded: Vec<u8>,
+    contents: Vec<u8>,
     target: Vec<Option<Identity>>,
     lease: Option<File>,
     cookies: Vec<u8>,
@@ -365,7 +370,8 @@ impl Watcher {
             ));
         }
         let state = snapshot()?;
-        let encoded = stable_state()?;
+        let encoded = stable_state(true)?;
+        let contents = stable_state(false)?;
         let lease = browser::lease()?;
         browser::pin_for_update();
         let token = token()?;
@@ -380,6 +386,7 @@ impl Watcher {
             child: Some(child),
             state: Some(state),
             encoded,
+            contents,
             target: target(),
             lease,
             cookies: Vec::new(),
@@ -398,7 +405,7 @@ impl Watcher {
     fn valid(&self, transaction: &Transaction) -> bool {
         self.broker.borrow().idle()
             && target() == transaction.target
-            && stable_state().ok().as_ref() == Some(&transaction.encoded)
+            && stable_state(true).ok().as_ref() == Some(&transaction.encoded)
             && browser::lease().ok().flatten().is_some() == transaction.lease.is_some()
     }
     fn rollback(&self, transaction: &mut Transaction, message: &str) {
@@ -575,8 +582,13 @@ impl Watcher {
                     }
                     transaction.phase = Phase::Exporting;
                 } else if packet.kind == LIVE && matches!(transaction.phase, Phase::Activating) {
-                    if target() != transaction.target || stable_state()? != transaction.encoded {
+                    if target() != transaction.target {
                         return Err(io::Error::other("installation changed during replacement"));
+                    }
+                    if stable_state(false)? != transaction.contents {
+                        return Err(io::Error::other(
+                            "window contents changed during replacement",
+                        ));
                     }
                     let channel = transaction.channel.as_mut().unwrap();
                     send(channel, FINISH, Vec::new())?;

@@ -16,6 +16,8 @@ requires closing that old owner once.
 
 Connections reconnecting, queued input and pending window launches defer staging; the owner retries the same
 installed build once they settle. Replacement notices are recorded in syslog as well as shown in the window.
+Before activation the donor validates its complete state. After the candidate maps, geometry may change as a
+tiling window manager rearranges clients; commit still validates the installation, tabs, links and other state.
 
 Browser pages reload. Volatile DOM, unsaved form contents, JavaScript memory, back/forward history and active media
 are lost. Tabs, URLs and the existing persistent browser profile remain. Cookies are transferred over the private,

@@ -8,6 +8,8 @@ import subprocess
 import tempfile
 import time
 import unittest
+import sys
+from contextlib import contextmanager, ExitStack
 from preview import profile, service, fixture, Fixture
 from runtime import CHECKS, copy_runtime, module_path, runtime_binary, RUST_FRONTEND_MODULE, RUST_BROWSER_MODULE
 from x11 import isolated_display
@@ -47,6 +49,23 @@ def stop_fixture(env):
                 if not poll.poll(5000): raise AssertionError('Private fixture process did not exit')
         finally:
             os.close(identity)
+
+
+@contextmanager
+def retile_on_map(env, original):
+    """Model a tiling WM resizing old clients as replacement clients become visible."""
+    # A fresh interpreter also isolates Xlib's select()-limited socket descriptors
+    # from the browser fixture's process-wide descriptor allocation.
+    with tempfile.TemporaryDirectory(prefix='retile-', dir=CHECKS) as directory:
+        ready, resized = Path(directory)/'ready', Path(directory)/'resized'
+        worker = subprocess.Popen([sys.executable, str(Path(__file__).with_name('tiling_wm.py')),
+                                   str(ready), str(resized), *original], env=env)
+        try:
+            wait(ready.exists, 'Private retiling observer did not start')
+            yield resized
+        finally:
+            worker.terminate()
+            worker.wait(timeout=5)
 
 
 class ReplacementTest(unittest.TestCase):
@@ -209,6 +228,12 @@ class ReplacementTest(unittest.TestCase):
                     if process is not None: process.wait(timeout=5)
 
     def test_terminal_windows_replace_without_restarting_shells(self):
+        self.terminal_replacement(retile=False)
+
+    def test_tiling_resize_during_activation_does_not_cancel_replacement(self):
+        self.terminal_replacement(retile=True)
+
+    def terminal_replacement(self, *, retile):
         with isolated_display() as display, profile(display) as env, service(env), \
                 tempfile.TemporaryDirectory(prefix='replacement-', dir=CHECKS) as directory:
             executable = copy_runtime(directory, browser=True)
@@ -216,6 +241,7 @@ class ReplacementTest(unittest.TestCase):
             env.pop('DBUS_SESSION_BUS_ADDRESS', None)
             log_path = Path(directory) / 'owner.log'
             processes = []
+            tiler = ExitStack()
             def windows():
                 result = subprocess.run(['xdotool', 'search', '--onlyvisible', '--class', 'ReplacementFixture'],
                                         env=env, capture_output=True, text=True)
@@ -249,6 +275,8 @@ class ReplacementTest(unittest.TestCase):
                     bad.replace(executable)
                     time.sleep(2)
                     self.assertEqual({pid(window) for window in windows()}, {owner}, 'Failed candidate closed old windows')
+                    if retile:
+                        resized = tiler.enter_context(retile_on_map(env, windows()))
                     bad.write_bytes(original)
                     bad.chmod(0o755)
                     bad.replace(executable)
@@ -260,11 +288,16 @@ class ReplacementTest(unittest.TestCase):
                     wait(lambda: len(windows()) == 2 and all(
                             (current := pid(window)) and current != owner for window in windows()),
                          'Owner did not replace: ' + log_path.read_text(errors='replace'))
-                    self.assertEqual(geometry, state(), 'Window positions, sizes or selected tab titles changed')
+                    if retile:
+                        self.assertTrue(resized.exists(), 'Fixture did not resize the old owner')
+                    else:
+                        self.assertEqual(geometry, state(), 'Window positions, sizes or selected tab titles changed')
+                    tiler.close()
                     for shell in shell_pids:
                         os.kill(int(shell), 0)
                     self.assertEqual(shell_pids, [(Path(directory) / f'shell-{i}').read_text().strip() for i in range(2)])
             finally:
+                tiler.close()
                 for identity in {value for window in windows() if (value := pid(window))}:
                     os.kill(int(identity), 15)
                 for process in processes:
