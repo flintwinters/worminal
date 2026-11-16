@@ -16,6 +16,7 @@ use worminal_protocol::worp::{
 };
 use worminal_protocol::{WORKSPACE_MAX_COLS, WORKSPACE_MAX_ROWS};
 
+mod file_drop;
 mod scroll;
 
 #[derive(Debug)]
@@ -157,6 +158,7 @@ impl Terminal {
             move |_, _| { inner.state.borrow_mut().pointer = None; inner.hover(); glib::Propagation::Proceed }),
         );
         inner.connect_wheel();
+        inner.connect_file_drop();
         inner.widget.connect_focus_in_event(
             glib::clone!(@weak inner => @default-return glib::Propagation::Proceed,
             move |_, _| { inner.focus(true); glib::Propagation::Proceed }),
@@ -641,21 +643,22 @@ impl Inner {
                 return;
             };
             if let Some(text) = text {
-                let bracketed = inner.state.borrow().mode & MODE_BRCKTPASTE != 0;
-                let mut filter = PasteFilter::new(bracketed);
-                let mut bytes = text.as_bytes().to_vec();
-                let length = filter.filter(&mut bytes);
-                if bracketed {
-                    inner.input(paste_begin());
-                }
-                for chunk in bytes[..length].chunks(32768) {
-                    inner.input(chunk);
-                }
-                if bracketed {
-                    inner.input(paste_end());
-                }
+                inner.paste_bytes(text.as_bytes().to_vec());
             }
         });
+    }
+    fn paste_bytes(self: &Rc<Self>, mut bytes: Vec<u8>) {
+        let bracketed = self.state.borrow().mode & MODE_BRCKTPASTE != 0;
+        let length = PasteFilter::new(bracketed).filter(&mut bytes);
+        if bracketed {
+            self.input(paste_begin());
+        }
+        for chunk in bytes[..length].chunks(32768) {
+            self.input(chunk);
+        }
+        if bracketed {
+            self.input(paste_end());
+        }
     }
     fn focus(self: &Rc<Self>, focused: bool) {
         self.prepare();

@@ -14,6 +14,8 @@ toggles browser-style autoscroll (pointer distance from the click sets speed; an
 through the same dispatch as the wheel, so mouse-reporting and alternate-screen applications scroll too;
 Shift+middle click pastes the primary selection. Ctrl+scroll over a terminal cycles tabs in the focused pane,
 wrapping like Ctrl+Tab (up selects the previous tab; down selects the next), before application mouse handling.
+Dropping local files onto a terminal pastes shell-quoted absolute paths at its current cursor, separated by spaces,
+through the ordinary bracketed-paste path without submitting input.
 Keep the upstream st attribution and license intact. Use existing
 modules. Keep each shared rule or definition in one place. Enforce state rules where the state changes. For bugs
 with subtle causes, add a test that fails without the fix and explain the reason beside the code.
