@@ -37,6 +37,8 @@ mod notifications;
 mod shortcuts;
 #[path = "app_split.rs"]
 mod split;
+#[path = "app_update_fences.rs"]
+mod update_fences;
 
 thread_local! { static WINDOWS: RefCell<Vec<Rc<App>>> = const { RefCell::new(Vec::new()) }; }
 use config::Config;
@@ -203,7 +205,7 @@ struct Link {
     reconnect: RefCell<Option<glib::SourceId>>,
     retry_delay: Cell<Duration>,
     initial_claim: Cell<bool>,
-    service_revision: Cell<u64>,
+    update_fences: RefCell<update_fences::Fences>,
     catalog_tabs: RefCell<Vec<u32>>,
     pending_tabs: Cell<u32>,
     requested: Cell<u32>,
@@ -218,7 +220,7 @@ impl Link {
             reconnect: RefCell::new(None),
             retry_delay: Cell::new(Duration::from_millis(250)),
             initial_claim: Cell::new(true),
-            service_revision: Cell::new(0),
+            update_fences: RefCell::new(update_fences::Fences::default()),
             catalog_tabs: RefCell::new(Vec::new()),
             pending_tabs: Cell::new(0),
             requested: Cell::new(0),
@@ -241,6 +243,7 @@ impl Link {
             }
         }
         self.connection.borrow_mut().take();
+        self.update_fences.borrow_mut().disconnected();
     }
 }
 /// Another `--master` host whose tabs are shown in this window beside its own.
@@ -560,8 +563,7 @@ impl App {
                     .set(link.pending_tabs.get().saturating_sub(1));
             }
             EventKind::ServiceInfo(_) => {
-                link.service_revision
-                    .set(link.service_revision.get().wrapping_add(1));
+                link.update_fences.borrow_mut().acknowledge();
             }
             EventKind::Error(bytes) => self.message(Some(&text(bytes))),
             EventKind::Released => {

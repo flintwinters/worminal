@@ -109,6 +109,13 @@ impl App {
         } else {
             self.send_link(index, 0, CommandKind::Subscribe);
         }
+        // A disconnect discards the old stream's replies. Re-fence the new stream after
+        // its catalog instead of waiting forever for an acknowledgement on a dead socket.
+        // Only the fence is retried; accepted terminal input is never replayed.
+        let retry_fence = link.update_fences.borrow_mut().reconnect();
+        if retry_fence {
+            self.send_link(index, 0, CommandKind::ServiceInfo);
+        }
         if link.connection.borrow().is_none() {
             return Err(io::ErrorKind::BrokenPipe.into());
         }
@@ -171,7 +178,8 @@ impl App {
             else {
                 continue;
             };
-            barriers.push((link.clone(), link.service_revision.get()));
+            let revision = link.update_fences.borrow_mut().request();
+            barriers.push((link.clone(), revision));
             // The explicit catalog precedes a unique service-info reply on this stream.
             // That reply fences all earlier accepted input even when SSH is backpressured;
             // an unsolicited catalog alone is not a causal acknowledgement.

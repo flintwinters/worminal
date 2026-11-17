@@ -9,7 +9,9 @@ Preparation is provisional: windows remain usable while the candidate warms up. 
 tab selection, zoom, geometry and master-link changes during this phase do not invalidate the transaction.
 At the commit boundary the donor pauses launch acceptance, gates edits, drains accepted input, and suspends
 its viewport readers. Ordered service replies on each existing link fence accepted input through remote
-backpressure before that suspension. It then sends a fresh descriptor-backed snapshot. The candidate reconciles
+backpressure before that suspension. A reconnected link reissues only its outstanding fence after the new
+catalog; terminal input is never replayed. Ordered fence identities prevent a late reply from satisfying a
+newer snapshot request. It then sends a fresh descriptor-backed snapshot. The candidate reconciles
 to that snapshot, reuses unchanged warm connections, and fences fresh catalogs before profile transfer.
 
 The final presentation update carries late geometry, focus and close requests by stable window identity.
@@ -51,6 +53,8 @@ Use `--match PATTERN` to select a regression. These checks modify copied binarie
 a browser first opened during preparation, close/geometry edits and queued launches during profile commit,
 accepted input behind remote backpressure, and failed-candidate rollback.
 GUI transaction phases and failures are recorded in syslog without window content or cookie payloads.
+Timeouts identify the transaction phase. Drain timeouts also record each window/link’s connection, catalog,
+pending-tab, queued-byte and fence state, without terminal contents or host credentials.
 
 Update status (postponed, pending or failed) always appears in the window message bar. Desktop notifications for these
 notices are off by default; enable them with `update_notifications: true` under `worminal:` in `worminal.yaml` (see `config.md`). One notification is sent per notice, not per window.

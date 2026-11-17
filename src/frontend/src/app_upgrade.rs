@@ -132,7 +132,7 @@ fn barriers_complete(barriers: &[UpdateBarrier]) -> bool {
         .collect::<Vec<_>>();
     barriers.iter().all(|(link, revision)| {
         !active.iter().any(|current| Rc::ptr_eq(current, link))
-            || link.service_revision.get() != *revision
+            || link.update_fences.borrow().complete(*revision)
     })
 }
 fn snapshot() -> io::Result<Vec<Window>> {
@@ -337,6 +337,31 @@ struct Transaction {
     rollback_started: bool,
     retirement_known: bool,
 }
+impl Transaction {
+    fn timeout_reason(&self) -> String {
+        if matches!(self.phase, Phase::Draining) {
+            for app in windows() {
+                for (index, link) in app.links().iter().enumerate() {
+                    let fence_pending = self.barriers.iter().any(|(pending, revision)| {
+                        Rc::ptr_eq(pending, link)
+                            && !link.update_fences.borrow().complete(*revision)
+                    });
+                    let connection = link.connection.borrow();
+                    trace(&format!(
+                        "GUI update drain: window={} link={index} connected={} catalog_pending={} \
+                         pending_tabs={} queued_bytes={} fence_pending={fence_pending}",
+                        app.state_id,
+                        connection.is_some(),
+                        link.initial_claim.get(),
+                        link.pending_tabs.get(),
+                        connection.as_ref().map_or(0, |connection| connection.bytes),
+                    ));
+                }
+            }
+        }
+        format!("timed out during {:?}", self.phase)
+    }
+}
 pub(super) struct Watcher {
     broker: RefCell<Rc<broker::Server>>,
     candidate: bool,
@@ -457,12 +482,15 @@ impl Watcher {
         }
         let mut slot = self.transaction.borrow_mut();
         let transaction = slot.as_mut().unwrap();
-        if !matches!(transaction.phase, Phase::RollingBack)
-            && (Instant::now() > transaction.deadline
-                || (transaction.channel.is_none()
-                    && transaction.child.as_ref().is_some_and(spawn::Child::exited)))
-        {
-            self.rollback(transaction, "replacement did not become ready");
+        if !matches!(transaction.phase, Phase::RollingBack) {
+            if Instant::now() > transaction.deadline {
+                let reason = transaction.timeout_reason();
+                self.rollback(transaction, &reason);
+            } else if transaction.channel.is_none()
+                && transaction.child.as_ref().is_some_and(spawn::Child::exited)
+            {
+                self.rollback(transaction, "replacement exited before connecting");
+            }
         }
         let previous = transaction.phase;
         let result = self.advance(transaction);

@@ -97,6 +97,30 @@ def gate_candidate(base, executable):
     return healthy, gate
 
 
+def gated_master(base, env):
+    """Share the private native master transport used by handoff fence regressions."""
+    gate, waiting = base/'release-input', base/'input-waiting'
+    daemon = str(runtime_binary('worminald'))
+    scope = env['WORMINAL_SHARED_SOCKET_SCOPE']+'-remote'
+    wrapper = base/'gated-daemon'
+    wrapper.write_text('#!/usr/bin/python3\nimport runpy\n'
+        f'runpy.run_path({str(ROOT/"tests/fixtures/gated_master_bridge.py")!r},run_name="__main__")\n')
+    wrapper.chmod(0o700)
+    ssh = base/'ssh'
+    ssh.write_text('#!/usr/bin/python3\nimport os,sys\n'
+        f'os.environ["WORMINAL_SHARED_SOCKET_SCOPE"]={scope!r}\n'
+        f'sys.path.insert(0,{str(ROOT/"tests/fixtures")!r})\n'
+        'from master_ssh import run\n'
+        f'run({str(wrapper)!r})\n')
+    ssh.chmod(0o700)
+    env = {**env, 'GDK_BACKEND': 'x11', 'PATH': str(base)+os.pathsep+env['PATH'],
+           'WORMINAL_TEST_GATE_DAEMON': daemon, 'WORMINAL_TEST_PYTHON_DIR': str(ROOT/'tests'),
+           'WORMINAL_TEST_INPUT_WAITING': str(waiting), 'WORMINAL_TEST_INPUT_GATE': str(gate)}
+    env.pop('DBUS_SESSION_BUS_ADDRESS', None)
+    remote = {**env, 'WORMINAL_SHARED_SOCKET_SCOPE': scope}
+    return env, remote
+
+
 class ReplacementTest(unittest.TestCase):
     def test_browser_reloads_with_session_and_persistent_cookies(self):
         requests = []
@@ -377,25 +401,8 @@ class ReplacementTest(unittest.TestCase):
                 tempfile.TemporaryDirectory(prefix='replacement-input-', dir=CHECKS) as directory:
             base = Path(directory)
             executable = copy_runtime(base, browser=True)
-            daemon = str(runtime_binary('worminald'))
             gate, waiting = base/'release-input', base/'input-waiting'
-            scope = env['WORMINAL_SHARED_SOCKET_SCOPE']+'-remote'
-            wrapper = base/'gated-daemon'
-            wrapper.write_text('#!/usr/bin/python3\nimport runpy\n'
-                f'runpy.run_path({str(ROOT/"tests/fixtures/gated_master_bridge.py")!r},run_name="__main__")\n')
-            wrapper.chmod(0o700)
-            ssh = base/'ssh'
-            ssh.write_text('#!/usr/bin/python3\nimport os,sys\n'
-                f'os.environ["WORMINAL_SHARED_SOCKET_SCOPE"]={scope!r}\n'
-                f'sys.path.insert(0,{str(ROOT/"tests/fixtures")!r})\n'
-                'from master_ssh import run\n'
-                f'run({str(wrapper)!r})\n')
-            ssh.chmod(0o700)
-            env = {**env, 'GDK_BACKEND': 'x11', 'PATH': str(base)+os.pathsep+env['PATH'],
-                   'WORMINAL_TEST_GATE_DAEMON': daemon, 'WORMINAL_TEST_PYTHON_DIR': str(ROOT/'tests'),
-                   'WORMINAL_TEST_INPUT_WAITING': str(waiting), 'WORMINAL_TEST_INPUT_GATE': str(gate)}
-            env.pop('DBUS_SESSION_BUS_ADDRESS', None)
-            remote = {**env, 'WORMINAL_SHARED_SOCKET_SCOPE': scope}
+            env, remote = gated_master(base, env)
             ready, received = base/'ready', base/'received'
             payload = 'handoff-input'
             script = ('import os,tty\nfrom pathlib import Path\n'
@@ -438,8 +445,41 @@ class ReplacementTest(unittest.TestCase):
                     owner.wait(timeout=5)
                     stop_fixture(remote)
 
+    def test_drain_fence_survives_a_reconnected_master(self):
+        with isolated_display() as display, profile(display) as env, \
+                tempfile.TemporaryDirectory(prefix='replacement-reconnect-', dir=CHECKS) as directory:
+            base = Path(directory)
+            executable = copy_runtime(base, browser=True)
+            env, remote = gated_master(base, env)
+            dropped, ready = base/'fence-dropped', base/'shell-ready'
+            env['WORMINAL_TEST_DROP_FENCE'] = str(dropped)
+            log_path = CHECKS/'window-replacement-reconnect.log'
+            with service(remote), log_path.open('wb') as log:
+                owner = subprocess.Popen([str(executable), '--master', 'reconnect-master',
+                    '-c', 'ReconnectFixture', '-T', 'Reconnect', '-e', '/bin/sh', '-c',
+                    f'echo $$ > {shlex.quote(str(ready))}; exec cat'], env=env, stdout=log, stderr=log)
+                try:
+                    wait(lambda: ready.exists() and normal_windows(env, 'ReconnectFixture'),
+                         'Remote shell did not start')
+                    shell_pid = ready.read_text().strip()
+                    module = module_path(RUST_FRONTEND_MODULE, prefix=base)
+                    pending = module.with_suffix('.pending')
+                    shutil.copy2(module, pending)
+                    pending.replace(module)
+                    wait(dropped.exists, 'Fixture did not drop the donor fence')
+                    wait(lambda: owner.poll() is not None,
+                         lambda: 'Reconnected fence stalled handoff: '+log_path.read_text(errors='replace'))
+                    wait(lambda: normal_windows(env, 'ReconnectFixture'), 'Replacement window did not map')
+                    self.assertEqual(owner.returncode, 0)
+                    os.kill(int(shell_pid), 0)
+                    self.assertEqual(ready.read_text().strip(), shell_pid, 'Handoff replayed the shell launch')
+                finally:
+                    stop_fixture(env)
+                    owner.wait(timeout=5)
+                    stop_fixture(remote)
+
     def test_terminal_windows_replace_without_restarting_shells(self):
-        with isolated_display() as display, profile(display) as env, service(env), \
+        with isolated_display() as display, profile(display) as env, service(env) as daemon, \
                 tempfile.TemporaryDirectory(prefix='replacement-', dir=CHECKS) as directory:
             executable = copy_runtime(directory, browser=True)
             env = {**env, 'GDK_BACKEND': 'x11', 'GIO_USE_VFS': 'local'}
@@ -483,6 +523,9 @@ class ReplacementTest(unittest.TestCase):
                     bad.chmod(0o755)
                     bad.replace(executable)
                     shell_pids = [(Path(directory) / f'shell-{i}').read_text().strip() for i in range(2)]
+                    pending_daemon = daemon.with_suffix('.pending')
+                    shutil.copy2(daemon, pending_daemon)
+                    pending_daemon.replace(daemon)
                     module = module_path(RUST_FRONTEND_MODULE, prefix=Path(directory))
                     replacement = module.with_suffix('.pending')
                     shutil.copy2(module, replacement)
@@ -490,6 +533,13 @@ class ReplacementTest(unittest.TestCase):
                     wait(lambda: len(windows()) == 2 and all(
                             (current := pid(window)) and current != owner for window in windows()),
                          'Owner did not replace: ' + log_path.read_text(errors='replace'))
+                    # A replacement owner must itself remain able to drain and replace again.
+                    second_owner = pid(windows()[0])
+                    shutil.copy2(module, replacement)
+                    replacement.replace(module)
+                    wait(lambda: len(windows()) == 2 and all(
+                            (current := pid(window)) and current != second_owner for window in windows()),
+                         lambda: 'Second owner did not replace: ' + log_path.read_text(errors='replace'))
                     self.assertEqual(geometry, state(), 'Window positions, sizes or selected tab titles changed')
                     for shell in shell_pids:
                         os.kill(int(shell), 0)

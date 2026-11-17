@@ -35,6 +35,11 @@ threading.Thread(target=downstream, daemon=True).start()
 try:
     while True:
         kind, tab, body = packet(upstream, version=2)
+        if kind == 30 and (drop := os.environ.get('WORMINAL_TEST_DROP_FENCE')):
+            # Drop exactly the original owner's first fence; replacement/reconnect bridges
+            # use --bridge-existing and bypass this wrapper. No input is held or replayed.
+            Path(drop).touch()
+            break
         if kind == 3:  # WIRE_INPUT; retain exact packet bytes until the fixture releases backpressure.
             Path(os.environ['WORMINAL_TEST_INPUT_WAITING']).touch()
             while not Path(os.environ['WORMINAL_TEST_INPUT_GATE']).exists():
