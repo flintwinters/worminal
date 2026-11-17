@@ -246,6 +246,44 @@ fn run(column: u32, count: u32, uri: &str) -> LinkRun {
 }
 
 #[test]
+fn wrapped_link_segments_share_target_and_hover_binding() {
+    let mut view = Viewport::new(6, 4).unwrap();
+    header(&mut view, 6, 4);
+    for (index, label) in ["prefix", "middle", "end!!!", "other!"].iter().enumerate() {
+        row(&mut view, index as u32, label, 0);
+    }
+    let uri = "https://example.org/complete-target";
+    links(&mut view, 0, &[run(2, 4, uri)]).unwrap();
+    links(&mut view, 1, &[run(0, 6, uri)]).unwrap();
+    links(
+        &mut view,
+        2,
+        &[run(0, 3, uri), run(3, 3, "https://other.org")],
+    )
+    .unwrap();
+    links(&mut view, 3, &[run(0, 6, uri)]).unwrap();
+    finish(&mut view);
+
+    for position in 2..15 {
+        assert_eq!(
+            view.link_at(position % 6, position / 6),
+            Some((uri, 2..=14)),
+            "every segment shares the target and hover binding"
+        );
+    }
+    assert!(view.link_at(1, 0).is_none());
+    assert_eq!(view.link_at(3, 2), Some(("https://other.org", 15..=17)));
+    assert_eq!(
+        view.link_at(0, 3),
+        Some((uri, 18..=23)),
+        "separate occurrence"
+    );
+    assert_eq!(text(&view, 0), "prefix");
+    assert_eq!(text(&view, 1), "middle");
+    assert_eq!(text(&view, 2), "end!!!");
+}
+
+#[test]
 fn links_apply_at_finish_follow_row_copies_and_clear_with_geometry() {
     let mut view = Viewport::new(6, 3).unwrap();
     header(&mut view, 6, 3);
