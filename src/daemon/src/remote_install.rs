@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 use worminal_protocol::worp::devices::validate_endpoint;
-use worminal_workspace::ssh;
+use worminal_workspace::{cli_output, ssh};
 
 const LAYOUT: &str = include_str!("../../../assets/headless-install.json");
 const BOOTSTRAP: &str = include_str!("../../../tools/remote_install.py");
@@ -389,7 +389,10 @@ fn pull(
 
 pub fn run(arguments: &[OsString], upgrading: bool) -> io::Result<i32> {
     if arguments.len() == 1 && matches!(arguments[0].to_str(), Some("--help" | "-h" | "help")) {
-        print!("{}", if upgrading { UPGRADE_HELP } else { HELP });
+        print!(
+            "{}",
+            cli_output::text(if upgrading { UPGRADE_HELP } else { HELP })
+        );
         return Ok(0);
     }
     let result = match arguments {

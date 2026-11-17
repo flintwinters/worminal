@@ -58,16 +58,28 @@ pub fn index() -> String {
     format!("Search: worminald api help search QUERY... (case-insensitive, typo-tolerant; up to 20 matching lines)\nTopics:\n{}\n", lines.join("\n"))
 }
 
-pub fn topic(name: &str) -> Option<String> {
-    match name {
-        "schema" => Some(SCHEMA.to_owned()),
-        "keys" => Some(KEYS.to_owned()),
-        "observe" => Some(OBSERVE.to_owned()),
-        "shell-bash" => Some(include_str!("../../../assets/shell/worminal.bash").to_owned()),
-        "shell-zsh" => Some(include_str!("../../../assets/shell/worminal.zsh").to_owned()),
-        "session" => Some(session()),
-        _ => None,
-    }
+pub struct Topic {
+    pub text: String,
+    pub runnable: bool,
+}
+
+pub fn topic(name: &str) -> Option<Topic> {
+    let (text, runnable) = match name {
+        "schema" => (SCHEMA.to_owned(), false),
+        "keys" => (KEYS.to_owned(), false),
+        "observe" => (OBSERVE.to_owned(), false),
+        "shell-bash" => (
+            include_str!("../../../assets/shell/worminal.bash").to_owned(),
+            true,
+        ),
+        "shell-zsh" => (
+            include_str!("../../../assets/shell/worminal.zsh").to_owned(),
+            true,
+        ),
+        "session" => (session(), false),
+        _ => return None,
+    };
+    Some(Topic { text, runnable })
 }
 
 const SCHEMA: &str = r#"Every command prints exactly one JSON object on stdout.

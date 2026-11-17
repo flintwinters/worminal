@@ -1,6 +1,7 @@
 //! Application state and local transport shared by the Rust service and frontend.
 pub mod broker;
 pub mod browser_target;
+pub mod cli_output;
 pub mod devices;
 pub mod diagnostics;
 pub mod gui_handoff;

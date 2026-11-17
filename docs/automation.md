@@ -92,6 +92,16 @@ were queued, not that every process has exited. No owner or no connected matchin
 failure may leave partial closure; inspect the remaining tabs before retrying. No SSH connection or workspace is
 created by this command. `worminal --detach-master user@host` instead removes the views and keeps shells running.
 
+## CLI presentation
+
+`worminal` and `worminald` color human help, versions, status and errors only when the relevant output
+stream is a terminal. Redirected output is plain. `NO_COLOR` (even empty), `CLICOLOR=0` or `TERM=dumb`
+disables color. Agent markers also disable it, even when set to an empty value: `CODEX_*`, `CLAUDE_CODE_*`,
+`AIDER_*`, `OPENCODE_*`, `GEMINI_CLI_*`, `CLAUDECODE`, `CURSOR_AGENT`, `AIDER`, `OPENCODE`, `GEMINI_CLI`,
+`CLINE_ACTIVE`, `ROO_CODE`, `AGENT`, `AGENT_MODE` and `AI_AGENT`. API keys and SSH authentication-agent
+variables do not identify an AI agent. The shared policy lives in `src/workspace/src/cli_output.rs`.
+JSON, binary sessions, shell integration source and configuration examples always remain plain.
+
 ## Observation, waiting and input safety
 
 `api help observe` documents passive inspection and its limits; `api help keys` lists application keys.

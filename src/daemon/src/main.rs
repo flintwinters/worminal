@@ -10,7 +10,7 @@ fn main() {
                 worminal_daemon::process::error(&error.to_string());
                 worminal_daemon::process::error("Workspace service exited with status 1");
             }
-            eprintln!("{error}");
+            eprintln!("{}", worminal_workspace::cli_output::error(&error));
             1
         }
     };

@@ -5,7 +5,10 @@ use worminal_protocol::{
     worp::{events::EventKind, v2_events},
     Decoder, WIRE_CATALOG,
 };
-use worminal_workspace::masters::{Connection, Registry};
+use worminal_workspace::{
+    cli_output,
+    masters::{Connection, Registry},
+};
 
 const HELP: &str = "Usage: worminald --list-masters [--help]
 List this user's currently and previously connected master SSH routes as JSON.
@@ -27,7 +30,7 @@ fn registry() -> Registry {
 
 pub fn run(arguments: &[OsString]) -> io::Result<i32> {
     if arguments.len() == 1 && matches!(arguments[0].to_str(), Some("--help" | "-h")) {
-        print!("{HELP}");
+        print!("{}", cli_output::text(HELP));
         return Ok(0);
     }
     if !arguments.is_empty() {

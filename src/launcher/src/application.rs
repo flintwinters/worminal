@@ -60,7 +60,7 @@ pub fn main(candidate: bool) -> ExitCode {
     match run(candidate) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("{error}");
+            eprintln!("{}", worminal_workspace::cli_output::error(&error));
             ExitCode::from(if error.kind() == io::ErrorKind::InvalidInput {
                 2
             } else {

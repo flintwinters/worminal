@@ -7,6 +7,7 @@ use std::{
     rc::Rc,
 };
 use worminal_protocol::*;
+use worminal_workspace::cli_output;
 #[derive(Clone)]
 pub(super) struct Config {
     pub(super) candidate: bool,
@@ -89,7 +90,7 @@ impl Config {
         while let Some(arg) = args.next() {
             match arg.to_str() {
                 Some("--help" | "-h") => {
-                    println!("{product} {version}\n\n\
+                    println!("{}", cli_output::text(format!("{product} {version}\n\n\
                         usage: {product} [--master HOST] [--attach] [-aiv] [-f font] [-g COLSxROWS] \
                         [-c class] [-n name] [-T title] [-o file] [-l line] [-e command ...]\n\n\
                         Ctrl+Shift+T: tab  Ctrl+Shift+N: window  \
@@ -104,11 +105,11 @@ impl Config {
                         --surf URL|FILE: open a browser window (--browser is an alias)\n\
                         --new-browser-tab URL|FILE: replace this terminal with a browser\n\
                         Automation and agents: run `worminald --help`, then `worminald api help`\n\
-                        -h | --help: show help\n-v | --version: show version");
+                        -h | --help: show help\n-v | --version: show version\n\n{}", cli_output::HELP)));
                     return Ok(None);
                 }
                 Some("--version" | "-v") => {
-                    println!("{product} {version}");
+                    println!("{}", cli_output::text(format!("{product} {version}")));
                     return Ok(None);
                 }
                 Some("--attach") => config.attach = true,

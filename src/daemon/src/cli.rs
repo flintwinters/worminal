@@ -17,7 +17,7 @@ use worminal_protocol::worp::{
     session::Session,
 };
 use worminal_protocol::*;
-use worminal_workspace::{browser_target, socket};
+use worminal_workspace::{browser_target, cli_output, socket};
 
 fn connect(scope: &[u8]) -> io::Result<std::os::unix::net::UnixStream> {
     socket::connect(process::uid(), scope)
@@ -156,7 +156,7 @@ fn request(scope: &[u8], kind: CommandKind) -> io::Result<i32> {
         EventKind::Error(bytes) => bytes,
         _ => b"Preview service rejected the command.".to_vec(),
     };
-    eprintln!("{}", String::from_utf8_lossy(&error));
+    eprintln!("{}", cli_output::error(String::from_utf8_lossy(&error)));
     Ok(1)
 }
 
@@ -173,14 +173,20 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
         _ => {}
     }
     if arguments.len() == 2 && arguments[1] == "--version" {
-        println!("worminald {}", env!("CARGO_PKG_VERSION"));
+        println!(
+            "{}",
+            cli_output::text(format!("worminald {}", env!("CARGO_PKG_VERSION")))
+        );
         return Ok(0);
     }
     if arguments.get(1).is_some_and(|value| value == "api") {
         return crate::api_cli::run(scope, &arguments[2..]);
     }
     if arguments.len() == 2 && matches!(arguments[1].to_str(), Some("--help" | "-h")) {
-        print!("{}", crate::api_help::OVERVIEW);
+        print!(
+            "{}",
+            cli_output::text(format!("{}{}", crate::api_help::OVERVIEW, cli_output::HELP))
+        );
         return Ok(0);
     }
     if arguments.len() == 2 {
@@ -233,17 +239,20 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
             let result = request(scope, command);
             if kind != WIRE_BROWSER_REPLACE && !matches!(&result, Ok(0)) {
                 eprintln!(
-                    "Handoff unavailable or rejected; no automatic daemon restart was attempted."
+                    "{}", cli_output::error("Handoff unavailable or rejected; no automatic daemon restart was attempted.")
                 );
             }
             return result;
         }
     }
     eprintln!(
-        "usage: worminald api COMMAND (run 'worminald api help' for commands)\n\
+        "{}",
+        cli_output::error(
+            "usage: worminald api COMMAND (run 'worminald api help' for commands)\n\
                worminald --serve|--bridge|--stop\n\
                worminald --handin NAME | --handoff NAME\n       \
                worminald --new-browser-tab URL|FILE"
+        )
     );
     Ok(2)
 }

@@ -10,7 +10,7 @@ use worminal_protocol::worp::{
     stream::{self, Stream},
     Client, Handler, Reply, Request,
 };
-use worminal_workspace::{socket, ssh};
+use worminal_workspace::{cli_output, socket, ssh};
 
 #[path = "api_arguments.rs"]
 mod arguments;
@@ -115,7 +115,10 @@ pub fn run(scope: &[u8], arguments: &[OsString]) -> io::Result<i32> {
     if arguments.is_empty()
         || (arguments.len() == 1 && matches!(arguments[0].to_str(), Some("help" | "--help" | "-h")))
     {
-        print!("{HELP}{}", api_help::index());
+        print!(
+            "{}",
+            cli_output::text(format!("{HELP}{}", api_help::index()))
+        );
         return Ok(0);
     }
     if arguments.len() >= 2 && arguments[0] == "help" && arguments[1] == "search" {
@@ -124,22 +127,34 @@ pub fn run(scope: &[u8], arguments: &[OsString]) -> io::Result<i32> {
             .map(|value| value.to_str())
             .collect::<Option<Vec<_>>>();
         let Some(query) = query else {
-            eprintln!("Search query must be UTF-8.");
+            eprintln!("{}", cli_output::error("Search query must be UTF-8."));
             return Ok(2);
         };
         let Some(text) = api_help::search(&query.join(" ")) else {
-            eprintln!("Usage: worminald api help search QUERY... (1..256 bytes, at most 16 terms)");
+            eprintln!(
+                "{}",
+                cli_output::error(
+                    "Usage: worminald api help search QUERY... (1..256 bytes, at most 16 terms)"
+                )
+            );
             return Ok(2);
         };
-        print!("{text}");
+        print!("{}", cli_output::text(text));
         return Ok(0);
     }
     if arguments.len() == 2 && arguments[0] == "help" {
-        let Some(text) = arguments[1].to_str().and_then(api_help::topic) else {
-            eprintln!("Unknown help topic.\n{}", api_help::index());
+        let Some(topic) = arguments[1].to_str().and_then(api_help::topic) else {
+            eprintln!(
+                "{}",
+                cli_output::error(format!("Unknown help topic.\n{}", api_help::index()))
+            );
             return Ok(2);
         };
-        print!("{text}");
+        if topic.runnable {
+            print!("{}", topic.text);
+        } else {
+            print!("{}", cli_output::text(topic.text));
+        }
         return Ok(0);
     }
     if arguments.len() == 1 && arguments[0] == "--session" {

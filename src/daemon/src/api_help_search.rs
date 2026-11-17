@@ -10,7 +10,7 @@ pub fn search(query: &str) -> Option<String> {
     documents.extend(TOPICS.iter().map(|(name, summary)| {
         (
             *name,
-            format!("{name}: {summary}\n{}", topic(name).unwrap()),
+            format!("{name}: {summary}\n{}", topic(name).unwrap().text),
         )
     }));
     let mut matches = Vec::new();
