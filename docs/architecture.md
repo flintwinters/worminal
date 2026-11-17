@@ -62,8 +62,11 @@ The same authenticated stream becomes the bridge only after synchronization succ
 It updates whichever side has the older Cargo version, pushing or pulling the
 daemon with atomic replacement so the running daemon's watch hands live shells to the new file. It needs the same
 CPU, sudo and /usr/local on both sides, and never touches a v1 workspace. It compares only the Cargo version, so
-bump it with any change remote daemons must receive; equal versions never upgrade. Every tab's environment carries
-`WORMINAL_DAEMON`, the serving worminald's path: an agent learns it is in a tab and where to start discovery.
+bump it with any change remote daemons must receive; equal versions never upgrade.
+`worminald --list-masters` passively lists successful outbound view routes and their live kernel leases, independently
+of explicit device enrollment. History starts at a valid catalog and survives disconnects; it never drives probes.
+Every tab's environment carries `WORMINAL_DAEMON`, the serving worminald's path: an agent learns it is in a tab
+and where to start discovery.
 Inspection never takes control or starts a daemon; one-shot input preserves the existing view/controller. Agent
 reads expose bounded history/batches and opaque observation revisions; deferred waits never block the service.
 Output cursors reference retained physical cells and report gaps across eviction/layout changes; bounded command

@@ -78,6 +78,9 @@ are sent in the supplied order. Input is limited to 65536 bytes per request. Inp
 without taking its graphical controller or resizing it. Sending Enter may submit a command or prompt; Ctrl-C may
 interrupt work. These commands do not detect whether the intended application still owns the terminal.
 
+`worminald --list-masters` passively lists currently and previously connected master SSH routes as JSON. It is local
+per-user connection history, separate from enrolled devices; run `worminald --list-masters --help` for its contract.
+
 ## Observation, waiting and input safety
 
 `api help observe` documents passive inspection and its limits; `api help keys` lists application keys.

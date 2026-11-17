@@ -74,7 +74,8 @@ fn connect(arguments: &[OsString]) -> io::Result<i32> {
     stream.flush()?;
     stream.set_read_timeout(None)?;
     stream.set_write_timeout(None)?;
-    crate::cli::relay(stream)?;
+    let mut history = crate::master_history::Observer::new(endpoint);
+    crate::cli::relay_observed(stream, |bytes| history.observe(bytes))?;
     Ok(0)
 }
 

@@ -17,7 +17,8 @@ pub(crate) fn config_home() -> PathBuf {
         .map_or_else(|| home().join(".config"), PathBuf::from)
 }
 
-pub(crate) fn state_home() -> PathBuf {
+/// Per-user persistent state root, shared by configuration sync and local connection history.
+pub fn state_home() -> PathBuf {
     env::var_os("XDG_STATE_HOME")
         .filter(|value| !value.is_empty())
         .map_or_else(|| home().join(".local/state"), PathBuf::from)

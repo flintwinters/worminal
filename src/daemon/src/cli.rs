@@ -65,7 +65,14 @@ pub(crate) fn bridge(scope: &[u8], existing: bool) -> io::Result<()> {
 }
 
 /// Bounded bidirectional transport, shared by local bridges and authenticated remote views.
-pub(crate) fn relay(mut socket: std::os::unix::net::UnixStream) -> io::Result<()> {
+pub(crate) fn relay(socket: std::os::unix::net::UnixStream) -> io::Result<()> {
+    relay_observed(socket, |_| {})
+}
+
+pub(crate) fn relay_observed(
+    mut socket: std::os::unix::net::UnixStream,
+    mut observe: impl FnMut(&[u8]),
+) -> io::Result<()> {
     socket.set_nonblocking(true)?;
     let mut input = process::StdioDescriptor::new(0)?;
     let mut output = process::StdioDescriptor::new(1)?;
@@ -106,6 +113,7 @@ pub(crate) fn relay(mut socket: std::os::unix::net::UnixStream) -> io::Result<()
                         if ready.index == 0 {
                             incoming.append(&bytes[..count])?;
                         } else {
+                            observe(&bytes[..count]);
                             outgoing.append(&bytes[..count])?;
                         }
                     }
@@ -155,29 +163,14 @@ fn request(scope: &[u8], kind: CommandKind) -> io::Result<i32> {
 pub fn run(arguments: &[OsString]) -> io::Result<i32> {
     let scope = std::env::var_os("WORMINAL_SHARED_SOCKET_SCOPE").unwrap_or_default();
     let scope = scope.as_os_str().as_bytes();
-    if arguments.get(1).is_some_and(|value| value == "--ssh-child") {
-        return crate::remote_connect::ssh_child(&arguments[2..]);
-    }
-    if arguments
-        .get(1)
-        .is_some_and(|value| value == "--connect-master")
-    {
-        return crate::remote_connect::run(&arguments[2..]);
-    }
-    if arguments
-        .get(1)
-        .is_some_and(|value| value == "install-on-remote")
-    {
-        return crate::remote_install::run(&arguments[2..], false);
-    }
-    if arguments
-        .get(1)
-        .is_some_and(|value| value == "upgrade-remote")
-    {
-        return crate::remote_install::run(&arguments[2..], true);
-    }
-    if arguments.get(1).is_some_and(|value| value == "config") {
-        return crate::config_cli::run(&arguments[2..]);
+    match arguments.get(1).and_then(|value| value.to_str()) {
+        Some("--ssh-child") => return crate::remote_connect::ssh_child(&arguments[2..]),
+        Some("--connect-master") => return crate::remote_connect::run(&arguments[2..]),
+        Some("install-on-remote") => return crate::remote_install::run(&arguments[2..], false),
+        Some("upgrade-remote") => return crate::remote_install::run(&arguments[2..], true),
+        Some("config") => return crate::config_cli::run(&arguments[2..]),
+        Some("--list-masters") => return crate::master_history::run(&arguments[2..]),
+        _ => {}
     }
     if arguments.len() == 2 && arguments[1] == "--version" {
         println!("worminald {}", env!("CARGO_PKG_VERSION"));

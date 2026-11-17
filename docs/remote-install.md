@@ -71,3 +71,28 @@ Outcomes other than "already current" are logged to syslog.
 
 Run `python3 manage.py check-remote-install` for private mock-SSH/bootstrap and no-overwrite publication checks.
 It uses neither root nor live remote hosts.
+
+## Master connection history
+
+```sh
+worminald --list-masters
+worminald --list-masters --help
+```
+
+The command returns JSON, for example:
+
+```json
+{"ok":true,"masters":[{"endpoint":"felix@disciple","connected":true},{"endpoint":"old-node","connected":false}]}
+```
+
+Each row is an exact SSH route that a view successfully connected to. `connected` means at least one connection
+has received a valid master catalog and remains open; authentication or version sync alone is not enough.
+Multiple windows and aliases remain distinct where appropriate: one row per exact route, live until its last
+connection closes. Disconnecting, detaching, crashes and restarts retain the row with `connected: false`.
+
+History begins with this feature; earlier connections are not reconstructed from enrollment or config-sync files.
+Reconnect existing views to begin tracking them. History belongs to the local user and spans displays and workspace
+scopes sharing `$XDG_STATE_HOME` (default `~/.local/state`). It is stored under `worminal/masters` there; private
+connection leases release automatically on process exit. Recording failures go to syslog without breaking a view.
+Listing never starts a daemon, opens SSH, probes a host, enrolls devices or takes terminal control. Missing history
+returns an empty list without creating files; unreadable or malformed records return `ok: false` and exit status 1.

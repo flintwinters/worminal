@@ -14,6 +14,7 @@ mod frames;
 mod handoff;
 mod handoff_io;
 mod jobs;
+mod master_history;
 pub mod process;
 pub mod queue;
 mod reactor;

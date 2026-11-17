@@ -288,13 +288,24 @@ def check_agent_api():
     raise typer.Exit(code)
 
 
-def run_remote_checks(pattern):
+def run_remote_checks(pattern, *, workspace_test=None):
     from tools.update_storage import verification_environment
     candidate = build_rust_daemon()
     with verification_environment(ROOT) as env:
+        if workspace_test:
+            code = run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-workspace",
+                        "--test", workspace_test], env=env)
+            if code:
+                return code
         return run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                     "-p", pattern, "-q"],
                    env={**env, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate)})
+
+
+@app.command("check-master-history")
+def check_master_history():
+    """Check passive master listing, durable history and live connection leases on private targets."""
+    raise typer.Exit(run_remote_checks("test_master_history.py", workspace_test="masters"))
 
 
 @app.command("check-remote-install")

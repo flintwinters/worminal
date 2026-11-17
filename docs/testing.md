@@ -26,6 +26,13 @@ then explicitly edit the baseline values, maxima and workload hashes with an exp
 hash or unit changes, missing/invalid samples and new metrics without a budget decision fail closed. Use
 `check-perf --limits PATH` for a reviewed machine-specific policy; ordinary checks always use the checked-in file.
 
+## Master connection history
+
+`python3 manage.py check-master-history` runs kernel lease/storage checks and private native bootstrap/bridge
+regressions for `worminald --list-masters`. It covers catalog confirmation, multiple simultaneous views, crash
+cleanup, history persistence, scope isolation and passive empty/error/help replies. It uses project-local
+verification storage and mock SSH, without a desktop or live remote device.
+
 ## Python check workers
 
 The full check command builds shared artifacts and runs native checks first:

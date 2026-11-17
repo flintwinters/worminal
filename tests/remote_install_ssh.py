@@ -48,5 +48,9 @@ if gate := os.environ.get('WORMINAL_TEST_UPDATE_GATE'):
         f'        gate = Path({gate!r})\n'
         '        gate.with_suffix(".waiting").touch()\n'
         '        while not gate.exists(): time.sleep(.01)')
+if reply := os.environ.get('WORMINAL_TEST_MASTER_REPLY'):
+    bridge = "os.execv(str(PREFIX/'bin/worminald'), ['worminald', bridge])"
+    assert bridge in suffix
+    suffix = suffix.replace(bridge, f'os.write(1, bytes.fromhex({reply!r}))')
 code = f'LAYOUT={namespace["LAYOUT"]!r}\nMODE={namespace.get("MODE", "install")!r}\nSOURCE={source!r}\nexec(SOURCE)\n{suffix}'
 os.execv('/usr/bin/python3', ['/usr/bin/python3', '-c', code])

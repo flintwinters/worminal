@@ -5,6 +5,7 @@ pub mod devices;
 pub mod gui_handoff;
 pub mod handoff;
 pub mod launch;
+pub mod masters;
 pub mod recovery;
 pub mod rights;
 pub mod socket;

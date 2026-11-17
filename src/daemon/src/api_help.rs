@@ -11,6 +11,7 @@ Discover by topic (each prints a complete reference and needs no running daemon)
   worminald api help observe          history, batch reads, wait, guarded input and shell integration
   worminald api help schema           JSON reply shapes, limits, exit codes
   worminald api help session          binary streaming protocol (worminald api --session)
+  worminald --list-masters --help     current and previous master connections
   worminald config --help             how to read, edit and validate worminal.yaml (--example)
   worminald install-on-remote --help  bootstrap a new headless node over SSH
   worminald upgrade-remote --help     sync an older node with a newer peer
