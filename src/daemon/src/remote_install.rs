@@ -434,7 +434,7 @@ pub fn run(arguments: &[OsString], upgrading: bool) -> io::Result<i32> {
         // Detached views discard stdout, so record changes, failures and conflicts where daemon events go.
         crate::process::diagnostic(&format!("Remote upgrade: {result}"));
     }
-    println!("{result}");
+    print!("{}", worminal_workspace::cli_output::reply(&result));
     Ok(
         if result.get("ok").and_then(Value::as_bool) == Some(false) {
             1

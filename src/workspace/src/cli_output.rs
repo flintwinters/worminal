@@ -1,4 +1,5 @@
 //! Human CLI presentation only. Wire replies, JSON and runnable source bypass this module.
+use serde_json::Value;
 use std::{ffi::OsStr, fmt::Display, io::IsTerminal};
 
 pub const HELP: &str =
@@ -29,6 +30,17 @@ fn agent_variable(name: &OsStr) -> bool {
             b"ROO_CODE",
         ]
         .contains(&name)
+}
+
+/// Human layout: a terminal without agent markers. Color additionally honors the opt-outs below.
+fn human(
+    terminal: bool,
+    variables: impl IntoIterator<Item = (impl AsRef<OsStr>, impl AsRef<OsStr>)>,
+) -> bool {
+    terminal
+        && !variables
+            .into_iter()
+            .any(|(name, _)| agent_variable(name.as_ref()))
 }
 
 fn enabled(
@@ -110,6 +122,204 @@ pub fn success(value: impl Display) -> String {
     }
 }
 
+fn scalar(value: &Value, color: bool) -> String {
+    let (text, code) = match value {
+        Value::String(text) => (text.clone(), ""),
+        Value::Bool(true) => ("yes".into(), "32"),
+        Value::Bool(false) => ("no".into(), "2"),
+        Value::Null => ("-".into(), "2"),
+        other => (other.to_string(), ""),
+    };
+    if color && !code.is_empty() {
+        paint(code, &text)
+    } else {
+        text
+    }
+}
+
+fn visible(value: &str) -> usize {
+    let mut width = 0;
+    let mut escape = false;
+    for character in value.chars() {
+        match (escape, character) {
+            (_, '\x1b') => escape = true,
+            (true, 'm') => escape = false,
+            (false, _) => width += 1,
+            _ => {}
+        }
+    }
+    width
+}
+
+fn pad(value: &str, width: usize) -> String {
+    format!(
+        "{value}{}",
+        " ".repeat(width.saturating_sub(visible(value)))
+    )
+}
+
+fn table(rows: &[Value], color: bool, margin: &str, output: &mut String) {
+    let heading = |text: &str| {
+        if color {
+            paint("1;35", text)
+        } else {
+            text.into()
+        }
+    };
+    let mut columns: Vec<&str> = Vec::new();
+    for key in rows.iter().flat_map(|row| row.as_object().unwrap().keys()) {
+        if !columns.contains(&key.as_str()) {
+            columns.push(key);
+        }
+    }
+    // JSON keys arrive alphabetized: lead with the identifying text columns, keep the rest in order.
+    columns.sort_by_key(|key| {
+        !rows
+            .iter()
+            .any(|row| row.get(*key).is_some_and(Value::is_string))
+    });
+    let cells: Vec<Vec<String>> = rows
+        .iter()
+        .map(|row| {
+            columns
+                .iter()
+                .map(|key| match row.get(*key) {
+                    Some(Value::Array(items))
+                        if items.iter().all(|i| !i.is_object() && !i.is_array()) =>
+                    {
+                        items
+                            .iter()
+                            .map(|i| scalar(i, false))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    }
+                    Some(cell) => scalar(cell, color),
+                    None => scalar(&Value::Null, color),
+                })
+                .collect()
+        })
+        .collect();
+    let widths: Vec<usize> = columns
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            cells
+                .iter()
+                .map(|row| visible(&row[i]))
+                .chain([name.len()])
+                .max()
+                .unwrap()
+        })
+        .collect();
+    let line = |row: Vec<String>| {
+        let joined: Vec<String> = row
+            .iter()
+            .zip(&widths)
+            .map(|(cell, width)| pad(cell, *width))
+            .collect();
+        format!("{margin}{}\n", joined.join("  ").trim_end())
+    };
+    output.push_str(&line(
+        columns
+            .iter()
+            .map(|name| heading(&name.to_uppercase()))
+            .collect(),
+    ));
+    for row in cells {
+        output.push_str(&line(row));
+    }
+}
+
+/// Lay out any JSON reply for people: uniform arrays of objects become tables, objects become
+/// aligned key/value lists, and failures become one error line. Commands never format by hand.
+fn layout(value: &Value, color: bool, indent: usize, output: &mut String) {
+    let margin = " ".repeat(indent);
+    let heading = |text: &str| {
+        if color {
+            paint("1;35", text)
+        } else {
+            text.into()
+        }
+    };
+    match value {
+        Value::Array(rows) if rows.is_empty() => {
+            output.push_str(&format!("{margin}{}\n", scalar(&Value::Null, color)));
+        }
+        Value::Array(rows) if rows.iter().all(Value::is_object) => {
+            table(rows, color, &margin, output);
+        }
+        Value::Array(items) => {
+            for item in items {
+                output.push_str(&format!("{margin}- {}\n", scalar(item, color)));
+            }
+        }
+        Value::Object(fields) => {
+            let width = fields.keys().map(String::len).max().unwrap_or(0);
+            for (key, field) in fields {
+                let label = pad(&heading(key), width);
+                if matches!(field, Value::Object(_) | Value::Array(_))
+                    && !field.as_array().is_some_and(|a| a.is_empty())
+                {
+                    output.push_str(&format!("{margin}{}\n", heading(&format!("{key}:"))));
+                    layout(field, color, indent + 2, output);
+                } else if field.as_array().is_some_and(|a| a.is_empty()) {
+                    output.push_str(&format!(
+                        "{margin}{label}  {}\n",
+                        scalar(&Value::Null, color)
+                    ));
+                } else {
+                    output.push_str(&format!("{margin}{label}  {}\n", scalar(field, color)));
+                }
+            }
+        }
+        other => output.push_str(&format!("{margin}{}\n", scalar(other, color))),
+    }
+}
+
+/// Render a command's JSON reply: the exact compact JSON for agents, pipes and redirection, or a
+/// readable layout on a human terminal. A reply with `masters` etc. needs no per-command renderer.
+pub fn reply(value: &Value) -> String {
+    let variables: Vec<_> = std::env::vars_os().collect();
+    let terminal = std::io::stdout().is_terminal();
+    if !human(terminal, variables.iter().cloned()) {
+        return format!("{value}\n");
+    }
+    let color = enabled(terminal, variables);
+    let mut output = String::new();
+    let failed = value.get("ok") == Some(&Value::Bool(false));
+    let mut body = value.clone();
+    if let Some(fields) = body.as_object_mut() {
+        if fields.get("ok") == Some(&Value::Bool(true)) {
+            fields.remove("ok");
+        }
+        if failed {
+            if let Some(Value::String(error)) = fields.remove("error") {
+                fields.remove("ok");
+                let line = format!("error: {error}");
+                output.push_str(&format!(
+                    "{}\n",
+                    if color { paint("31", &line) } else { line }
+                ));
+            }
+        }
+    }
+    let plain_empty = body.as_object().is_some_and(|fields| fields.is_empty());
+    if !plain_empty {
+        layout(&body, color, 0, &mut output);
+    }
+    if output.is_empty() {
+        output.push_str(&format!(
+            "{}\n",
+            if color {
+                paint("32", "ok")
+            } else {
+                "ok".into()
+            }
+        ));
+    }
+    output
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,5 +374,33 @@ mod tests {
             }
         }
         assert_eq!(plain, source);
+    }
+
+    #[test]
+    fn replies_lay_out_tables_and_objects_generically() {
+        let mut output = String::new();
+        let value = serde_json::json!([
+            {"endpoint": "user@host", "connected": true},
+            {"endpoint": "a", "connected": false}
+        ]);
+        layout(&value, false, 0, &mut output);
+        assert_eq!(
+            output,
+            "ENDPOINT   CONNECTED\nuser@host  yes\na          no\n"
+        );
+        let mut output = String::new();
+        layout(
+            &serde_json::json!({"endpoint": "e", "masters": []}),
+            false,
+            0,
+            &mut output,
+        );
+        assert_eq!(output, "endpoint  e\nmasters   -\n");
+    }
+
+    #[test]
+    fn replies_are_compact_json_off_human_terminals() {
+        // Test processes have no terminal stdout.
+        assert_eq!(reply(&serde_json::json!({"ok": true})), "{\"ok\":true}\n");
     }
 }

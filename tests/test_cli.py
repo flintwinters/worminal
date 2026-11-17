@@ -6,6 +6,7 @@ from runtime import runtime_binary
 
 import os
 import errno
+import json
 import pty
 import re
 import select
@@ -121,6 +122,15 @@ class CommandLineTest(unittest.TestCase):
                     status, output = self.terminal_output(binary, *arguments, variables=variables)
                     self.assertEqual(status, 0)
                     self.assertEqual(output, plain)
+
+    def test_terminal_json_replies_are_laid_out_for_humans_and_compact_for_agents(self):
+        status, human = self.terminal_output('worminald', '--list-masters')
+        self.assertEqual(status, 0)
+        self.assertNotIn('{', human)
+        self.assertRegex(re.sub(r'\x1b\[[0-9;]*m', '', human), r'masters\s+-')
+        status, agent = self.terminal_output('worminald', '--list-masters', variables={'CLAUDECODE': '1'})
+        self.assertEqual(status, 0)
+        self.assertEqual(json.loads(agent)['masters'], [])
 
     def test_terminal_errors_use_stderr_policy_and_data_outputs_stay_plain(self):
         for binary, arguments in [('worminal', ('--new-browser-tab',)),

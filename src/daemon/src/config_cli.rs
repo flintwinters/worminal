@@ -34,7 +34,7 @@ fn sync(arguments: &[OsString]) -> io::Result<i32> {
         .ok_or_else(|| io::Error::other("SSH endpoint must be UTF-8."))
         .and_then(|endpoint| crate::config_sync::run(endpoint, prefer))
         .unwrap_or_else(|error| serde_json::json!({"ok": false, "error": error.to_string()}));
-    println!("{result}");
+    print!("{}", cli_output::reply(&result));
     Ok(i32::from(result["ok"] == false))
 }
 

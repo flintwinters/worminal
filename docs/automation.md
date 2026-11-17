@@ -103,6 +103,9 @@ disables color. Agent markers also disable it, even when set to an empty value: 
 `CLINE_ACTIVE`, `ROO_CODE`, `AGENT`, `AGENT_MODE` and `AI_AGENT`. API keys and SSH authentication-agent
 variables do not identify an AI agent. The shared policy lives in `src/workspace/src/cli_output.rs`.
 JSON, binary sessions, shell integration source and configuration examples always remain plain.
+CLI commands that reply with JSON (`--list-masters`, `config sync`, remote install/upgrade) pass it through
+`cli_output::reply`: a human terminal gets generated tables and key/value lists, while agents, pipes and
+redirection receive the exact compact JSON. New commands need no separate human renderer.
 
 ## Observation, waiting and input safety
 

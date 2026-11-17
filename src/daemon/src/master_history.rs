@@ -12,7 +12,8 @@ use worminal_workspace::{
 };
 
 pub(crate) const HELP: &str = "Usage: worminald --list-masters [--help]
-List this user's currently and previously connected master SSH routes as JSON.
+List this user's currently and previously connected master SSH routes as JSON
+(a table on a human terminal; agents, pipes and redirection receive the JSON).
 
 Reply: {\"ok\":true,\"masters\":[{\"endpoint\":\"user@host\",\"connected\":true}]}
 Entries are sorted by exact SSH endpoint; aliases are not merged. connected is true while
@@ -35,9 +36,11 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
         return Ok(0);
     }
     if !arguments.is_empty() {
-        println!(
+        print!(
             "{}",
-            json!({"ok": false, "error": "Run worminald --list-masters --help for usage."})
+            cli_output::reply(
+                &json!({"ok": false, "error": "Run worminald --list-masters --help for usage."})
+            )
         );
         return Ok(2);
     }
@@ -48,11 +51,14 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
     });
     match result {
         Ok(value) => {
-            println!("{value}");
+            print!("{}", cli_output::reply(&value));
             Ok(0)
         }
         Err(error) => {
-            println!("{}", json!({"ok": false, "error": error.to_string()}));
+            print!(
+                "{}",
+                cli_output::reply(&json!({"ok": false, "error": error.to_string()}))
+            );
             Ok(1)
         }
     }

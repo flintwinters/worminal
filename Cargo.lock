@@ -1119,6 +1119,7 @@ name = "worminal-workspace"
 version = "0.9.19"
 dependencies = [
  "libc",
+ "serde_json",
  "worminal-protocol",
 ]
 

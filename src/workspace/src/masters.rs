@@ -111,7 +111,7 @@ impl Registry {
             let observed = lock(&file, libc::F_OFD_GETLK, libc::F_WRLCK as _)?;
             masters.push(Master {
                 endpoint: endpoint.to_owned(),
-                connected: observed.l_type != libc::F_UNLCK as _,
+                connected: observed.l_type != libc::F_UNLCK as libc::c_short,
             });
         }
         masters.sort_by(|left, right| left.endpoint.cmp(&right.endpoint));
