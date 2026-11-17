@@ -100,6 +100,7 @@ impl Config {
                         Drag a tab to a pane edge: split  Ctrl+Shift+X: gather panes\n\
                         Middle click: autoscroll  Shift+middle click: paste selection\n\n\
                         --detach-master HOST: detach its tabs in this display/workspace; remote shells keep running\n\
+                        --close-master HOST: close its connected tabs in this display/workspace; terminates their programs\n\
                         --surf URL|FILE: open a browser window (--browser is an alias)\n\
                         --new-browser-tab URL|FILE: replace this terminal with a browser\n\
                         Automation and agents: run `worminald --help`, then `worminald api help`\n\

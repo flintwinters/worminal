@@ -1,4 +1,4 @@
-"""Detach real frontend links on private displays without closing daemon-owned tabs."""
+"""Exercise master-scoped frontend commands on private displays and real private daemons."""
 import json
 import os
 import shutil
@@ -156,10 +156,80 @@ class MasterDetachTest(unittest.TestCase):
                     app.wait(timeout=5)
                     stop_workspace(env)
 
+    def test_close_master_ends_only_target_tabs_across_windows(self):
+        with isolated_display() as display, profile(display) as env, \
+                tempfile.TemporaryDirectory(prefix='master-close-', dir=CHECKS) as directory:
+            base = Path(directory)
+            executable = str(copy_runtime(base, browser=True))
+            scopes = {host: env['WORMINAL_SHARED_SOCKET_SCOPE']+'-'+host
+                      for host in ('target-master', 'other-master')}
+            ssh = base/'ssh'
+            ssh.write_text('#!/usr/bin/python3\nimport os,sys\n'
+                           f'os.environ["WORMINAL_SHARED_SOCKET_SCOPE"]={scopes!r}[sys.argv[4]]\n'
+                           f'sys.path.insert(0,{str(ROOT/"tests/fixtures")!r})\n'
+                           'from master_ssh import run\n'
+                           f'run({str(runtime_binary("worminald"))!r})\n')
+            ssh.chmod(0o700)
+            env.update(GDK_BACKEND='x11', SHELL='/bin/sh', PATH=str(base)+os.pathsep+env['PATH'])
+            def cli(*arguments, success=True):
+                result = subprocess.run([executable, *arguments], env=env,
+                                        capture_output=True, timeout=10)
+                self.assertEqual(result.returncode == 0, success, result.stderr)
+            def api(host, *arguments):
+                target = {**env, 'WORMINAL_SHARED_SOCKET_SCOPE': scopes.get(host, env['WORMINAL_SHARED_SOCKET_SCOPE'])}
+                result = subprocess.run([str(runtime_binary('worminald')), 'api', *arguments],
+                                        env=target, capture_output=True, text=True, check=True, timeout=5)
+                return json.loads(result.stdout)
+            def ready_tabs(host):
+                try:
+                    return api(host, 'list')['tabs']
+                except subprocess.CalledProcessError:
+                    return None  # The asynchronous SSH bootstrap has not created its private daemon yet.
+            with (CHECKS/'master-close.log').open('wb') as log:
+                app = subprocess.Popen([executable, '-c', 'CloseFixture', '--master', 'target-master', '-e', '/bin/cat'],
+                                       env=env, stdout=log, stderr=log)
+                try:
+                    from runtime import window
+                    window(env, app)
+                    self.wait(lambda: ready_tabs('target-master'), 'target tab')
+                    api('target-master', 'open', '--', '/bin/cat')
+                    api('target-master', 'open', '--browser', 'about:blank')
+                    before = api('target-master', 'list')['tabs']
+                    shells = [tab['shell_pid'] for tab in before if tab['shell_pid']]
+                    self.assertEqual(len(before), 3)
+                    cli('--master', 'other-master', '-e', '/bin/cat')
+                    other = self.wait(lambda: ready_tabs('other-master'), 'other master')
+                    cli('-c', 'CloseMirror', '-T', 'CloseMirror', '-e', '/bin/cat')
+                    local = self.wait(lambda: ready_tabs(''), 'local tab')
+                    cli('--master', 'target-master', '--attach')
+                    cli('--close-master', 'unknown-master', success=False)
+                    # A wrong endpoint must not close a similarly scoped or selected host.
+                    self.assertEqual(len(api('target-master', 'list')['tabs']), 3)
+                    cli('--close-master', 'target-master')
+                    self.wait(lambda: not api('target-master', 'list')['tabs'], 'target tabs closed')
+                    self.wait(lambda: all(not Path(f'/proc/{pid}').exists() for pid in shells), 'target programs terminated')
+                    self.assertEqual([tab['shell_pid'] for tab in api('other-master', 'list')['tabs']],
+                                     [tab['shell_pid'] for tab in other])
+                    self.assertEqual([tab['shell_pid'] for tab in api('', 'list')['tabs']],
+                                     [tab['shell_pid'] for tab in local])
+                    self.assertIsNone(app.poll(), 'Unrelated master window closed')
+                    cli('--close-master', 'target-master', success=False)
+                    cli('--detach-master', 'other-master')
+                    for tab in local:
+                        api('', 'close', str(tab['id']))
+                    self.assertEqual(app.wait(timeout=5), 0)
+                finally:
+                    from test_window_replacement import stop_fixture
+                    stop_fixture(env)
+                    app.wait(timeout=5)
+                    stop_workspace(env)
+                    for scope in scopes.values():
+                        stop_workspace({**env, 'WORMINAL_SHARED_SOCKET_SCOPE': scope})
+
     def test_invalid_command_never_opens_an_owner(self):
         with isolated_display() as env:
-            for args in [('--detach-master',), ('--detach-master', ''),
-                         ('--detach-master', 'host', '--attach'), ('--detach-master', 'host')]:
-                result = subprocess.run([str(runtime_binary('worminal')), *args], env=env,
-                                        capture_output=True, timeout=5)
-                self.assertNotEqual(result.returncode, 0)
+            for option in ('--detach-master', '--close-master'):
+                for args in [(option,), (option, ''), (option, 'host', '--attach'), (option, 'host')]:
+                    result = subprocess.run([str(runtime_binary('worminal')), *args], env=env,
+                                            capture_output=True, timeout=5)
+                    self.assertNotEqual(result.returncode, 0)

@@ -510,6 +510,12 @@ def check_window_updates(match: str = typer.Option(None, help="Select private wi
     raise typer.Exit(run_display_checks("test_window_replacement.py", match=match))
 
 
+@app.command("check-master-tabs")
+def check_master_tabs():
+    """Check master-scoped close/detach commands, shell lifecycle and unrelated-host preservation."""
+    raise typer.Exit(run_display_checks("test_master_detach.py"))
+
+
 @app.command("check-master-startup")
 def check_master_startup(
     executable: Path = typer.Option(None, help="Executable to check; defaults to project build."),

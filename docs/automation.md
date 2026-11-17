@@ -81,6 +81,13 @@ interrupt work. These commands do not detect whether the intended application st
 `worminald --list-masters` passively lists currently and previously connected master SSH routes as JSON. It is local
 per-user connection history, separate from enrolled devices; run `worminald --list-masters --help` for its contract.
 
+`worminal --close-master user@host` queues normal closure of that master's catalogued tabs through the existing
+GUI connections in this display/workspace. Terminal programs are terminated; browser records are removed.
+Use the exact SSH endpoint. Mirrored tabs close once, and other hosts are unaffected. Success means the closes
+were queued, not that every process has exited. No owner or no connected matching tabs is an error. A transport
+failure may leave partial closure; inspect the remaining tabs before retrying. No SSH connection or workspace is
+created by this command. `worminal --detach-master user@host` instead removes the views and keeps shells running.
+
 ## Observation, waiting and input safety
 
 `api help observe` documents passive inspection and its limits; `api help keys` lists application keys.

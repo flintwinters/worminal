@@ -204,6 +204,7 @@ struct Link {
     retry_delay: Cell<Duration>,
     initial_claim: Cell<bool>,
     service_revision: Cell<u64>,
+    catalog_tabs: RefCell<Vec<u32>>,
     pending_tabs: Cell<u32>,
     requested: Cell<u32>,
     features: Cell<u32>,
@@ -218,6 +219,7 @@ impl Link {
             retry_delay: Cell::new(Duration::from_millis(250)),
             initial_claim: Cell::new(true),
             service_revision: Cell::new(0),
+            catalog_tabs: RefCell::new(Vec::new()),
             pending_tabs: Cell::new(0),
             requested: Cell::new(0),
             features: Cell::new(0),
@@ -672,6 +674,7 @@ impl App {
                 colors: tab.colors.iter().map(|color| text(color)).collect(),
             });
         }
+        *link.catalog_tabs.borrow_mut() = catalog.tabs.iter().map(|tab| tab.id).collect();
         link.retry_delay.set(Duration::from_millis(250));
         let initial_claim = link.initial_claim.replace(false);
         let mut replaced_active = false;
@@ -946,7 +949,7 @@ pub(crate) fn run_with_listener(
     }
     worminal_workspace::browser_target::command(&arguments)?;
     let request = worminal_workspace::broker::Request::capture(arguments)?;
-    if worminal_workspace::broker::detach_master(&request.args)?.is_some() {
+    if worminal_workspace::broker::master_action(&request.args)?.is_some() {
         return match broker::forward(&request)? {
             None => Ok(()),
             Some(_) => Err(io::Error::new(

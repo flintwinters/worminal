@@ -34,6 +34,12 @@ A gated native candidate deterministically exercises edits after the provisional
 shim exercises close/geometry requests while the cookie/profile commit is in progress. Logs remain in the check
 runtime and all private owners are awaited before that runtime is released.
 
+## Master tab commands
+
+`python3 manage.py check-master-tabs` checks native master close/detach commands on private displays. It covers
+multiple windows and hosts, terminal termination, browser records, preserved detached shells and invalid requests.
+Closes use fixture daemons and never target real SSH hosts or desktop windows.
+
 ## Master connection history
 
 `python3 manage.py check-master-history` runs kernel lease/storage checks and private native bootstrap/bridge

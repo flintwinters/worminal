@@ -256,22 +256,60 @@ impl App {
         self.window.present();
         Ok(())
     }
+    fn master_index(&self, master: &std::ffi::OsStr) -> Option<u32> {
+        if self.config.master.as_deref() == Some(master) && !self.primary_detached.get() {
+            Some(0)
+        } else {
+            self.remotes
+                .borrow()
+                .iter()
+                .find(|remote| remote.master == master)
+                .map(|remote| remote.index)
+        }
+    }
+    /// Close each catalogued daemon tab once, even when multiple windows mirror the master.
+    /// Keep links alive until normal catalog updates acknowledge removal; detaching here
+    /// would discard queued closes under SSH backpressure.
+    pub(super) fn close_master(master: &std::ffi::OsStr) -> io::Result<()> {
+        let apps = super::WINDOWS.with(|windows| windows.borrow().clone());
+        let mut targets = std::collections::BTreeMap::new();
+        for app in apps.into_iter().filter(|app| !app.closing.get()) {
+            let Some(index) = app.master_index(master) else {
+                continue;
+            };
+            let link = app.link(index).unwrap();
+            if link.initial_claim.get() || link.connection.borrow().is_none() {
+                continue;
+            }
+            for id in link.catalog_tabs.borrow().iter().copied() {
+                targets
+                    .entry(id)
+                    .or_insert((app.clone(), id | index << LINK_SHIFT));
+            }
+        }
+        if targets.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "No connected tabs for master",
+            ));
+        }
+        for (app, id) in targets.into_values() {
+            app.try_send_link(
+                id >> LINK_SHIFT,
+                id & ((1 << LINK_SHIFT) - 1),
+                CommandKind::Close { receipt: false },
+            )?;
+        }
+        Ok(())
+    }
     /// Detachment imports an empty view catalog, never a daemon Close command.
     pub(super) fn detach_master(master: &std::ffi::OsStr) -> io::Result<()> {
         let apps = super::WINDOWS.with(|windows| windows.borrow().clone());
         let mut found = false;
         for app in apps.into_iter().filter(|app| !app.closing.get()) {
-            let index =
-                if app.config.master.as_deref() == Some(master) && !app.primary_detached.get() {
-                    Some(0)
-                } else {
-                    app.remotes
-                        .borrow()
-                        .iter()
-                        .find(|remote| remote.master == master)
-                        .map(|remote| remote.index)
-                };
-            let Some(index) = index else { continue };
+            let Some(index) = app.master_index(master) else {
+                continue;
+            };
             found = true;
             let link = app.link(index).unwrap();
             // Stop readers, writers and reconnect timers before changing widgets: GTK can reenter.
@@ -353,18 +391,20 @@ impl App {
         self.send_link(tab >> LINK_SHIFT, tab & ((1 << LINK_SHIFT) - 1), kind);
     }
     pub(super) fn send_link(self: &Rc<Self>, index: u32, tab: u32, kind: CommandKind) {
-        let Some(link) = self.link(index) else { return };
-        let result = v2_commands::encode(&Command { tab, kind }).and_then(|packet| {
-            link.connection
-                .borrow_mut()
-                .as_mut()
-                .map(|connection| connection.queue(packet))
-                .transpose()
-        });
-        if let Err(error) = result {
+        if let Err(error) = self.try_send_link(index, tab, kind) {
             self.lost(index, &error.to_string());
-            return;
         }
+    }
+    fn try_send_link(self: &Rc<Self>, index: u32, tab: u32, kind: CommandKind) -> io::Result<()> {
+        let link = self
+            .link(index)
+            .ok_or_else(|| io::Error::from(io::ErrorKind::NotConnected))?;
+        let packet = v2_commands::encode(&Command { tab, kind })?;
+        link.connection
+            .borrow_mut()
+            .as_mut()
+            .ok_or_else(|| io::Error::from(io::ErrorKind::NotConnected))?
+            .queue(packet)?;
         let fd = link
             .connection
             .borrow()
@@ -400,5 +440,6 @@ impl App {
                 ));
             }
         }
+        Ok(())
     }
 }

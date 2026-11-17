@@ -16,18 +16,31 @@ use std::{
 };
 use worminal_protocol::{Buffer, Decoder, Packet, Payload, WIRE_HELLO};
 
-/// A frontend-only command: exact host spelling and no launch options or shell command.
-pub fn detach_master(arguments: &[OsString]) -> io::Result<Option<&std::ffi::OsStr>> {
-    if arguments.get(1).is_none_or(|arg| arg != "--detach-master") {
-        return Ok(None);
-    }
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum MasterAction {
+    Detach,
+    Close,
+}
+
+/// Frontend-only commands: exact host spelling and no launch options or shell command.
+pub fn master_action(
+    arguments: &[OsString],
+) -> io::Result<Option<(MasterAction, &std::ffi::OsStr)>> {
+    let action = match arguments.get(1).and_then(|arg| arg.to_str()) {
+        Some("--detach-master") => MasterAction::Detach,
+        Some("--close-master") => MasterAction::Close,
+        _ => return Ok(None),
+    };
     if arguments.len() != 3 || arguments[2].is_empty() || arguments[2].as_bytes()[0] == b'-' {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "usage: worminal --detach-master user@host",
+            format!(
+                "usage: worminal {} user@host",
+                arguments[1].to_string_lossy()
+            ),
         ));
     }
-    Ok(Some(&arguments[2]))
+    Ok(Some((action, &arguments[2])))
 }
 
 /// Display/workspace identity shared by lightweight launchers and direct frontend entry.

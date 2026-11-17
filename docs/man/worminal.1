@@ -64,6 +64,11 @@ in its PATH. Further hosts can be reached with ordinary SSH inside a tab.
 removes that master's tabs from every window in this display/workspace and disconnects its SSH views.
 Use the exact host spelling passed to --master. Remote tabs and shells keep running; windows left empty close.
 Reconnect with worminal --master user@host --attach. An absent master or GUI owner returns failure.
+.B --close-master user@host
+closes that master's connected tabs in this display/workspace through the normal daemon lifecycle.
+This terminates the tabs' running programs. Use the exact host spelling passed to --master.
+Other masters and local tabs survive. The command queues closure without waiting for process exit;
+an absent owner or no connected matching tabs returns failure. It does not open SSH or retry failed closes.
 .SH AUTOMATION
 Run
 .B worminald --help
