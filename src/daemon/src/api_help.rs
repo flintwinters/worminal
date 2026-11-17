@@ -3,11 +3,16 @@
 //! tests/test_agent_api.py against real replies.
 use worminal_protocol::*;
 
+#[path = "api_help_search.rs"]
+mod search;
+pub use search::search;
+
 /// `worminald --help`: the entry point that leads an agent to every other reference.
 pub const OVERVIEW: &str = "worminald: persistent terminal workspace service and headless agent interface
 
 Discover by topic (each prints a complete reference and needs no running daemon):
   worminald api help                  list, self, open, close, read, wait, type, key, devices, enroll, forget
+  worminald api help search QUERY... fuzzy search of commands and topic contents
   worminald api help observe          history, batch reads, wait, guarded input and shell integration
   worminald api help schema           JSON reply shapes, limits, exit codes
   worminald api help session          binary streaming protocol (worminald api --session)
@@ -50,7 +55,7 @@ pub fn index() -> String {
         .iter()
         .map(|(name, summary)| format!("  worminald api help {name:<8} {summary}"))
         .collect();
-    format!("Topics:\n{}\n", lines.join("\n"))
+    format!("Search: worminald api help search QUERY... (case-insensitive, typo-tolerant; up to 20 matching lines)\nTopics:\n{}\n", lines.join("\n"))
 }
 
 pub fn topic(name: &str) -> Option<String> {

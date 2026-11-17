@@ -2,6 +2,10 @@
 
 Run `worminald --help`, then `worminald api help` (plus `api help schema` for reply JSON and `api help session` for the
 binary stream) to discover the native command interface from the executable alone.
+`worminald api help search QUERY...` searches command help and all topic contents without a daemon.
+Search is case-insensitive, tolerates word typos, and requires every query term on a matching line.
+It prints up to 20 ranked lines with topic commands; no matches is a successful empty search.
+Queries accept 1..256 UTF-8 bytes and at most 16 whitespace-separated terms.
 It works on headless hosts and uses [Worp](worp.md), independently of the selected delivery transport.
 It never starts a daemon or restores shells as a side effect of inspection.
 [Install a new remote node](remote-install.md) with the separate native `install-on-remote` bootstrap command.
