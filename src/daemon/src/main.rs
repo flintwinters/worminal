@@ -1,8 +1,13 @@
 fn main() {
     let arguments: Vec<_> = std::env::args_os().collect();
-    let serving = arguments.get(1).is_some_and(|arg| {
-        arg == "--serve" || arg == "--upgrade-receiver" || arg == "--handoff-receiver"
-    });
+    use worminal_workspace::cli_schema::Daemon;
+    let serving = matches!(
+        arguments
+            .get(1)
+            .and_then(|arg| arg.to_str())
+            .and_then(Daemon::parse),
+        Some(Daemon::Serve | Daemon::UpgradeReceiver | Daemon::HandoffReceiver)
+    );
     let status = match worminal_daemon::run(&arguments) {
         Ok(status) => status,
         Err(error) => {

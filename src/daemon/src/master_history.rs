@@ -7,10 +7,11 @@ use worminal_protocol::{
 };
 use worminal_workspace::{
     cli_output,
+    cli_schema::Daemon,
     masters::{Connection, Registry},
 };
 
-const HELP: &str = "Usage: worminald --list-masters [--help]
+pub(crate) const HELP: &str = "Usage: worminald --list-masters [--help]
 List this user's currently and previously connected master SSH routes as JSON.
 
 Reply: {\"ok\":true,\"masters\":[{\"endpoint\":\"user@host\",\"connected\":true}]}
@@ -29,7 +30,7 @@ fn registry() -> Registry {
 }
 
 pub fn run(arguments: &[OsString]) -> io::Result<i32> {
-    if arguments.len() == 1 && matches!(arguments[0].to_str(), Some("--help" | "-h")) {
+    if arguments.len() == 1 && Daemon::Help.matches(&arguments[0]) {
         print!("{}", cli_output::text(HELP));
         return Ok(0);
     }

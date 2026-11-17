@@ -40,7 +40,15 @@ fn connect(arguments: &[OsString]) -> io::Result<i32> {
     let [endpoint, bridge] = arguments else {
         return Err(io::Error::other("Expected master and bridge mode."));
     };
-    if !matches!(bridge.to_str(), Some("--bridge" | "--bridge-existing")) {
+    if !matches!(
+        bridge
+            .to_str()
+            .and_then(worminal_workspace::cli_schema::Daemon::parse),
+        Some(
+            worminal_workspace::cli_schema::Daemon::Bridge
+                | worminal_workspace::cli_schema::Daemon::BridgeExisting
+        )
+    ) {
         return Err(io::Error::other("Invalid master bridge mode."));
     }
     let endpoint = endpoint

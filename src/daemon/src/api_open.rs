@@ -1,5 +1,6 @@
 use std::{collections::HashSet, ffi::OsString, io};
 use worminal_protocol::worp::{tabs::TerminalOptions, Request};
+use worminal_workspace::cli_schema::ApiOption as Flag;
 
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
@@ -12,7 +13,10 @@ fn text(value: &OsString) -> io::Result<String> {
 }
 
 pub(super) fn parse(arguments: &[OsString]) -> io::Result<Request> {
-    if arguments.first().is_some_and(|arg| arg == "--browser") {
+    if arguments
+        .first()
+        .is_some_and(|arg| Flag::Browser.matches(arg))
+    {
         if arguments.len() != 2 {
             return Err(invalid("Use open --browser URL with no terminal options."));
         }
@@ -27,7 +31,7 @@ pub(super) fn parse(arguments: &[OsString]) -> io::Result<Request> {
     let mut index = 0;
     while index < arguments.len() {
         let flag = text(&arguments[index])?;
-        if flag == "--" {
+        if Flag::End.matches(&flag) {
             if index + 1 == arguments.len() {
                 return Err(invalid("Supply a program after --."));
             }
@@ -37,8 +41,11 @@ pub(super) fn parse(arguments: &[OsString]) -> io::Result<Request> {
                 .collect::<io::Result<Vec<_>>>()?;
             break;
         }
-        if !matches!(flag.as_str(), "--cwd" | "--title" | "--columns" | "--rows")
-            || !seen.insert(flag.clone())
+        let option = Flag::parse(&flag);
+        if !matches!(
+            option,
+            Some(Flag::Cwd | Flag::Title | Flag::Columns | Flag::Rows)
+        ) || !seen.insert(option)
             || index + 1 == arguments.len()
         {
             return Err(invalid(
@@ -46,15 +53,17 @@ pub(super) fn parse(arguments: &[OsString]) -> io::Result<Request> {
             ));
         }
         let value = text(&arguments[index + 1])?;
-        match flag.as_str() {
-            "--cwd" => options.directory = value,
-            "--title" => options.title = value,
-            "--columns" => {
+        match option {
+            Some(Flag::Cwd) => options.directory = value,
+            Some(Flag::Title) => options.title = value,
+            Some(Flag::Columns) => {
                 options.columns = value
                     .parse()
                     .map_err(|_| invalid("Invalid column count."))?
             }
-            "--rows" => options.rows = value.parse().map_err(|_| invalid("Invalid row count."))?,
+            Some(Flag::Rows) => {
+                options.rows = value.parse().map_err(|_| invalid("Invalid row count."))?
+            }
             _ => unreachable!(),
         }
         index += 2;

@@ -433,6 +433,14 @@ class AgentApiTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn('worminald api help observe', result.stdout)
             self.assertIn('bracketed paste', result.stdout)
+        for terms, command in [(('--close-master',), '--close-master'),
+                               (('close', 'master'), '--close-master'),
+                               (('close', 'connecttion'), '--close-master'),
+                               (('detach', 'master'), '--detach-master')]:
+            result = search(*terms)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('worminal --help\n', result.stdout)
+            self.assertIn(command + ' HOST', result.stdout)
         result = search('zzzzzzzzzz')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('No matching API help', result.stdout)

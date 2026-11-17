@@ -5,6 +5,7 @@ use std::{
     io::{self, Read},
 };
 use worminal_protocol::worp::{Request, MAX_INPUT_BYTES};
+use worminal_workspace::cli_schema::{Api, ApiOption as Flag};
 fn tab(value: &str) -> io::Result<u32> {
     value
         .parse()
@@ -20,20 +21,20 @@ pub(super) fn parse(arguments: &[OsString]) -> io::Result<Option<Request>> {
                 .ok_or_else(|| invalid("Arguments must be UTF-8."))
         })
         .collect::<io::Result<_>>()?;
-    let Some(&operation) = args.first() else {
+    let Some(operation) = args.first().and_then(|word| Api::parse(word)) else {
         return Ok(None);
     };
-    if matches!(operation, "read" | "wait") {
+    if matches!(operation, Api::Read | Api::Wait) {
         return observe(&args);
     }
-    if !matches!(operation, "key" | "type") || args.len() < 3 {
+    if !matches!(operation, Api::Key | Api::Type) || args.len() < 3 {
         return Ok(None);
     }
     let id = tab(args[1])?;
     let mut rest = args[2..].to_vec();
     let mut guard = String::new();
     // Options precede payload; `--` disambiguates literal text that starts with an option.
-    if rest.first() == Some(&"--guard") {
+    if rest.first().is_some_and(|word| Flag::Guard.matches(word)) {
         guard = rest
             .get(1)
             .filter(|s| !s.is_empty())
@@ -42,7 +43,7 @@ pub(super) fn parse(arguments: &[OsString]) -> io::Result<Option<Request>> {
         rest.drain(..2);
     }
     let mut following = Vec::new();
-    if operation == "type" && rest.first() == Some(&"--then") {
+    if operation == Api::Type && rest.first().is_some_and(|word| Flag::Then.matches(word)) {
         following.push(
             rest.get(1)
                 .ok_or_else(|| invalid("--then requires KEY."))?
@@ -51,11 +52,11 @@ pub(super) fn parse(arguments: &[OsString]) -> io::Result<Option<Request>> {
         worminal_engine::keys::named(&following[0], 0).map_err(invalid)?;
         rest.drain(..2);
     }
-    let literal = rest.first() == Some(&"--");
+    let literal = rest.first().is_some_and(|word| Flag::End.matches(word));
     if literal {
         rest.remove(0);
     }
-    if operation == "key" {
+    if operation == Api::Key {
         if rest.is_empty() {
             return Err(invalid("key requires at least one KEY."));
         }
@@ -68,7 +69,7 @@ pub(super) fn parse(arguments: &[OsString]) -> io::Result<Option<Request>> {
             guard,
         }));
     }
-    if !literal && rest == ["--stdin"] {
+    if !literal && rest.len() == 1 && Flag::Stdin.matches(rest[0]) {
         let text = stdin_text()?;
         return Ok(Some(if following.is_empty() {
             Request::Paste {
@@ -115,9 +116,9 @@ pub(super) fn parse(arguments: &[OsString]) -> io::Result<Option<Request>> {
 }
 
 fn observe(args: &[&str]) -> io::Result<Option<Request>> {
-    if args[0] == "read" {
-        if args.len() == 4 && matches!(args[2], "--since" | "--command") {
-            let (since, command_id) = if args[2] == "--since" {
+    if Api::Read.matches(args[0]) {
+        if args.len() == 4 && matches!(Flag::parse(args[2]), Some(Flag::Since | Flag::Command)) {
+            let (since, command_id) = if Flag::Since.matches(args[2]) {
                 (args[3].into(), 0)
             } else {
                 (
@@ -142,7 +143,7 @@ fn observe(args: &[&str]) -> io::Result<Option<Request>> {
         let mut tail = 0;
         let mut i = 1;
         while i < args.len() {
-            if args[i] == "--tail" && tail == 0 {
+            if Flag::Tail.matches(args[i]) && tail == 0 {
                 i += 1;
                 tail = args
                     .get(i)
@@ -156,11 +157,11 @@ fn observe(args: &[&str]) -> io::Result<Option<Request>> {
         }
         return Ok(Some(Request::ReadMany { tabs, tail }));
     }
-    if args[0] == "wait" {
+    if Api::Wait.matches(args[0]) {
         if args.len() == 8
-            && args[2] == "--command"
-            && args[4] == "--workspace"
-            && args[6] == "--timeout"
+            && Flag::Command.matches(args[2])
+            && Flag::Workspace.matches(args[4])
+            && Flag::Timeout.matches(args[6])
         {
             let command_id = args[3]
                 .parse()
@@ -179,7 +180,7 @@ fn observe(args: &[&str]) -> io::Result<Option<Request>> {
                 timeout_ms: seconds * 1000,
             }));
         }
-        if args.len() != 6 || args[2] != "--after" || args[4] != "--timeout" {
+        if args.len() != 6 || !Flag::After.matches(args[2]) || !Flag::Timeout.matches(args[4]) {
             return Err(invalid(
                 "Usage: wait TAB --after REVISION --timeout SECONDS (0..60).",
             ));

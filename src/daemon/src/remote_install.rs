@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 use worminal_protocol::worp::devices::validate_endpoint;
-use worminal_workspace::{cli_output, ssh};
+use worminal_workspace::{cli_output, cli_schema::Api, ssh};
 
 const LAYOUT: &str = include_str!("../../../assets/headless-install.json");
 const BOOTSTRAP: &str = include_str!("../../../tools/remote_install.py");
@@ -21,13 +21,13 @@ const FRONTEND_HEADER: &str = include_str!("../../gtk/rust_frontend_module.h");
 const BROWSER_HEADER: &str = include_str!("../../gtk/rust_browser_module.h");
 const LIMIT: u64 = 64 * 1024 * 1024;
 const HEADER_LIMIT: usize = 16384;
-const UPGRADE_HELP: &str = "Usage: worminald upgrade-remote SSH_ENDPOINT\n\
+pub(crate) const UPGRADE_HELP: &str = "Usage: worminald upgrade-remote SSH_ENDPOINT\n\
 Make this node and an installed peer run the same worminald, whichever is older.\n\
 Compares Cargo versions; a newer local daemon is pushed to the peer, a newer peer daemon is pulled here.\n\
 Both sides must be Linux on the same CPU, with Python 3 and non-interactive sudo, installed in /usr/local.\n\
 Files are replaced atomically; a running daemon hands its shells to the new file without restarting them.\n\
 Active v1 workspaces are never touched. Views update immediately after SSH authentication, before opening the bridge.\n";
-const HELP: &str = "Usage: worminald install-on-remote SSH_ENDPOINT\n\
+pub(crate) const HELP: &str = "Usage: worminald install-on-remote SSH_ENDPOINT\n\
 Install this daemon and its manual on a new compatible Linux node over SSH.\n\
 A target with GTK/WebKit also gets the worminal command, modules, desktop entry and icon.\n\
 Requires Python 3 and non-interactive sudo on the target. Installs into /usr/local.\n\
@@ -388,7 +388,7 @@ fn pull(
 }
 
 pub fn run(arguments: &[OsString], upgrading: bool) -> io::Result<i32> {
-    if arguments.len() == 1 && matches!(arguments[0].to_str(), Some("--help" | "-h" | "help")) {
+    if arguments.len() == 1 && Api::Help.matches(&arguments[0]) {
         print!(
             "{}",
             cli_output::text(if upgrading { UPGRADE_HELP } else { HELP })

@@ -1,25 +1,19 @@
 //! Search the shipped reference itself so help and its search index evolve together.
-use super::{topic, TOPICS};
 
 pub fn search(query: &str) -> Option<String> {
     let terms: Vec<_> = query.split_whitespace().map(str::to_lowercase).collect();
     if query.len() > 256 || terms.is_empty() || terms.len() > 16 {
         return None;
     }
-    let mut documents = vec![("", crate::api::HELP.to_owned())];
-    documents.extend(TOPICS.iter().map(|(name, summary)| {
-        (
-            *name,
-            format!("{name}: {summary}\n{}", topic(name).unwrap().text),
-        )
-    }));
+    let documents = crate::cli::help_documents();
     let mut matches = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
     for (name, text) in &documents {
         for (line_number, line) in text.lines().enumerate() {
             let lower = line.to_lowercase();
             let score: Option<usize> = terms.iter().map(|term| term_score(term, &lower)).sum();
-            if let Some(score) = score {
-                matches.push((score, *name, line_number, line.trim()));
+            if let Some(score) = score.filter(|_| seen.insert((name.as_str(), line.trim()))) {
+                matches.push((score, name.as_str(), line_number, line.trim()));
             }
         }
     }
@@ -31,14 +25,7 @@ pub fn search(query: &str) -> Option<String> {
         matches
             .iter()
             .take(20)
-            .map(|(_, name, _, line)| {
-                let suffix = if name.is_empty() {
-                    String::new()
-                } else {
-                    format!(" {name}")
-                };
-                format!("worminald api help{suffix}\n  {line}\n")
-            })
+            .map(|(_, command, _, line)| format!("{command}\n  {line}\n"))
             .collect(),
     )
 }
@@ -90,6 +77,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn every_parser_registry_entry_is_in_the_search_corpus() {
+        let documents = crate::cli::help_documents();
+        for group in worminal_workspace::cli_schema::GROUPS {
+            let generated = group.reference();
+            assert!(documents
+                .iter()
+                .any(|(help, text)| help == group.help && text == &generated));
+            for entry in group.entries {
+                for name in entry.names {
+                    assert!(!search(name).unwrap().starts_with("No matching"), "{name}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn searches_authoritative_commands_and_topics() {
         let exact = search("BRACKETED paste").unwrap();
         assert!(exact.contains("worminald api help observe"));
@@ -103,6 +106,38 @@ mod tests {
         assert!(search("bash")
             .unwrap()
             .contains("worminald api help shell-bash"));
+    }
+
+    #[test]
+    fn finds_native_master_commands_and_their_actual_help_entrypoints() {
+        for (query, command, fragment) in [
+            ("--close-master", "worminal --help", "--close-master HOST"),
+            ("close master", "worminal --help", "--close-master HOST"),
+            (
+                "close connecttion",
+                "worminal --help",
+                "--close-master HOST",
+            ),
+            ("detach master", "worminal --help", "--detach-master HOST"),
+            (
+                "--list-masters",
+                "worminald --list-masters --help",
+                "--list-masters",
+            ),
+            ("config sync", "worminald config --help", "config sync"),
+            (
+                "upgrade-remote",
+                "worminald upgrade-remote --help",
+                "upgrade-remote",
+            ),
+        ] {
+            let result = search(query).unwrap();
+            assert!(
+                result.lines().any(|line| line == command),
+                "{query}: {result}"
+            );
+            assert!(result.contains(fragment), "{query}: {result}");
+        }
     }
 
     #[test]

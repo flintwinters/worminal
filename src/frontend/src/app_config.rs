@@ -7,7 +7,7 @@ use std::{
     rc::Rc,
 };
 use worminal_protocol::*;
-use worminal_workspace::cli_output;
+use worminal_workspace::{cli_help, cli_output, cli_schema::Launcher as Flag};
 #[derive(Clone)]
 pub(super) struct Config {
     pub(super) candidate: bool,
@@ -88,48 +88,40 @@ impl Config {
         };
         let mut args = request.args.iter().skip(1).cloned();
         while let Some(arg) = args.next() {
-            match arg.to_str() {
-                Some("--help" | "-h") => {
-                    println!("{}", cli_output::text(format!("{product} {version}\n\n\
-                        usage: {product} [--master HOST] [--attach] [-aiv] [-f font] [-g COLSxROWS] \
-                        [-c class] [-n name] [-T title] [-o file] [-l line] [-e command ...]\n\n\
-                        Ctrl+Shift+T: tab  Ctrl+Shift+N: window  \
-                        Ctrl+Shift+W: close tab\n\
-                        Ctrl+Shift+C/V: clipboard  Ctrl+Shift+A: select all history\n\
-                        Ctrl+Tab / Ctrl+Shift+Tab or Ctrl+scroll: cycle tabs  Alt+1..9: select tab\n\
-                        Ctrl+= / Ctrl+-: zoom in/out  Ctrl+Shift+Home: reset zoom\n\
-                        Drag a tab to a pane edge: split  Ctrl+Shift+X: gather panes\n\
-                        Middle click: autoscroll  Shift+middle click: paste selection\n\n\
-                        --detach-master HOST: detach its tabs in this display/workspace; remote shells keep running\n\
-                        --close-master HOST: close its connected tabs in this display/workspace; terminates their programs\n\
-                        --surf URL|FILE: open a browser window (--browser is an alias)\n\
-                        --new-browser-tab URL|FILE: replace this terminal with a browser\n\
-                        Automation and agents: run `worminald --help`, then `worminald api help`\n\
-                        -h | --help: show help\n-v | --version: show version\n\n{}", cli_output::HELP)));
+            match arg.to_str().and_then(Flag::parse) {
+                Some(Flag::Help) => {
+                    println!("{}", cli_output::text(cli_help::launcher(product, version)));
                     return Ok(None);
                 }
-                Some("--version" | "-v") => {
+                Some(Flag::Version) => {
                     println!("{}", cli_output::text(format!("{product} {version}")));
                     return Ok(None);
                 }
-                Some("--attach") => config.attach = true,
-                Some("-a") => config.alternate = false,
-                Some("-i") => config.fixed = true,
-                Some("-e" | "--") => {
+                Some(Flag::Attach) => config.attach = true,
+                Some(Flag::Alternate) => config.alternate = false,
+                Some(Flag::Fixed) => config.fixed = true,
+                Some(Flag::Execute) => {
                     config.command.extend(args);
                     break;
                 }
                 Some(
-                    "--browser" | "--surf" | "--master" | "-c" | "-n" | "-T" | "-t" | "-f" | "-g"
-                    | "-o" | "-l",
+                    Flag::Browser
+                    | Flag::Master
+                    | Flag::Class
+                    | Flag::Name
+                    | Flag::Title
+                    | Flag::Font
+                    | Flag::Geometry
+                    | Flag::Output
+                    | Flag::Line,
                 ) => {
                     let value = args
                         .next()
                         .ok_or_else(|| argument("option requires a value"))?;
-                    match arg.to_str().unwrap() {
-                        "-c" => config.class = Some(value.to_string_lossy().into_owned()),
-                        "-n" => config.name = Some(value.to_string_lossy().into_owned()),
-                        "--browser" | "--surf" => {
+                    match Flag::parse(arg.to_str().unwrap()).unwrap() {
+                        Flag::Class => config.class = Some(value.to_string_lossy().into_owned()),
+                        Flag::Name => config.name = Some(value.to_string_lossy().into_owned()),
+                        Flag::Browser => {
                             let url = worminal_workspace::browser_target::resolve_in(
                                 Some(&value),
                                 &request.directory,
@@ -137,14 +129,14 @@ impl Config {
                             config.browser_url =
                                 Some(String::from_utf8(url).map_err(io::Error::other)?);
                         }
-                        "--master" => {
+                        Flag::Master => {
                             config.master = Some(value);
                             config.cwd = PathBuf::new();
                         }
-                        "-T" | "-t" => config.title = value.to_string_lossy().into_owned(),
-                        "-f" => config.font = Some(value.to_string_lossy().into_owned()),
-                        "-o" => config.output = value,
-                        "-l" => config.line = value,
+                        Flag::Title => config.title = value.to_string_lossy().into_owned(),
+                        Flag::Font => config.font = Some(value.to_string_lossy().into_owned()),
+                        Flag::Output => config.output = value,
+                        Flag::Line => config.line = value,
                         _ => {
                             let text = value.to_string_lossy();
                             let (cols, rows) = text
@@ -163,8 +155,11 @@ impl Config {
                         }
                     }
                 }
-                Some(value) if value.starts_with('-') => {
-                    return Err(argument(format!("unsupported option {value}; see --help")))
+                _ if arg.to_str().is_some_and(|value| value.starts_with('-')) => {
+                    return Err(argument(format!(
+                        "unsupported option {}; see --help",
+                        arg.to_string_lossy()
+                    )))
                 }
                 _ => {
                     config.command.push(arg);
@@ -225,28 +220,32 @@ impl Config {
         use std::os::unix::ffi::OsStringExt;
         let mut args: Vec<OsString> = vec![
             "worminal".into(),
-            "--attach".into(),
-            "-T".into(),
+            Flag::Attach.name().into(),
+            Flag::Title.name().into(),
             self.title.clone().into(),
-            "-g".into(),
+            Flag::Geometry.name().into(),
             format!("{}x{}", self.columns, self.rows).into(),
         ];
         if let Some(master) = &self.master {
-            args.extend(["--master".into(), master.clone()]);
+            args.extend([Flag::Master.name().into(), master.clone()]);
         }
-        for (flag, value) in [("-f", &self.font), ("-c", &self.class), ("-n", &self.name)] {
+        for (flag, value) in [
+            (Flag::Font.name(), &self.font),
+            (Flag::Class.name(), &self.class),
+            (Flag::Name.name(), &self.name),
+        ] {
             if let Some(value) = value {
                 args.extend([flag.into(), value.into()]);
             }
         }
         if !self.alternate {
-            args.push("-a".into());
+            args.push(Flag::Alternate.name().into());
         }
         if self.fixed {
-            args.push("-i".into());
+            args.push(Flag::Fixed.name().into());
         }
         if self.output == "-" {
-            args.extend(["-o".into(), "-".into()]);
+            args.extend([Flag::Output.name().into(), "-".into()]);
         }
         let environment = self
             .environment

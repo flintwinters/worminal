@@ -1,5 +1,5 @@
 //! Shared launch forwarding envelope. The owner receives caller state without mutating its own process environment.
-use crate::rights;
+use crate::{cli_schema::Launcher, rights};
 use std::{
     ffi::OsString,
     fs::File,
@@ -26,9 +26,13 @@ pub enum MasterAction {
 pub fn master_action(
     arguments: &[OsString],
 ) -> io::Result<Option<(MasterAction, &std::ffi::OsStr)>> {
-    let action = match arguments.get(1).and_then(|arg| arg.to_str()) {
-        Some("--detach-master") => MasterAction::Detach,
-        Some("--close-master") => MasterAction::Close,
+    let action = match arguments
+        .get(1)
+        .and_then(|arg| arg.to_str())
+        .and_then(Launcher::parse)
+    {
+        Some(Launcher::DetachMaster) => MasterAction::Detach,
+        Some(Launcher::CloseMaster) => MasterAction::Close,
         _ => return Ok(None),
     };
     if arguments.len() != 3 || arguments[2].is_empty() || arguments[2].as_bytes()[0] == b'-' {

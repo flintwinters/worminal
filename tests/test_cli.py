@@ -35,6 +35,30 @@ def human_environment(variables=None):
 
 
 class CommandLineTest(unittest.TestCase):
+    def test_native_help_automatically_exposes_searchable_commands_and_options(self):
+        env = human_environment()
+        daemon = str(runtime_binary('worminald'))
+        references = [subprocess.check_output([str(runtime_binary(binary)), '--help'], env=env, text=True)
+                      for binary in ('worminal', 'worminald')]
+        # Discover commands from generated help, not a test-owned command/option list.
+        commands = set(re.findall(r'^  worminald (\S+)', references[1], re.MULTILINE))
+        for command in sorted(commands):
+            result = subprocess.run([daemon, command, '--help'], env=env,
+                                    capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 0, (command, result.stderr))
+            references.append(result.stdout)
+        options = set(re.findall(r'(?<![\w-])--[a-z][a-z-]*|(?<![\w-])-[a-zA-Z](?!\w)',
+                                 '\n'.join(references)))
+        self.assertTrue(commands)
+        self.assertTrue(options)
+        for token in sorted(commands | options):
+            with self.subTest(token=token):
+                result = subprocess.run([daemon, 'api', 'help', 'search', token], env=env,
+                                        capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(token, result.stdout)
+                self.assertNotIn('No matching API help', result.stdout)
+
     def terminal_output(self, binary, *arguments, variables=None, stderr=False):
         env = human_environment(variables)
         master, slave = pty.openpty()

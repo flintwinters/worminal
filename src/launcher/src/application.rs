@@ -7,7 +7,7 @@ use std::{
     os::{linux::net::SocketAddrExt, unix::net::SocketAddr},
     process::ExitCode,
 };
-use worminal_workspace::broker::Forward;
+use worminal_workspace::{broker::Forward, cli_schema::Launcher};
 
 fn forward(args: &[OsString], candidate: bool) -> io::Result<Forward> {
     let key = worminal_workspace::broker::display_key(candidate);
@@ -32,11 +32,12 @@ fn run(candidate: bool) -> io::Result<()> {
     let args: Vec<_> = std::env::args_os().collect();
     worminal_workspace::browser_target::command(&args)?;
     let master_action = worminal_workspace::broker::master_action(&args)?.is_some();
-    let local = args.len() == 2
-        && ["-h", "--help", "-v", "--version"]
-            .iter()
-            .any(|flag| args[1] == *flag);
-    let replacing = args.len() == 3 && args[1] == "--replace-owner";
+    let option = args
+        .get(1)
+        .and_then(|value| value.to_str())
+        .and_then(Launcher::parse);
+    let local = args.len() == 2 && matches!(option, Some(Launcher::Help | Launcher::Version));
+    let replacing = args.len() == 3 && option == Some(Launcher::ReplaceOwner);
     let listener = if local || replacing || worminal_workspace::ssh::is_askpass(&args) {
         None
     } else {
