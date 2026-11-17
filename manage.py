@@ -484,13 +484,9 @@ def check_bridge():
             raise typer.Exit(code)
 
 
-@app.command("check-master-startup")
-def check_master_startup(
-    executable: Path = typer.Option(None, help="Executable to check; defaults to project build."),
-    master: str = typer.Option(None, help="Use real SSH with a private remote workspace."),
-):
-    """Check native --master startup and input on private Xvfb, using an isolated workspace."""
-    native_build.build_targets()
+def run_display_checks(pattern, *, executable=None, master=None, match=None):
+    # copy_runtime uses this isolated launcher; never exercise a stale candidate binary.
+    native_build.build_targets("worminal-rust")
     from tools.update_storage import verification_environment
     from tools.test_runner import retire_worker
     with verification_environment(ROOT) as env:
@@ -498,12 +494,29 @@ def check_master_startup(
             env["WORMINAL_TEST_EXECUTABLE"] = str(executable.resolve())
         if master:
             env["WORMINAL_TEST_REAL_MASTER"] = master
-        process = subprocess.Popen([sys.executable, "-m", "unittest", "discover", "-s", "tests",
-                                    "-p", "test_master_startup.py", "-q"], env=env)
+        arguments = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", pattern, "-q"]
+        if match:
+            arguments.extend(["-k", match])
+        process = subprocess.Popen(arguments, env=env)
         try:
-            raise typer.Exit(process.wait())
+            return process.wait()
         finally:
             retire_worker(process, Path(env["WORMINAL_TEST_CHECKS_DIR"]))
+
+
+@app.command("check-window-updates")
+def check_window_updates(match: str = typer.Option(None, help="Select private window replacement regressions.")):
+    """Check atomic GUI handoff, concurrent window edits, browser rollback and live shell preservation."""
+    raise typer.Exit(run_display_checks("test_window_replacement.py", match=match))
+
+
+@app.command("check-master-startup")
+def check_master_startup(
+    executable: Path = typer.Option(None, help="Executable to check; defaults to project build."),
+    master: str = typer.Option(None, help="Use real SSH with a private remote workspace."),
+):
+    """Check native --master startup and input on private Xvfb, using an isolated workspace."""
+    raise typer.Exit(run_display_checks("test_master_startup.py", executable=executable, master=master))
 
 
 @app.command("check-network")

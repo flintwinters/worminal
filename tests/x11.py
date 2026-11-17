@@ -33,6 +33,33 @@ def close_window(env, title, timeout=5):
         connection.close()
 
 
+def normal_windows(env, wm_class):
+    """Return application toplevels, excluding WebKit/GTK tooltips and override-redirect popups."""
+    from Xlib import X, display, error
+    found = subprocess.run(['xdotool', 'search', '--onlyvisible', '--class', wm_class],
+                           env=env, capture_output=True, text=True)
+    if found.returncode:
+        return []
+    connection = display.Display(env['DISPLAY'])
+    try:
+        window_type = connection.intern_atom('_NET_WM_WINDOW_TYPE')
+        normal = connection.intern_atom('_NET_WM_WINDOW_TYPE_NORMAL')
+        windows = []
+        for identity in found.stdout.splitlines():
+            try:
+                window = connection.create_resource_object('window', int(identity))
+                if window.get_attributes().override_redirect:
+                    continue
+                types = window.get_full_property(window_type, X.AnyPropertyType)
+                if types is None or normal in types.value:
+                    windows.append(identity)
+            except error.BadWindow:
+                continue  # A committed handoff can retire an enumerated XID before inspection.
+        return windows
+    finally:
+        connection.close()
+
+
 @contextmanager
 def isolated_display():
     for tool in ("Xvfb", "xdotool"):

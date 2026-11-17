@@ -159,6 +159,46 @@ impl App {
             },
         ));
     }
+    pub(super) fn update_barriers(self: &Rc<Self>) -> Vec<super::upgrade::UpdateBarrier> {
+        let indexes = std::iter::once(0)
+            .chain(self.remotes.borrow().iter().map(|remote| remote.index))
+            .collect::<Vec<_>>();
+        let mut barriers = Vec::new();
+        for index in indexes {
+            let Some(link) = self
+                .link(index)
+                .filter(|link| link.connection.borrow().is_some())
+            else {
+                continue;
+            };
+            barriers.push((link.clone(), link.service_revision.get()));
+            // The explicit catalog precedes a unique service-info reply on this stream.
+            // That reply fences all earlier accepted input even when SSH is backpressured;
+            // an unsolicited catalog alone is not a causal acknowledgement.
+            self.send_link(index, 0, CommandKind::Subscribe);
+            self.send_link(index, 0, CommandKind::ServiceInfo);
+        }
+        barriers
+    }
+    pub(super) fn pause_update_reads(&self) {
+        for link in self.links() {
+            if let Some(reader) = link.reader.borrow_mut().take() {
+                reader.remove();
+            }
+        }
+    }
+    pub(super) fn resume_update_reads(self: &Rc<Self>) {
+        for index in
+            std::iter::once(0).chain(self.remotes.borrow().iter().map(|remote| remote.index))
+        {
+            let Some(link) = self.link(index) else {
+                continue;
+            };
+            if link.reader.borrow().is_none() {
+                self.watch(index, &link);
+            }
+        }
+    }
     pub(super) fn clear_connection(&self) {
         self.primary.clear();
         for remote in self.remotes.borrow().iter() {

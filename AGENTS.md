@@ -31,6 +31,7 @@ Existing v1 processes must never be stopped or migrated implicitly.
 
 The lightweight GLib launcher forwards before loading graphics. Frontend/browser modules have distinct versioned
 C ABIs; Rust containers never cross them. Browser generations retain their callbacks and share profile ownership.
+GUI updates commit a fresh frozen snapshot after provisional preparation; ordinary window edits never invalidate it.
 Candidate owners/profiles remain isolated from the stable installation. Preserve established browser profile and
 broker identities, including names containing `preview`. Release Rust borrows before reentrant GTK/WebKit calls.
 

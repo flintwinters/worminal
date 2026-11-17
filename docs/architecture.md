@@ -101,7 +101,8 @@ versioned C module ABIs with opaque handles and explicit callbacks; no Rust cont
 view pins its creating generation; generations share a persistent profile manager. Keep code resident for async
 callbacks and release unused contexts. Never let concurrent owners write the same browser profile. Candidate
 owners/profiles are isolated from the stable installation. Browser moves preserve live DOM within the local owner;
-remote workspaces share saved URLs only. Updated owners stage automatic window replacement; see
+remote workspaces share saved URLs only. Updated owners warm a provisional GUI, refresh a frozen descriptor-backed snapshot, and acknowledge commit
+before the donor retires; see
 `docs/window-updates.md`. Older owners need one manual restart.
 
 ## Rendering and panes

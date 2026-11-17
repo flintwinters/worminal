@@ -17,6 +17,7 @@ use std::{
     ptr,
     rc::Rc,
 };
+use worminal_workspace::diagnostics::log;
 use worminal_workspace::launch::Launch;
 
 const PROCESS_TERM_NAME: &str = "xterm-256color";
@@ -31,14 +32,6 @@ fn checked(result: libc::c_int) -> io::Result<libc::c_int> {
         Err(io::Error::last_os_error())
     } else {
         Ok(result)
-    }
-}
-
-fn log(priority: libc::c_int, message: &str) {
-    if let Ok(message) = std::ffi::CString::new(message) {
-        unsafe {
-            libc::syslog(priority, c"%s".as_ptr().cast(), message.as_ptr());
-        }
     }
 }
 

@@ -143,8 +143,11 @@ pub fn forward(address: &SocketAddr, request: &Request) -> io::Result<Forward> {
         Err(error) => return Err(error),
     }
     let mut peer = UnixStream::connect_addr(address)?;
-    peer.set_read_timeout(Some(Duration::from_secs(5)))?;
-    peer.set_write_timeout(Some(Duration::from_secs(5)))?;
+    // A launcher can connect while GUI ownership is committing. Its accepted request
+    // stays queued on the continuously bound listener, so outlive the bounded cutover.
+    let timeout = Duration::from_secs(crate::gui_handoff::TIMEOUT_SECONDS + 5);
+    peer.set_read_timeout(Some(timeout))?;
+    peer.set_write_timeout(Some(timeout))?;
     rights::send_descriptor(&peer, request.output.as_fd(), 0)?;
     peer.write_all(&request.encode()?)?;
     let mut result = [0];

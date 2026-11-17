@@ -26,6 +26,14 @@ then explicitly edit the baseline values, maxima and workload hashes with an exp
 hash or unit changes, missing/invalid samples and new metrics without a budget decision fail closed. Use
 `check-perf --limits PATH` for a reviewed machine-specific policy; ordinary checks always use the checked-in file.
 
+## Atomic GUI updates
+
+`python3 manage.py check-window-updates` owns the private-display handoff regressions; `--match PATTERN` selects
+one case. It uses the same ownership-correct verification runtime and worker retirement as master startup checks.
+A gated native candidate deterministically exercises edits after the provisional snapshot; a private browser ABI
+shim exercises close/geometry requests while the cookie/profile commit is in progress. Logs remain in the check
+runtime and all private owners are awaited before that runtime is released.
+
 ## Master connection history
 
 `python3 manage.py check-master-history` runs kernel lease/storage checks and private native bootstrap/bridge

@@ -147,6 +147,11 @@ impl App {
         } else {
             return false;
         }
+        self.set_zoom(zoom);
+        true
+    }
+
+    pub(super) fn set_zoom(self: &Rc<Self>, zoom: f64) {
         // Every page must receive the same bounded zoom, including browser views.
         let zoom = zoom.clamp(-10.0, 40.0);
         self.fonts.borrow_mut().set_zoom(zoom);
@@ -165,7 +170,6 @@ impl App {
             }
         }
         self.refresh_tabs();
-        true
     }
 
     pub(super) fn cycle_tab(self: &Rc<Self>, previous: bool) {

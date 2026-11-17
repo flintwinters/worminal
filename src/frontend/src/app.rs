@@ -203,6 +203,7 @@ struct Link {
     reconnect: RefCell<Option<glib::SourceId>>,
     retry_delay: Cell<Duration>,
     initial_claim: Cell<bool>,
+    service_revision: Cell<u64>,
     pending_tabs: Cell<u32>,
     requested: Cell<u32>,
     features: Cell<u32>,
@@ -216,6 +217,7 @@ impl Link {
             reconnect: RefCell::new(None),
             retry_delay: Cell::new(Duration::from_millis(250)),
             initial_claim: Cell::new(true),
+            service_revision: Cell::new(0),
             pending_tabs: Cell::new(0),
             requested: Cell::new(0),
             features: Cell::new(0),
@@ -296,6 +298,8 @@ struct App {
     next_link: Cell<u32>,
     closing: Cell<bool>,
     replacing: Cell<bool>,
+    handoff_frozen: Cell<bool>,
+    close_after_update: Cell<bool>,
     replacement_frame: Cell<bool>,
     defer_navigation: Cell<bool>,
     geometry_pending: Cell<bool>,
@@ -375,6 +379,8 @@ impl App {
             next_link: Cell::new(1),
             closing: Cell::new(false),
             replacing: Cell::new(staged),
+            handoff_frozen: Cell::new(false),
+            close_after_update: Cell::new(false),
             replacement_frame: Cell::new(false),
             defer_navigation: Cell::new(staged),
             geometry_pending: Cell::new(true),
@@ -400,6 +406,10 @@ impl App {
         });
         app.window.connect_delete_event(
             glib::clone!(@weak app => @default-return glib::Propagation::Proceed, move |_, _| {
+                if app.handoff_frozen.get() || app.replacing.get() {
+                    app.close_after_update.set(true);
+                    return glib::Propagation::Stop;
+                }
                 app.release_browsers(); glib::Propagation::Proceed
             }),
         );
@@ -546,6 +556,10 @@ impl App {
                 link.requested.set(event.tab);
                 link.pending_tabs
                     .set(link.pending_tabs.get().saturating_sub(1));
+            }
+            EventKind::ServiceInfo(_) => {
+                link.service_revision
+                    .set(link.service_revision.get().wrapping_add(1));
             }
             EventKind::Error(bytes) => self.message(Some(&text(bytes))),
             EventKind::Released => {
