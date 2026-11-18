@@ -21,7 +21,9 @@ class AgentApiTest(unittest.TestCase):
     def setUp(self):
         state = tempfile.TemporaryDirectory(prefix='agent-state-', dir=workspace.CHECKS)
         self.addCleanup(state.cleanup)
-        environment = patch.dict(os.environ, {'XDG_STATE_HOME': state.name})
+        # Device membership lives under XDG_CONFIG_HOME; enrollment checks must not touch the user's.
+        environment = patch.dict(os.environ, {'XDG_STATE_HOME': state.name,
+                                              'XDG_CONFIG_HOME': os.path.join(state.name, 'config')})
         environment.start()
         self.addCleanup(environment.stop)
         self.fixture = workspace.PreviewWorkspaceTest(methodName='runTest')

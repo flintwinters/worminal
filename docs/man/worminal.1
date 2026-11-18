@@ -116,7 +116,7 @@ lists membership without probes.
 .B worminald api forget NAME
 removes enrollment only. All registry operations accept --master to use a shared authority.
 Names label SSH routes, not physical machines. Availability is a timestamped observation, not persistent online state.
-There are no heartbeats or automatic enrollment. Membership is saved under XDG_STATE_HOME/worminal/devices-v1.
+There are no heartbeats or automatic enrollment. Membership is saved in the hand-editable XDG_CONFIG_HOME/worminal/devices.yaml.
 .SH REMOTE INSTALLATION
 .B worminald install-on-remote user@host
 installs this headless daemon and its manual into /usr/local on a new compatible Linux node over SSH.

@@ -90,6 +90,8 @@ forget   {"ok":true,"name":S,"removed":BOOL}
 Failures also happen without a daemon: {"ok":false,"error":"No workspace service is running in this scope."}
 Limits: type/key input 65536 bytes per request; terminal size 1..=400 columns, 1..=200 rows; at most 32
 enrolled devices; local timeout 3s, --master timeout 13s. Tab ids are per running daemon; re-list after restart.
+Membership lives in the authority's $XDG_CONFIG_HOME/worminal/devices.yaml: devices: {NAME: {endpoint: S}}.
+Hand edits apply on the next request; enroll/forget rewrite the file atomically and drop its comments.
 Targeting: WORMINAL_SHARED_SOCKET_SCOPE picks the local workspace; --master user@host uses SSH instead.
 Additional fields (additive to the shapes above):
 doctor --json adds "diagnostics":{"client_version":S,"scope":S,"target":S,"socket":S|null,

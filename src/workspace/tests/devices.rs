@@ -25,7 +25,7 @@ impl Fixture {
         Self(root)
     }
     fn path(&self) -> PathBuf {
-        self.0.join("devices-v1")
+        self.0.join("devices.yaml")
     }
     fn registry(&self) -> Registry {
         Registry::new(self.path())
@@ -79,9 +79,20 @@ fn explicit_membership_is_durable_idempotent_and_never_silently_rebound() {
 #[test]
 fn malformed_state_and_symlinks_are_preserved_instead_of_reset() {
     let fixture = Fixture::new();
-    fs::write(fixture.path(), b"unrecognized registry").unwrap();
-    assert!(fixture.registry().enroll(device("bench", "bench")).is_err());
-    assert_eq!(fs::read(fixture.path()).unwrap(), b"unrecognized registry");
+    for malformed in [
+        "unrecognized registry",
+        "devices: {a: {endpoint: x}}\nextra: 1\n",
+        "devices: {a: {endpoint: x, tags: [gpu]}}\n",
+        "devices: {a: {endpoint: x}, b: {endpoint: x}}\n",
+        "devices: {a: {endpoint: x}, a: {endpoint: y}}\n",
+        "devices: {UPPER: {endpoint: x}}\n",
+        "devices: {a: {endpoint: 'ssh://x'}}\n",
+    ] {
+        fs::write(fixture.path(), malformed).unwrap();
+        assert!(fixture.registry().list().is_err(), "{malformed}");
+        assert!(fixture.registry().enroll(device("bench", "bench")).is_err());
+        assert_eq!(fs::read_to_string(fixture.path()).unwrap(), malformed);
+    }
     fs::remove_file(fixture.path()).unwrap();
     let target = fixture.0.join("preserved");
     fs::write(&target, b"preserve me").unwrap();
@@ -92,13 +103,41 @@ fn malformed_state_and_symlinks_are_preserved_instead_of_reset() {
 }
 
 #[test]
+fn hand_edited_yaml_is_membership_and_enrollment_keeps_it() {
+    let fixture = Fixture::new();
+    fs::write(
+        fixture.path(),
+        "# mine\ndevices:\n  zeta: {endpoint: me@zeta}\n  42:\n    endpoint: box42\n",
+    )
+    .unwrap();
+    let registry = fixture.registry();
+    assert_eq!(
+        registry.list().unwrap(),
+        vec![device("42", "box42"), device("zeta", "me@zeta")]
+    );
+    assert!(registry.enroll(device("anvil", "anvil")).unwrap());
+    assert_eq!(
+        registry.list().unwrap(),
+        vec![
+            device("42", "box42"),
+            device("anvil", "anvil"),
+            device("zeta", "me@zeta")
+        ]
+    );
+    for empty in ["", "devices:\n", "devices: {}\n"] {
+        fs::write(fixture.path(), empty).unwrap();
+        assert!(registry.list().unwrap().is_empty(), "{empty:?}");
+    }
+}
+
+#[test]
 fn busy_registry_rejects_before_read_modify_publish() {
     let fixture = Fixture::new();
     let lock = OpenOptions::new()
         .read(true)
         .write(true)
         .create_new(true)
-        .open(fixture.0.join("devices-v1.lock"))
+        .open(fixture.0.join("devices.yaml.lock"))
         .unwrap();
     assert_eq!(unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) }, 0);
     assert_eq!(

@@ -41,6 +41,11 @@ pub fn worminal_default_path() -> PathBuf {
     config_home().join("worminal/worminal.yaml")
 }
 
+/// Hand-editable device membership; per node, never layered or synced like worminal.yaml.
+pub fn devices_path() -> PathBuf {
+    config_home().join("worminal/devices.yaml")
+}
+
 /// `WORMINAL_CONFIG`, else `$XDG_CONFIG_HOME/worminal/worminal.yaml` when present.
 pub fn worminal_path() -> Result<Option<PathBuf>, String> {
     if let Some(path) = explicit("WORMINAL_CONFIG", "Worminal config")? {

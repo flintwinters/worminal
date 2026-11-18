@@ -39,9 +39,20 @@ the route uses the remote account's normal default scope.
 registry query succeeded, and individual observations describe the failures.
 
 Membership is per authority user, shared across that user's workspace scopes, in
-`$XDG_STATE_HOME/worminal/devices-v1` (default `~/.local/state/worminal/devices-v1`). Changes use a short nonblocking
-file lock and the same atomic private-state publication as tab recovery. Corrupt or unrecognized registries and
-symlinks cause explicit errors and are preserved. There is no replication or consensus; point clients at the same
-authority to share membership.
+`$XDG_CONFIG_HOME/worminal/devices.yaml` (default `~/.config/worminal/devices.yaml`):
+
+```yaml
+devices:
+  cinnamon: {endpoint: felix@cinnamon}
+  anvil:
+    endpoint: anvil
+```
+
+The file may be edited by hand; every request reads it afresh, with the same validation as `enroll`. Unknown keys,
+duplicate names or endpoints and invalid values are explicit errors. `enroll`/`forget` use a short nonblocking lock
+(`devices.yaml.lock`) and rewrite the file atomically, dropping comments. Unreadable files and symlinks are
+preserved, never reset. Unlike `worminal.yaml` it is never layered or synced: there is no replication or consensus;
+point clients at the same authority to share membership. The former binary `$XDG_STATE_HOME/worminal/devices-v1`
+is no longer read; re-enroll its devices.
 
 Run `python3 manage.py check-agent-api` for registry, Worp and private-workspace CLI regression checks.

@@ -167,6 +167,8 @@ Files, lowest to highest priority:
      Alacritty's search order, or the file named by WORMINAL_ALACRITTY_CONFIG.
   2. worminal.yaml: $XDG_CONFIG_HOME/worminal/worminal.yaml (default ~/.config/worminal/worminal.yaml), or the
      file named by WORMINAL_CONFIG (which must exist).
+Device membership is separate: $XDG_CONFIG_HOME/worminal/devices.yaml, never layered or synced
+(`worminald api help` covers it).
 Layering is per key: worminal.yaml needs only the differences, and a working Alacritty setup keeps working.
 Alacritty keys Worminal does not use (window, keyboard, ...) are ignored. Every other source of settings is
 absent: nothing is compiled in, and each process reads the files itself, also on headless hosts.
