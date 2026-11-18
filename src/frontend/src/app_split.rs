@@ -27,7 +27,6 @@ pub(super) struct Panes {
     host: gtk::Box,
     /// Region a hovering tab drag would claim, in `root` coordinates.
     marked: Rc<Cell<Option<Rect>>>,
-    mark: gtk::DrawingArea,
     list: RefCell<Vec<Rc<Pane>>>,
     layout: RefCell<Layout>,
     focused: Cell<u32>,
@@ -40,15 +39,14 @@ impl Panes {
         let host = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let root = gtk::Overlay::new();
         root.add(&host);
-        let mark = gtk::DrawingArea::new();
-        // A windowed overlay would intercept pointer events above terminal content.
-        mark.set_has_window(false);
-        root.add_overlay(&mark);
-        root.set_overlay_pass_through(&mark, true);
+        // Draw after children instead of using an overlay widget: GTK drag hit testing
+        // ignores overlay pointer pass-through and would hide terminal drop targets.
         let marked = Rc::new(Cell::new(None::<Rect>));
-        mark.connect_draw(
-            glib::clone!(@strong marked => @default-return glib::Propagation::Proceed,
-                move |_, cr| {
+        root.connect_local(
+            "draw",
+            true,
+            glib::clone!(@strong marked => move |values| {
+                let cr = values[1].get::<cairo::Context>().unwrap();
                 if let Some((x, y, width, height)) = marked.get() {
                     cr.rectangle(x, y, width, height);
                     cr.set_source_rgba(0.6, 0.6, 0.6, 0.25);
@@ -61,14 +59,13 @@ impl Panes {
                         eprintln!("worminal: split mark: {error}");
                     }
                 }
-                glib::Propagation::Proceed
+                Some(false.to_value())
             }),
         );
         Self {
             root,
             host,
             marked,
-            mark,
             list: RefCell::new(Vec::new()),
             layout: RefCell::new(Layout::Leaf(0)),
             focused: Cell::new(0),
@@ -276,7 +273,7 @@ impl App {
             Some((f64::from(x) + dx, f64::from(y) + dy, width, height))
         });
         self.panes.marked.set(rect);
-        self.panes.mark.queue_draw();
+        self.panes.root.queue_draw();
     }
     /// Move a tab's page into `dest`, leaving the pane that held it.
     fn move_page(&self, id: u32, dest: &Pane) {
@@ -376,7 +373,7 @@ impl App {
             .host
             .pack_start(&self.tree(&layout), true, true, 0);
         self.panes.host.show_all();
-        self.panes.mark.queue_draw();
+        self.panes.root.queue_draw();
     }
     fn tree(&self, layout: &Layout) -> gtk::Widget {
         match layout {

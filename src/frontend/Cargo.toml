@@ -8,7 +8,6 @@ publish.workspace = true
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
-serde_json = "1.0"
 worminal-engine = { path = "../engine" }
 worminal-engine-sys = { path = "../engine-sys" }
 worminal-protocol = { path = "../protocol" }

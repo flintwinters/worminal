@@ -27,7 +27,10 @@ def rust_fixture(directory, name, component="daemon", *, tests=False):
     workspace = tomllib.loads((ROOT / "Cargo.toml").read_text())
     package = f"worminal-{name}-proof"
     text = f'[workspace]\n[package]\nname={json.dumps(package)}\n'
-    text += f'version={json.dumps(manifest["package"]["version"])}\n'
+    version = manifest["package"]["version"]
+    if isinstance(version, dict) and version.get("workspace"):
+        version = workspace["workspace"]["package"]["version"]
+    text += f'version={json.dumps(version)}\n'
     text += f'edition={json.dumps(workspace["workspace"]["package"]["edition"])}\n'
     text += f'[lib]\nname="worminal_{component.replace("-", "_")}"\n'
     for section in ("dependencies", "build-dependencies", "dev-dependencies"):
@@ -88,6 +91,27 @@ def rust_viewport_counterfactual(directory):
     return "Rust viewport publication", command, os.environ, test.encode()
 
 
+def rust_update_fence_counterfactual(directory):
+    target = directory / "rust-update-fence"
+    target.mkdir(exist_ok=True)
+    mutant = target / "fences.rs"
+    source = (ROOT / "src/frontend/src/app_update_fences.rs").read_text()
+    operation = "self.pending.push_back(self.requested);\n        true"
+    if source.count(operation) != 1:
+        raise ValueError("Update fence counterfactual no longer removes reconnect recovery")
+    mutant.write_text(source.replace(operation, "false"))
+    test = "reconnect_reissues_the_lost_fence_without_inventing_an_acknowledgement"
+    # This state machine has no GTK dependencies; prove its invariant without rebuilding
+    # an entire graphics module or contending with the application's Cargo target directory.
+    unit = target / "fence-test.rs"
+    unit.write_text('#[path = "fences.rs"] mod fences;\n')
+    binary = target / "fence-test"
+    rust_build(directory, "rust-update-fence", ["rustc", "--test", "--edition=2021",
+                                               str(unit), "-o", str(binary)])
+    command = [str(binary), test]
+    return "Rust update fence reconnect", command, os.environ, (test + " ... FAILED").encode()
+
+
 def rust_activation_counterfactual(directory):
     target, package = rust_fixture(directory, "rust-activation", "frontend")
     mutant = target / "src/graphics_ffi.rs"
@@ -127,6 +151,8 @@ def prove(match=None):
     cases = []
 
     def engine_case(name, path, original, replacement, expected, *, sanitize=False):
+        if match is not None and match.casefold() not in name.casefold():
+            return
         source = (ROOT / path).read_text()
         mutant = source.replace(original, replacement)
         if mutant == source:
@@ -167,6 +193,8 @@ def prove(match=None):
         cases.append(rust_frame_counterfactual(directory))
     if match is None or match.casefold() in "Rust viewport publication".casefold():
         cases.append(rust_viewport_counterfactual(directory))
+    if match is None or match.casefold() in "Rust update fence reconnect".casefold():
+        cases.append(rust_update_fence_counterfactual(directory))
     if match is None or match.casefold() in "Rust activation timestamp".casefold():
         cases.append(rust_activation_counterfactual(directory))
     ownership_cases = (

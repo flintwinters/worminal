@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 use worminal_protocol::worp::devices::validate_endpoint;
-use worminal_workspace::ssh;
+use worminal_workspace::{cli_output, cli_schema::Api, ssh};
 
 const LAYOUT: &str = include_str!("../../../assets/headless-install.json");
 const BOOTSTRAP: &str = include_str!("../../../tools/remote_install.py");
@@ -21,13 +21,13 @@ const FRONTEND_HEADER: &str = include_str!("../../gtk/rust_frontend_module.h");
 const BROWSER_HEADER: &str = include_str!("../../gtk/rust_browser_module.h");
 const LIMIT: u64 = 64 * 1024 * 1024;
 const HEADER_LIMIT: usize = 16384;
-const UPGRADE_HELP: &str = "Usage: worminald upgrade-remote SSH_ENDPOINT\n\
+pub(crate) const UPGRADE_HELP: &str = "Usage: worminald upgrade-remote SSH_ENDPOINT\n\
 Make this node and an installed peer run the same worminald, whichever is older.\n\
 Compares Cargo versions; a newer local daemon is pushed to the peer, a newer peer daemon is pulled here.\n\
 Both sides must be Linux on the same CPU, with Python 3 and non-interactive sudo, installed in /usr/local.\n\
 Files are replaced atomically; a running daemon hands its shells to the new file without restarting them.\n\
-Active v1 workspaces are never touched. Views run this automatically once per host when they connect.\n";
-const HELP: &str = "Usage: worminald install-on-remote SSH_ENDPOINT\n\
+Active v1 workspaces are never touched. Views update immediately after SSH authentication, before opening the bridge.\n";
+pub(crate) const HELP: &str = "Usage: worminald install-on-remote SSH_ENDPOINT\n\
 Install this daemon and its manual on a new compatible Linux node over SSH.\n\
 A target with GTK/WebKit also gets the worminal command, modules, desktop entry and icon.\n\
 Requires Python 3 and non-interactive sudo on the target. Installs into /usr/local.\n\
@@ -39,7 +39,7 @@ fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::other(message.into())
 }
 
-fn receive(reader: &mut impl Read) -> io::Result<Value> {
+pub(super) fn receive(reader: &mut impl Read) -> io::Result<Value> {
     let mut bytes = Vec::new();
     for _ in 0..HEADER_LIMIT {
         let mut byte = [0];
@@ -114,7 +114,7 @@ fn layout() -> Value {
     layout
 }
 
-fn code(mode: &str) -> String {
+pub(super) fn code(mode: &str) -> String {
     format!(
         "import json\nLAYOUT=json.loads({})\nMODE={}\nSOURCE={}\nexec(SOURCE)\n",
         serde_json::to_string(&layout().to_string()).unwrap(),
@@ -283,21 +283,27 @@ fn timeouts(stream: &UnixStream) -> io::Result<()> {
 fn upgrade(endpoint: &str) -> io::Result<Value> {
     validate_endpoint(endpoint)?;
     let (mut stream, _child) = ssh::connect_python(endpoint.as_ref(), &code("upgrade"))?;
-    timeouts(&stream)?;
+    let mut result = upgrade_stream(&mut stream)?;
+    result["endpoint"] = json!(endpoint);
+    Ok(result)
+}
+
+/// Version negotiation is shared by the explicit command and the authenticated view gate.
+pub(super) fn upgrade_stream(stream: &mut UnixStream) -> io::Result<Value> {
+    timeouts(stream)?;
     let mut reader = BufReader::new(stream.try_clone()?);
     let ready = receive(&mut reader)?;
     check_platform(&ready)?;
     let theirs = ready.get("version").and_then(Value::as_str);
-    let mut result = match compare(theirs, env!("CARGO_PKG_VERSION"))? {
+    let result = match compare(theirs, env!("CARGO_PKG_VERSION"))? {
         Ordering::Less => {
-            let mut result = push(&mut stream, &mut reader, &ready)?;
+            let mut result = push(stream, &mut reader, &ready)?;
             result["direction"] = json!("push");
             result
         }
-        Ordering::Equal => finish_current(&mut stream, &mut reader)?,
-        Ordering::Greater => pull(&mut stream, &mut reader, theirs.unwrap_or(""))?,
+        Ordering::Equal => finish_current(stream, &mut reader)?,
+        Ordering::Greater => pull(stream, &mut reader, theirs.unwrap_or(""))?,
     };
-    result["endpoint"] = json!(endpoint);
     Ok(result)
 }
 
@@ -382,8 +388,11 @@ fn pull(
 }
 
 pub fn run(arguments: &[OsString], upgrading: bool) -> io::Result<i32> {
-    if arguments.len() == 1 && matches!(arguments[0].to_str(), Some("--help" | "-h" | "help")) {
-        print!("{}", if upgrading { UPGRADE_HELP } else { HELP });
+    if arguments.len() == 1 && Api::Help.matches(&arguments[0]) {
+        print!(
+            "{}",
+            cli_output::text(if upgrading { UPGRADE_HELP } else { HELP })
+        );
         return Ok(0);
     }
     let result = match arguments {
@@ -425,7 +434,7 @@ pub fn run(arguments: &[OsString], upgrading: bool) -> io::Result<i32> {
         // Detached views discard stdout, so record changes, failures and conflicts where daemon events go.
         crate::process::diagnostic(&format!("Remote upgrade: {result}"));
     }
-    println!("{result}");
+    print!("{}", worminal_workspace::cli_output::reply(&result));
     Ok(
         if result.get("ok").and_then(Value::as_bool) == Some(false) {
             1

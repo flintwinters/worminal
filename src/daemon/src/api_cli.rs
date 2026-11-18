@@ -1,4 +1,4 @@
-use crate::api::HELP;
+use crate::api::help;
 use crate::api_help;
 use std::{
     ffi::{OsStr, OsString},
@@ -10,7 +10,11 @@ use worminal_protocol::worp::{
     stream::{self, Stream},
     Client, Handler, Reply, Request,
 };
-use worminal_workspace::{socket, ssh};
+use worminal_workspace::{
+    cli_output,
+    cli_schema::{Api, ApiOption as Flag, Topic},
+    socket, ssh,
+};
 
 #[path = "api_arguments.rs"]
 mod arguments;
@@ -30,29 +34,32 @@ fn command(arguments: &[OsString]) -> io::Result<Request> {
         request.validate()?;
         return Ok(request);
     }
-    let operation = arguments.first().and_then(|arg| arg.to_str()).unwrap_or("");
+    let operation = arguments
+        .first()
+        .and_then(|arg| arg.to_str())
+        .and_then(Api::parse);
     let text = |index: usize| {
         arguments[index]
             .to_str()
             .ok_or_else(|| invalid("Arguments must be UTF-8."))
     };
     let request = match (operation, arguments.len()) {
-        ("list", 1) => Request::List,
-        ("open", _) => open::parse(&arguments[1..])?,
-        ("close", 2) => Request::Close {
+        (Some(Api::List), 1) => Request::List,
+        (Some(Api::Open), _) => open::parse(&arguments[1..])?,
+        (Some(Api::Close), 2) => Request::Close {
             tab: text(1)?
                 .parse()
                 .map_err(|_| invalid("TAB must be a positive ID from api list."))?,
         },
-        ("devices", 1) => Request::Devices,
-        ("devices", 2) if arguments[1] == "--no-check" => Request::Devices,
-        ("enroll", 3) => Request::Enroll {
+        (Some(Api::Devices), 1) => Request::Devices,
+        (Some(Api::Devices), 2) if Flag::NoCheck.matches(&arguments[1]) => Request::Devices,
+        (Some(Api::Enroll), 3) => Request::Enroll {
             device: Device {
                 name: text(1)?.into(),
                 endpoint: text(2)?.into(),
             },
         },
-        ("forget", 2) => Request::Forget {
+        (Some(Api::Forget), 2) => Request::Forget {
             name: text(1)?.into(),
         },
         _ => {
@@ -112,29 +119,64 @@ impl Handler for Local<'_> {
 }
 
 pub fn run(scope: &[u8], arguments: &[OsString]) -> io::Result<i32> {
-    if arguments.is_empty()
-        || (arguments.len() == 1 && matches!(arguments[0].to_str(), Some("help" | "--help" | "-h")))
-    {
-        print!("{HELP}{}", api_help::index());
+    if arguments.is_empty() || (arguments.len() == 1 && Api::Help.matches(&arguments[0])) {
+        print!(
+            "{}",
+            cli_output::text(format!("{}{}", help(), api_help::index()))
+        );
         return Ok(0);
     }
-    if arguments.len() == 2 && arguments[0] == "help" {
-        let Some(text) = arguments[1].to_str().and_then(api_help::topic) else {
-            eprintln!("Unknown help topic.\n{}", api_help::index());
+    if arguments.len() >= 2
+        && Api::Help.matches(&arguments[0])
+        && Topic::Search.matches(&arguments[1])
+    {
+        let query = arguments[2..]
+            .iter()
+            .map(|value| value.to_str())
+            .collect::<Option<Vec<_>>>();
+        let Some(query) = query else {
+            eprintln!("{}", cli_output::error("Search query must be UTF-8."));
             return Ok(2);
         };
-        print!("{text}");
+        let Some(text) = api_help::search(&query.join(" ")) else {
+            eprintln!(
+                "{}",
+                cli_output::error(
+                    "Usage: worminald api help search QUERY... (1..256 bytes, at most 16 terms)"
+                )
+            );
+            return Ok(2);
+        };
+        print!("{}", cli_output::text(text));
         return Ok(0);
     }
-    if arguments.len() == 1 && arguments[0] == "--session" {
+    if arguments.len() == 2 && Api::Help.matches(&arguments[0]) {
+        let Some(topic) = arguments[1].to_str().and_then(api_help::topic) else {
+            eprintln!(
+                "{}",
+                cli_output::error(format!("Unknown help topic.\n{}", api_help::index()))
+            );
+            return Ok(2);
+        };
+        if topic.runnable {
+            print!("{}", topic.text);
+        } else {
+            print!("{}", cli_output::text(topic.text));
+        }
+        return Ok(0);
+    }
+    if arguments.len() == 1 && Api::Session.matches(&arguments[0]) {
         crate::cli::bridge(scope, true)?;
         return Ok(0);
     }
-    if arguments.len() == 1 && arguments[0] == "--stdio" {
+    if arguments.len() == 1 && Api::Stdio.matches(&arguments[0]) {
         stream::serve_once(io::stdin().lock(), io::stdout().lock(), &mut Local(scope))?;
         return Ok(0);
     }
-    let (master, arguments) = if arguments.first().is_some_and(|arg| arg == "--master") {
+    let (master, arguments) = if arguments
+        .first()
+        .is_some_and(|arg| Flag::Master.matches(arg))
+    {
         (
             arguments.get(1).map(OsString::as_os_str),
             arguments.get(2..).unwrap_or_default(),
@@ -142,10 +184,13 @@ pub fn run(scope: &[u8], arguments: &[OsString]) -> io::Result<i32> {
     } else {
         (None, arguments)
     };
-    if arguments.len() == 1 && arguments[0] == "self" {
+    if arguments.len() == 1 && Api::SelfTab.matches(&arguments[0]) {
         return Ok(print_result(identify_self(scope, master)));
     }
-    if arguments == [OsString::from("doctor"), OsString::from("--json")] {
+    if arguments.len() == 2
+        && Api::Doctor.matches(&arguments[0])
+        && Flag::Json.matches(&arguments[1])
+    {
         let reply = diagnostics::doctor(scope, master);
         return Ok(print_result(Ok((reply.json, reply.success))));
     }

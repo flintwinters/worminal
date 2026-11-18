@@ -9,32 +9,14 @@ use worminal_protocol::worp::{Handler, Reply, Request};
 #[path = "api_tabs.rs"]
 mod tabs;
 
-pub const HELP: &str = r#"Worp: Worminal command and event API (version 1)
-Usage: worminald api [--master user@host] COMMAND
-  help                 Show this command reference; needs no running daemon.
-  --session            Duplex binary Worp command/event session to the existing daemon.
-                       Supports catalog, frames, input, focus/resize, selection and lifecycle.
-  list                 List tab IDs, titles, directories and shell PIDs as JSON.
-  doctor --json        Diagnose scope, endpoint, versions and shell-marker availability.
-  self                 Identify the tab running this process (local only; fails outside a tab).
-  open [OPTIONS] [-- PROGRAM ARG...]  Create a terminal; default is the target user's shell.
-    --cwd /ABS/PATH --title TITLE --columns N --rows N  (default size: 80x24)
-  open --browser URL   Create a browser record; use an explicit URL, including file:/// paths.
-  close TAB            Close a terminal/browser tab. Terminal close hangs up its running programs.
-  enroll NAME ENDPOINT  Enroll a named SSH route; no contact with that device.
-  devices              List enrollment and check Worp reachability from this caller.
-  devices --no-check   List enrollment only; no network probes.
-  forget NAME          Remove enrollment; never stops the device or its sessions.
-  read TAB [TAB...] [--tail N]  Viewport or last N retained physical rows (1..1000); no control.
-  read TAB --since CURSOR | --command N  Incremental rows or bounded command output.
-  wait TAB --command N --workspace WORKSPACE --timeout S  Wait for an explicit completion marker.
-  wait TAB --after REV --timeout S  Wait for a changed observation, up to 60 seconds.
-  type TAB [--guard TOKEN] TEXT|--stdin  Literal text or stdin paste; no appended Enter.
-  type TAB [--guard TOKEN] --then KEY TEXT|--stdin  Atomic paste followed by a named key.
-  key TAB [--guard TOKEN] KEY...  Named keys incl. arrows, navigation, F1..F35 and modifiers.
-  help keys|observe    Key names, batch/history reads, revisions, wait, input guards and limits.
-  help shell-bash|shell-zsh  Optional runnable shell integration and setup comments.
-Examples:
+pub fn help() -> String {
+    use worminal_workspace::cli_schema::{Api, ApiOption};
+    format!("Worp: Worminal command and event API (version 1)\n\
+Usage: worminald api [--master user@host] COMMAND\n{}\nOptions (where supported by the command):\n{}\n{}",
+        Api::GROUP.reference(), ApiOption::GROUP.reference(), HELP_DETAILS)
+}
+
+const HELP_DETAILS: &str = r#"Examples:
   worminald api list
   worminald api open --cwd /path/to/project -- /bin/sh
   worminald api open --browser https://example.org/

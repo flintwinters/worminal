@@ -12,9 +12,15 @@ use worminal_protocol::{Buffer, Decoder, Payload};
 
 pub const MAX_WINDOWS: usize = 32;
 pub const TIMEOUT_SECONDS: u64 = 15;
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
 const MAX_DESCRIPTORS: usize = 128;
 pub const MAX_LINKS: usize = 16;
+/// Keep the original host available for explicit reattachment, without reconnecting on replacement.
+pub const PRIMARY_DETACHED: u32 = 8;
+
+#[path = "gui_handoff_view.rs"]
+mod view;
+pub use view::{decode_presentations, encode_presentations, Presentation, CLOSE_REQUESTED};
 
 pub struct Link {
     pub index: u32,
@@ -22,6 +28,7 @@ pub struct Link {
 }
 
 pub struct Window {
+    pub id: u32,
     pub request: broker::Request,
     pub links: Vec<Link>,
     pub selected: u32,
@@ -30,11 +37,32 @@ pub struct Window {
     pub zoom: f64,
 }
 
+impl Window {
+    pub fn presentation(&self) -> Presentation {
+        Presentation {
+            id: self.id,
+            selected: self.selected,
+            geometry: self.geometry,
+            flags: self.flags,
+            zoom: self.zoom,
+        }
+    }
+}
+
 fn invalid() -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, "Invalid GUI replacement state")
 }
 
 pub fn encode(windows: &[Window]) -> io::Result<Vec<u8>> {
+    encode_with(windows, false)
+}
+
+/// Only owner/link identity participates in reuse; presentation changes are never a reason to reject an update.
+pub fn configuration(windows: &[Window]) -> io::Result<Vec<u8>> {
+    encode_with(windows, true)
+}
+
+fn encode_with(windows: &[Window], configuration: bool) -> io::Result<Vec<u8>> {
     if windows.is_empty() || windows.len() > MAX_WINDOWS {
         return Err(invalid());
     }
@@ -50,22 +78,22 @@ pub fn encode(windows: &[Window]) -> io::Result<Vec<u8>> {
     let mut body = Buffer::default();
     body.put_u32(VERSION)?;
     body.put_u32(windows.len() as u32)?;
+    let mut ids = std::collections::BTreeSet::new();
     for window in windows {
-        if window.geometry[2] <= 0
-            || window.geometry[3] <= 0
-            || window.flags > 7
-            || !window.zoom.is_finite()
-            || !(-10.0..=40.0).contains(&window.zoom)
-        {
+        if !ids.insert(window.id) {
             return Err(invalid());
         }
-        body.put_u32(window.selected)?;
-        for value in window.geometry {
-            body.put_u32(value as u32)?;
+        let presentation = window.presentation();
+        // Validate the actual state even when computing a normalized configuration identity.
+        if configuration {
+            presentation.write(&mut Buffer::default())?;
         }
-        body.put_u32(window.flags)?;
-        body.put_u32((window.zoom.to_bits() >> 32) as u32)?;
-        body.put_u32(window.zoom.to_bits() as u32)?;
+        (if configuration {
+            presentation.configuration()
+        } else {
+            presentation
+        })
+        .write(&mut body)?;
         body.put_string(&window.request.encode()?)?;
         if window.links.len() > MAX_LINKS {
             return Err(invalid());
@@ -117,7 +145,7 @@ pub fn receive(peer: &mut UnixStream) -> io::Result<(UnixListener, File, Vec<Win
     peer.read_exact(&mut bytes)?;
     let mut body = Payload::new(&bytes);
     let version = body.u32()?;
-    if version != 1 && version != VERSION {
+    if !(1..=VERSION).contains(&version) {
         return Err(invalid());
     }
     let count = body.u32()? as usize;
@@ -125,17 +153,16 @@ pub fn receive(peer: &mut UnixStream) -> io::Result<(UnixListener, File, Vec<Win
         return Err(invalid());
     }
     let mut windows = Vec::new();
-    for _ in 0..count {
+    for index in 0..count {
         let output = descriptors.next().ok_or_else(invalid)?;
-        let selected = body.u32()?;
-        let geometry = [
-            body.u32()? as i32,
-            body.u32()? as i32,
-            body.u32()? as i32,
-            body.u32()? as i32,
-        ];
-        let flags = body.u32()?;
-        let zoom = f64::from_bits((u64::from(body.u32()?) << 32) | u64::from(body.u32()?));
+        let presentation = Presentation::read(
+            &mut body,
+            if version < 3 {
+                Some(index as u32 + 1)
+            } else {
+                None
+            },
+        )?;
         let bytes = body.string()?;
         let (used, packet) = Decoder::default().push(bytes)?;
         if used != bytes.len() {
@@ -165,10 +192,11 @@ pub fn receive(peer: &mut UnixStream) -> io::Result<(UnixListener, File, Vec<Win
         windows.push(Window {
             request,
             links,
-            selected,
-            geometry,
-            flags,
-            zoom,
+            id: presentation.id,
+            selected: presentation.selected,
+            geometry: presentation.geometry,
+            flags: presentation.flags,
+            zoom: presentation.zoom,
         });
     }
     if descriptors.next().is_some() {

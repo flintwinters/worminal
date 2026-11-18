@@ -423,6 +423,33 @@ class AgentApiTest(unittest.TestCase):
         self.assertIn('not running in a tab', self.api('self', success=False)['error'])
         self.assertIn('--master', self.api('--master', 'nobody@invalid', 'self', success=False)['error'])
 
+    def test_fuzzy_help_search_without_a_daemon(self):
+        environment = {**self.fixture.env, 'WORMINAL_SHARED_SOCKET_SCOPE': self.fixture.scope + '-absent'}
+        def search(*terms):
+            return subprocess.run([str(workspace.DAEMON), 'api', 'help', 'search', *terms],
+                                  env=environment, capture_output=True, text=True, timeout=5)
+        for terms in [('brackted', 'paste'), ('BRACKETED paste',)]:
+            result = search(*terms)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('worminald api help observe', result.stdout)
+            self.assertIn('bracketed paste', result.stdout)
+        for terms, command in [(('--close-master',), '--close-master'),
+                               (('close', 'master'), '--close-master'),
+                               (('close', 'connecttion'), '--close-master'),
+                               (('detach', 'master'), '--detach-master')]:
+            result = search(*terms)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('worminal --help\n', result.stdout)
+            self.assertIn(command + ' HOST', result.stdout)
+        result = search('zzzzzzzzzz')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('No matching API help', result.stdout)
+        for terms in [(), ('   ',), ('x' * 257,), tuple(['word'] * 17)]:
+            result = search(*terms)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn('Usage:', result.stderr)
+            self.assertEqual(result.stdout, '')
+
     def test_help_topics_document_every_reply_key_without_a_daemon(self):
         """An agent with only the executable must learn the reply shapes from `api help schema`."""
         environment = {**self.fixture.env, 'WORMINAL_SHARED_SOCKET_SCOPE': self.fixture.scope + '-absent'}

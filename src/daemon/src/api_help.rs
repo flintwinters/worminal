@@ -2,66 +2,65 @@
 //! from the protocol constants so this text cannot drift from the framing; JSON shapes are checked by
 //! tests/test_agent_api.py against real replies.
 use worminal_protocol::*;
+use worminal_workspace::cli_schema::{Daemon, Topic as TopicName};
+
+#[path = "api_help_search.rs"]
+mod search;
+pub use search::search;
 
 /// `worminald --help`: the entry point that leads an agent to every other reference.
-pub const OVERVIEW: &str = "worminald: persistent terminal workspace service and headless agent interface
-
-Discover by topic (each prints a complete reference and needs no running daemon):
-  worminald api help                  list, self, open, close, read, wait, type, key, devices, enroll, forget
-  worminald api help observe          history, batch reads, wait, guarded input and shell integration
-  worminald api help schema           JSON reply shapes, limits, exit codes
-  worminald api help session          binary streaming protocol (worminald api --session)
-  worminald config --help             how to read, edit and validate worminal.yaml (--example)
-  worminald install-on-remote --help  bootstrap a new headless node over SSH
-  worminald upgrade-remote --help     sync an older node with a newer peer
-
-Service commands: --serve, --bridge, --stop, --handin NAME, --handoff NAME, --new-browser-tab URL|FILE, --version
-Environment: every Worminal tab sets WORMINAL_DAEMON to this executable's path (absent elsewhere). WORMINAL_SHARED_SOCKET_SCOPE selects the workspace; `api --master user@host` targets another node over SSH.
-Manual: man worminal. Inspection and `api` never start a daemon or restore shells.
-";
-
-const TOPICS: [(&str, &str); 6] = [
-    ("keys", "named keys, modifiers and target terminal modes"),
-    (
-        "observe",
-        "scrollback, batch reads, revisions, wait and guarded input",
-    ),
-    (
-        "shell-bash",
-        "optional runnable Bash integration; eval in interactive .bashrc",
-    ),
-    (
-        "shell-zsh",
-        "optional runnable Zsh integration; eval in interactive .zshrc",
-    ),
-    (
-        "schema",
-        "JSON reply shapes, key names, errors and exit codes",
-    ),
-    (
-        "session",
-        "binary duplex session: framing, commands, events",
-    ),
-];
-
-pub fn index() -> String {
-    let lines: Vec<String> = TOPICS
-        .iter()
-        .map(|(name, summary)| format!("  worminald api help {name:<8} {summary}"))
-        .collect();
-    format!("Topics:\n{}\n", lines.join("\n"))
+pub fn overview() -> String {
+    format!("worminald: persistent terminal workspace service and headless agent interface\n\n\
+        Commands and options (append --help for a complete reference):\n{}\n{}\n\
+        Environment: every Worminal tab sets WORMINAL_DAEMON to this executable's path.\n\
+        WORMINAL_SHARED_SOCKET_SCOPE selects the workspace; api --master user@host targets another node over SSH.\n\
+        Manual: man worminal. Inspection and api never start a daemon or restore shells.\n{}",
+        Daemon::GROUP.reference(), index(), worminal_workspace::cli_output::HELP)
 }
 
-pub fn topic(name: &str) -> Option<String> {
-    match name {
-        "schema" => Some(SCHEMA.to_owned()),
-        "keys" => Some(KEYS.to_owned()),
-        "observe" => Some(OBSERVE.to_owned()),
-        "shell-bash" => Some(include_str!("../../../assets/shell/worminal.bash").to_owned()),
-        "shell-zsh" => Some(include_str!("../../../assets/shell/worminal.zsh").to_owned()),
-        "session" => Some(session()),
-        _ => None,
-    }
+pub fn index() -> String {
+    format!(
+        "Topics (search is case-insensitive and typo-tolerant; up to 20 matching lines):\n{}",
+        TopicName::GROUP.reference()
+    )
+}
+
+pub fn documents() -> Vec<(String, String)> {
+    TopicName::ALL
+        .iter()
+        .filter_map(|name| {
+            topic(name.name()).map(|topic| {
+                (
+                    format!("worminald api help {}", name.name()),
+                    format!("{}: {}\n{}", name.name(), name.entry().summary, topic.text),
+                )
+            })
+        })
+        .collect()
+}
+
+pub struct Topic {
+    pub text: String,
+    pub runnable: bool,
+}
+
+pub fn topic(name: &str) -> Option<Topic> {
+    let (text, runnable) = match TopicName::parse(name)? {
+        TopicName::Schema => (SCHEMA.to_owned(), false),
+        TopicName::Keys => (KEYS.to_owned(), false),
+        TopicName::Observe => (OBSERVE.to_owned(), false),
+        TopicName::ShellBash => (
+            include_str!("../../../assets/shell/worminal.bash").to_owned(),
+            true,
+        ),
+        TopicName::ShellZsh => (
+            include_str!("../../../assets/shell/worminal.zsh").to_owned(),
+            true,
+        ),
+        TopicName::Session => (session(), false),
+        TopicName::Search => return None,
+    };
+    Some(Topic { text, runnable })
 }
 
 const SCHEMA: &str = r#"Every command prints exactly one JSON object on stdout.

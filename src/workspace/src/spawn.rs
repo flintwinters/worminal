@@ -34,6 +34,9 @@ impl Drop for Attributes {
     }
 }
 
+/// Children receive stdio plus a few inherited descriptors (e.g. a status pipe at 3).
+const HIGHEST_DESTINATION: i32 = 9;
+
 /// The caller exclusively owns this unreaped local child and must arrange its exact-PID wait.
 pub fn start(
     arguments: &[CString],
@@ -67,14 +70,21 @@ pub fn start_with_environment(
             libc::posix_spawnattr_setflags(&mut attributes.0, libc::POSIX_SPAWN_SETSID)
         })?;
     }
-    // Duplicate all sources above stdio before remapping any destination, including closed-stdio launches.
+    // Duplicate all sources above every destination before remapping any, including closed-stdio
+    // launches. A source already at its destination would otherwise be closed by the cleanup below.
     let sources: Vec<_> = stdio
         .iter()
         .map(|(source, destination)| {
-            if !(0..=2).contains(destination) {
+            if !(0..=HIGHEST_DESTINATION).contains(destination) {
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid stdio"));
             }
-            let high = unsafe { libc::fcntl(source.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 3) };
+            let high = unsafe {
+                libc::fcntl(
+                    source.as_raw_fd(),
+                    libc::F_DUPFD_CLOEXEC,
+                    HIGHEST_DESTINATION + 1,
+                )
+            };
             if high < 0 {
                 return Err(io::Error::last_os_error());
             }

@@ -186,7 +186,8 @@ Invalid configuration never stops Worminal: it reports to stderr and runs with d
 When it applies: each process reads configuration once, at start. New windows pick up appearance and
 update_notifications. scrolling.history and worminal.group_tabs_by_title are the daemon's: they take effect when
 the daemon next restarts (existing shells are preserved by the normal handoff). Running windows never change.
-Other devices: `worminald config sync` (views also run it once per host on connect). Only worminal.yaml syncs.",
+Other devices: `worminald config sync` (views also sync after updating on each master connection).
+Only worminal.yaml syncs.",
         keys = keys_text()
     )
 }

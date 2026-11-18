@@ -2,6 +2,12 @@
 
 Run `worminald --help`, then `worminald api help` (plus `api help schema` for reply JSON and `api help session` for the
 binary stream) to discover the native command interface from the executable alone.
+`worminald api help search QUERY...` searches native launcher/daemon help and all API topic contents without a daemon.
+Search is case-insensitive, tolerates word typos, and requires every query term on a matching line.
+The parser-backed command registry automatically contributes every command, option and alias, including
+`--close-master` and `--detach-master`. Detailed help uses the native commands’ own reference providers.
+It prints up to 20 ranked lines with their actual help commands; no matches is a successful empty search.
+Queries accept 1..256 UTF-8 bytes and at most 16 whitespace-separated terms.
 It works on headless hosts and uses [Worp](worp.md), independently of the selected delivery transport.
 It never starts a daemon or restores shells as a side effect of inspection.
 [Install a new remote node](remote-install.md) with the separate native `install-on-remote` bootstrap command.
@@ -77,6 +83,29 @@ named keystrokes including arrows, navigation, F1..F35 and Ctrl-/Alt-/Shift-/Sup
 are sent in the supplied order. Input is limited to 65536 bytes per request. Input goes to the selected tab's PTY
 without taking its graphical controller or resizing it. Sending Enter may submit a command or prompt; Ctrl-C may
 interrupt work. These commands do not detect whether the intended application still owns the terminal.
+
+`worminald --list-masters` passively lists currently and previously connected master SSH routes as JSON. It is local
+per-user connection history, separate from enrolled devices; run `worminald --list-masters --help` for its contract.
+
+`worminal --close-master user@host` queues normal closure of that master's catalogued tabs through the existing
+GUI connections in this display/workspace. Terminal programs are terminated; browser records are removed.
+Use the exact SSH endpoint. Mirrored tabs close once, and other hosts are unaffected. Success means the closes
+were queued, not that every process has exited. No owner or no connected matching tabs is an error. A transport
+failure may leave partial closure; inspect the remaining tabs before retrying. No SSH connection or workspace is
+created by this command. `worminal --detach-master user@host` instead removes the views and keeps shells running.
+
+## CLI presentation
+
+`worminal` and `worminald` color human help, versions, status and errors only when the relevant output
+stream is a terminal. Redirected output is plain. `NO_COLOR` (even empty), `CLICOLOR=0` or `TERM=dumb`
+disables color. Agent markers also disable it, even when set to an empty value: `CODEX_*`, `CLAUDE_CODE_*`,
+`AIDER_*`, `OPENCODE_*`, `GEMINI_CLI_*`, `CLAUDECODE`, `CURSOR_AGENT`, `AIDER`, `OPENCODE`, `GEMINI_CLI`,
+`CLINE_ACTIVE`, `ROO_CODE`, `AGENT`, `AGENT_MODE` and `AI_AGENT`. API keys and SSH authentication-agent
+variables do not identify an AI agent. The shared policy lives in `src/workspace/src/cli_output.rs`.
+JSON, binary sessions, shell integration source and configuration examples always remain plain.
+CLI commands that reply with JSON (`--list-masters`, `config sync`, remote install/upgrade) pass it through
+`cli_output::reply`: a human terminal gets generated tables and key/value lists, while agents, pipes and
+redirection receive the exact compact JSON. New commands need no separate human renderer.
 
 ## Observation, waiting and input safety
 

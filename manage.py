@@ -254,13 +254,13 @@ def check_test_runtime(prove: bool = typer.Option(False, help="Also require fail
 @app.command("check-rust-app")
 def check_rust_app(module_only: bool = typer.Option(
         False, help="Run only launcher/module and GUI broker checks on private displays."),
-        match: str = typer.Option(None, help="Run matching native GUI tests.")):
+        match: str = typer.Option(None, help="Run application tests matching this unittest name pattern.")):
     """Check the actual Rust app: private shell input, clipboard, tabs and surviving-session reattachment."""
     native_build.build_targets("worminal", "worminal-rust", "build/gui-peer.so")
     arguments = (["-m", "unittest", "discover", "-s", "tests", "-p", "rust_module.py", "-q"]
                  if module_only else ["tests/rust_app.py"])
     if match:
-        arguments += ["-k", match]
+        arguments = ["-m", "unittest", "discover", "-s", "tests", "-p", "rust_app.py", "-k", match, "-v"]
     raise typer.Exit(run([sys.executable, *arguments]))
 
 
@@ -306,22 +306,36 @@ def check_agent_api():
     raise typer.Exit(code)
 
 
+def run_remote_checks(pattern, *, workspace_test=None):
+    from tools.update_storage import verification_environment
+    candidate = build_rust_daemon()
+    with verification_environment(ROOT) as env:
+        if workspace_test:
+            code = run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-workspace",
+                        "--test", workspace_test], env=env)
+            if code:
+                return code
+        return run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                    "-p", pattern, "-q"],
+                   env={**env, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate)})
+
+
+@app.command("check-master-history")
+def check_master_history():
+    """Check passive master listing, durable history and live connection leases on private targets."""
+    raise typer.Exit(run_remote_checks("test_master_history.py", workspace_test="masters"))
+
+
 @app.command("check-remote-install")
 def check_remote_install():
-    """Check native remote-install bootstrap against private mock-SSH targets, without root or live hosts."""
-    candidate = build_rust_daemon()
-    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
-                         "-p", "test_remote_install.py", "-q"],
-                        env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate)}))
+    """Check native remote bootstrap and authenticated view ordering on private mock-SSH targets."""
+    raise typer.Exit(run_remote_checks("test_remote_install.py"))
 
 
 @app.command("check-remote-upgrade")
 def check_remote_upgrade():
     """Check private mock-SSH upgrades, publication rollback and live daemon session preservation."""
-    candidate = build_rust_daemon()
-    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
-                         "-p", "test_remote_upgrade.py", "-q"],
-                        env={**os.environ, "WORMINAL_TEST_PREVIEW_DAEMON": str(candidate)}))
+    raise typer.Exit(run_remote_checks("test_remote_upgrade.py"))
 
 
 @app.command("check-rust-daemon")
@@ -491,20 +505,45 @@ def check_bridge():
             raise typer.Exit(code)
 
 
+def run_display_checks(pattern, *, executable=None, master=None, match=None):
+    # copy_runtime uses this isolated launcher; never exercise a stale candidate binary.
+    native_build.build_targets("worminal-rust")
+    from tools.update_storage import verification_environment
+    from tools.test_runner import retire_worker
+    with verification_environment(ROOT) as env:
+        if executable:
+            env["WORMINAL_TEST_EXECUTABLE"] = str(executable.resolve())
+        if master:
+            env["WORMINAL_TEST_REAL_MASTER"] = master
+        arguments = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", pattern, "-q"]
+        if match:
+            arguments.extend(["-k", match])
+        process = subprocess.Popen(arguments, env=env)
+        try:
+            return process.wait()
+        finally:
+            retire_worker(process, Path(env["WORMINAL_TEST_CHECKS_DIR"]))
+
+
+@app.command("check-window-updates")
+def check_window_updates(match: str = typer.Option(None, help="Select private window replacement regressions.")):
+    """Check atomic GUI handoff, concurrent window edits, browser rollback and live shell preservation."""
+    raise typer.Exit(run_display_checks("test_window_replacement.py", match=match))
+
+
+@app.command("check-master-tabs")
+def check_master_tabs():
+    """Check master-scoped close/detach commands, shell lifecycle and unrelated-host preservation."""
+    raise typer.Exit(run_display_checks("test_master_detach.py"))
+
+
 @app.command("check-master-startup")
 def check_master_startup(
     executable: Path = typer.Option(None, help="Executable to check; defaults to project build."),
     master: str = typer.Option(None, help="Use real SSH with a private remote workspace."),
 ):
     """Check native --master startup and input on private Xvfb, using an isolated workspace."""
-    native_build.build_targets()
-    env = dict(os.environ)
-    if executable:
-        env["WORMINAL_TEST_EXECUTABLE"] = str(executable.resolve())
-    if master:
-        env["WORMINAL_TEST_REAL_MASTER"] = master
-    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
-                         "-p", "test_master_startup.py", "-q"], env=env))
+    raise typer.Exit(run_display_checks("test_master_startup.py", executable=executable, master=master))
 
 
 @app.command("check-network")

@@ -78,7 +78,17 @@ pub fn run(endpoint: &str, prefer: Prefer) -> io::Result<Value> {
     stream.set_write_timeout(Some(Duration::from_secs(30)))?;
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut writer = stream;
-    let remote_text = text(&line(&mut reader)?, "config")?.to_owned();
+    exchange_with(endpoint, prefer, &mut reader, &mut writer)
+}
+
+/// Reuse an authenticated transport after its version gate has completed.
+pub(super) fn exchange_with(
+    endpoint: &str,
+    prefer: Prefer,
+    reader: &mut impl BufRead,
+    writer: &mut impl Write,
+) -> io::Result<Value> {
+    let remote_text = text(&line(reader)?, "config")?.to_owned();
     let path = sync::target_path();
     let local_text = sync::read_text(&path).map_err(invalid)?;
     let base_path = sync::base_path(endpoint);
@@ -100,8 +110,8 @@ pub fn run(endpoint: &str, prefer: Prefer) -> io::Result<Value> {
     };
     writeln!(writer, "{request}")?;
     writer.flush()?;
-    line(&mut reader)?; // the peer applied it, or refused and nothing below runs
-                        // Local last: a refused peer leaves this node unchanged, and the base only advances after both sides did.
+    line(reader)?; // the peer applied it, or refused and nothing below runs
+                   // Local last: a refused peer leaves this node unchanged; advance the base only after both sides did.
     if changed_local {
         worminal_config::Settings::resolve(&as_value(&new_local).map_err(invalid)?)
             .map_err(invalid)?;

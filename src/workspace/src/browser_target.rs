@@ -14,7 +14,7 @@ pub const WORKSPACE_BROWSER_HOME: &str = "about:blank";
 pub fn command(arguments: &[OsString]) -> io::Result<()> {
     if arguments
         .get(1)
-        .is_none_or(|argument| argument != "--new-browser-tab")
+        .is_none_or(|argument| !crate::cli_schema::Launcher::NewBrowser.matches(argument))
     {
         return Ok(());
     }
@@ -28,7 +28,7 @@ pub fn command(arguments: &[OsString]) -> io::Result<()> {
     let daemon = worminal_protocol::WORKSPACE_DAEMON;
     let daemon = std::env::current_exe()?.with_file_name(OsStr::from_bytes(daemon.to_bytes()));
     Err(Command::new(daemon)
-        .arg("--new-browser-tab")
+        .arg(crate::cli_schema::Daemon::NewBrowser.name())
         .arg(&arguments[2])
         .exec())
 }

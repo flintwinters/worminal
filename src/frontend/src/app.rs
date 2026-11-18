@@ -37,6 +37,8 @@ mod notifications;
 mod shortcuts;
 #[path = "app_split.rs"]
 mod split;
+#[path = "app_update_fences.rs"]
+mod update_fences;
 
 thread_local! { static WINDOWS: RefCell<Vec<Rc<App>>> = const { RefCell::new(Vec::new()) }; }
 use config::Config;
@@ -98,6 +100,7 @@ fn ensure() -> io::Result<()> {
 struct Connection {
     socket: UnixStream,
     _ssh: Option<worminal_workspace::ssh::Child>,
+    report: Option<io::PipeReader>,
     decoder: Decoder,
     output: VecDeque<Vec<u8>>,
     offset: usize,
@@ -105,27 +108,36 @@ struct Connection {
 }
 impl Connection {
     fn new(master: Option<&OsStr>, existing: bool, interactive: bool) -> io::Result<Self> {
-        let (socket, ssh) = if let Some(master) = master {
+        let (socket, ssh, report) = if let Some(master) = master {
             let executable = std::env::current_exe()?;
-            let (socket, child) = worminal_workspace::ssh::connect_gui(
+            let (socket, child, report) = worminal_workspace::ssh::connect_gui(
                 master,
                 existing,
                 executable.as_os_str(),
                 interactive,
             )?;
-            (socket, Some(child))
+            (socket, Some(child), Some(report))
         } else {
-            (connect()?, None)
+            (connect()?, None, None)
         };
         socket.set_nonblocking(true)?;
         Ok(Self {
             socket,
             _ssh: ssh,
+            report,
             decoder: Decoder::default(),
             output: VecDeque::new(),
             offset: 0,
             bytes: 0,
         })
+    }
+    /// Why the master helper closed this link, when it said (e.g. a failed version sync).
+    /// The helper writes before exiting, so the report is complete once the stream has closed.
+    fn failure(&mut self) -> Option<String> {
+        let mut text = Vec::new();
+        let _ = self.report.as_mut()?.take(4096).read_to_end(&mut text);
+        let text = String::from_utf8_lossy(&text).trim().to_owned();
+        (!text.is_empty()).then_some(text)
     }
     fn queue(&mut self, packet: Packet) -> io::Result<()> {
         let bytes = packet.encode()?;
@@ -203,9 +215,13 @@ struct Link {
     reconnect: RefCell<Option<glib::SourceId>>,
     retry_delay: Cell<Duration>,
     initial_claim: Cell<bool>,
+    update_fences: RefCell<update_fences::Fences>,
+    catalog_tabs: RefCell<Vec<u32>>,
     pending_tabs: Cell<u32>,
     requested: Cell<u32>,
     features: Cell<u32>,
+    /// The last helper failure shown on the desktop; retries repeating it stay quiet.
+    alerted: RefCell<Option<String>>,
 }
 impl Link {
     fn new() -> Rc<Self> {
@@ -216,8 +232,11 @@ impl Link {
             reconnect: RefCell::new(None),
             retry_delay: Cell::new(Duration::from_millis(250)),
             initial_claim: Cell::new(true),
+            update_fences: RefCell::new(update_fences::Fences::default()),
+            catalog_tabs: RefCell::new(Vec::new()),
             pending_tabs: Cell::new(0),
             requested: Cell::new(0),
+            alerted: RefCell::new(None),
             features: Cell::new(0),
         })
     }
@@ -237,6 +256,7 @@ impl Link {
             }
         }
         self.connection.borrow_mut().take();
+        self.update_fences.borrow_mut().disconnected();
     }
 }
 /// Another `--master` host whose tabs are shown in this window beside its own.
@@ -291,10 +311,13 @@ struct App {
     active: Cell<u32>,
     syncing: Cell<bool>,
     primary: Rc<Link>,
+    primary_detached: Cell<bool>,
     remotes: RefCell<Vec<Rc<Remote>>>,
     next_link: Cell<u32>,
     closing: Cell<bool>,
     replacing: Cell<bool>,
+    handoff_frozen: Cell<bool>,
+    close_after_update: Cell<bool>,
     replacement_frame: Cell<bool>,
     defer_navigation: Cell<bool>,
     geometry_pending: Cell<bool>,
@@ -325,7 +348,7 @@ impl App {
         Self::open(config)
     }
     fn open(config: Config) -> io::Result<Rc<Self>> {
-        Self::open_mode(config, false)
+        Self::open_mode(config, false, false)
     }
     fn replacement_window(config: &Config) -> gtk::Window {
         if let Some(class) = &config.class {
@@ -340,7 +363,7 @@ impl App {
         window.set_resizable(!config.fixed);
         window
     }
-    fn open_mode(config: Config, staged: bool) -> io::Result<Rc<Self>> {
+    fn open_mode(config: Config, staged: bool, primary_detached: bool) -> io::Result<Rc<Self>> {
         // New launches may arrive in an existing GTK owner after service loss. The shared
         // posix_spawn boundary can recover the service here without GUI-process fork hooks.
         if config.master.is_none() && !staged {
@@ -369,10 +392,13 @@ impl App {
             active: Cell::new(0),
             syncing: Cell::new(false),
             primary: Link::new(),
+            primary_detached: Cell::new(primary_detached),
             remotes: RefCell::new(Vec::new()),
             next_link: Cell::new(1),
             closing: Cell::new(false),
             replacing: Cell::new(staged),
+            handoff_frozen: Cell::new(false),
+            close_after_update: Cell::new(false),
             replacement_frame: Cell::new(false),
             defer_navigation: Cell::new(staged),
             geometry_pending: Cell::new(true),
@@ -398,6 +424,10 @@ impl App {
         });
         app.window.connect_delete_event(
             glib::clone!(@weak app => @default-return glib::Propagation::Proceed, move |_, _| {
+                if app.handoff_frozen.get() || app.replacing.get() {
+                    app.close_after_update.set(true);
+                    return glib::Propagation::Stop;
+                }
                 app.release_browsers(); glib::Propagation::Proceed
             }),
         );
@@ -410,9 +440,11 @@ impl App {
                     if windows.len() != previous && windows.is_empty() { gtk::main_quit(); } });
                 window_state::changed();
             }));
-        if let Err(error) = app.establish(0, !app.config.attach) {
-            app.window.close();
-            return Err(error);
+        if !primary_detached {
+            if let Err(error) = app.establish(0, !app.config.attach) {
+                app.window.close();
+                return Err(error);
+            }
         }
         WINDOWS.with(|windows| windows.borrow_mut().push(app.clone()));
         window_state::changed();
@@ -543,6 +575,9 @@ impl App {
                 link.pending_tabs
                     .set(link.pending_tabs.get().saturating_sub(1));
             }
+            EventKind::ServiceInfo(_) => {
+                link.update_fences.borrow_mut().acknowledge();
+            }
             EventKind::Error(bytes) => self.message(Some(&text(bytes))),
             EventKind::Released => {
                 if let Some(terminal) = self.terminal(event.tab) {
@@ -654,6 +689,7 @@ impl App {
                 colors: tab.colors.iter().map(|color| text(color)).collect(),
             });
         }
+        *link.catalog_tabs.borrow_mut() = catalog.tabs.iter().map(|tab| tab.id).collect();
         link.retry_delay.set(Duration::from_millis(250));
         let initial_claim = link.initial_claim.replace(false);
         let mut replaced_active = false;
@@ -868,6 +904,9 @@ impl App {
         }
         self.refresh_tabs();
         window_state::changed();
+        if self.primary_detached.get() {
+            self.close_empty_window();
+        }
         Ok(())
     }
     fn new_tab(self: &Rc<Self>) {
@@ -925,6 +964,15 @@ pub(crate) fn run_with_listener(
     }
     worminal_workspace::browser_target::command(&arguments)?;
     let request = worminal_workspace::broker::Request::capture(arguments)?;
+    if worminal_workspace::broker::master_action(&request.args)?.is_some() {
+        return match broker::forward(&request)? {
+            None => Ok(()),
+            Some(_) => Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "No connected GUI owner",
+            )),
+        };
+    }
     let Some(config) = Config::parse(&request, candidate)? else {
         return Ok(());
     };

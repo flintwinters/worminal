@@ -6,6 +6,10 @@ import os
 from pathlib import Path
 import stat
 import shutil
+import select
+import signal
+import socket
+import time
 import subprocess
 import tempfile
 import unittest
@@ -263,6 +267,134 @@ class RemoteCommandTest(unittest.TestCase):
         for scenario in ('os','cpu','active','missing-python','runtime'):
             self.command(scenario, success=False)
             self.assertEqual(list(self.prefix.iterdir()), [])
+
+    def connect_environment(self):
+        from workspace_protocol import stop_workspace
+        env = {**self.env, 'WORMINAL_SHARED_SOCKET_SCOPE': self.root.name,
+                'XDG_STATE_HOME': str(self.root/'state'), 'XDG_CONFIG_HOME': str(self.root/'config'),
+                'WORMINAL_TEST_SSH_TRACE': str(self.root/'ssh-trace')}
+        self.addCleanup(stop_workspace, env)
+        return env
+
+    def test_authenticated_connect_finishes_update_before_forwarding_queued_view_input(self):
+        from workspace_protocol import send, wait_kind, stop_workspace
+        env = self.connect_environment()
+        gate = self.root/'update-gate'
+        env['WORMINAL_TEST_UPDATE_GATE'] = str(gate)
+        # Exercise both publication and an equal-version no-op. Each connection must authenticate
+        # and check versions before starting the bridge, even when the previous one succeeded.
+        self.fake(self.prefix, '0.0.1')
+        for _ in range(2):
+            peer, child = socket.socketpair()
+            peer.settimeout(10)
+            with child:
+                process = subprocess.Popen([str(DAEMON), '--connect-master', 'fixture-host', '--bridge'],
+                                           env=env, stdin=child, stdout=child, stderr=subprocess.PIPE)
+            try:
+                send(peer, 19, version=2)  # queued before authentication/update finishes
+                deadline = time.monotonic()+10
+                while not gate.with_suffix('.waiting').exists() and time.monotonic()<deadline:
+                    self.assertIsNone(process.poll())
+                    time.sleep(.01)
+                self.assertTrue(gate.with_suffix('.waiting').exists())
+                self.assertEqual((self.prefix/'bin/worminald').read_bytes(), DAEMON.read_bytes())
+                self.assertFalse(select.select([peer], [], [], .1)[0], 'View received bytes before update finished')
+                with socket.socket(socket.AF_UNIX) as probe:
+                    with self.assertRaises(ConnectionRefusedError):
+                        probe.connect(f'\0worminal-workspace-v2-{os.getuid()}-{self.root.name}')
+                gate.touch()
+                try:
+                    wait_kind(peer, 7, version=2)
+                except AssertionError as error:
+                    _, detail = process.communicate(timeout=5)
+                    self.fail(f'{error}; {detail.decode(errors="replace")}')
+            finally:
+                gate.touch()  # unblock the fixture before waiting, including on assertion failure
+                peer.close()
+                try:
+                    _, error = process.communicate(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.communicate(timeout=5)
+                    raise
+                stop_workspace(env)
+            self.assertEqual(process.returncode, 0, error)
+            gate.unlink()
+            gate.with_suffix('.waiting').unlink()
+        self.assertEqual((self.root/'ssh-trace').read_text().splitlines(), ['authenticated']*2,
+                         'Version/config/bridge must share one authenticated SSH connection')
+
+    def test_closing_a_view_during_update_reaps_its_authenticated_ssh_child(self):
+        self.fake(self.prefix, '0.0.1')
+        gate, pid_file = self.root/'update-gate', self.root/'ssh-pid'
+        env = {**self.connect_environment(), 'WORMINAL_TEST_UPDATE_GATE': str(gate),
+               'WORMINAL_TEST_SSH_PID': str(pid_file)}
+        process = subprocess.Popen([str(DAEMON), '--connect-master', 'fixture-host', '--bridge'],
+                                   env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        identity = None
+        try:
+            deadline = time.monotonic()+10
+            while not gate.with_suffix('.waiting').exists() and time.monotonic()<deadline:
+                self.assertIsNone(process.poll())
+                time.sleep(.01)
+            self.assertTrue(gate.with_suffix('.waiting').exists())
+            identity = os.pidfd_open(int(pid_file.read_text()))
+            process.terminate()
+            process.wait(timeout=5)
+            self.assertTrue(select.select([identity], [], [], 5)[0],
+                            'Closing the view orphaned its authenticated SSH connection')
+        finally:
+            gate.touch()
+            if identity is not None:
+                try:
+                    signal.pidfd_send_signal(identity, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                self.assertTrue(select.select([identity], [], [], 5)[0])
+                os.close(identity)
+            if process.poll() is None:
+                process.kill()
+            process.communicate(timeout=5)
+
+    def test_failed_update_never_opens_a_workspace_or_exposes_bootstrap_json_to_the_view(self):
+        report, writer = os.pipe()
+        self.addCleanup(os.close, report)
+        env = {**self.connect_environment(), 'WORMINAL_TEST_INSTALL_SCENARIO': 'runtime',
+               'WORMINAL_CONNECT_REPORT_FD': str(writer)}
+        self.fake(self.prefix, '0.0.1')
+        try:
+            result = subprocess.run([str(DAEMON), '--connect-master', 'fixture-host', '--bridge'], pass_fds=(writer,),
+                                    env=env, input=b'queued view input', capture_output=True, timeout=15)
+        finally:
+            os.close(writer)
+        # The view notifies the desktop from this report; a closed stream alone does not say why.
+        self.assertRegex(os.read(report, 4096), rb'^Version sync with fixture-host failed: .*staged daemon cannot run')
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, b'')
+        self.assertIn(b'staged daemon cannot run', result.stderr)
+        self.assertFalse((self.root/'state').exists())
+        self.assertEqual((self.root/'ssh-trace').read_text().splitlines(), ['authenticated'])
+
+    def test_authenticated_existing_connect_never_starts_a_missing_workspace(self):
+        env = self.connect_environment()
+        self.fake(self.prefix, '0.0.1')
+        shutil.copyfile(DAEMON, self.prefix/'bin/worminald')
+        peer, child = socket.socketpair()
+        peer.settimeout(10)
+        with child:
+            process = subprocess.Popen([str(DAEMON), '--connect-master', 'fixture-host', '--bridge-existing'],
+                                       env=env, stdin=child, stdout=child, stderr=subprocess.PIPE)
+        with peer:
+            try:
+                self.assertEqual(peer.recv(1), b'')
+                _, error = process.communicate(timeout=5)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.communicate(timeout=5)
+        self.assertIn(b"Connection refused", error)
+        self.assertEqual(list((self.root/'state/worminal').glob('tabs-v2-*')), [])
+        self.assertEqual((self.root/'ssh-trace').read_text().splitlines(), ['authenticated'])
 
     def test_help_is_discoverable_without_ssh(self):
         for args in (['--help'], ['api','help'], ['install-on-remote','--help']):

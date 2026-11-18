@@ -26,6 +26,27 @@ then explicitly edit the baseline values, maxima and workload hashes with an exp
 hash or unit changes, missing/invalid samples and new metrics without a budget decision fail closed. Use
 `check-perf --limits PATH` for a reviewed machine-specific policy; ordinary checks always use the checked-in file.
 
+## Atomic GUI updates
+
+`python3 manage.py check-window-updates` owns the private-display handoff regressions; `--match PATTERN` selects
+one case. It uses the same ownership-correct verification runtime and worker retirement as master startup checks.
+A gated native candidate deterministically exercises edits after the provisional snapshot; a private browser ABI
+shim exercises close/geometry requests while the cookie/profile commit is in progress. Logs remain in the check
+runtime and all private owners are awaited before that runtime is released.
+
+## Master tab commands
+
+`python3 manage.py check-master-tabs` checks native master close/detach commands on private displays. It covers
+multiple windows and hosts, terminal termination, browser records, preserved detached shells and invalid requests.
+Closes use fixture daemons and never target real SSH hosts or desktop windows.
+
+## Master connection history
+
+`python3 manage.py check-master-history` runs kernel lease/storage checks and private native bootstrap/bridge
+regressions for `worminald --list-masters`. It covers catalog confirmation, multiple simultaneous views, crash
+cleanup, history persistence, scope isolation and passive empty/error/help replies. It uses project-local
+verification storage and mock SSH, without a desktop or live remote device.
+
 ## Python check workers
 
 The full check command builds shared artifacts and runs native checks first:
@@ -47,6 +68,9 @@ python3 manage.py check-python --jobs 2 --module test_upgrade --module test_wind
 python3 manage.py check-python --jobs 2 --module test_theme --module test_http_fixture
 python3 manage.py check-python --jobs 2 --match retained
 ```
+
+Use `python3 manage.py check-rust-app --match external_file_drop` for the real cross-application file-drop
+regression on a private X11 display. `--match` accepts a unittest name pattern for other application checks too.
 
 `--module` can be repeated and takes a top-level module name without `.py`. `--match` retains unittest's `-k`
 semantics. Without `--module`, discovery still covers all tests, including unreviewed/nested modules in the serial

@@ -14,6 +14,8 @@ toggles browser-style autoscroll (pointer distance from the click sets speed; an
 through the same dispatch as the wheel, so mouse-reporting and alternate-screen applications scroll too;
 Shift+middle click pastes the primary selection. Ctrl+scroll over a terminal cycles tabs in the focused pane,
 wrapping like Ctrl+Tab (up selects the previous tab; down selects the next), before application mouse handling.
+Dropping local files onto a terminal pastes shell-quoted absolute paths at its current cursor, separated by spaces,
+through the ordinary bracketed-paste path without submitting input.
 Keep the upstream st attribution and license intact. Use existing
 modules. Keep each shared rule or definition in one place. Enforce state rules where the state changes. For bugs
 with subtle causes, add a test that fails without the fix and explain the reason beside the code.
@@ -46,19 +48,28 @@ The per-user v2 daemon owns ordered tabs, PTYs and bounded scrollback. Views con
 one viewport; they never parse terminal output or recompute history/reflow. Browser records have no PTY. `worminald
 api` is the headless agent interface over Worp; see `docs/automation.md` and `docs/worp.md`. The executable alone
 must teach an agent everything: `worminald --help` indexes `api help [schema|session]`, `config`,
-`install-on-remote` and `upgrade-remote`; `api_help.rs` and `src/config/src/reference.rs` own those texts; tests
-check them against real replies and the resolver. `src/protocol::worp` owns shared transport-independent
+`install-on-remote` and `upgrade-remote`. Parsers, generated help and API help search share the command/option
+registry in `src/workspace/src/cli_schema.rs`; search enumerates every declared group, spelling and alias without
+a separate command list. Detailed references use the same providers as native command help, without loading graphics.
+`api_help.rs` and `src/config/src/reference.rs` own the API/configuration texts; tests check them against real
+replies and the resolver. `src/protocol::worp` owns shared transport-independent
 commands/events for every client, plus unary request/reply conveniences; local sockets and SSH bind them to the
 existing v2 stream protocol. Device enrollment is explicit per authority user, shared across scopes and persisted
 independently of tabs; `docs/devices.md` defines membership and caller-side availability. Never add heartbeats or
 block the daemon on probes. `worminald install-on-remote` bootstraps new compatible nodes over SSH, adding the
 `worminal` command when the target has the graphics stack; see `docs/remote-install.md`. It must refuse existing
-installations/workspaces and preserve state. Version sync is the separate `worminald upgrade-remote`: views run it
-once per host when they connect, and it updates whichever side has the older Cargo version, pushing or pulling the
+installations/workspaces and preserve state. Version sync is also exposed as `worminald upgrade-remote`. Every GUI
+master connection first runs the shared
+update bootstrap immediately after SSH authentication, before config sync or any bridge/workspace operation.
+The same authenticated stream becomes the bridge only after synchronization succeeds; failures disconnect the view.
+It updates whichever side has the older Cargo version, pushing or pulling the
 daemon with atomic replacement so the running daemon's watch hands live shells to the new file. It needs the same
 CPU, sudo and /usr/local on both sides, and never touches a v1 workspace. It compares only the Cargo version, so
-bump it with any change remote daemons must receive; equal versions never upgrade. Every tab's environment carries
-`WORMINAL_DAEMON`, the serving worminald's path: an agent learns it is in a tab and where to start discovery.
+bump it with any change remote daemons must receive; equal versions never upgrade.
+`worminald --list-masters` passively lists successful outbound view routes and their live kernel leases, independently
+of explicit device enrollment. History starts at a valid catalog and survives disconnects; it never drives probes.
+Every tab's environment carries `WORMINAL_DAEMON`, the serving worminald's path: an agent learns it is in a tab
+and where to start discovery.
 Inspection never takes control or starts a daemon; one-shot input preserves the existing view/controller. Agent
 reads expose bounded history/batches and opaque observation revisions; deferred waits never block the service.
 Output cursors reference retained physical cells and report gaps across eviction/layout changes; bounded command
@@ -93,7 +104,8 @@ versioned C module ABIs with opaque handles and explicit callbacks; no Rust cont
 view pins its creating generation; generations share a persistent profile manager. Keep code resident for async
 callbacks and release unused contexts. Never let concurrent owners write the same browser profile. Candidate
 owners/profiles are isolated from the stable installation. Browser moves preserve live DOM within the local owner;
-remote workspaces share saved URLs only. Updated owners stage automatic window replacement; see
+remote workspaces share saved URLs only. Updated owners warm a provisional GUI, refresh a frozen descriptor-backed
+snapshot, and acknowledge commit before the donor retires; see
 `docs/window-updates.md`. Older owners need one manual restart.
 
 ## Rendering and panes

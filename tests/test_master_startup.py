@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import select
 import signal
+import json
 import subprocess
 import time
 import unittest
@@ -93,14 +94,14 @@ class MasterStartupTest(unittest.TestCase):
             ssh = base/'ssh'
             ssh.write_text('#!/usr/bin/python3\nimport os,sys,subprocess\n'
                 'from pathlib import Path\n'
-                # upgrade-remote is independent of the view authentication under test.
-                'if sys.argv[-1] not in ("--bridge","--bridge-existing"): sys.exit(1)\n'
                 f'with open({str(attempts)!r},"a") as f: f.write("attempt\\n")\n'
                 'if os.environ.get("SSH_ASKPASS_REQUIRE")!="force": sys.exit(255)\n'
                 'reply=subprocess.run([os.environ["SSH_ASKPASS"],"fixture password:"],capture_output=True)\n'
                 'if reply.returncode or reply.stdout!=b"fixture-secret\\n": sys.exit(255)\n'
                 f'Path({str(accepted)!r}).touch()\n'
-                f'os.execv({daemon!r},[{daemon!r},"--bridge"])\n')
+                f'sys.path.insert(0,{str(ROOT / "tests/fixtures")!r})\n'
+                'from master_ssh import run\n'
+                f'run({daemon!r})\n')
             ssh.chmod(0o700)
             env.update(GDK_BACKEND='x11', PATH=str(base)+os.pathsep+env['PATH'])
             env.pop('DBUS_SESSION_BUS_ADDRESS', None)
@@ -125,6 +126,10 @@ class MasterStartupTest(unittest.TestCase):
                 def key(wid, *keys):
                     subprocess.run(['xdotool','windowfocus','--sync',wid,'key','--clearmodifiers',*keys],
                                    env=env,check=True,stdout=log,stderr=log)
+                def connected():
+                    result = subprocess.run([daemon, 'api', 'list'], env=env,
+                                            capture_output=True, text=True, timeout=3)
+                    return result.returncode == 0 and bool(json.loads(result.stdout).get('tabs'))
                 try:
                     prompt = wait(prompts, 'initial password dialog')[0]
                     key(prompt, 'Escape')
@@ -145,6 +150,7 @@ class MasterStartupTest(unittest.TestCase):
                     key(prompt, 'Return')
                     wait(accepted.exists, 'password delivered privately to SSH')
                     wait(lambda: not prompts(), 'password dialog closes')
+                    wait(connected, 'version/config sync and master tab setup finish')
                     self.assertEqual(window(env,app),owner_window,'Authentication replaced the window')
                     self.assertNotIn('fixture-secret',log_path.read_text(errors='replace'))
                 finally:

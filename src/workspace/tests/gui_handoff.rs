@@ -6,6 +6,7 @@ use worminal_workspace::{
 
 fn window(selected: u32) -> Window {
     Window {
+        id: selected.max(1),
         request: Request {
             args: vec!["worminal".into(), "--attach".into()],
             directory: "/".into(),
@@ -30,6 +31,7 @@ fn transfers_multiple_windows_and_descriptor_ownership() {
     let lease = File::open("/dev/null").unwrap();
     let (mut sender, mut receiver) = UnixStream::pair().unwrap();
     let mut first = window(0x0300000b);
+    first.flags |= gui_handoff::PRIMARY_DETACHED;
     first.links.push(gui_handoff::Link {
         index: 3,
         request: window(0).request,
@@ -75,25 +77,66 @@ fn accepts_previous_single_link_handoff_version() {
         UnixListener::bind_addr(&SocketAddr::from_abstract_name(name.as_bytes()).unwrap()).unwrap();
     let lease = File::open("/dev/null").unwrap();
     let state = [window(7)];
-    let mut body = gui_handoff::encode(&state).unwrap();
-    body[..4].copy_from_slice(&1u32.to_be_bytes());
-    body.truncate(body.len() - 4); // v1 had no auxiliary-link count.
-    let (mut sender, mut receiver) = UnixStream::pair().unwrap();
-    worminal_workspace::rights::send_descriptors(
-        sender.as_fd(),
-        &[
-            listener.as_fd(),
-            lease.as_fd(),
-            state[0].request.output.as_fd(),
-        ],
-        b'G',
-    )
-    .unwrap();
-    sender
-        .write_all(&(body.len() as u32).to_be_bytes())
+    for version in [1u32, 2] {
+        let mut body = gui_handoff::encode(&state).unwrap();
+        body[..4].copy_from_slice(&version.to_be_bytes());
+        body.drain(8..12); // v1/v2 did not carry stable window identities.
+        if version == 1 {
+            body.truncate(body.len() - 4);
+        }
+        let (mut sender, mut receiver) = UnixStream::pair().unwrap();
+        worminal_workspace::rights::send_descriptors(
+            sender.as_fd(),
+            &[
+                listener.as_fd(),
+                lease.as_fd(),
+                state[0].request.output.as_fd(),
+            ],
+            b'G',
+        )
         .unwrap();
-    sender.write_all(&body).unwrap();
-    let (_, _, received) = gui_handoff::receive(&mut receiver).unwrap();
-    assert_eq!(received[0].selected, 7);
-    assert!(received[0].links.is_empty());
+        sender
+            .write_all(&(body.len() as u32).to_be_bytes())
+            .unwrap();
+        sender.write_all(&body).unwrap();
+        let (_, _, received) = gui_handoff::receive(&mut receiver).unwrap();
+        assert_eq!(received[0].selected, 7);
+        assert_eq!(received[0].id, 1);
+        assert!(received[0].links.is_empty());
+    }
+}
+
+#[test]
+fn configuration_identity_excludes_presentation_and_keeps_owner_membership() {
+    let mut state = window(7);
+    let configuration = gui_handoff::configuration(std::slice::from_ref(&state)).unwrap();
+    state.selected = 99;
+    state.geometry = [123, -456, 900, 700];
+    state.flags = gui_handoff::CLOSE_REQUESTED | 3;
+    state.zoom = 3.0;
+    assert_eq!(
+        gui_handoff::configuration(std::slice::from_ref(&state)).unwrap(),
+        configuration
+    );
+    let view = state.presentation();
+    let encoded = gui_handoff::encode_presentations(&[view]).unwrap();
+    assert_eq!(
+        gui_handoff::decode_presentations(&encoded).unwrap(),
+        vec![view]
+    );
+    assert!(gui_handoff::encode_presentations(&[view, view]).is_err());
+    state.flags |= gui_handoff::PRIMARY_DETACHED;
+    assert_ne!(
+        gui_handoff::configuration(std::slice::from_ref(&state)).unwrap(),
+        configuration
+    );
+    state.flags &= !gui_handoff::PRIMARY_DETACHED;
+    state.id += 1;
+    assert_ne!(
+        gui_handoff::configuration(std::slice::from_ref(&state)).unwrap(),
+        configuration
+    );
+    assert!(gui_handoff::encode(&[window(7), window(7)]).is_err());
+    state.id = 0;
+    assert!(gui_handoff::encode(&[state]).is_err());
 }

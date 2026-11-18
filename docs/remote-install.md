@@ -53,15 +53,20 @@ Use [`python3 manage.py upgrade HOST`](remote-upgrade.md) for nodes that already
 worminald upgrade-remote felix@disciple
 ```
 
-Views run this automatically, once per host per window owner, when they connect to a `--master`. It is symmetric:
+Every view connection to a `--master`, including reconnects and replacement owners, checks versions immediately
+after SSH authentication. The update finishes before configuration sync, bridge startup, workspace restoration,
+subscription or tab creation. These phases share one authenticated SSH connection; a failed update leaves the
+view disconnected and never opens a workspace. The GUI remains responsive and background retries never prompt.
+It is symmetric:
 the node with the older Cargo version is updated from the newer one. A newer local daemon is pushed over the same
 bootstrap as `install-on-remote`; a newer remote daemon is pulled through that bootstrap run locally. A daemon that
 predates `--version` counts as older. Equal versions change nothing.
 
 The daemon is a static musl executable, so it runs on any Linux of the same CPU regardless of either side's glibc.
 Older dynamically linked daemons only run on peers whose glibc is at least as new as their build host's; the run check
-refuses them ("cannot run here") and nothing is installed. When an automatic sync fails, the view shows a desktop
-notification with the error (independent of `update_notifications`) and the daemon log records the receipt.
+refuses them ("cannot run here") and nothing is installed. A failed sync keeps a view's master link closed: the
+connect helper reports the error to the view, which shows it in the window and once as a desktop notification
+(independent of `update_notifications`) while it retries. The daemon log records the receipt.
 
 The daemon and manual in `/usr/local` are replaced; a pushed upgrade also adds the graphical `worminal` command to a graphics-capable target that lacks it, but never replaces an existing launcher or modules (use `manage.py upgrade`). Replacement is a same-directory
 atomic rename after the same staging, checksum, run check and non-interactive sudo steps as installation, and both
@@ -72,3 +77,28 @@ Outcomes other than "already current" are logged to syslog.
 
 Run `python3 manage.py check-remote-install` for private mock-SSH/bootstrap and no-overwrite publication checks.
 It uses neither root nor live remote hosts.
+
+## Master connection history
+
+```sh
+worminald --list-masters
+worminald --list-masters --help
+```
+
+The command returns JSON, for example:
+
+```json
+{"ok":true,"masters":[{"endpoint":"felix@disciple","connected":true},{"endpoint":"old-node","connected":false}]}
+```
+
+Each row is an exact SSH route that a view successfully connected to. `connected` means at least one connection
+has received a valid master catalog and remains open; authentication or version sync alone is not enough.
+Multiple windows and aliases remain distinct where appropriate: one row per exact route, live until its last
+connection closes. Disconnecting, detaching, crashes and restarts retain the row with `connected: false`.
+
+History begins with this feature; earlier connections are not reconstructed from enrollment or config-sync files.
+Reconnect existing views to begin tracking them. History belongs to the local user and spans displays and workspace
+scopes sharing `$XDG_STATE_HOME` (default `~/.local/state`). It is stored under `worminal/masters` there; private
+connection leases release automatically on process exit. Recording failures go to syslog without breaking a view.
+Listing never starts a daemon, opens SSH, probes a host, enrolls devices or takes terminal control. Missing history
+returns an empty list without creating files; unreadable or malformed records return `ok: false` and exit status 1.

@@ -164,14 +164,37 @@ impl Viewport {
             .get(row)
             .is_some_and(|range| column >= range.first as usize && column < range.end as usize)
     }
-    /// Explicit OSC 8 target under a cell and the row-major cells its run covers.
+    /// Explicit OSC 8 target under a cell and its contiguous visible runs across rows.
     pub fn link_at(&self, column: usize, row: usize) -> Option<(&str, RangeInclusive<usize>)> {
         let columns = self.frame.columns as usize;
         let run = self.links.get(row)?.iter().find(|run| {
             (run.column as usize..(run.column + run.count) as usize).contains(&column)
         })?;
-        let first = row * columns + run.column as usize;
-        Some((&run.uri, first..=first + run.count as usize - 1))
+        let mut first = row * columns + run.column as usize;
+        let mut end = first + run.count as usize;
+        // ROW_LINKS splits a hyperlink into physical-row runs. Keep one hover binding for
+        // adjoining segments with the same authoritative URI; never reconstruct it from labels.
+        while first > 0 && first.is_multiple_of(columns) {
+            let previous = self
+                .links
+                .get(first / columns - 1)
+                .and_then(|runs| runs.last());
+            let Some(previous) = previous.filter(|previous| {
+                previous.column as usize + previous.count as usize == columns
+                    && previous.uri == run.uri
+            }) else {
+                break;
+            };
+            first -= previous.count as usize;
+        }
+        while end.is_multiple_of(columns) {
+            let next = self.links.get(end / columns).and_then(|runs| runs.first());
+            let Some(next) = next.filter(|next| next.column == 0 && next.uri == run.uri) else {
+                break;
+            };
+            end += next.count as usize;
+        }
+        Some((&run.uri, first..=end - 1))
     }
     pub fn release(&mut self) {
         self.live = false;
