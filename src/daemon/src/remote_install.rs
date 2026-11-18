@@ -211,7 +211,9 @@ fn desktop_bodies(layout: &[Value]) -> Option<Vec<(String, Body)>> {
 }
 
 /// Send this running daemon and manual to a peer whose bootstrap is waiting for the payload header.
-/// A peer that can run graphics and has no `worminal` command also gets ours, when this node has one.
+/// A peer that can run graphics also gets our `worminal` command and modules, when this node has
+/// them, so a version sync updates the whole installation; the peer's run check falls back to the
+/// daemon alone when they cannot load there (e.g. built against a newer glibc).
 fn push(
     stream: &mut UnixStream,
     reader: &mut BufReader<UnixStream>,
@@ -244,7 +246,7 @@ fn push(
         });
     }
     let wants = |key| ready.get(key).and_then(Value::as_bool);
-    if wants("graphics") == Some(true) && wants("desktop") == Some(false) {
+    if wants("graphics") == Some(true) {
         if let Some(desktop) = layout["desktop"]
             .as_array()
             .and_then(|layout| desktop_bodies(layout))

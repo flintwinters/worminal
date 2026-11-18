@@ -228,6 +228,15 @@ class RemoteCommandTest(unittest.TestCase):
         self.assertTrue(self.install_from(daemon, graphics=True, command='upgrade-remote')['desktop'])
         self.assertTrue((self.prefix/'bin/worminal').is_file())
 
+    def test_older_peer_desktop_is_replaced_by_the_push(self):
+        # Version sync updates the whole installation, so a peer's GUI never lags its daemon.
+        daemon = self.graphical_controller()
+        self.fake(self.prefix, '0.0.1')
+        (self.prefix/'bin/worminal').write_text('#!/bin/sh\necho old\n')
+        self.assertTrue(self.install_from(daemon, graphics=True, command='upgrade-remote')['desktop'])
+        self.assertEqual((self.prefix/'bin/worminal').read_bytes(), (daemon.parent/'worminal').read_bytes())
+        self.assertEqual((self.prefix/'lib/worminal'/MODULES[0]).read_bytes(), b'module ' + MODULES[0].encode())
+
     def fake(self, prefix, version):
         """An installed daemon stand-in: reports its version (or predates --version) and passes the run check."""
         for directory in ('bin', 'share', 'share/man', 'share/man/man1'):

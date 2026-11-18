@@ -68,7 +68,10 @@ refuses them ("cannot run here") and nothing is installed. A failed sync keeps a
 connect helper reports the error to the view, which shows it in the window and once as a desktop notification
 (independent of `update_notifications`) while it retries. The daemon log records the receipt.
 
-The daemon and manual in `/usr/local` are replaced; a pushed upgrade also adds the graphical `worminal` command to a graphics-capable target that lacks it, but never replaces an existing launcher or modules (use `manage.py upgrade`). Replacement is a same-directory
+The daemon and manual in `/usr/local` are replaced; on a graphics-capable target the sender's `worminal` command,
+modules, desktop entry and icon are installed or replaced too, unless the staged launcher cannot load them there,
+in which case only the daemon and manual are updated. Running windows hand off to the new files as after a local
+install. Replacement is a same-directory
 atomic rename after the same staging, checksum, run check and non-interactive sudo steps as installation, and both
 sides must be Linux on the same CPU. The running daemon sees its executable change and hands its shells to the new
 file without restarting them; connected views reconnect. A daemon too old to watch its executable keeps running
