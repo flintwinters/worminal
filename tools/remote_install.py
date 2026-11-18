@@ -14,6 +14,9 @@ from ctypes.util import find_library
 PREFIX = Path('/usr/local')
 LIMIT = 64 * 1024 * 1024
 HEADER_LIMIT = 16384
+# Members of the root group can already administer the host, so its group write does not widen trust.
+# Distributions ship such directories: Ubuntu's /usr/local/share/man/man1 is root:root 0775.
+TRUSTED_GROUP = 0
 
 
 def message(value):
@@ -127,6 +130,11 @@ def payload(layout, stream, value=None):
     return records
 
 
+def writable_by_others(info):
+    return (info.st_uid != os.geteuid() or info.st_mode & 0o002
+            or (info.st_mode & 0o020 and info.st_gid != TRUSTED_GROUP))
+
+
 def private_parent(path):
     # PREFIX is fixed, not supplied by the remote request. Walk its descendants with
     # directory descriptors so privileged publication cannot follow user-created symlinks.
@@ -137,7 +145,7 @@ def private_parent(path):
     fd = os.open(PREFIX, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         info = os.fstat(fd)
-        if info.st_uid != os.geteuid() or info.st_mode & 0o022:
+        if writable_by_others(info):
             raise ValueError('Installation prefix is writable by another user; refusing publication.')
         for component in path.parent.relative_to(PREFIX).parts:
             try:
@@ -148,7 +156,7 @@ def private_parent(path):
             os.close(fd)
             fd = next_fd
             info = os.fstat(fd)
-            if info.st_uid != os.geteuid() or info.st_mode & 0o022:
+            if writable_by_others(info):
                 raise ValueError('Installation directory is writable by another user; refusing publication.')
         return fd
     except BaseException:
@@ -305,17 +313,25 @@ def bootstrap(layout, source, replace=False):
         process = subprocess.Popen(root_command(layout, source, replace), stdin=subprocess.PIPE,
                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         try:
-            process.stdin.write((json.dumps({'files': records})+'\n').encode())
-            for path in paths:
-                with path.open('rb') as input_file:
-                    shutil.copyfileobj(input_file, process.stdin, 65536)
-            process.stdin.close()
+            try:
+                process.stdin.write((json.dumps({'files': records})+'\n').encode())
+                for path in paths:
+                    with path.open('rb') as input_file:
+                        shutil.copyfileobj(input_file, process.stdin, 65536)
+                process.stdin.close()
+            except BrokenPipeError:
+                # The publisher refused before consuming the payload; its reply below says why.
+                pass
             output = process.stdout.read(HEADER_LIMIT + 1)
-            if process.wait(timeout=30):
-                raise ValueError('Privileged publication failed; existing destinations were not replaced.')
-            result = json.loads(output)
-            if not result.get('ok'):
-                raise ValueError(result.get('error', 'Privileged publication failed.'))
+            failed = process.wait(timeout=30)
+            try:
+                result = json.loads(output)
+            except ValueError:
+                result = {}
+            if failed or not result.get('ok'):
+                # The publisher's own refusal is the actionable reason; keep it.
+                raise ValueError(result.get('error') or
+                                 'Privileged publication failed; existing destinations were not replaced.')
         finally:
             if process.poll() is None:
                 process.kill()

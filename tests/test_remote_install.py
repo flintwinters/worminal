@@ -66,6 +66,15 @@ class PublicationTest(unittest.TestCase):
             remote_install.publish(self.layout, io.BytesIO(payload(self.files)))
         self.assertEqual(list(outside.iterdir()), [])
 
+    def test_only_the_trusted_group_may_share_write_access_to_a_destination_directory(self):
+        (self.prefix / 'bin').mkdir()
+        (self.prefix / 'bin').chmod(0o775)
+        with self.assertRaisesRegex(ValueError, 'writable by another user'):
+            remote_install.publish(self.layout, io.BytesIO(payload(self.files)))
+        with patch.object(remote_install, 'TRUSTED_GROUP', os.getegid()):
+            remote_install.publish(self.layout, io.BytesIO(payload(self.files)))
+        self.assertEqual(self.targets()[0].read_bytes(), self.files[0][1])
+
     def test_concurrent_destination_is_preserved_and_our_partial_publication_is_removed(self):
         original = os.link
         def race(source, target, **kwargs):
