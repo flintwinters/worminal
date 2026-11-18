@@ -1,5 +1,5 @@
 """Automatic daemon replacement retains the endpoint, identities, PTYs, and recovery recipes."""
-from runtime import CHECKS
+from runtime import CHECKS, preloadable_daemon
 
 import os
 import signal
@@ -210,9 +210,11 @@ class UpgradeTest(HandoffFixture, unittest.TestCase):
         env = {'LD_PRELOAD': str(library), 'WORMINAL_TEST_UPGRADE_FAULT_FILE': str(marker),
                'WORMINAL_TEST_UPGRADE_FAULT_OPERATION':
                    'signals'}
+        daemon = preloadable_daemon()
+        self.replace(daemon)
         peer, env, parent = self.start(2, self.binary, env)
         tab, shell_pid = self.launch(peer, 2, 'setup-retained')
-        self.replace()
+        self.replace(daemon)
         deadline = time.monotonic() + 8
         output = b''
         while b'Daemon upgrade rejected; live tabs retained' not in output and time.monotonic() < deadline:
@@ -226,7 +228,7 @@ class UpgradeTest(HandoffFixture, unittest.TestCase):
         send(peer, 3, tab, b'setup-rejected', version=2)
         self.assert_screen(peer, 2, tab, 'setup-rejected')
         marker.unlink()
-        self.replace()
+        self.replace(daemon)
         replacement = self.completed(parent, env)
         self.assertEqual([row[0] for row in self.catalog(replacement)], [tab])
         send(replacement, 4, tab, number(40) + number(8), version=2)

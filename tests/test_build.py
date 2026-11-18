@@ -24,19 +24,35 @@ class BuildTests(unittest.TestCase):
         self.addCleanup(self.root_patch.stop)
 
     def test_release_build_does_not_construct_historical_applications(self):
-        with patch.object(build, "pkg_flags", return_value=[]), patch.object(build, "step"):
+        with patch.object(build, "pkg_flags", return_value=[]), patch.object(build, "step"), \
+                patch.object(build, "require_static") as static:
             builder = build.Builder()
             with (patch.object(builder, "program") as program, patch.object(builder, "rust_program") as rust,
                   patch.object(builder, "rust_library") as library):
-                for name in ("worminal", "worminald"):
-                    builder.target(name)
-                    rust.assert_called_with(name, "worminal-launcher" if name == "worminal" else "worminal-daemon")
+                builder.target("worminal")
+                rust.assert_called_with("worminal", "worminal-launcher")
+                builder.target("worminald")
+                rust.assert_called_with("worminald", "worminal-daemon", triple=build.DAEMON_TARGET)
+                static.assert_called_once()
                 program.assert_not_called()
                 self.assertIn(unittest.mock.call("build/lib/worminal/" + build.RUST_FRONTEND_MODULE,
                                                 "worminal-frontend"),
                               library.call_args_list)
                 self.assertIn(unittest.mock.call("build/lib/worminal/" + build.RUST_BROWSER_MODULE, "worminal-browser"),
                               library.call_args_list)
+
+    def test_release_daemon_must_not_need_a_program_interpreter(self):
+        # A dynamically linked daemon from a newer-glibc host could not run on an older-glibc peer during sync.
+        with self.assertRaisesRegex(RuntimeError, "dynamically linked"):
+            build.require_static(os.path.realpath("/bin/sh"))
+        header = bytearray(64 + 56)
+        header[:5] = b"\x7fELF\x02"
+        header[0x20:0x28] = (64).to_bytes(8, "little")
+        header[0x36:0x3a] = (56).to_bytes(2, "little") + (1).to_bytes(2, "little")
+        header[64:68] = (1).to_bytes(4, "little")  # PT_LOAD only: a static executable
+        static = self.root / "static"
+        static.write_bytes(header)
+        build.require_static(static)
 
     def test_independent_steps_run_together_and_every_one_finishes_before_a_failure_is_raised(self):
         # A serial implementation never gets three parties to the barrier, so it fails with BrokenBarrierError.

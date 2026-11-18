@@ -76,7 +76,10 @@ impl App {
         *link.connection.borrow_mut() = Some(connection);
         if let (Some(master), false) = (config.master.as_deref(), self.replacing.get()) {
             // Best effort: a failed helper must never affect the connection itself.
-            let _ = crate::startup::sync_versions(master);
+            let host = master.to_string_lossy().into_owned();
+            let _ = crate::startup::sync_versions(master, move |error| {
+                super::upgrade::alert(&format!("Could not sync versions with {host}: {error}"));
+            });
         }
         link.initial_claim.set(true);
         self.watch(index, &link);

@@ -3,6 +3,8 @@
 import json
 import tomllib
 import os
+import platform
+import struct
 from pathlib import Path
 import shlex
 import shutil
@@ -36,6 +38,28 @@ CPPFLAGS = ("-I.", "-Isrc", "-Isrc/terminal", "-Isrc/workspace",
             f'-DVERSION="{VERSION}"', "-D_XOPEN_SOURCE=600")
 PACKAGES = ()
 PROBES = {"latency_echo": ()}
+# Version sync copies the installed daemon between devices (docs/remote-install.md), so it must run on any
+# Linux with the same CPU. A dynamically linked daemon built against a newer glibc fails to load on an older
+# peer (Ubuntu glibc 2.44 -> Debian 2.36 did), so the daemon links musl statically. GUI binaries stay dynamic:
+# they need the host's GTK/WebKit and are never copied between distributions by sync.
+DAEMON_TARGET = f"{platform.machine()}-unknown-linux-musl"
+MUSL_CC = "musl-gcc"
+
+
+def engine_archive(triple=None):
+    """The C engine archive for a Rust target; src/engine-sys/build.rs selects the same path."""
+    return f"build/{triple}/libworminal_engine.a" if triple else "build/libworminal_engine.a"
+
+
+def require_static(path):
+    """Refuse a daemon that needs a program interpreter (ld.so), i.e. one bound to this host's libc."""
+    data = Path(path).read_bytes()
+    if data[:4] != b"\x7fELF" or data[4] != 2:
+        raise RuntimeError(f"{path}: expected a 64-bit ELF executable")
+    phoff, = struct.unpack_from("<Q", data, 0x20)
+    size, count = struct.unpack_from("<HH", data, 0x36)
+    if any(struct.unpack_from("<I", data, phoff + index * size)[0] == 3 for index in range(count)):  # PT_INTERP
+        raise RuntimeError(f"{path} is dynamically linked; the daemon must be static to sync across devices")
 
 
 def words(name, default=""):
@@ -148,17 +172,17 @@ class Builder:
         step(output, [*self.cc, *objects, *(self.libs if libs is None else libs)],
              [*objects, *link_dependencies])
 
-    def rust_artifact(self, package, binary=None, *, library=False):
+    def rust_artifact(self, package, binary=None, *, library=False, triple=None):
         if package in ("worminal-daemon", "worminal-frontend"):
-            self.target("build/libworminal_engine.a")
+            self.target(engine_archive(triple))
         invoke(["cargo", "build", "--locked", "--release", "--quiet", "-p", package,
+                *(["--target", triple] if triple else []),
                 *(["--lib"] if library else ["--bin", binary] if binary else [])])
         artifact = f"lib{package.replace('-', '_')}.so" if library else binary or package
-        return ROOT / "build/cargo/release" / artifact
+        return ROOT / "build/cargo" / (triple or "") / "release" / artifact
 
-    def rust_program(self, output, package, binary=None):
-        source = self.rust_artifact(package, binary) if binary else self.rust_artifact(package)
-        self.publish_rust(output, source)
+    def rust_program(self, output, package, binary=None, *, triple=None):
+        self.publish_rust(output, self.rust_artifact(package, binary, triple=triple))
 
     def rust_library(self, output, package):
         self.publish_rust(output, self.rust_artifact(package, library=True))
@@ -191,9 +215,15 @@ class Builder:
             self.rust_library(target, "worminal-frontend")
         elif target == "build/lib/worminal/" + RUST_BROWSER_MODULE:
             self.rust_library(target, "worminal-browser")
-        elif target == "build/libworminal_engine.a":
-            objects = [f"build/obj/engine/{Path(source).with_suffix('.o')}" for source in ENGINE]
-            concurrently(partial(step, obj, [*self.cc, *CPPFLAGS, *words("CPPFLAGS"), *words("CFLAGS", "-O3"),
+        elif target in (engine_archive(), engine_archive(DAEMON_TARGET)):
+            musl = target != engine_archive()
+            if musl and not shutil.which(MUSL_CC):
+                raise RuntimeError(f"{MUSL_CC} not found: install musl-tools (Debian/Ubuntu) and run "
+                                   f"`rustup target add {DAEMON_TARGET}` to build the static daemon")
+            cc = [MUSL_CC] if musl else self.cc
+            objects = [f"build/obj/engine{'-musl' if musl else ''}/{Path(source).with_suffix('.o')}"
+                       for source in ENGINE]
+            concurrently(partial(step, obj, [*cc, *CPPFLAGS, *words("CPPFLAGS"), *words("CFLAGS", "-O3"),
                                              "-ffunction-sections", "-fdata-sections",
                                              "-c", f"src/{source}"], [f"src/{source}"], depfile=True)
                          for obj, source in zip(objects, ENGINE))
@@ -212,7 +242,8 @@ class Builder:
             self.target("build/lib/worminal/" + RUST_FRONTEND_MODULE)
             self.rust_program(target, "worminal-launcher")
         elif target == "worminald":
-            self.rust_program(target, "worminal-daemon")
+            self.rust_program(target, "worminal-daemon", triple=DAEMON_TARGET)
+            require_static(runtime_binary(target, prefix=ROOT / "build"))
         elif target.removeprefix("build/") in PROBES and target.startswith("build/"):
             name = target.removeprefix("build/")
             packages = PROBES[name]

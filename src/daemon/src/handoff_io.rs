@@ -56,7 +56,7 @@ fn socket() -> io::Result<OwnedFd> {
 fn configure(fd: RawFd) -> io::Result<()> {
     process::peer_pid(fd)?;
     let timeout = libc::timeval {
-        tv_sec: HANDOFF_TIMEOUT_SECONDS as libc::time_t,
+        tv_sec: HANDOFF_TIMEOUT_SECONDS as _,
         tv_usec: 0,
     };
     for option in [libc::SO_RCVTIMEO, libc::SO_SNDTIMEO] {

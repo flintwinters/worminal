@@ -1,7 +1,7 @@
 """Preview protocol records, version coexistence and PTY backpressure limits."""
 from runtime import CHECKS
 
-from runtime import runtime_binary
+from runtime import preloadable_daemon, runtime_binary
 
 
 from functools import partial
@@ -347,7 +347,7 @@ class PreviewWorkspaceTest(unittest.TestCase):
             library, log = Path(directory) / "transport.so", Path(directory) / "send.log"
             subprocess.run(["cc", "-shared", "-fPIC", "-Wall", "-Wextra", "-o", str(library),
                             str(ROOT / "tests/service_transport.c"), "-ldl"], check=True)
-            self.daemon = subprocess.Popen([str(DAEMON), "--serve"],
+            self.daemon = subprocess.Popen([str(preloadable_daemon()), "--serve"],
                                            env={**self.env, "LD_PRELOAD": str(library),
                                                 "WORMINAL_TEST_SEND_LOG": str(log)},
                                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -808,7 +808,7 @@ class ServiceDiagnosticsTest(unittest.TestCase):
                 "WORMINAL_SHARED_SOCKET_SCOPE": f"diagnostics-{uuid.uuid4().hex}"}
 
     def test_event_loop_failure_records_operation_and_errno(self):
-        result = subprocess.run([str(DAEMON), "--serve"],
+        result = subprocess.run([str(preloadable_daemon()), "--serve"],
                                 env={**self.environment(), "WORMINAL_TEST_PPOLL_FAILURE": "1"},
                                 capture_output=True, text=True, timeout=3)
         self.assertEqual(result.returncode, 1)
@@ -820,7 +820,7 @@ class ServiceDiagnosticsTest(unittest.TestCase):
 
     def test_fatal_pty_failure_is_reported_to_journal_and_stderr(self):
         env = self.environment()
-        service = subprocess.Popen([str(DAEMON), "--serve"], env=env,
+        service = subprocess.Popen([str(preloadable_daemon()), "--serve"], env=env,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         try:
             deadline = time.monotonic() + 3

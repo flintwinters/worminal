@@ -58,6 +58,11 @@ the node with the older Cargo version is updated from the newer one. A newer loc
 bootstrap as `install-on-remote`; a newer remote daemon is pulled through that bootstrap run locally. A daemon that
 predates `--version` counts as older. Equal versions change nothing.
 
+The daemon is a static musl executable, so it runs on any Linux of the same CPU regardless of either side's glibc.
+Older dynamically linked daemons only run on peers whose glibc is at least as new as their build host's; the run check
+refuses them ("cannot run here") and nothing is installed. When an automatic sync fails, the view shows a desktop
+notification with the error (independent of `update_notifications`) and the daemon log records the receipt.
+
 The daemon and manual in `/usr/local` are replaced; a pushed upgrade also adds the graphical `worminal` command to a graphics-capable target that lacks it, but never replaces an existing launcher or modules (use `manage.py upgrade`). Replacement is a same-directory
 atomic rename after the same staging, checksum, run check and non-interactive sudo steps as installation, and both
 sides must be Linux on the same CPU. The running daemon sees its executable change and hands its shells to the new

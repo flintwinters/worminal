@@ -1091,6 +1091,7 @@ dependencies = [
  "gtk",
  "libc",
  "pango",
+ "serde_json",
  "worminal-browser-api",
  "worminal-config",
  "worminal-engine",

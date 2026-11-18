@@ -117,6 +117,14 @@ fn notice(text: &str) {
         app.message(Some(text));
     }
 }
+/// Version sync failures need the user's action (e.g. a peer's release cannot run here), so they reach
+/// the desktop regardless of update_notifications, which covers local window-update progress.
+pub(super) fn alert(text: &str) {
+    if let Some(app) = windows().first() {
+        app.notification_desktop
+            .show(super::notifications::Message::update(text), |_| {});
+    }
+}
 fn snapshot() -> io::Result<Vec<Window>> {
     windows()
         .into_iter()

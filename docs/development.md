@@ -19,6 +19,9 @@ Scrollback capacity is fixed by a process's first engine; other settings apply t
 Builds and installs auto-detect a headless host (no GTK/WebKit/Pango via pkg-config, or `WORMINAL_HEADLESS=1`; `0` forces
 graphics) and then build/install only `worminald` and the manual. Cargo output and generated files belong in
 `build/`; native executables use `build/bin` and modules use `build/lib/worminal`, matching installed prefixes.
+`worminald` is linked statically against musl so version sync can copy it between distributions; building it needs
+`musl-gcc` (Debian/Ubuntu `musl-tools`) and `rustup target add x86_64-unknown-linux-musl` (or the host CPU's triple).
+The build refuses a dynamically linked daemon. GUI binaries stay dynamic against the host's GTK/WebKit.
 `tools/paths.py` owns runtime/diagnostic path decisions. Diagnostics belong in `build/checks`; optional Python
 virtualenvs use `build/venv`. `clean` preserves diagnostics/virtualenvs while removing compiled output.
 Analysis/dependency configuration lives under `tools`. Management suppresses Python bytecode caches. Never test
