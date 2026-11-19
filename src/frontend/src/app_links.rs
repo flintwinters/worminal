@@ -13,6 +13,11 @@ use worminal_protocol::*;
 pub(super) const RETRY_INITIAL: Duration = Duration::from_millis(250);
 
 impl Link {
+    /// Nothing more to wait for: settled, or lost so that no reply can ever settle it. Updates
+    /// wait on this, never on an unreachable peer.
+    pub(super) fn quiet(&self) -> bool {
+        self.down() || self.settled()
+    }
     /// Lost and not yet recovered. Only a catalog resets the backoff, so this holds through the
     /// brief reconnect attempts of an unreachable peer too.
     pub(super) fn down(&self) -> bool {

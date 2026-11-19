@@ -139,7 +139,9 @@ fn barriers_complete(barriers: &[UpdateBarrier]) -> bool {
         .flat_map(|app| app.links())
         .collect::<Vec<_>>();
     barriers.iter().all(|(link, revision)| {
+        // A lost link cannot acknowledge a fence until its peer returns; it must not hold the update.
         !active.iter().any(|current| Rc::ptr_eq(current, link))
+            || link.down()
             || link.update_fences.borrow().complete(*revision)
     })
 }
@@ -653,7 +655,7 @@ impl Watcher {
             && barriers_complete(&transaction.barriers)
             && windows()
                 .iter()
-                .all(|app| app.links().iter().all(|link| link.settled()))
+                .all(|app| app.links().iter().all(|link| link.quiet()))
         {
             for app in windows() {
                 app.pause_update_reads();
