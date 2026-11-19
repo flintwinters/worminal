@@ -40,7 +40,7 @@ master did exactly this). Rules that keep every release updatable:
 - Wire message kinds and capability strings are frozen once shipped; new behavior gets a new number or capability.
   `shipped_wire_vocabulary_is_frozen` and `shipped_snapshot_identity_is_frozen` fail if either changes.
 - A donor wait may depend only on state a lost peer cannot hold hostage. Every readiness, fence and drain check
-  goes through `Link::quiet()` (settled or lost); any new wait needs the same treatment and a deadline.
+  goes through `Link::quiet()` (settled or lost), donor-side via `links_quiet()`; any new wait needs the same treatment and a deadline.
 
 Terminal processes remain in the daemon. The replacement attaches to existing tabs and never replays shell
 commands. Remote windows require a daemon supporting `--bridge-existing`; an older or missing remote service

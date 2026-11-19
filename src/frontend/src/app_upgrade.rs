@@ -132,6 +132,12 @@ pub(super) fn alert(text: &str) {
             .show(super::notifications::Message::update(text), |_| {});
     }
 }
+/// Every link has nothing more to wait for. The only link condition an update may wait on.
+pub(super) fn links_quiet() -> bool {
+    windows()
+        .iter()
+        .all(|app| app.links().iter().all(|link| link.quiet()))
+}
 pub(super) type UpdateBarrier = (Rc<super::Link>, u64);
 fn barriers_complete(barriers: &[UpdateBarrier]) -> bool {
     let active = windows()
@@ -633,11 +639,7 @@ impl Watcher {
         if matches!(transaction.phase, Phase::Preparing)
             && transaction.ready
             && self.broker.borrow().idle()
-            && windows().iter().all(|app| {
-                app.links()
-                    .iter()
-                    .all(|link| !link.initial_claim.get() && link.pending_tabs.get() == 0)
-            })
+            && links_quiet()
         {
             if target() != transaction.target {
                 return Err(io::Error::other("Installation changed during preparation"));
@@ -653,9 +655,7 @@ impl Watcher {
         }
         if matches!(transaction.phase, Phase::Draining)
             && barriers_complete(&transaction.barriers)
-            && windows()
-                .iter()
-                .all(|app| app.links().iter().all(|link| link.quiet()))
+            && links_quiet()
         {
             for app in windows() {
                 app.pause_update_reads();
