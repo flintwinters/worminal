@@ -16,7 +16,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use worminal_engine_sys::MODE_BUSY;
+use worminal_protocol::cell::MODE_BUSY;
 use worminal_protocol::worp::{
     commands::{CommandKind, OpenMode},
     events::{Catalog, Event, EventKind, TabKind},
@@ -818,7 +818,8 @@ impl App {
                 page.directory = record.directory.clone();
                 page.ssh_user = record.ssh_user.clone();
                 page.busy = record.mode & MODE_BUSY != 0;
-                page.background_job = record.mode & worminal_protocol::MODE_BACKGROUND_JOB != 0;
+                page.background_job =
+                    record.mode & worminal_protocol::cell::MODE_BACKGROUND_JOB != 0;
             }
         }
         {

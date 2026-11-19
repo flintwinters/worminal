@@ -308,7 +308,7 @@ impl Tab {
             crate::ssh::foreground_group(fd)
                 .is_some_and(|foreground| crate::jobs::background(pid, foreground))
         });
-        let bit = worminal_protocol::MODE_BACKGROUND_JOB;
+        let bit = worminal_protocol::cell::MODE_BACKGROUND_JOB;
         let next = if background {
             self.mode | bit
         } else {

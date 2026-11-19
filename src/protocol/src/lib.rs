@@ -2,6 +2,7 @@
 //! No native-layout structures are sent on the wire.
 use std::{io, mem};
 
+pub mod cell;
 mod constants;
 mod links;
 pub mod worp;

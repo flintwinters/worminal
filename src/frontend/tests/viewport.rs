@@ -1,8 +1,8 @@
-use worminal_engine_sys::{
-    ATTR_BLINK, ATTR_WDUMMY, ATTR_WIDE, ATTR_WRAP, WORMINAL_DEFAULT_BACKGROUND,
-    WORMINAL_DEFAULT_FOREGROUND,
-};
 use worminal_frontend::viewport::Viewport;
+use worminal_protocol::cell::{
+    ATTR_BLINK, ATTR_WDUMMY, ATTR_WIDE, ATTR_WRAP, COLOR_DEFAULT_BACKGROUND,
+    COLOR_DEFAULT_FOREGROUND,
+};
 use worminal_protocol::*;
 
 fn packet(kind: u32, values: &[u32]) -> Packet {
@@ -169,8 +169,8 @@ fn row_packet_cells(body: &mut Vec<u8>, text: &str, attributes: u32) {
         for value in [
             u32::from(rune),
             attributes,
-            WORMINAL_DEFAULT_FOREGROUND,
-            WORMINAL_DEFAULT_BACKGROUND,
+            COLOR_DEFAULT_FOREGROUND,
+            COLOR_DEFAULT_BACKGROUND,
         ] {
             body.extend_from_slice(&value.to_be_bytes());
         }

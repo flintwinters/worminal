@@ -10,7 +10,7 @@ use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
-use worminal_engine_sys::{WORMINAL_DEFAULT_BACKGROUND as BG, WORMINAL_DEFAULT_FOREGROUND as FG};
+use worminal_protocol::cell::{COLOR_DEFAULT_BACKGROUND as BG, COLOR_DEFAULT_FOREGROUND as FG};
 use worminal_protocol::{ATTENTION_DONE, ATTENTION_FAILED, ATTENTION_HELP};
 
 #[derive(Clone)]

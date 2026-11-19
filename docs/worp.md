@@ -19,6 +19,15 @@ The daemon owns the state; transports deliver the same contract without deciding
 Device membership is owned by the queried authority; see [the device registry](devices.md). Availability
 observations run on demand in the caller, so network waits never block a terminal service.
 
+## Frame stream
+
+Frontends render daemon viewports without linking the terminal engine. `worminal_protocol::cell` is the
+authority for the screen vocabulary: wire cell layout (rune, attributes, foreground, background as
+big-endian u32), `ATTR_*` flags, palette/truecolor encoding with default colors, and catalog `MODE_*` bits.
+The engine pins `engine.h` to these values at compile time, so native cells copy onto the wire unchanged.
+A focused viewer receives FRAME, row deltas and FRAME_FINISH; it keeps its own baseline and never parses
+terminal output. `worminald api help session` prints the same vocabulary for clients without this crate.
+
 ## Delivery adapters
 
 The session and one-shot adapters carry Worp over ordered, reliable `Read`/`Write` streams. The v2

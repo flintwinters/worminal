@@ -9,7 +9,7 @@ use crate::{
 use gtk::{gdk, prelude::*};
 use std::{cell::RefCell, io, rc::Rc, time::Duration};
 use worminal_engine::{paste_begin, paste_end, PasteFilter};
-use worminal_engine_sys::*;
+use worminal_protocol::cell::*;
 use worminal_protocol::worp::{
     commands::{CommandKind, Control, ControlAction, SelectionOperation},
     events::{Event, EventKind},

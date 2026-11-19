@@ -1072,6 +1072,7 @@ version = "0.9.21"
 dependencies = [
  "worminal-config",
  "worminal-engine-sys",
+ "worminal-protocol",
 ]
 
 [[package]]
@@ -1094,7 +1095,6 @@ dependencies = [
  "worminal-browser-api",
  "worminal-config",
  "worminal-engine",
- "worminal-engine-sys",
  "worminal-protocol",
  "worminal-workspace",
 ]

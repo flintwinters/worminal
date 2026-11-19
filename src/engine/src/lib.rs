@@ -3,6 +3,7 @@ mod ffi;
 pub mod keys;
 mod paste;
 mod selection;
+mod wire;
 pub use ffi::{Cell, Engine, Error, Event, Frame, OutputPosition, TransportState};
 pub use paste::{paste_begin, paste_end, PasteFilter};
 pub use selection::{Selection, SelectionRange};

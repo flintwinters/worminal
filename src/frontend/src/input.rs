@@ -3,7 +3,7 @@ use gtk::gdk::{
     keys::{constants as key, Key},
     ModifierType as Mod,
 };
-use worminal_engine_sys::*;
+use worminal_protocol::cell::*;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum KeyAction {

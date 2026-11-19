@@ -9,7 +9,6 @@ crate-type = ["rlib", "cdylib"]
 
 [dependencies]
 worminal-engine = { path = "../engine" }
-worminal-engine-sys = { path = "../engine-sys" }
 worminal-protocol = { path = "../protocol" }
 worminal-config = { path = "../config" }
 worminal-workspace = { path = "../workspace" }

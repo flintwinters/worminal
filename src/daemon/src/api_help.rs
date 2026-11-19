@@ -1,7 +1,7 @@
 //! `worminald api help TOPIC`: reference text an agent needs without docs or source. Wire numbers come
 //! from the protocol constants so this text cannot drift from the framing; JSON shapes are checked by
 //! tests/test_agent_api.py against real replies.
-use worminal_protocol::*;
+use worminal_protocol::{cell::*, *};
 use worminal_workspace::cli_schema::{Daemon, Topic as TopicName};
 
 #[path = "api_help_search.rs"]
@@ -178,6 +178,52 @@ const FEATURES: [(&str, u32); 8] = [
     ("PANES", WIRE_FEATURE_PANES),
 ];
 
+const ATTRIBUTES: [(&str, u32); 11] = [
+    ("BOLD", ATTR_BOLD),
+    ("FAINT", ATTR_FAINT),
+    ("ITALIC", ATTR_ITALIC),
+    ("UNDERLINE", ATTR_UNDERLINE),
+    ("BLINK", ATTR_BLINK),
+    ("REVERSE", ATTR_REVERSE),
+    ("INVISIBLE", ATTR_INVISIBLE),
+    ("STRUCK", ATTR_STRUCK),
+    ("WRAP", ATTR_WRAP),
+    ("WIDE", ATTR_WIDE),
+    ("WDUMMY", ATTR_WDUMMY),
+];
+
+const MODES: [(&str, u32); 21] = [
+    ("VISIBLE", MODE_VISIBLE),
+    ("FOCUSED", MODE_FOCUSED),
+    ("APPKEYPAD", MODE_APPKEYPAD),
+    ("MOUSEBTN", MODE_MOUSEBTN),
+    ("MOUSEMOTION", MODE_MOUSEMOTION),
+    ("REVERSE", MODE_REVERSE),
+    ("KBDLOCK", MODE_KBDLOCK),
+    ("HIDE", MODE_HIDE),
+    ("APPCURSOR", MODE_APPCURSOR),
+    ("MOUSESGR", MODE_MOUSESGR),
+    ("8BIT", MODE_8BIT),
+    ("BLINK", MODE_BLINK),
+    ("FBLINK", MODE_FBLINK),
+    ("FOCUS", MODE_FOCUS),
+    ("MOUSEX10", MODE_MOUSEX10),
+    ("MOUSEMANY", MODE_MOUSEMANY),
+    ("BRCKTPASTE", MODE_BRCKTPASTE),
+    ("NUMLOCK", MODE_NUMLOCK),
+    ("ALTSCROLL", MODE_ALTSCROLL),
+    ("BUSY", MODE_BUSY),
+    ("BACKGROUND_JOB", MODE_BACKGROUND_JOB),
+];
+
+fn flags(names: &[(&str, u32)]) -> String {
+    let flags: Vec<String> = names
+        .iter()
+        .map(|(name, bit)| format!("{name}=0x{bit:x}"))
+        .collect();
+    flags.join(" ")
+}
+
 fn table(rows: &[Row]) -> String {
     rows.iter()
         .map(|(name, id, body)| format!("  {name:<17}{id:>3}  {body}\n"))
@@ -185,10 +231,6 @@ fn table(rows: &[Row]) -> String {
 }
 
 fn session() -> String {
-    let features: Vec<String> = FEATURES
-        .iter()
-        .map(|(name, bit)| format!("{name}=0x{bit:x}"))
-        .collect();
     format!(
         "Worp session: worminald api --session (stdin/stdout), or ssh user@host worminald api --session.\n\
          It bridges to an existing daemon; none is started. Prefer the unary JSON commands (`worminald api help`)\n\
@@ -197,7 +239,11 @@ fn session() -> String {
          Packet: u32 version ({WIRE_VERSION}), u32 kind, u32 tab id (0 when none), u32 body length (at most {WIRE_MAX_BYTES}), body.\n\
          Flow: CAPABILITIES, ATTACH -> CATALOG; FOCUS tab,columns,rows -> FRAME, ROW/ROW_SPAN/COPY_ROWS/ROW_LINKS...,\n\
          FRAME_FINISH. Later frames are deltas against the previous one; a viewer keeps its own baseline.\n\
-         Cell: 16 bytes = u32 rune, u32 attributes, u32 foreground, u32 background (at most {WORKSPACE_MAX_COLS} columns, {WORKSPACE_MAX_ROWS} rows).\n\
+         Cell: 16 bytes = u32 rune (0 blank), u32 attributes, u32 foreground, u32 background (at most {WORKSPACE_MAX_COLS} columns, {WORKSPACE_MAX_ROWS} rows).\n\
+         Attributes: {attributes}.\n\
+         Colors: below {COLOR_COUNT} a palette index (0-255 xterm; default cursor {COLOR_DEFAULT_CURSOR}, foreground\n\
+         {COLOR_DEFAULT_FOREGROUND}, background {COLOR_DEFAULT_BACKGROUND}), else 0x{COLOR_TRUECOLOR:x}|0xRRGGBB.\n\
+         Catalog tab modes: {modes}.\n\
          Feature bits (daemon offers PANES, clients advertise the rest): {features}\n\n\
          Extended WORP payloads (all string fields are length-prefixed):\n\
          10: tail u32 (0 viewport), count u32, count tab u32s; envelope tab=0.\n\
@@ -209,7 +255,9 @@ fn session() -> String {
          17: since-cursor string, command-id decimal string (u64); exactly one nonempty/nonzero.\n\
          Client -> daemon (kind, id, body):\n{commands}\n\
          Daemon -> client:\n{events}",
-        features = features.join(" "),
+        features = flags(&FEATURES),
+        attributes = flags(&ATTRIBUTES),
+        modes = flags(&MODES),
         commands = table(&COMMANDS),
         events = table(&EVENTS),
     )
