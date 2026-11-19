@@ -12,6 +12,14 @@ use worminal_protocol::*;
 /// First reconnect delay; a link whose delay has grown has not recovered since it was lost.
 pub(super) const RETRY_INITIAL: Duration = Duration::from_millis(250);
 
+impl Link {
+    /// Lost and not yet recovered. Only a catalog resets the backoff, so this holds through the
+    /// brief reconnect attempts of an unreachable peer too.
+    pub(super) fn down(&self) -> bool {
+        self.retry_delay.get() != RETRY_INITIAL
+    }
+}
+
 impl App {
     pub(super) fn link(&self, index: u32) -> Option<Rc<Link>> {
         if index == 0 {
@@ -366,11 +374,7 @@ impl App {
     /// A reselect or catalog from a healthy link must not erase a disconnect another link still
     /// has: the report would flash for one frame and vanish while the retries continue.
     pub(super) fn clear_message(&self) {
-        if self
-            .links()
-            .iter()
-            .all(|link| link.retry_delay.get() == RETRY_INITIAL)
-        {
+        if self.links().iter().all(|link| !link.down()) {
             self.message(None);
         }
     }
@@ -394,7 +398,9 @@ impl App {
             }
         }
         if let Some(report) = &report {
-            if link.alerted.borrow().as_ref() != Some(report) {
+            if !report.starts_with(worminal_workspace::ssh::UNREACHABLE_REPORT)
+                && link.alerted.borrow().as_ref() != Some(report)
+            {
                 *link.alerted.borrow_mut() = Some(report.clone());
                 super::upgrade::alert(report);
             }

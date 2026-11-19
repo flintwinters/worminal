@@ -24,6 +24,11 @@ Windows containing multiple daemon hosts transfer each link and retain their sel
 The bounded handoff supports 16 additional hosts per window and 128 descriptors across all windows; exceeding
 these limits postpones replacement while existing windows and sessions remain available.
 
+An unreachable master never blocks replacement: a link that is lost and still backing off does not hold the
+candidate's readiness, and the candidate keeps retrying it. Its status stays in the status bar until the link
+recovers (a healthy link's catalog does not clear it). A peer that never answers SSH reports `Cannot reach HOST`
+and only a genuine version-sync failure raises a desktop notification. Remove a dead master with `worminald forget`.
+
 Terminal processes remain in the daemon. The replacement attaches to existing tabs and never replays shell
 commands. Remote windows require a daemon supporting `--bridge-existing`; an older or missing remote service
 postpones the update rather than restoring shells. The first upgrade from an owner predating this feature still

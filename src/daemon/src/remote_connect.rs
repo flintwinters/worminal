@@ -79,7 +79,7 @@ fn connect(arguments: &[OsString], report: &mut Option<File>) -> io::Result<i32>
     let mut result = remote_install::upgrade_stream(&mut stream).inspect_err(|error| {
         if let Some(report) = report {
             let _ = if error.kind() == io::ErrorKind::NotConnected {
-                writeln!(report, "Cannot reach {endpoint}: {error}")
+                writeln!(report, "{} {endpoint}: {error}", ssh::UNREACHABLE_REPORT)
             } else {
                 writeln!(report, "Version sync with {endpoint} failed: {error}")
             };
