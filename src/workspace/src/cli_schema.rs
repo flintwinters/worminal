@@ -85,6 +85,7 @@ commands! {
         Help ["--help", "-h"] "" => "Show native command discovery without starting a daemon.";
         Version ["--version"] "" => "Print the installed version.";
         Api ["api"] "COMMAND" => "Headless workspace commands; use api help for reference topics.";
+        Attach ["attach"] "[--master HOST] [--existing]" => "Frontend Worp session on stdin/stdout; see attach --help.";
         Config ["config"] "[OPTIONS]|sync SSH_ENDPOINT" => "Inspect, validate or synchronize runtime configuration.";
         InstallRemote ["install-on-remote"] "SSH_ENDPOINT" => "Bootstrap a new headless node over SSH.";
         UpgradeRemote ["upgrade-remote"] "SSH_ENDPOINT" => "Sync an older node with a newer peer.";
@@ -138,6 +139,10 @@ commands! {
         NoCheck ["--no-check"] "" => "List device enrollment without network probes.";
         Json ["--json"] "" => "Print structured doctor diagnostics.";
         End ["--"] "" => "End options before literal text or a program's arguments.";
+    }
+    AttachOption("worminald attach --help", "worminald attach") {
+        Master ["--master"] "HOST" => "Attach to this SSH node after version and configuration sync.";
+        Existing ["--existing"] "" => "Never start a daemon; fail when none is running.";
     }
     Config("worminald config --help", "worminald config") {
         Sync ["sync"] "[--prefer local|remote] SSH_ENDPOINT" => "Merge configuration per key with an SSH peer.";

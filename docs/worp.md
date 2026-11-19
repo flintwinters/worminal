@@ -48,6 +48,10 @@ semantics and stream framing are separate contracts.
 A persistent endpoint is `worminald api --session`: stdin receives v2-bound Worp commands and stdout emits
 Worp events. It bridges to an existing daemon without starting or restoring one. Over SSH use
 `ssh user@host worminald api --session`; the stream contents and semantic contract are identical.
+Frontends use `worminald attach [--master HOST] [--existing]`, the same stream: it starts the local
+daemon unless `--existing`, and with `--master` it first runs the authenticated version and
+configuration sync that GUI `--master` views use. A frontend therefore spawns one process and needs no
+SSH, socket or upgrade logic of its own.
 Normal terminal windows send `Command` and consume `Event` through this same binding. The private local
 GUI-owner upgrade/descriptor handoff channel is separate internal IPC and is not a node operation.
 

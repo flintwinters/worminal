@@ -494,9 +494,9 @@ class AgentApiTest(unittest.TestCase):
             self.assertIn(word, session)
 
     @contextmanager
-    def session(self):
-        process = subprocess.Popen([str(workspace.DAEMON), 'api', '--session'],
-                                   env=self.fixture.env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+    def session(self, *arguments, env=None):
+        process = subprocess.Popen([str(workspace.DAEMON), *(arguments or ('api', '--session'))],
+                                   env=env or self.fixture.env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE, bufsize=0)
         class Pipe:
             def sendall(self, data):
@@ -542,6 +542,48 @@ class AgentApiTest(unittest.TestCase):
             while len(self.api('list')['tabs']) != 1:
                 self.assertLess(time.monotonic(), deadline)
             self.assertTrue(self.api('read', existing)['ok'])
+
+    def test_attach_starts_the_daemon_and_encodes_semantic_keys_with_live_modes(self):
+        """attach is the frontend stream; KEY bytes follow the application's mode, not the view's."""
+        env = {**self.fixture.env, 'WORMINAL_SHARED_SOCKET_SCOPE': self.fixture.scope + '-attach'}
+        absent = subprocess.run([str(workspace.DAEMON), 'attach', '--existing'], env=env,
+                                stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
+        self.assertNotEqual(absent.returncode, 0)
+        usage = subprocess.run([str(workspace.DAEMON), 'attach', '--bogus'], env=env,
+                               capture_output=True, text=True, timeout=5)
+        self.assertEqual(usage.returncode, 2)
+        self.assertIn('--existing', usage.stderr)
+        def api(*args, success=True):
+            result = subprocess.run([str(workspace.DAEMON), 'api', *map(str, args)], env=env,
+                                    capture_output=True, text=True, timeout=5)
+            value = json.loads(result.stdout)
+            self.assertEqual(value['ok'], success, result.stderr + result.stdout)
+            return value
+        def stop():
+            subprocess.run([str(workspace.DAEMON), '--stop'], env=env, timeout=5)
+            deadline = time.monotonic() + 5
+            while api('doctor', '--json', success=False).get('code') != 'unavailable':
+                self.assertLess(time.monotonic(), deadline, 'attached daemon did not stop')
+                time.sleep(.02)
+        script = ('import os,tty; tty.setraw(0); os.write(1,b"\\x1b[?1hREADY"); '
+                  'exec("while True:\\n b=os.read(0,64)\\n os.write(1,b.hex().encode()+b\\"\\\\r\\\\n\\")")')
+        with self.session('attach', env=env) as session:
+            self.addCleanup(stop)
+            send(session, 19, version=2)
+            wait_kind(session, 7, version=2)
+            tab = api('open', '--', '/usr/bin/python3', '-c', script)['id']
+            deadline = time.monotonic() + 3
+            while 'READY' not in ''.join(api('read', tab)['lines']):
+                self.assertLess(time.monotonic(), deadline)
+                time.sleep(.01)
+            # Up under application cursor mode, then Ctrl-C, as an alternative frontend sends them.
+            send(session, 39, tab, number(0xff52) + number(0) + number(0) + number(0), version=2)
+            send(session, 39, tab, number(0x63) + number(4) + number(ord('c')) + number(0), version=2)
+            deadline = time.monotonic() + 3
+            while '03' not in ''.join(api('read', tab)['lines']):
+                self.assertLess(time.monotonic(), deadline)
+                time.sleep(.01)
+            self.assertIn('1b4f41', ''.join(api('read', tab)['lines']))
 
     def test_closing_a_tab_selects_its_left_neighbour_and_the_first_selects_its_right(self):
         """The catalog's fallback id is what views select after a close."""

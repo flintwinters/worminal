@@ -17,7 +17,11 @@ use worminal_protocol::worp::{
     session::Session,
 };
 use worminal_protocol::*;
-use worminal_workspace::{browser_target, cli_output, cli_schema::Daemon, socket};
+use worminal_workspace::{
+    browser_target, cli_output,
+    cli_schema::{AttachOption, Daemon},
+    socket,
+};
 
 fn connect(scope: &[u8]) -> io::Result<std::os::unix::net::UnixStream> {
     socket::connect(process::uid(), scope)
@@ -135,6 +139,49 @@ pub(crate) fn relay_observed(
     }
 }
 
+/// The public frontend entry point: the same framed v2 stream as `api --session`, locally or through
+/// the authenticated, version-synced master bridge that GUI `--master` views use.
+fn attach(scope: &[u8], arguments: &[OsString]) -> io::Result<i32> {
+    let (mut master, mut existing) = (None, false);
+    let mut arguments = arguments.iter();
+    while let Some(argument) = arguments.next() {
+        match argument.to_str().and_then(AttachOption::parse) {
+            Some(AttachOption::Master) if master.is_none() => {
+                master = Some(arguments.next().ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "--master needs an SSH endpoint.",
+                    )
+                })?);
+            }
+            Some(AttachOption::Existing) if !existing => existing = true,
+            _ => {
+                eprintln!("{}", cli_output::error(reference(Daemon::Attach)));
+                return Ok(2);
+            }
+        }
+    }
+    let Some(endpoint) = master else {
+        bridge(scope, existing)?;
+        return Ok(0);
+    };
+    let mode = if existing {
+        Daemon::BridgeExisting
+    } else {
+        Daemon::Bridge
+    };
+    crate::remote_connect::run(&[endpoint.clone(), mode.name().into()])
+}
+
+const ATTACH_HELP: &str = "\
+worminald attach [--master HOST] [--existing]
+Speak framed Worp v2 on stdin/stdout to this node's daemon, starting it (and restoring its tabs)
+unless --existing. With --master, first authenticate over SSH and sync versions and configuration,
+exactly as `worminal --master` views do, then bridge to that node's daemon. The stream is the same
+as `api --session`; alternative frontends need only worminal_protocol or `worminald api help session`.
+Under the INPUT feature send KEY/MOUSE/PASTE/WHEEL and the daemon encodes them with live modes.
+";
+
 fn request(scope: &[u8], kind: CommandKind) -> io::Result<i32> {
     let socket =
         connect(scope).map_err(|_| io::Error::other("No preview workspace service is running."))?;
@@ -169,6 +216,7 @@ fn detail(command: Daemon) -> Option<String> {
             crate::api::help(),
             crate::api_help::index()
         )),
+        Daemon::Attach => Some(format!("{ATTACH_HELP}{}", AttachOption::GROUP.reference())),
         Daemon::Config => Some(crate::config_cli::reference()),
         Daemon::ListMasters => Some(crate::master_history::HELP.to_owned()),
         Daemon::InstallRemote => Some(crate::remote_install::HELP.to_owned()),
@@ -249,6 +297,7 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
         Some(Daemon::ConnectMaster) => return crate::remote_connect::run(&arguments[2..]),
         Some(Daemon::InstallRemote) => return crate::remote_install::run(&arguments[2..], false),
         Some(Daemon::UpgradeRemote) => return crate::remote_install::run(&arguments[2..], true),
+        Some(Daemon::Attach) => return attach(scope, &arguments[2..]),
         Some(Daemon::Config) => return crate::config_cli::run(&arguments[2..]),
         Some(Daemon::ListMasters) => return crate::master_history::run(&arguments[2..]),
         _ => {}
@@ -307,6 +356,7 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
         "{}",
         cli_output::error(
             "usage: worminald api COMMAND (run 'worminald api help' for commands)\n\
+               worminald attach [--master HOST] [--existing]\n       \
                worminald --serve|--bridge|--stop\n\
                worminald --handin NAME | --handoff NAME\n       \
                worminald --new-browser-tab URL|FILE"

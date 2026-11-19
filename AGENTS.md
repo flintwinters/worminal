@@ -18,7 +18,7 @@ Rust owns the launcher, daemon, frontend, browser, configuration and transport a
 scrollback/reflow, selection and serialization; it never owns processes, descriptors, GUI objects or app policy.
 The frontend imports daemon viewports; it never parses output or recomputes history. `src/protocol` owns the
 screen and input vocabulary, so alternative frontends need no engine; the daemon encodes semantic input with
-live modes. GTK 3, Pango/Cairo and
+live modes, and `worminald attach [--master HOST]` is their one entry point. GTK 3, Pango/Cairo and
 WebKitGTK 4.1 support native Wayland and X11.
 
 The per-user v2 daemon owns ordered tabs and PTYs independently of windows. Local sockets and SSH bind the same

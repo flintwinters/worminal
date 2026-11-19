@@ -246,7 +246,8 @@ fn table(rows: &[Row]) -> String {
 fn session() -> String {
     format!(
         "Worp session: worminald api --session (stdin/stdout), or ssh user@host worminald api --session.\n\
-         It bridges to an existing daemon; none is started. Prefer the unary JSON commands (`worminald api help`)\n\
+         It bridges to an existing daemon; none is started. Frontends use worminald attach [--master HOST],\n\
+         the same stream that starts the daemon and syncs remote versions first. Prefer the unary JSON commands (`worminald api help`)\n\
          unless you need streaming frames or control of a tab; `read` returns the same viewport as text.\n\n\
          Stream: ordered bytes, all integers big-endian u32; string = u32 length + bytes.\n\
          Packet: u32 version ({WIRE_VERSION}), u32 kind, u32 tab id (0 when none), u32 body length (at most {WIRE_MAX_BYTES}), body.\n\
