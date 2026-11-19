@@ -223,6 +223,11 @@ fn v2_bytes_are_unchanged_and_malformed_commands_are_rejected() {
     );
     for (kind, body) in [
         (WIRE_RESIZE, vec![0; 7]),
+        // Bounds hold for every decoded command, not only the input kinds.
+        (
+            WIRE_RESIZE,
+            [0u32.to_be_bytes(), 24u32.to_be_bytes()].concat(),
+        ),
         (
             WIRE_SCROLL,
             [2u32.to_be_bytes(), 1u32.to_be_bytes()].concat(),
