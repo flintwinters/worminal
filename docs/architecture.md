@@ -35,7 +35,8 @@ and deliver them asynchronously on their desktop, including for remote tabs. OSC
 view; the daemon clears it when the shell regains the foreground. Busy tabs get a static gray background; live
 background or stopped shell jobs get cyan, observed by the daemon through shell child process groups. Click targets
 retain weak window ownership and use the existing tab-selection and platform activation paths. The Rust engine
-wrapper owns ordered terminal key encoding shared by the frontend and headless API; the frontend owns GUI shortcuts.
+wrapper owns key, mouse, paste and wheel encoding; the daemon applies it to semantic Worp input with live modes,
+and views use it for local effects and older daemons. The frontend owns GUI shortcuts.
 Shell defaults live with Rust PTY creation; browser defaults live with Rust target resolution. C headers retain only
 engine snapshot and module ABIs: `src/protocol` owns wire constants and framing, `src/workspace` owns
 recovery/handoff formats, and `src/gtk` contains module/D-Bus definitions and browser scripts/templates. The Rust

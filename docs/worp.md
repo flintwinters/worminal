@@ -28,6 +28,16 @@ The engine pins `engine.h` to these values at compile time, so native cells copy
 A focused viewer receives FRAME, row deltas and FRAME_FINISH; it keeps its own baseline and never parses
 terminal output. `worminald api help session` prints the same vocabulary for clients without this crate.
 
+## Semantic input
+
+Under the daemon's `INPUT` feature, views send what the user did, not escape sequences: KEY (X11 keysym,
+modifiers, character, Num Lock), MOUSE (button, cell, modifiers, press/release/motion), PASTE (chunks
+flagged begin/end) and WHEEL (notches, history lines, cell, modifiers). `worminal_protocol::input` owns the
+modifier masks and limits; `worminal_engine::input` encodes these commands against a tab's modes. The daemon
+encodes with its live modes, so a view never sends keys for modes it has not yet drawn. A view still
+encodes locally to decide its own effects (claiming, clearing selection, answering bells) and to fall back
+to INPUT/SCROLL for daemons without the feature. Text from an input method remains INPUT.
+
 ## Delivery adapters
 
 The session and one-shot adapters carry Worp over ordered, reliable `Read`/`Write` streams. The v2

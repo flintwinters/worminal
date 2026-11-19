@@ -16,7 +16,9 @@ Read the relevant [architecture and behavior contracts](docs/architecture.md) be
 Rust owns the launcher, daemon, frontend, browser, configuration and transport above a small C terminal engine.
 `src/terminal/engine.h` defines the engine API; generated Rust bindings follow it. C owns parsing, cells,
 scrollback/reflow, selection and serialization; it never owns processes, descriptors, GUI objects or app policy.
-The frontend imports daemon viewports; it never parses output or recomputes history. GTK 3, Pango/Cairo and
+The frontend imports daemon viewports; it never parses output or recomputes history. `src/protocol` owns the
+screen and input vocabulary, so alternative frontends need no engine; the daemon encodes semantic input with
+live modes. GTK 3, Pango/Cairo and
 WebKitGTK 4.1 support native Wayland and X11.
 
 The per-user v2 daemon owns ordered tabs and PTYs independently of windows. Local sockets and SSH bind the same

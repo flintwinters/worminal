@@ -1,7 +1,7 @@
 //! `worminald api help TOPIC`: reference text an agent needs without docs or source. Wire numbers come
 //! from the protocol constants so this text cannot drift from the framing; JSON shapes are checked by
 //! tests/test_agent_api.py against real replies.
-use worminal_protocol::{cell::*, *};
+use worminal_protocol::{cell::*, input::*, *};
 use worminal_workspace::cli_schema::{Daemon, Topic as TopicName};
 
 #[path = "api_help_search.rs"]
@@ -121,7 +121,7 @@ Keys: api help keys lists named keys and supported modifiers; several may follow
 /// Name, wire id, body layout.
 type Row = (&'static str, u32, &'static str);
 
-const COMMANDS: [Row; 21] = [
+const COMMANDS: [Row; 25] = [
     ("ATTACH", WIRE_ATTACH, "empty. Subscribe; the daemon answers CATALOG."),
     ("CAPABILITIES", WIRE_CAPABILITIES, "u32 feature bits. Send before ATTACH; unadvertised features keep the original encoding."),
     ("INPUT", WIRE_INPUT, "raw bytes for the PTY. Takes control of the tab (the unary `type` does not)."),
@@ -135,6 +135,10 @@ const COMMANDS: [Row; 21] = [
     ("BROWSER", WIRE_BROWSER, "string URL. Create a browser tab and subscribe."),
     ("BROWSER_NAVIGATE", WIRE_BROWSER_NAVIGATE, "string URL for an existing browser tab."),
     ("SELECT_ALL", WIRE_SELECT_ALL, "u32 generation, u32 operation (0 start, 1 next, 2 cancel). Selects screen plus scrollback."),
+    ("KEY", WIRE_KEY, "u32 X11 keysym, u32 modifiers, u32 character (Unicode scalar, 0 none), u32 Num Lock 0/1. The daemon encodes it with the tab's live modes; text without Ctrl/Alt belongs in INPUT (needs INPUT)."),
+    ("MOUSE", WIRE_MOUSE, "u32 button (0 left, 1 middle, 2 right, 3 none), column, row, modifiers, action (0 press, 1 release, 2 motion); reported only as the application's mouse mode requests (needs INPUT)."),
+    ("PASTE", WIRE_PASTE, "u32 flags (1 begin, 2 end), then at most 32768 raw bytes; filtered and bracketed for the live mode. Send one paste as begin..end chunks, never splitting CR LF (needs INPUT)."),
+    ("WHEEL", WIRE_WHEEL, "u32 up 0/1, notches (at most 256), history lines, column, row, modifiers: mouse reports, alternate-screen arrows or history scrolling, by live mode (needs INPUT)."),
     ("CONTROL", WIRE_CONTROL, "u32 action: 0 toggle printer, 1 print screen, 2 send break."),
     ("FOCUS_STATE", WIRE_FOCUS_STATE, "u32 0/1: whether the window showing this tab has desktop focus."),
     ("ATTENTION", WIRE_ATTENTION, "optional u32 severity 1 done, 2 needs the user, 3 failed. Needs the ATTENTION bit."),
@@ -167,7 +171,7 @@ const EVENTS: [Row; 19] = [
     ("COMMAND_DONE", WIRE_COMMAND_DONE, "empty (end of a handoff or browser replacement)."),
 ];
 
-const FEATURES: [(&str, u32); 8] = [
+const FEATURES: [(&str, u32); 9] = [
     ("COPY_ROWS", WIRE_FEATURE_COPY_ROWS),
     ("SELECT_ALL", WIRE_FEATURE_SELECT_ALL),
     ("ROW_SPAN", WIRE_FEATURE_ROW_SPAN),
@@ -176,6 +180,7 @@ const FEATURES: [(&str, u32); 8] = [
     ("NOTIFICATIONS", WIRE_FEATURE_NOTIFICATIONS),
     ("ATTENTION", WIRE_FEATURE_ATTENTION),
     ("PANES", WIRE_FEATURE_PANES),
+    ("INPUT", WIRE_FEATURE_INPUT),
 ];
 
 const ATTRIBUTES: [(&str, u32); 11] = [
@@ -216,6 +221,14 @@ const MODES: [(&str, u32); 21] = [
     ("BACKGROUND_JOB", MODE_BACKGROUND_JOB),
 ];
 
+const MODIFIERS: [(&str, u32); 5] = [
+    ("SHIFT", MOD_SHIFT),
+    ("CONTROL", MOD_CONTROL),
+    ("ALT", MOD_ALT),
+    ("MOD3", MOD_MOD3),
+    ("SUPER", MOD_SUPER),
+];
+
 fn flags(names: &[(&str, u32)]) -> String {
     let flags: Vec<String> = names
         .iter()
@@ -244,7 +257,8 @@ fn session() -> String {
          Colors: below {COLOR_COUNT} a palette index (0-255 xterm; default cursor {COLOR_DEFAULT_CURSOR}, foreground\n\
          {COLOR_DEFAULT_FOREGROUND}, background {COLOR_DEFAULT_BACKGROUND}), else 0x{COLOR_TRUECOLOR:x}|0xRRGGBB.\n\
          Catalog tab modes: {modes}.\n\
-         Feature bits (daemon offers PANES, clients advertise the rest): {features}\n\n\
+         Feature bits (daemon offers PANES and INPUT, clients advertise the rest): {features}\n\
+         Input modifiers (X11 masks): {modifiers}.\n\n\
          Extended WORP payloads (all string fields are length-prefixed):\n\
          10: tail u32 (0 viewport), count u32, count tab u32s; envelope tab=0.\n\
          11: guard string (empty unguarded), count u32, count key-name strings; envelope tab=target.\n\
@@ -258,6 +272,7 @@ fn session() -> String {
         features = flags(&FEATURES),
         attributes = flags(&ATTRIBUTES),
         modes = flags(&MODES),
+        modifiers = flags(&MODIFIERS),
         commands = table(&COMMANDS),
         events = table(&EVENTS),
     )

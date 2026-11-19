@@ -4,6 +4,7 @@ use std::{io, mem};
 
 pub mod cell;
 mod constants;
+pub mod input;
 mod links;
 pub mod worp;
 pub use constants::*;

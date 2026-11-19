@@ -180,17 +180,11 @@ impl Service {
                     )));
                 };
                 // Multiline input needs bracketed paste: ordinary LF would submit commands.
-                let bracketed = self.tabs[index].mode & worminal_engine::MODE_BRCKTPASTE != 0;
-                if !bracketed && text.contains(['\n', '\r']) {
+                let mode = self.tabs[index].mode;
+                if mode & worminal_engine::MODE_BRCKTPASTE == 0 && text.contains(['\n', '\r']) {
                     return Ok(Some(failure("Multiline stdin requires bracketed paste mode; use explicit key Enter to submit.")));
                 }
-                let mut bytes = text.as_bytes().to_vec();
-                let length = worminal_engine::PasteFilter::new(bracketed).filter(&mut bytes);
-                bytes.truncate(length);
-                if bracketed {
-                    bytes.splice(0..0, worminal_engine::paste_begin().iter().copied());
-                    bytes.extend_from_slice(worminal_engine::paste_end());
-                }
+                let mut bytes = worminal_engine::paste_envelope(text.as_bytes(), true, true, mode);
                 if let Request::PasteKeys { names, .. } = request {
                     if let Err(message) = append_keys(&mut bytes, names, self.tabs[index].mode) {
                         return Ok(Some(failure(message)));

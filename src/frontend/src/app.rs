@@ -16,6 +16,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use worminal_engine::input::Encoded;
 use worminal_protocol::cell::MODE_BUSY;
 use worminal_protocol::worp::{
     commands::{CommandKind, OpenMode},
@@ -522,12 +523,14 @@ impl App {
             return;
         }
         match action {
-            Action::Send(kind) => {
+            Action::Send(kind) => self.send(id, kind),
+            Action::Input(kind, encoded) => {
                 // Keys, paste and mouse reports answer a bell; focus reports use FocusState.
-                if matches!(kind, CommandKind::Input { .. }) {
+                if matches!(encoded, Encoded::Input(_)) {
                     self.strip_of(id).answer(id);
                 }
-                self.send(id, kind)
+                let semantic = self.features(id) & WIRE_FEATURE_INPUT != 0;
+                self.send(id, if semantic { kind } else { encoded.command() })
             }
             Action::Claim => self.activate(id),
             Action::CycleTab(previous) => self.cycle_tab(previous),

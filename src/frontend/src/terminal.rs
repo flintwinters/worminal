@@ -8,10 +8,11 @@ use crate::{
 };
 use gtk::{gdk, prelude::*};
 use std::{cell::RefCell, io, rc::Rc, time::Duration};
-use worminal_engine::{paste_begin, paste_end, PasteFilter};
+use worminal_engine::{input::Encoded, paste_chunks};
 use worminal_protocol::cell::*;
+use worminal_protocol::input::{MOD_KEYS, MOUSE_NONE};
 use worminal_protocol::worp::{
-    commands::{CommandKind, Control, ControlAction, SelectionOperation},
+    commands::{CommandKind, Control, ControlAction, MouseAction, SelectionOperation},
     events::{Event, EventKind},
 };
 use worminal_protocol::{WORKSPACE_MAX_COLS, WORKSPACE_MAX_ROWS};
@@ -22,6 +23,9 @@ mod scroll;
 #[derive(Debug)]
 pub enum Action {
     Send(CommandKind),
+    /// Input for the application, with the view's encoding of it for daemons that predate
+    /// `WIRE_FEATURE_INPUT`; newer daemons encode the command against their live modes.
+    Input(CommandKind, Encoded),
     Claim,
     CycleTab(bool),
     Resized(u32, u32),
@@ -500,29 +504,41 @@ impl Inner {
         self.damage(&damage);
     }
     fn input(self: &Rc<Self>, bytes: &[u8]) {
-        if self.state.borrow().mode & MODE_KBDLOCK != 0 {
-            return;
-        }
-        self.prepare();
-        self.clear_all_selection();
-        crate::timing("input");
-        let (damage, claim) = {
-            let mut state = self.state.borrow_mut();
-            let damage = state.viewport.clear_selection();
-            state.input_pending |= !bytes.is_empty();
-            (damage, !state.viewport.live())
-        };
-        match damage {
-            Ok(damage) => self.damage(&damage),
-            Err(error) => self.error(error),
-        }
-        if claim {
-            self.emit(Action::Claim);
-        }
-        self.send(CommandKind::Input {
+        self.deliver(CommandKind::Input {
             bytes: bytes.to_vec(),
             control: Control::Acquire,
         });
+    }
+    /// Delivers application input. The view encodes it with the modes it draws only to decide
+    /// its own effects: the daemon's live modes may already differ.
+    fn deliver(self: &Rc<Self>, kind: CommandKind) {
+        let encoded = {
+            let state = self.state.borrow();
+            let alternate = state.viewport.frame().alternate != 0;
+            worminal_engine::input::encode(&kind, state.mode, alternate)
+        };
+        let Some(encoded) = encoded else {
+            return;
+        };
+        if let Encoded::Input(bytes) = &encoded {
+            self.prepare();
+            self.clear_all_selection();
+            crate::timing("input");
+            let (damage, claim) = {
+                let mut state = self.state.borrow_mut();
+                let damage = state.viewport.clear_selection();
+                state.input_pending |= !bytes.is_empty();
+                (damage, !state.viewport.live())
+            };
+            match damage {
+                Ok(damage) => self.damage(&damage),
+                Err(error) => self.error(error),
+            }
+            if claim {
+                self.emit(Action::Claim);
+            }
+        }
+        self.emit(Action::Input(kind, encoded));
     }
     fn key(self: &Rc<Self>, event: &gdk::EventKey) -> bool {
         self.prepare();
@@ -540,7 +556,7 @@ impl Inner {
                 .press(event.keyval(), event.state(), mode, rows)
         };
         match action {
-            KeyAction::Bytes(bytes) => self.input(&bytes),
+            KeyAction::Send(kind) => self.deliver(kind),
             KeyAction::PastePrimary => self.paste(gdk::SELECTION_PRIMARY),
             KeyAction::Scroll { up, rows } => self.send(CommandKind::Scroll { up, amount: rows }),
             KeyAction::Control(value) => self.send(CommandKind::Control(match value {
@@ -647,17 +663,15 @@ impl Inner {
             }
         });
     }
-    fn paste_bytes(self: &Rc<Self>, mut bytes: Vec<u8>) {
-        let bracketed = self.state.borrow().mode & MODE_BRCKTPASTE != 0;
-        let length = PasteFilter::new(bracketed).filter(&mut bytes);
-        if bracketed {
-            self.input(paste_begin());
-        }
-        for chunk in bytes[..length].chunks(32768) {
-            self.input(chunk);
-        }
-        if bracketed {
-            self.input(paste_end());
+    fn paste_bytes(self: &Rc<Self>, bytes: Vec<u8>) {
+        let chunks = paste_chunks(&bytes);
+        let last = chunks.len() - 1;
+        for (index, chunk) in chunks.into_iter().enumerate() {
+            self.deliver(CommandKind::Paste {
+                bytes: chunk.to_vec(),
+                begin: index == 0,
+                end: index == last,
+            });
         }
     }
     fn focus(self: &Rc<Self>, focused: bool) {
@@ -744,29 +758,24 @@ impl Inner {
                 }
             }
         }
-        let bytes = {
+        // An application reporting the mouse owns unshifted buttons, even when the daemon's
+        // live modes encode no report for this one.
+        let reported = {
             let mut state = self.state.borrow_mut();
-            if state.mode & MODE_MOUSE != 0 && !shift {
+            let reported = state.mode & MODE_MOUSE != 0 && !shift;
+            if reported {
                 state.mouse.button = if release { 0 } else { event.button() };
-                Some(event.button().checked_sub(1).and_then(|button| {
-                    state.mouse.report(
-                        state.mode,
-                        state.viewport.live(),
-                        button,
-                        x,
-                        y,
-                        event.state(),
-                        release,
-                        false,
-                    )
-                }))
-            } else {
-                None
             }
+            reported
         };
-        if let Some(bytes) = bytes {
-            if let Some(bytes) = bytes {
-                self.input(&bytes);
+        if reported {
+            let action = if release {
+                MouseAction::Release
+            } else {
+                MouseAction::Press
+            };
+            if let Some(button) = event.button().checked_sub(1) {
+                self.deliver(mouse(button, (x, y), event.state(), action));
             }
             return;
         }
@@ -857,22 +866,13 @@ impl Inner {
             if state.mode & MODE_MOUSE != 0
                 && !event.state().contains(gdk::ModifierType::SHIFT_MASK)
             {
-                let bytes = if state.mouse.last != (x, y) {
-                    state.mouse.report(
-                        state.mode,
-                        state.viewport.live(),
-                        state.mouse.button.checked_sub(1).unwrap_or(3),
-                        x,
-                        y,
-                        event.state(),
-                        false,
-                        true,
-                    )
-                } else {
-                    None
-                };
+                // Motion reports only reach a live view's application.
+                let report = (state.mouse.last != (x, y) && state.viewport.live()).then(|| {
+                    let button = state.mouse.button.checked_sub(1).unwrap_or(MOUSE_NONE);
+                    mouse(button, (x, y), event.state(), MouseAction::Motion)
+                });
                 state.mouse.last = (x, y);
-                (bytes, None)
+                (report, None)
             } else if state.selecting {
                 (
                     None,
@@ -889,8 +889,8 @@ impl Inner {
                 (None, None)
             }
         };
-        if let Some(bytes) = result.0 {
-            self.input(&bytes);
+        if let Some(report) = result.0 {
+            self.deliver(report);
         }
         if let Some(result) = result.1 {
             match result {
@@ -943,5 +943,21 @@ impl Inner {
             let cell = self.state.borrow().pointer.unwrap_or_default();
             self.scroll(up, lines, lines, cell, gdk::ModifierType::empty());
         }
+    }
+}
+
+/// A mouse command for cell `(x, y)`; pointer coordinates are clamped to the grid.
+fn mouse(
+    button: u32,
+    (x, y): (i32, i32),
+    state: gdk::ModifierType,
+    action: MouseAction,
+) -> CommandKind {
+    CommandKind::Mouse {
+        button,
+        column: x.max(0) as u32,
+        row: y.max(0) as u32,
+        modifiers: state.bits() & MOD_KEYS,
+        action,
     }
 }
