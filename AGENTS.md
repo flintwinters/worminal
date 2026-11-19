@@ -69,7 +69,6 @@ Public contracts and subsystem details:
 
 Audit input, rendering, output delivery and view switching until further gains require correctness, resource or
 compatibility compromises. Measure private software presentation; do not infer physical display latency.
-Treat remote Codex scrolling separately from tested wheel modes.
 
 Remote daemons older than 2fc0825 can resend idle full frames at link rate; upgrade them before metered use.
 Negotiated focused frames suppress hidden-tab traffic. Use syslog lifecycle/event-loop/fatal terminal diagnostics
