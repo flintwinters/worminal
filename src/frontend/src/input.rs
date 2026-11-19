@@ -76,9 +76,8 @@ pub struct Mouse {
     pub last: (i32, i32),
 }
 /// Browser-style middle-click autoscroll: the pointer's distance from the click anchor sets the
-/// scroll speed, with a dead zone around the anchor. Speed accelerates with distance and has no
-/// fixed ceiling: once the button is released the pointer cannot report beyond the widget, so the
-/// widget's height already bounds it, and a linear or capped curve made long histories slow.
+/// scroll speed linearly, with a dead zone around the anchor. There is no fixed ceiling: speed keeps
+/// following the pointer as far as it can report.
 pub struct Autoscroll {
     anchor: f64,
     pub y: f64,
@@ -87,10 +86,8 @@ pub struct Autoscroll {
 }
 impl Autoscroll {
     const DEAD_ZONE: f64 = 12.0;
-    /// Lines per second for each line height of pointer distance beyond the dead zone, near it.
+    /// Lines per second for each line height of pointer distance beyond the dead zone.
     const GAIN: f64 = 4.0;
-    /// Line heights of distance at which the rate has doubled over the linear `GAIN`.
-    const ACCELERATION: f64 = 4.0;
     pub fn new(y: f64) -> Self {
         Self {
             anchor: y,
@@ -106,8 +103,7 @@ impl Autoscroll {
             self.carry = 0.0;
             return None;
         }
-        let distance = beyond / line_height.max(1.0);
-        let rate = Self::GAIN * distance * (1.0 + distance / Self::ACCELERATION);
+        let rate = beyond / line_height.max(1.0) * Self::GAIN;
         self.carry += rate * seconds * offset.signum();
         let lines = self.carry.abs().floor();
         self.carry -= lines * self.carry.signum();
@@ -132,7 +128,7 @@ mod tests {
         scroll.y = 108.0;
         assert_eq!(scroll.step(1.0, 16.0), None, "inside the dead zone");
         scroll.y = 100.0 + 12.0 + 32.0;
-        assert_eq!(scroll.step(1.0, 16.0), Some((false, 12)));
+        assert_eq!(scroll.step(1.0, 16.0), Some((false, 8)));
         scroll.y = 100.0 - 12.0 - 16.0;
         assert_eq!(scroll.step(0.1, 16.0), None, "fractions carry");
         assert_eq!(scroll.step(0.2, 16.0), Some((true, 1)));
@@ -142,12 +138,12 @@ mod tests {
             None,
             "returning to the anchor stops"
         );
-        // Forty line heights away: far beyond the old fixed 80 lines per second.
+        // Forty line heights away: past the former fixed ceiling of 80 lines per second.
         scroll.y = 100.0 + 12.0 + 16.0 * 40.0;
         assert_eq!(
             scroll.step(1.0, 16.0),
-            Some((false, 1760)),
-            "speed accelerates without a ceiling"
+            Some((false, 160)),
+            "speed stays linear without a ceiling"
         );
     }
 
