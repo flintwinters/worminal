@@ -29,6 +29,19 @@ candidate's readiness, and the candidate keeps retrying it. Its status stays in 
 recovers (a healthy link's catalog does not clear it). A peer that never answers SSH reports `Cannot reach HOST`
 and only a genuine version-sync failure raises a desktop notification. Remove a dead master with `worminald forget`.
 
+## Updates must stay possible
+
+The donor of the next update is the binary running now, and its handoff code cannot be replaced except by the
+handoff itself. A donor bug can therefore make updates impossible until its owner is restarted (an unreachable
+master did exactly this). Rules that keep every release updatable:
+
+- Receivers read every layout any release has sent. Snapshot versions grow additively
+  (`HANDOFF_UPGRADE_MIN_VERSION..=HANDOFF_UPGRADE_VERSION`, `gui_handoff` `1..=VERSION`); never raise the minimum.
+- Wire message kinds and capability strings are frozen once shipped; new behavior gets a new number or capability.
+  `shipped_wire_vocabulary_is_frozen` and `shipped_snapshot_identity_is_frozen` fail if either changes.
+- A donor wait may depend only on state a lost peer cannot hold hostage. Every readiness, fence and drain check
+  goes through `Link::quiet()` (settled or lost); any new wait needs the same treatment and a deadline.
+
 Terminal processes remain in the daemon. The replacement attaches to existing tabs and never replays shell
 commands. Remote windows require a daemon supporting `--bridge-existing`; an older or missing remote service
 postpones the update rather than restoring shells. The first upgrade from an owner predating this feature still
