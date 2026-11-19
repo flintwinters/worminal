@@ -20,6 +20,7 @@ including headless remote daemons.
 worminal:
   update_notifications: true   # desktop notification when a window update is postponed, pending or failed
   group_tabs_by_title: true    # when a tab's name changes, the daemon moves it beside a tab with the same name
+  wsl_window_frame: true       # under WSL, restyle the Windows-drawn window frame to the terminal background
 ```
 
 Supported Alacritty keys: `font` (`size`, `normal.family`, `offset.y`, `glyph_offset.y`), `colors` (`primary`,
@@ -53,5 +54,9 @@ daemon log.
   `--json` prints the resolved settings and `--json --defaults` the built-in values.
 - Appearance applies to windows started afterwards. Scrollback capacity is fixed when a process creates its first
   terminal, so changing `scrolling.history` needs a daemon restart (shells are preserved by the usual handoff).
+- Under WSL (WSLg), Windows draws each window's frame. With `worminal.wsl_window_frame` (default on) a new window
+  briefly carries a unique title while a hidden `powershell.exe` (WSL interop) finds it and has DWM recolor its
+  caption and text to the terminal colors and hide the border, then the real title returns. It needs Windows 11
+  (build 22000+); failures leave the stock frame. Nothing runs outside WSL. Not verified on a real WSLg host yet.
 - `src/config` is the only resolver. Python tooling (explorer font) calls
   `worminald config --json` instead of reimplementing the rules.

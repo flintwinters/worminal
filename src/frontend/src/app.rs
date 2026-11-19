@@ -362,7 +362,7 @@ impl App {
         window.set_title(&config.title);
         window.set_default_size(1000, 600);
         window.set_resizable(!config.fixed);
-        window
+        crate::wsl_frame::style(window)
     }
     fn open_mode(config: Config, staged: bool, primary_detached: bool) -> io::Result<Rc<Self>> {
         // New launches may arrive in an existing GTK owner after service loss. The shared

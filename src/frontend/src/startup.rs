@@ -19,6 +19,16 @@ pub fn daemon(path: &Path) -> io::Result<Receiver<io::Result<i32>>> {
 pub fn open_url(url: &str) -> io::Result<()> {
     detached(&[CString::new("xdg-open").unwrap(), CString::new(url)?]).map(drop)
 }
+/// A hidden Windows PowerShell through WSL interop; `encoded` is its `-EncodedCommand` payload.
+pub fn powershell(encoded: &str) -> io::Result<Receiver<io::Result<i32>>> {
+    detached(&[
+        CString::new("powershell.exe").unwrap(),
+        CString::new("-NoProfile").unwrap(),
+        CString::new("-NonInteractive").unwrap(),
+        CString::new("-EncodedCommand").unwrap(),
+        CString::new(encoded)?,
+    ])
+}
 fn detached(arguments: &[CString]) -> io::Result<Receiver<io::Result<i32>>> {
     let null = OpenOptions::new()
         .read(true)
