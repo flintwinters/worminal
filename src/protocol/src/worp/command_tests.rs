@@ -254,6 +254,12 @@ fn v2_bytes_are_unchanged_and_malformed_commands_are_rejected() {
         ),
         (
             WIRE_WHEEL,
+            [0u32, 1, i32::MAX as u32 + 1, 0, 0, 0]
+                .map(u32::to_be_bytes)
+                .concat(),
+        ),
+        (
+            WIRE_WHEEL,
             [0u32, input::MAX_WHEEL_NOTCHES + 1, 1, 0, 0, 0]
                 .map(u32::to_be_bytes)
                 .concat(),
