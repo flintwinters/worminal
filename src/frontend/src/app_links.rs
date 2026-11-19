@@ -9,6 +9,9 @@ use worminal_protocol::worp::{
 };
 use worminal_protocol::*;
 
+/// First reconnect delay; a link whose delay has grown has not recovered since it was lost.
+pub(super) const RETRY_INITIAL: Duration = Duration::from_millis(250);
+
 impl App {
     pub(super) fn link(&self, index: u32) -> Option<Rc<Link>> {
         if index == 0 {
@@ -360,6 +363,17 @@ impl App {
             .borrow_mut()
             .retain(|remote| remote.index != index);
     }
+    /// A reselect or catalog from a healthy link must not erase a disconnect another link still
+    /// has: the report would flash for one frame and vanish while the retries continue.
+    pub(super) fn clear_message(&self) {
+        if self
+            .links()
+            .iter()
+            .all(|link| link.retry_delay.get() == RETRY_INITIAL)
+        {
+            self.message(None);
+        }
+    }
     pub(super) fn lost(self: &Rc<Self>, index: u32, error: &str) {
         if self.closing.get() {
             return;
@@ -386,7 +400,10 @@ impl App {
             }
         }
         let error = report.as_deref().unwrap_or(error);
-        self.message(Some(&format!("Disconnected: {error}. Reconnecting…")));
+        self.message(Some(&format!(
+            "Disconnected: {}. Reconnecting…",
+            error.trim_end_matches('.')
+        )));
         window_state::changed();
         if link.reconnect.borrow().is_none() {
             let weak = Rc::downgrade(self);

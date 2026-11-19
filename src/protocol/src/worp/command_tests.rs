@@ -227,6 +227,10 @@ fn v2_bytes_are_unchanged_and_malformed_commands_are_rejected() {
             WIRE_SCROLL,
             [2u32.to_be_bytes(), 1u32.to_be_bytes()].concat(),
         ),
+        (
+            WIRE_SCROLL,
+            [1u32.to_be_bytes(), (i32::MAX as u32 + 1).to_be_bytes()].concat(),
+        ),
         (WIRE_FOCUS_STATE, 2u32.to_be_bytes().to_vec()),
         (WIRE_CONTROL, 3u32.to_be_bytes().to_vec()),
         (

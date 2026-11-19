@@ -44,7 +44,11 @@ pub(super) fn receive(reader: &mut impl Read) -> io::Result<Value> {
     for _ in 0..HEADER_LIMIT {
         let mut byte = [0];
         reader.read_exact(&mut byte).map_err(|_| {
-            invalid("SSH bootstrap did not respond; verify SSH access and Python 3 on the target.")
+            // NotConnected tells callers the peer never answered, as opposed to refusing a sync.
+            io::Error::new(
+                io::ErrorKind::NotConnected,
+                "SSH bootstrap did not respond; verify SSH access and Python 3 on the target.",
+            )
         })?;
         bytes.push(byte[0]);
         if byte[0] == b'\n' {

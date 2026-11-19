@@ -231,7 +231,7 @@ impl Link {
             reader: RefCell::new(None),
             writer: RefCell::new(None),
             reconnect: RefCell::new(None),
-            retry_delay: Cell::new(Duration::from_millis(250)),
+            retry_delay: Cell::new(links::RETRY_INITIAL),
             initial_claim: Cell::new(true),
             update_fences: RefCell::new(update_fences::Fences::default()),
             catalog_tabs: RefCell::new(Vec::new()),
@@ -693,7 +693,7 @@ impl App {
             });
         }
         *link.catalog_tabs.borrow_mut() = catalog.tabs.iter().map(|tab| tab.id).collect();
-        link.retry_delay.set(Duration::from_millis(250));
+        link.retry_delay.set(links::RETRY_INITIAL);
         let initial_claim = link.initial_claim.replace(false);
         let mut replaced_active = false;
         self.syncing.set(true);
@@ -869,7 +869,7 @@ impl App {
             .find(|page| page.id == chosen)
             .cloned();
         if let Some(page) = page {
-            self.message(None);
+            self.clear_message();
             // Reclaim terminal controllers after reconnect, but preserve the existing local browser owner.
             // A mirror must not pull its live DOM into another window just because its socket was replaced.
             let changed = self.active.get() != chosen
