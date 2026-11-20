@@ -132,6 +132,12 @@ pub(super) fn alert(text: &str) {
             .show(super::notifications::Message::update(text), |_| {});
     }
 }
+/// Every link has nothing more to wait for. The only link condition an update may wait on.
+pub(super) fn links_quiet() -> bool {
+    windows()
+        .iter()
+        .all(|app| app.links().iter().all(|link| link.quiet()))
+}
 pub(super) type UpdateBarrier = (Rc<super::Link>, u64);
 fn barriers_complete(barriers: &[UpdateBarrier]) -> bool {
     let active = windows()
@@ -139,7 +145,9 @@ fn barriers_complete(barriers: &[UpdateBarrier]) -> bool {
         .flat_map(|app| app.links())
         .collect::<Vec<_>>();
     barriers.iter().all(|(link, revision)| {
+        // A lost link cannot acknowledge a fence until its peer returns; it must not hold the update.
         !active.iter().any(|current| Rc::ptr_eq(current, link))
+            || link.down()
             || link.update_fences.borrow().complete(*revision)
     })
 }
@@ -631,11 +639,7 @@ impl Watcher {
         if matches!(transaction.phase, Phase::Preparing)
             && transaction.ready
             && self.broker.borrow().idle()
-            && windows().iter().all(|app| {
-                app.links()
-                    .iter()
-                    .all(|link| !link.initial_claim.get() && link.pending_tabs.get() == 0)
-            })
+            && links_quiet()
         {
             if target() != transaction.target {
                 return Err(io::Error::other("Installation changed during preparation"));
@@ -651,9 +655,7 @@ impl Watcher {
         }
         if matches!(transaction.phase, Phase::Draining)
             && barriers_complete(&transaction.barriers)
-            && windows()
-                .iter()
-                .all(|app| app.links().iter().all(|link| link.settled()))
+            && links_quiet()
         {
             for app in windows() {
                 app.pause_update_reads();
@@ -843,3 +845,19 @@ mod receiver;
 pub(super) use receiver::receive;
 #[path = "app_upgrade_windows.rs"]
 mod candidate_windows;
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+
+    /// The donor of the next update is whatever binary is running now, so every message kind and
+    /// capability a release has shipped must keep its meaning; new behavior takes a new number or
+    /// capability string. Changing these strands running owners until they are restarted.
+    #[test]
+    fn shipped_wire_vocabulary_is_frozen() {
+        let kinds = [READY, ACTIVATE, LIVE, FINISH, ABORT, REFRESH, COMMITTED];
+        assert_eq!(kinds, [100, 101, 102, 103, 104, 105, 106]);
+        assert_eq!(ATOMIC_STATE, b"atomic-state-v1");
+        assert_eq!(FINAL_STATE, b"final-state-v1");
+    }
+}

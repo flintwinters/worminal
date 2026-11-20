@@ -1,19 +1,18 @@
 //! Explicit per-user membership in a hand-editable YAML file. Reachability observations never
 //! rewrite enrollment.
 use crate::statefile;
+use serde_yaml_ng::{Mapping, Value};
 use std::{
     fs::{File, OpenOptions},
     io::{self, Read},
     os::{fd::AsRawFd, unix::fs::OpenOptionsExt},
     path::PathBuf,
 };
-use worminal_protocol::{
-    worp::devices::{Device, MAX_DEVICES},
-};
-use serde_yaml_ng::{Mapping, Value};
+use worminal_protocol::worp::devices::{Device, MAX_DEVICES};
 
 const FILE_LIMIT: usize = 65536;
-const HEADER: &str = "# Worminal device membership: NAME: {endpoint: SSH_ENDPOINT}. Hand edits are fine;\n\
+const HEADER: &str =
+    "# Worminal device membership: NAME: {endpoint: SSH_ENDPOINT}. Hand edits are fine;\n\
 # `worminald api enroll/forget` rewrite this file without comments.\n";
 
 pub struct Registry {

@@ -297,7 +297,7 @@ fn background_job_catalog_clears_when_the_job_exits() {
         "-c".into(),
         "set -m; sleep 0.4 & wait; exec sleep 10".into(),
     ]);
-    let bit = worminal_protocol::MODE_BACKGROUND_JOB;
+    let bit = worminal_protocol::cell::MODE_BACKGROUND_JOB;
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
         fixture.tab.refresh_directory(1);

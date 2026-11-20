@@ -78,7 +78,11 @@ fn connect(arguments: &[OsString], report: &mut Option<File>) -> io::Result<i32>
     // otherwise sees only a closed stream and would retry silently (glibc mismatches did this).
     let mut result = remote_install::upgrade_stream(&mut stream).inspect_err(|error| {
         if let Some(report) = report {
-            let _ = writeln!(report, "Version sync with {endpoint} failed: {error}");
+            let _ = if error.kind() == io::ErrorKind::NotConnected {
+                writeln!(report, "{} {endpoint}: {error}", ssh::UNREACHABLE_REPORT)
+            } else {
+                writeln!(report, "Version sync with {endpoint} failed: {error}")
+            };
         }
     })?;
     result["endpoint"] = json!(endpoint);

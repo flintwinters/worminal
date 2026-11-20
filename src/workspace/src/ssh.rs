@@ -61,6 +61,9 @@ fn connect_python_with_guard(
 /// `worminald --connect-master` writes a failed version sync to this descriptor, when present,
 /// so the view can tell the user why the link closed. The helper owns the authoritative name.
 pub const CONNECT_REPORT_FD: i32 = 3;
+/// Opens a report about a peer that never answered. That is a network condition the status bar
+/// shows while retrying, not a version-sync failure that deserves a desktop notification.
+pub const UNREACHABLE_REPORT: &str = "Cannot reach";
 pub const CONNECT_REPORT_ENV: &str = "WORMINAL_CONNECT_REPORT_FD";
 
 /// GUI connections supply their own prompt helper; headless callers keep normal SSH policy.

@@ -465,6 +465,66 @@ fn attention_reaches_other_views_once_and_input_answers_it_everywhere() {
     assert_eq!(queued(service, 3), 0);
 }
 
+#[test]
+fn semantic_input_encodes_against_the_live_modes() {
+    use worminal_protocol::{cell::*, input::*, worp::commands::*};
+    let mut fixture = Fixture::sized(WIRE_FEATURE_INPUT, 80, 24, 1);
+    let service = &mut fixture.service;
+    // The view may still draw the previous modes; the daemon's are authoritative.
+    service.tabs[0].mode |= MODE_APPCURSOR | MODE_BRCKTPASTE | MODE_MOUSEBTN | MODE_MOUSESGR;
+    let written = |service: &mut Service, kind| {
+        let before = service.tabs[0]
+            .terminal
+            .as_ref()
+            .unwrap()
+            .input
+            .pending()
+            .len();
+        service.command(1, Command::new(1, kind)).unwrap();
+        service.tabs[0].terminal.as_ref().unwrap().input.pending()[before..].to_vec()
+    };
+    let key = CommandKind::Key {
+        keysym: 0xff52,
+        modifiers: 0,
+        character: None,
+        numlock: true,
+    };
+    assert_eq!(written(service, key), b"\x1bOA");
+    let paste = CommandKind::Paste {
+        bytes: b"a\nb".to_vec(),
+        begin: true,
+        end: true,
+    };
+    assert_eq!(written(service, paste), b"\x1b[200~a\nb\x1b[201~");
+    let wheel = |modifiers| CommandKind::Wheel {
+        up: false,
+        notches: 1,
+        lines: 3,
+        column: 1,
+        row: 2,
+        modifiers,
+    };
+    assert_eq!(written(service, wheel(0)), b"\x1b[<65;2;3M");
+    assert_eq!(
+        written(service, wheel(MOD_SHIFT)),
+        b"",
+        "Shift scrolls history instead"
+    );
+    service.tabs[0].mode |= MODE_KBDLOCK;
+    let mouse = CommandKind::Mouse {
+        button: 0,
+        column: 0,
+        row: 0,
+        modifiers: 0,
+        action: MouseAction::Press,
+    };
+    assert_eq!(
+        written(service, mouse),
+        b"",
+        "a locked keyboard takes nothing"
+    );
+}
+
 #[derive(Default)]
 struct Receiver {
     stream: Option<Box<dyn Write>>,

@@ -25,6 +25,8 @@ pub struct Settings {
     pub update_notifications: bool,
     /// The daemon moves a tab beside another with the same title when its title changes.
     pub group_tabs_by_title: bool,
+    /// Under WSLg the Windows side draws each window's frame; the frontend restyles it to match the terminal.
+    pub wsl_window_frame: bool,
     /// `#rrggbb` per palette slot. Unset indexed slots stay `None`: renderers synthesize them.
     pub colors: Vec<Option<String>>,
 }
@@ -255,11 +257,16 @@ impl Settings {
                 true,
                 "worminal.group_tabs_by_title",
             )?,
+            wsl_window_frame: boolean(
+                worminal.get("wsl_window_frame"),
+                true,
+                "worminal.wsl_window_frame",
+            )?,
             colors: palette(config)?,
         })
     }
 
-    /// Stable machine-readable form for tools outside Rust (explorer font).
+    /// Stable machine-readable form for tools outside Rust.
     pub fn to_json(&self) -> Value {
         json!({
             "font_family": self.font_family,
@@ -271,6 +278,7 @@ impl Settings {
             "bold_bright": self.bold_bright,
             "update_notifications": self.update_notifications,
             "group_tabs_by_title": self.group_tabs_by_title,
+            "wsl_window_frame": self.wsl_window_frame,
             "colors": self.colors,
         })
     }

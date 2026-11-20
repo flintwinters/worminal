@@ -52,6 +52,10 @@ fn defaults_match_alacritty_palette_and_shared_font() {
     );
     assert!(!settings.bold_bright && !settings.update_notifications);
     assert!(settings.group_tabs_by_title, "grouping is on by default");
+    assert!(
+        settings.wsl_window_frame,
+        "WSL frame styling is on by default"
+    );
 }
 
 #[test]

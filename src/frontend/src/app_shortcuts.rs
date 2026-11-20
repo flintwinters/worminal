@@ -1,4 +1,5 @@
 use super::App;
+use crate::layout::Direction;
 use gtk::{
     gdk::{self, keys::constants as key, ModifierType as Mod},
     prelude::*,
@@ -72,6 +73,26 @@ impl App {
         {
             self.cycle_tab(state == control_shift);
             return true;
+        }
+        // Ctrl+Shift+arrow focuses the pane that way; Alt+Shift+arrow moves the tab there like a drag would.
+        // Each leaves the keystroke to the application when it has nothing to do (no split, nothing to move).
+        // Ctrl+Shift+Alt+arrow is not used: GNOME owns it and some keyboards cannot send it.
+        let move_tab = state == Mod::MOD1_MASK | Mod::SHIFT_MASK;
+        if state == control_shift || move_tab {
+            let direction = match value {
+                key::Left => Some(Direction::Left),
+                key::Right => Some(Direction::Right),
+                key::Up => Some(Direction::Up),
+                key::Down => Some(Direction::Down),
+                _ => None,
+            };
+            if let Some(direction) = direction {
+                return if move_tab {
+                    self.move_toward(direction)
+                } else {
+                    self.focus_toward(direction)
+                };
+            }
         }
         let mut zoom = self.fonts.borrow().zoom();
         if state == control_shift {

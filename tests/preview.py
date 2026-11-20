@@ -20,7 +20,6 @@ import time
 
 from http_fixture import serving
 from x11 import isolated_display
-from tools import explorer
 from tools.paths import socket_directory
 from workspace_protocol import send as wire_send, wait_kind as wire_wait, service_pid
 

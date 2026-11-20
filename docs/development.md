@@ -19,9 +19,11 @@ Scrollback capacity is fixed by a process's first engine; other settings apply t
 Builds and installs auto-detect a headless host (no GTK/WebKit/Pango via pkg-config, or `WORMINAL_HEADLESS=1`; `0` forces
 graphics) and then build/install only `worminald` and the manual. Cargo output and generated files belong in
 `build/`; native executables use `build/bin` and modules use `build/lib/worminal`, matching installed prefixes.
-`worminald` is linked statically against musl so version sync can copy it between distributions; building it needs
-`musl-gcc` (Debian/Ubuntu `musl-tools`) and `rustup target add x86_64-unknown-linux-musl` (or the host CPU's triple).
-The build refuses a dynamically linked daemon. GUI binaries stay dynamic against the host's GTK/WebKit.
+By default `worminald` links this host's glibc, so version sync only reaches peers with at least this glibc.
+Releases use `build`/`install --portable` (or `WORMINAL_PORTABLE=1`): a daemon linked statically against musl that
+sync can copy between distributions. It needs `musl-gcc` (Debian/Ubuntu `musl-tools`) and `rustup target add
+x86_64-unknown-linux-musl` (or the host CPU's triple), and the build refuses a dynamically linked result. GUI binaries
+stay dynamic against the host's GTK/WebKit.
 `tools/paths.py` owns runtime/diagnostic path decisions. Diagnostics belong in `build/checks`; optional Python
 virtualenvs use `build/venv`. `clean` preserves diagnostics/virtualenvs while removing compiled output.
 Analysis/dependency configuration lives under `tools`. Management suppresses Python bytecode caches. Never test
@@ -61,7 +63,7 @@ modes, SSH/browser operation and actual module paths on private displays. Runnin
 owners hand off by themselves, v1 daemons are never touched. `manage.py running` classifies live processes against
 the installed files (`update` prints it); run it before claiming a change is active. `manage.py update` is the
 one-command flow and needs no manual preparation: it takes a per-checkout lock, releases tmpfs left by aborted runs,
-and `setup-check-runtime` builds a missing/stale explorer (`npm ci` as needed) and prepares audio and Weston under
+and `setup-check-runtime` prepares audio and Weston under
 `build/dependencies`. If it still stops, fix the cause in that flow rather than around it. Inventory commands record
 process IDs, tabs, windows and file hashes without copying executables. Keep destinations in environment
 configuration and preserve the contributor's configured Git identity.

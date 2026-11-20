@@ -1,5 +1,5 @@
 //! Shared terminal key encoding; independent of GTK and evaluated against the target terminal mode.
-use worminal_engine_sys::{MODE_APPCURSOR, MODE_APPKEYPAD};
+use worminal_protocol::{cell::*, input::*};
 #[allow(non_upper_case_globals)]
 mod key {
     pub const BackSpace: u32 = 0xff08;
@@ -113,6 +113,48 @@ pub fn mapping(value: u32, mask: u32, mode: u32, numlock: bool) -> Option<&'stat
         .map(|entry| entry.bytes)
 }
 
+/// Encodes a key press: the ordered table first, then ASCII Control and Alt combinations of the
+/// character the key produces. `None` leaves the key to the input method.
+pub fn encode(
+    keysym: u32,
+    character: Option<char>,
+    modifiers: u32,
+    mode: u32,
+    numlock: bool,
+) -> Option<Vec<u8>> {
+    if let Some(bytes) = mapping(keysym, modifiers & MOD_KEYS, mode, numlock) {
+        return Some(bytes.to_vec());
+    }
+    let mut bytes = Vec::new();
+    if modifiers & MOD_CONTROL != 0 {
+        // Encode ASCII Control before the input method, including NUL and numeric aliases.
+        // Locale strings can lose embedded NUL; punctuation pairs share five-bit encoding.
+        if let Some(c) = character.and_then(|c| match c {
+            '@'..='~' | ' ' => Some(c as u8 & 31),
+            '2' => Some(0),
+            '3'..='7' => Some(c as u8 - b'3' + 27),
+            '8' | '?' => Some(127),
+            '/' => Some(31),
+            _ => None,
+        }) {
+            if modifiers & MOD_ALT != 0 {
+                bytes.push(0x1b);
+            }
+            bytes.push(c);
+            return Some(bytes);
+        }
+    }
+    let c = character.filter(|c| modifiers & MOD_ALT != 0 && (' '..'\u{7f}').contains(c))?;
+    let c = if mode & MODE_8BIT != 0 {
+        char::from_u32(u32::from(c) | 0x80).unwrap()
+    } else {
+        bytes.push(0x1b);
+        c
+    };
+    bytes.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
+    Some(bytes)
+}
+
 /// CLI names use Ctrl-/Alt-/Shift-/Super- prefixes and the same ordered table as GUI input.
 pub fn named(name: &str, mode: u32) -> Result<Vec<u8>, &'static str> {
     let name = name.to_ascii_lowercase();
@@ -121,10 +163,10 @@ pub fn named(name: &str, mode: u32) -> Result<Vec<u8>, &'static str> {
     let mut mask = 0;
     for next in parts {
         let flag = match value {
-            "shift" => 1,
-            "ctrl" => 4,
-            "alt" => 8,
-            "super" => 64,
+            "shift" => MOD_SHIFT,
+            "ctrl" => MOD_CONTROL,
+            "alt" => MOD_ALT,
+            "super" => MOD_SUPER,
             _ => return Err("Unknown key modifier; use Ctrl-, Alt-, Shift-, Super-."),
         };
         if mask & flag != 0 {
@@ -135,7 +177,7 @@ pub fn named(name: &str, mode: u32) -> Result<Vec<u8>, &'static str> {
     }
     let keysym = match value {
         "enter" | "return" => key::Return,
-        "tab" if mask & 1 != 0 => key::ISO_Left_Tab,
+        "tab" if mask & MOD_SHIFT != 0 => key::ISO_Left_Tab,
         "backspace" => key::BackSpace,
         "up" => key::Up,
         "down" => key::Down,
@@ -160,15 +202,19 @@ pub fn named(name: &str, mode: u32) -> Result<Vec<u8>, &'static str> {
         }
         value if value.len() == 1 && value.as_bytes()[0].is_ascii_alphabetic() => {
             let byte = value.as_bytes()[0];
-            if mask & 4 != 0 && mask & !(1 | 4 | 8) == 0 {
-                let mut bytes = if mask & 8 != 0 { vec![27] } else { Vec::new() };
+            if mask & MOD_CONTROL != 0 && mask & !(MOD_SHIFT | MOD_CONTROL | MOD_ALT) == 0 {
+                let mut bytes = if mask & MOD_ALT != 0 {
+                    vec![27]
+                } else {
+                    Vec::new()
+                };
                 bytes.push(byte - b'a' + 1);
                 return Ok(bytes);
             }
-            if mask == 8 || mask == 9 {
+            if mask & !MOD_SHIFT == MOD_ALT {
                 return Ok(vec![
                     27,
-                    if mask & 1 != 0 {
+                    if mask & MOD_SHIFT != 0 {
                         byte.to_ascii_uppercase()
                     } else {
                         byte
@@ -194,6 +240,29 @@ mod tests {
         assert_eq!(named("Ctrl-Shift-Left", 0).unwrap(), b"\x1b[1;6D");
         assert_eq!(named("F12", 0).unwrap(), b"\x1b[24~");
         assert_eq!(named("Alt-Ctrl-C", 0).unwrap(), b"\x1b\x03");
+        assert_eq!(
+            encode(0x63, Some('c'), MOD_CONTROL, 0, true).unwrap(),
+            b"\x03"
+        );
+        assert_eq!(
+            encode(0x32, Some('2'), MOD_CONTROL | MOD_ALT, 0, true).unwrap(),
+            b"\x1b\0"
+        );
+        assert_eq!(encode(0x78, Some('x'), MOD_ALT, 0, true).unwrap(), b"\x1bx");
+        assert_eq!(
+            encode(0x78, Some('x'), MOD_ALT, MODE_8BIT, true).unwrap(),
+            "\u{f8}".as_bytes()
+        );
+        assert_eq!(
+            encode(0xff52, None, 0x10, MODE_APPCURSOR, true).unwrap(),
+            b"\x1bOA",
+            "NumLock (Mod2) is not a key modifier"
+        );
+        assert_eq!(
+            encode(0x78, Some('x'), 0, 0, true),
+            None,
+            "plain text belongs to the input method"
+        );
         for name in ["F0", "F36", "Ctrl-Ctrl-A", "unknown", "Ctrl-unknown"] {
             assert!(named(name, 0).is_err());
         }

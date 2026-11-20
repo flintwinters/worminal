@@ -230,15 +230,16 @@ class RustApplicationTest(unittest.TestCase):
         red, blue = (200, 30, 30), (20, 40, 210)
         # Each terminal repaints its whole screen continuously: resizing keeps text but not erased background.
         # Typing through the agent API would take the window's control of the tab, so no tab is typed into.
-        fill = lambda color: "while :; do printf '\\033[48;2;%d;%d;%dm\\033[2J'; sleep .2; done" % color
+        fill = lambda color, title: ("while :; do printf '\\033]2;%s\\007\\033[48;2;%d;%d;%dm\\033[2J'; sleep .2; done"
+                                     % ((title,) + color))
         with isolated_display() as env, ExitStack() as cleanup:
             script = CHECKS / 'split-shell.sh'
-            script.write_text(f'#!/bin/sh\n{fill(blue)}\n')
+            script.write_text(f'#!/bin/sh\n{fill(blue, "blue")}\n')
             script.chmod(0o755)
             env.update(GDK_BACKEND='x11', SHELL=str(script))
             env.pop('WAYLAND_DISPLAY', None)
             app = subprocess.Popen([str(runtime_binary("worminal-rust")), '-T', 'Rust split', '-o', '-',
-                                    '-e', '/bin/sh', '-c', fill(red)],
+                                    '-e', '/bin/sh', '-c', fill(red, 'red')],
                                    env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             self.addCleanup(lambda: self.stop(app))
             wid = window(env, app)
@@ -314,6 +315,26 @@ class RustApplicationTest(unittest.TestCase):
             xdo('mouseup', '1')
             # The anchor stays left; the dropped tab takes the right half and focus.
             wait_for(blue, red, 'dropping a tab on the right edge did not split the window')
+            # Split panes are outlined, the focused one (right, just dropped) brighter than the other. Look at the
+            # inner edges: the window's own outer frame is drawn by the display, not by the panes.
+            left_edge, right_edge = pixel(449.5 / 900, .75), pixel(451.5 / 900, .75)
+            self.assertNotEqual(left_edge, blue, 'the left pane has no border')
+            self.assertNotEqual(right_edge, red, 'the right pane has no border')
+            self.assertGreater(sum(right_edge), sum(left_edge), f'the focused border is not brighter: {left_edge} {right_edge}')
+            # Clicking the other pane makes its tab the current one, not just the target of typing: Ctrl+Shift+C/V
+            # and the window title follow the app's active tab, which a click on an already-live pane once left alone.
+            title = lambda: subprocess.check_output(['xdotool', 'getwindowname', wid], env=env, text=True).strip()
+            self.assertEqual(title(), 'red')
+            xdo('mousemove', '--window', wid, '225', '300', 'click', '1')
+            deadline = time.monotonic() + 5
+            while title() != 'blue':
+                self.assertLess(time.monotonic(), deadline, f'clicking the left pane left {title()!r} current')
+                time.sleep(.05)
+            xdo('mousemove', '--window', wid, '675', '300', 'click', '1')
+            deadline = time.monotonic() + 5
+            while title() != 'red':
+                self.assertLess(time.monotonic(), deadline, f'clicking the right pane left {title()!r} current')
+                time.sleep(.05)
             # Each pane has its own strip holding only its tabs: the dropped tab is selected in the right strip,
             # and the left strip no longer has the second tab where the shared strip had it.
             self.assertNotEqual(pixel(.505, 4 / 500), background, 'the right pane has no tab strip of its own')
@@ -336,6 +357,18 @@ class RustApplicationTest(unittest.TestCase):
             xdo('key', '--clearmodifiers', 'ctrl+shift+x')
             wait_for(red, red, 'ctrl+shift+x did not leave only the focused pane')
             self.assertEqual(pixel(.505, 4 / 500), background, 'the right strip outlived the unsplit')
+            # The keyboard does what dragging does. At the window's edge Alt+Shift+Right splits the shown
+            # tab off to the right (the first tab is red and was the one selected by the gather) ...
+            xdo('key', '--clearmodifiers', 'alt+shift+Right')
+            wait_for(blue, red, 'alt+shift+Right did not split the tab off to the right')
+            # ... Ctrl+Shift+Left focuses the left pane without moving anything ...
+            xdo('key', '--clearmodifiers', 'ctrl+shift+Left')
+            time.sleep(.3)
+            wait_for(blue, red, 'ctrl+shift+Left moved a tab')
+            # ... and with a pane to the right Alt+Shift+Right moves the tab into it, ending the split.
+            xdo('key', '--clearmodifiers', 'alt+shift+Right')
+            wait_for(blue, blue, 'alt+shift+Right did not move the tab into the right pane')
+            self.assertEqual(pixel(.505, 4 / 500), background, 'the emptied pane outlived the move')
 
     @staticmethod
     def stop(process):

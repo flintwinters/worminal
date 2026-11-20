@@ -40,10 +40,33 @@ PACKAGES = ()
 PROBES = {"latency_echo": ()}
 # Version sync copies the installed daemon between devices (docs/remote-install.md), so it must run on any
 # Linux with the same CPU. A dynamically linked daemon built against a newer glibc fails to load on an older
-# peer (Ubuntu glibc 2.44 -> Debian 2.36 did), so the daemon links musl statically. GUI binaries stay dynamic:
-# they need the host's GTK/WebKit and are never copied between distributions by sync.
+# peer (Ubuntu glibc 2.44 -> Debian 2.36 did), so portable builds link the daemon statically against musl. GUI
+# binaries stay dynamic: they need the host's GTK/WebKit and are never copied between distributions by sync.
 DAEMON_TARGET = f"{platform.machine()}-unknown-linux-musl"
 MUSL_CC = "musl-gcc"
+
+
+def musl_missing():
+    """What the static daemon's toolchain lacks, or None when musl-gcc and the Rust musl target are installed."""
+    if not shutil.which(MUSL_CC):
+        return f"{MUSL_CC} (Debian/Ubuntu package musl-tools)"
+    try:
+        sysroot = subprocess.run([*words("RUSTC", "rustc"), "--print", "sysroot"], cwd=ROOT, check=True,
+                                 capture_output=True, text=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "rustc"
+    if not (Path(sysroot) / "lib/rustlib" / DAEMON_TARGET).is_dir():
+        return f"the Rust target (rustup target add {DAEMON_TARGET})"
+    return None
+
+
+def portable():
+    """True when WORMINAL_PORTABLE=1 asks for a daemon linked statically against musl, as releases must be.
+
+    The default native daemon links this host's glibc, so it builds without musl but version sync can only copy it to
+    peers whose glibc is at least as new; the receiving run check refuses it elsewhere.
+    """
+    return os.environ.get("WORMINAL_PORTABLE", "") not in ("", "0")
 
 
 def engine_archive(triple=None):
@@ -164,6 +187,7 @@ class Builder:
         self.cc = words("CC", "cc")
         self.cflags = compile_flags()
         self.libs = link_flags()
+        self.daemon_triple = DAEMON_TARGET if portable() else None
 
     def program(self, output, sources, *, variant="default", flags=(), libs=None, link_dependencies=()):
         objects = [f"build/obj/{variant}/{Path(source).with_suffix('.o')}" for source in sources]
@@ -217,9 +241,9 @@ class Builder:
             self.rust_library(target, "worminal-browser")
         elif target in (engine_archive(), engine_archive(DAEMON_TARGET)):
             musl = target != engine_archive()
-            if musl and not shutil.which(MUSL_CC):
-                raise RuntimeError(f"{MUSL_CC} not found: install musl-tools (Debian/Ubuntu) and run "
-                                   f"`rustup target add {DAEMON_TARGET}` to build the static daemon")
+            if musl and (missing := musl_missing()):
+                raise RuntimeError(f"The portable daemon needs {missing}; "
+                                   "build without --portable for a native one")
             cc = [MUSL_CC] if musl else self.cc
             objects = [f"build/obj/engine{'-musl' if musl else ''}/{Path(source).with_suffix('.o')}"
                        for source in ENGINE]
@@ -242,8 +266,12 @@ class Builder:
             self.target("build/lib/worminal/" + RUST_FRONTEND_MODULE)
             self.rust_program(target, "worminal-launcher")
         elif target == "worminald":
-            self.rust_program(target, "worminal-daemon", triple=DAEMON_TARGET)
-            require_static(runtime_binary(target, prefix=ROOT / "build"))
+            self.rust_program(target, "worminal-daemon", triple=self.daemon_triple)
+            if self.daemon_triple:
+                require_static(runtime_binary(target, prefix=ROOT / "build"))
+            else:
+                print("Built a native daemon: version sync can only copy it to peers with at least this host's "
+                      "glibc. Build with --portable (needs the musl toolchain) for a release.")
         elif target.removeprefix("build/") in PROBES and target.startswith("build/"):
             name = target.removeprefix("build/")
             packages = PROBES[name]

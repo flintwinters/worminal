@@ -4,11 +4,10 @@ import subprocess
 import sys
 from pathlib import Path
 import tempfile
-import time
 import unittest
 from unittest.mock import patch
 
-from tools import auto_update, explorer
+from tools import auto_update
 from tools.paths import CHECKS, ROOT, socket_directory
 from tools.update_storage import release_stale
 
@@ -43,22 +42,6 @@ class UpdateFlowTests(unittest.TestCase):
             self.assertIn("Another update", str(refused.exception))
         with auto_update.exclusive(self.root):
             pass
-
-    def test_explorer_dist_older_than_sources_is_stale(self):
-        source = self.root / "apps/explorer/src/main.ts"
-        source.parent.mkdir(parents=True)
-        source.write_text("x")
-        dist = self.root / "dist/index.html"
-        dist.parent.mkdir()
-        with patch.object(explorer, "EXPLORER", self.root), patch.object(explorer, "DIST", dist):
-            self.assertTrue(explorer.dist_stale())  # missing
-            dist.write_text("y")
-            now = time.time()
-            os.utime(source, (now - 10, now - 10))
-            os.utime(dist, (now, now))
-            self.assertFalse(explorer.dist_stale())
-            os.utime(source, (now + 10, now + 10))
-            self.assertTrue(explorer.dist_stale())
 
     def test_only_mounts_of_aborted_updates_are_released(self):
         checks = (self.root / "build/checks").resolve()

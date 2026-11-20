@@ -1,5 +1,6 @@
 //! Wheel dispatch and application scrolling policy.
 use super::*;
+use worminal_protocol::input::MAX_WHEEL_NOTCHES;
 
 impl Inner {
     pub(super) fn connect_wheel(self: &Rc<Self>) {
@@ -51,40 +52,13 @@ impl Inner {
         (x, y): (i32, i32),
         mods: gdk::ModifierType,
     ) {
-        let (mouse, bytes, alternate, appcursor) = {
-            let state = self.state.borrow();
-            (
-                state.mode & MODE_MOUSE != 0 && !mods.contains(gdk::ModifierType::SHIFT_MASK),
-                state.mouse.report(
-                    state.mode,
-                    state.viewport.live(),
-                    if up { 64 } else { 65 },
-                    x,
-                    y,
-                    mods,
-                    false,
-                    false,
-                ),
-                state.viewport.frame().alternate != 0 && state.mode & MODE_ALTSCROLL != 0,
-                state.mode & MODE_APPCURSOR != 0,
-            )
-        };
-        if mouse {
-            for _ in 0..notches {
-                if let Some(bytes) = &bytes {
-                    self.input(bytes);
-                }
-            }
-        } else if alternate {
-            let key: &[u8] = match (appcursor, up) {
-                (true, true) => b"\x1bOA",
-                (true, false) => b"\x1bOB",
-                (false, true) => b"\x1b[A",
-                (false, false) => b"\x1b[B",
-            };
-            self.input(&key.repeat(notches as usize));
-        } else {
-            self.send(CommandKind::Scroll { up, amount: lines });
-        }
+        self.deliver(CommandKind::Wheel {
+            up,
+            notches: notches.min(MAX_WHEEL_NOTCHES),
+            lines,
+            column: x.max(0) as u32,
+            row: y.max(0) as u32,
+            modifiers: mods.bits() & MOD_KEYS,
+        });
     }
 }

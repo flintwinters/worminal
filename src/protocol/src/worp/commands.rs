@@ -20,6 +20,12 @@ pub enum SelectionOperation {
     Cancel,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MouseAction {
+    Press,
+    Release,
+    Motion,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OpenMode {
     Detached,
     Subscribe,
@@ -51,6 +57,23 @@ impl Command {
                 ))
             }
             CommandKind::Input { bytes, .. } if bytes.len() > super::MAX_INPUT_BYTES => {
+                return Err(invalid())
+            }
+            CommandKind::Paste { bytes, .. } if bytes.len() > crate::input::MAX_PASTE_BYTES => {
+                return Err(invalid())
+            }
+            // NUL encodes "no character" on the wire.
+            CommandKind::Key {
+                character: Some('\0'),
+                ..
+            } => return Err(invalid()),
+            // The engine takes a signed row count; a wrapped amount would scroll a page the wrong way.
+            CommandKind::Scroll { amount: lines, .. } | CommandKind::Wheel { lines, .. }
+                if *lines > i32::MAX as u32 =>
+            {
+                return Err(invalid())
+            }
+            CommandKind::Wheel { notches, .. } if *notches > crate::input::MAX_WHEEL_NOTCHES => {
                 return Err(invalid())
             }
             CommandKind::Focus { columns, rows }
@@ -110,6 +133,43 @@ pub enum CommandKind {
     Scroll {
         up: bool,
         amount: u32,
+    },
+    /// Semantic input, encoded by the daemon against the tab's live modes; each acquires control
+    /// as `Input` does. Needs `WIRE_FEATURE_INPUT`. Modifiers are `crate::input::MOD_*` masks.
+    /// An X11 keysym with the character it produces (Ctrl and Alt combinations derive from it);
+    /// views send only keys that encode under the modes they display, leaving the rest to their
+    /// input method.
+    Key {
+        keysym: u32,
+        modifiers: u32,
+        character: Option<char>,
+        numlock: bool,
+    },
+    /// A report for an application that owns the mouse; `button` is a `crate::input` button code.
+    /// Dropped when the live modes request no such report.
+    Mouse {
+        button: u32,
+        column: u32,
+        row: u32,
+        modifiers: u32,
+        action: MouseAction,
+    },
+    /// One chunk of at most `MAX_PASTE_BYTES` that never separates CR from a following LF:
+    /// filtered, and bracketed at `begin`/`end` when the application asks for bracketed paste.
+    Paste {
+        bytes: Vec<u8>,
+        begin: bool,
+        end: bool,
+    },
+    /// Wheel notches: mouse reports for an application owning the mouse (unless Shift is held),
+    /// arrow keys on an alternate screen with alternate scroll, otherwise `lines` of history.
+    Wheel {
+        up: bool,
+        notches: u32,
+        lines: u32,
+        column: u32,
+        row: u32,
+        modifiers: u32,
     },
     Control(ControlAction),
     Selection {

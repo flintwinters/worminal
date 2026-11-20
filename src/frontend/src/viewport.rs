@@ -1,8 +1,8 @@
 //! One imported viewport. Frame deltas remain bounded and private until FRAME_FINISH.
 use std::{io, ops::RangeInclusive, rc::Rc};
 use worminal_engine::{Cell, Frame, Selection, SelectionRange};
-use worminal_engine_sys::{
-    ATTR_BLINK, ATTR_WIDE, ATTR_WRAP, WORMINAL_DEFAULT_BACKGROUND, WORMINAL_DEFAULT_FOREGROUND,
+use worminal_protocol::cell::{
+    ATTR_BLINK, ATTR_WIDE, ATTR_WRAP, COLOR_DEFAULT_BACKGROUND, COLOR_DEFAULT_FOREGROUND,
 };
 use worminal_protocol::worp::events::{Event, EventKind};
 use worminal_protocol::worp::v2_events;
@@ -21,8 +21,8 @@ fn blank() -> Cell {
     Cell {
         rune: u32::from(' '),
         attributes: 0,
-        foreground: WORMINAL_DEFAULT_FOREGROUND,
-        background: WORMINAL_DEFAULT_BACKGROUND,
+        foreground: COLOR_DEFAULT_FOREGROUND,
+        background: COLOR_DEFAULT_BACKGROUND,
     }
 }
 fn dimensions(columns: u32, rows: u32) -> io::Result<()> {

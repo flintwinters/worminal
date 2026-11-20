@@ -1,11 +1,9 @@
 //! Ordered terminal key mappings. Exact modifiers must precede wildcard entries.
 use super::{key, KeyEntry};
 
-const SHIFT: u32 = 1;
-const CTRL: u32 = 4;
-const ALT: u32 = 8;
-const SUPER: u32 = 64;
-const MOD3: u32 = 32;
+use worminal_protocol::input::{
+    MOD_ALT as ALT, MOD_CONTROL as CTRL, MOD_MOD3 as MOD3, MOD_SHIFT as SHIFT, MOD_SUPER as SUPER,
+};
 const ANY: u32 = u32::MAX;
 const NONE: u32 = 0;
 

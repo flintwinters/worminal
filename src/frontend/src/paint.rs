@@ -3,7 +3,7 @@ use crate::{graphics_ffi, viewport::Viewport};
 use gtk::gdk::RGBA;
 use worminal_config as theme;
 use worminal_engine::Cell;
-use worminal_engine_sys::*;
+use worminal_protocol::cell::*;
 
 pub struct Palette {
     colors: Vec<RGBA>,
@@ -57,7 +57,7 @@ impl Palette {
         changed
     }
     pub fn color(&self, value: u32) -> RGBA {
-        if value & WORMINAL_TRUECOLOR_FLAG != 0 {
+        if value & COLOR_TRUECOLOR != 0 {
             RGBA::new(
                 ((value >> 16) & 255) as f64 / 255.0,
                 ((value >> 8) & 255) as f64 / 255.0,
@@ -68,7 +68,7 @@ impl Palette {
             self.colors
                 .get(value as usize)
                 .copied()
-                .unwrap_or(self.colors[WORMINAL_DEFAULT_FOREGROUND as usize])
+                .unwrap_or(self.colors[COLOR_DEFAULT_FOREGROUND as usize])
         }
     }
 }
@@ -252,8 +252,8 @@ impl Painter {
             && viewport.live();
         let block = cursor && style.cursor <= 2 && style.focused;
         if block {
-            bg = style.palette.color(WORMINAL_DEFAULT_CURSOR);
-            fg = style.palette.color(WORMINAL_DEFAULT_BACKGROUND);
+            bg = style.palette.color(COLOR_DEFAULT_CURSOR);
+            fg = style.palette.color(COLOR_DEFAULT_BACKGROUND);
         }
         (fg, bg, cursor && !block)
     }
@@ -363,9 +363,9 @@ impl Painter {
         source(
             cr,
             &style.palette.color(if style.mode & MODE_REVERSE != 0 {
-                WORMINAL_DEFAULT_FOREGROUND
+                COLOR_DEFAULT_FOREGROUND
             } else {
-                WORMINAL_DEFAULT_BACKGROUND
+                COLOR_DEFAULT_BACKGROUND
             }),
         );
         cr.paint()?;
@@ -437,7 +437,7 @@ impl Painter {
                     cr.fill()?;
                 }
                 if cursor {
-                    source(cr, &style.palette.color(WORMINAL_DEFAULT_CURSOR));
+                    source(cr, &style.palette.color(COLOR_DEFAULT_CURSOR));
                     match style.cursor {
                         0..=2 => {
                             cr.set_line_width(1.0);
@@ -468,7 +468,7 @@ impl Painter {
             }
         }
         if !style.preedit.is_empty() {
-            source(cr, &style.palette.color(WORMINAL_DEFAULT_FOREGROUND));
+            source(cr, &style.palette.color(COLOR_DEFAULT_FOREGROUND));
             self.text(
                 cr,
                 style.preedit,

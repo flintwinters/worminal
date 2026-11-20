@@ -13,9 +13,6 @@ pub const WORKSPACE_INITIAL_CURSOR: u32 = 2;
 /// Rune, attributes, foreground, background: independent of native cell layout.
 pub const WIRE_CELL_BYTES: u32 = 4 * 4;
 
-/// Daemon-owned catalog mode: a live shell job outside the foreground process group.
-pub const MODE_BACKGROUND_JOB: u32 = 1 << 20;
-
 // Service bounds and deadlines.
 pub const WORKSPACE_CLIENT_QUEUE_BYTES: u32 = 4 * 1024 * 1024;
 pub const WORKSPACE_INPUT_QUEUE_BYTES: u32 = 1024 * 1024;
@@ -123,6 +120,15 @@ pub const WIRE_FEATURE_ATTENTION: u32 = 1 << 7;
 /// leaves exactly one tab shown. The daemon advertises the feature; views never send the packet without it.
 pub const WIRE_PANE: u32 = 38;
 pub const WIRE_FEATURE_PANES: u32 = 1 << 8;
+
+/// Semantic input the daemon encodes against the tab's live modes, so a view needs no terminal encoder
+/// and cannot race a mode change it has not yet seen (`worminal_protocol::worp::commands` documents each
+/// payload). The daemon advertises the feature; views never send these packets without it.
+pub const WIRE_KEY: u32 = 39;
+pub const WIRE_MOUSE: u32 = 40;
+pub const WIRE_PASTE: u32 = 41;
+pub const WIRE_WHEEL: u32 = 42;
+pub const WIRE_FEATURE_INPUT: u32 = 1 << 9;
 
 // Extended unary agent operations; older operations keep their original payloads.
 pub const WORP_READ_MANY: u32 = 10;

@@ -16,7 +16,9 @@ Read the relevant [architecture and behavior contracts](docs/architecture.md) be
 Rust owns the launcher, daemon, frontend, browser, configuration and transport above a small C terminal engine.
 `src/terminal/engine.h` defines the engine API; generated Rust bindings follow it. C owns parsing, cells,
 scrollback/reflow, selection and serialization; it never owns processes, descriptors, GUI objects or app policy.
-The frontend imports daemon viewports; it never parses output or recomputes history. GTK 3, Pango/Cairo and
+The frontend imports daemon viewports; it never parses output or recomputes history. `src/protocol` owns the
+screen and input vocabulary, so alternative frontends need no engine; the daemon encodes semantic input with
+live modes, and `worminald attach [--master HOST]` is their one entry point. GTK 3, Pango/Cairo and
 WebKitGTK 4.1 support native Wayland and X11.
 
 The per-user v2 daemon owns ordered tabs and PTYs independently of windows. Local sockets and SSH bind the same
@@ -41,8 +43,9 @@ once for parsers, help and search.
 `manage.py` is internal development tooling only.
 Master views finish version sync immediately after SSH authentication, before workspace access.
 Remote version sync compares Cargo versions: bump the version when remote daemons need a runtime change; equal
-versions never upgrade. The daemon links musl statically so sync works across distributions; failures notify the
-desktop. Tests target the current Rust app and C engine, without historical application builds.
+versions never upgrade. Release daemons build `--portable`, linking musl statically so sync works across
+distributions; default native builds link glibc. Sync failures notify the desktop. Tests target the current Rust app
+and C engine, without historical application builds.
 Full checks enforce reviewed daemon CPU and network performance ceilings; never raise them automatically.
 
 Read [development.md](docs/development.md) for build/test/install workflows and [testing.md](docs/testing.md) for
@@ -67,7 +70,6 @@ Public contracts and subsystem details:
 
 Audit input, rendering, output delivery and view switching until further gains require correctness, resource or
 compatibility compromises. Measure private software presentation; do not infer physical display latency.
-Treat remote Codex scrolling separately from tested wheel modes.
 
 Remote daemons older than 2fc0825 can resend idle full frames at link rate; upgrade them before metered use.
 Negotiated focused frames suppress hidden-tab traffic. Use syslog lifecycle/event-loop/fatal terminal diagnostics

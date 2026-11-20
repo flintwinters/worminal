@@ -3,15 +3,20 @@
 //! shows (`Pane`), never the geometry.
 use super::{App, LINK_SHIFT};
 use crate::{
-    layout::{Layout, Target, Zone},
-    tabs::{Actions, Tabs},
+    layout::{neighbor, Direction, Layout, PaneRect, Target, Zone},
+    paint,
+    tabs::{mix, Actions, Tabs},
 };
 use gtk::prelude::*;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
-use worminal_protocol::{worp::commands::CommandKind, WIRE_FEATURE_PANES};
+use worminal_protocol::{
+    cell::{COLOR_DEFAULT_BACKGROUND as BG, COLOR_DEFAULT_FOREGROUND as FG},
+    worp::commands::CommandKind,
+    WIRE_FEATURE_PANES,
+};
 
 type Rect = (f64, f64, f64, f64);
 /// One tab strip above the notebook holding just its tabs.
@@ -91,7 +96,59 @@ impl App {
         let pane = self.add_pane();
         self.panes.focused.set(pane.id);
         *self.panes.layout.borrow_mut() = Layout::Leaf(pane.id);
+        // After the children, like the drop highlight: an overlay widget would hide drop targets from GTK.
+        self.panes.root.connect_local(
+            "draw",
+            true,
+            glib::clone!(@weak self as app => @default-return None, move |values| {
+                let cr = values[1].get::<gtk::cairo::Context>().ok()?;
+                if let Err(error) = app.draw_borders(&cr) {
+                    eprintln!("worminal: pane borders: {error}");
+                }
+                Some(false.to_value())
+            }),
+        );
         self.rebuild();
+    }
+    /// Outline every pane of a split in the terminal's colors, the focused one brighter on top, so the panes
+    /// read as separate terminals and the one taking keystrokes is plain. A window with one pane has none.
+    fn draw_borders(&self, cr: &gtk::cairo::Context) -> Result<(), gtk::cairo::Error> {
+        let panes = self.panes();
+        if panes.len() < 2 {
+            return Ok(());
+        }
+        let palette = self
+            .pages
+            .borrow()
+            .iter()
+            .find(|page| page.id == self.active.get())
+            .map(|page| page.palette.clone());
+        let Some(palette) = palette else {
+            return Ok(());
+        };
+        let (background, foreground) = {
+            let palette = palette.borrow();
+            (palette.color(BG), palette.color(FG))
+        };
+        let focused = self.panes.focused.get();
+        let rects = self.pane_rects();
+        cr.set_line_width(1.0);
+        // Unfocused outlines first: the focused one covers the edges it shares.
+        for (focus, amount) in [(false, 0.3), (true, 0.75)] {
+            paint::source(cr, &mix(&background, &foreground, amount));
+            for &(id, (x, y, width, height)) in &rects {
+                if (id == focused) == focus {
+                    cr.rectangle(
+                        f64::from(x) + 0.5,
+                        f64::from(y) + 0.5,
+                        f64::from(width - 1),
+                        f64::from(height - 1),
+                    );
+                    cr.stroke()?;
+                }
+            }
+        }
+        Ok(())
     }
     fn add_pane(self: &Rc<Self>) -> Rc<Pane> {
         let id = self.panes.next.replace(self.panes.next.get() + 1);
@@ -208,7 +265,9 @@ impl App {
         self.terminal(id).is_some() && self.features(id) & WIRE_FEATURE_PANES != 0
     }
     pub(super) fn focus_pane(&self, pane: &Pane) {
-        self.panes.focused.set(pane.id);
+        if self.panes.focused.replace(pane.id) != pane.id {
+            self.panes.root.queue_draw();
+        }
     }
     /// Focus the pane holding a tab and select its page there.
     pub(super) fn show_page(&self, id: u32) {
@@ -314,6 +373,70 @@ impl App {
         self.collapse();
         self.rebuild();
         self.select_id(id);
+    }
+    /// The panes' rectangles in the pane area's coordinates.
+    fn pane_rects(&self) -> Vec<(u32, PaneRect)> {
+        self.panes()
+            .iter()
+            .filter_map(|pane| {
+                let (x, y) = pane
+                    .widget
+                    .translate_coordinates(self.panes.widget(), 0, 0)?;
+                Some((
+                    pane.id,
+                    (
+                        x,
+                        y,
+                        pane.widget.allocated_width(),
+                        pane.widget.allocated_height(),
+                    ),
+                ))
+            })
+            .collect()
+    }
+    /// Select the tab shown by the pane lying `direction` of the focused one. False when there is none, so
+    /// a window without a split leaves the keystroke to the application.
+    pub(super) fn focus_toward(self: &Rc<Self>, direction: Direction) -> bool {
+        let from = self.focused_pane().id;
+        let Some(pane) = neighbor(&self.pane_rects(), from, direction).and_then(|id| self.pane(id))
+        else {
+            return false;
+        };
+        if let Some(tab) = self.active_of(&pane) {
+            self.select_id(tab);
+        }
+        true
+    }
+    /// Move the current tab as a drag would: into the pane lying `direction` of its own, or, at the window's
+    /// edge, into a new pane split off that side (never emptying its own pane). False when the tab cannot
+    /// move, so the keystroke stays the application's.
+    pub(super) fn move_toward(self: &Rc<Self>, direction: Direction) -> bool {
+        let id = self.active.get();
+        let Some(home) = self.pane_of(id).filter(|_| self.can_split(id)) else {
+            return false;
+        };
+        let target = match neighbor(&self.pane_rects(), home.id, direction) {
+            Some(anchor) => Target {
+                anchor,
+                zone: Zone::Center,
+            },
+            None if self.tabs_of(&home).len() > 1 => Target {
+                anchor: home.id,
+                zone: direction.zone(),
+            },
+            None => return false,
+        };
+        self.drop_tab(id, target);
+        true
+    }
+    /// A terminal asks to become the current tab: it was pressed, or must take control. Panes of a split are all
+    /// live, so liveness alone cannot tell whether the press changed the current tab. It must: typing follows
+    /// the focused widget, but copy, paste, new tabs and pane focus follow the active tab, and a click on the
+    /// other pane once typed there while Ctrl+Shift+C/V still used the previous tab.
+    pub(super) fn claim(self: &Rc<Self>, id: u32) {
+        if self.active.get() != id || !self.terminal(id).is_some_and(|terminal| terminal.live()) {
+            self.activate(id);
+        }
     }
     /// Gather every tab into the focused pane again.
     pub(super) fn unsplit(self: &Rc<Self>) {

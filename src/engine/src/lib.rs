@@ -1,10 +1,14 @@
 //! Exclusive terminal handles and Rust-owned copies of cells, events, and snapshots.
 mod ffi;
+pub mod input;
 pub mod keys;
 mod paste;
 mod selection;
+mod wire;
 pub use ffi::{Cell, Engine, Error, Event, Frame, OutputPosition, TransportState};
-pub use paste::{paste_begin, paste_end, PasteFilter};
+pub use paste::{
+    chunks as paste_chunks, envelope as paste_envelope, paste_begin, paste_end, PasteFilter,
+};
 pub use selection::{Selection, SelectionRange};
 pub use worminal_engine_sys::{ATTR_WDUMMY, WORMINAL_PENDING_BYTES};
 pub use worminal_engine_sys::{MODE_BRCKTPASTE, MODE_BUSY, MODE_FOCUS, MODE_REVERSE};

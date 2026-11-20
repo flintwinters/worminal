@@ -10,7 +10,7 @@ use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
-use worminal_engine_sys::{WORMINAL_DEFAULT_BACKGROUND as BG, WORMINAL_DEFAULT_FOREGROUND as FG};
+use worminal_protocol::cell::{COLOR_DEFAULT_BACKGROUND as BG, COLOR_DEFAULT_FOREGROUND as FG};
 use worminal_protocol::{ATTENTION_DONE, ATTENTION_FAILED, ATTENTION_HELP};
 
 #[derive(Clone)]
@@ -92,6 +92,15 @@ const BUSY: u32 = 8;
 fn width(layout: &pango::Layout, entry: &Tab, metrics: Metrics) -> i32 {
     layout.set_text(&entry.label);
     layout.pixel_size().0 + 2 * metrics.width
+}
+pub(super) fn mix(from: &gdk::RGBA, to: &gdk::RGBA, amount: f64) -> gdk::RGBA {
+    let blend = |a: f64, b: f64| a + (b - a) * amount;
+    gdk::RGBA::new(
+        blend(from.red(), to.red()),
+        blend(from.green(), to.green()),
+        blend(from.blue(), to.blue()),
+        1.0,
+    )
 }
 /// Background fill (none for resting tabs) and text color; attention stays solid until input.
 fn colors(
