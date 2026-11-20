@@ -1,4 +1,4 @@
-"""Runtime configuration as seen by tools: the `worminald config` resolver and explorer font.
+"""Runtime configuration as seen by tools: the `worminald config` resolver.
 
 Resolution rules themselves are unit-tested in src/config; these checks cover the CLI contract and adapters.
 """
@@ -9,9 +9,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
-from tools import theme
 from tools.build import Builder
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "alacritty"
@@ -56,16 +54,6 @@ class ThemeTest(unittest.TestCase):
     def test_defaults_ignore_every_file(self):
         result = config_json("--json", "--defaults", WORMINAL_ALACRITTY_CONFIG=str(FIXTURES / "main.toml"))
         self.assertEqual(json.loads(result.stdout)["font_family"], "DejaVu Sans Mono, Atkinson Hyperlegible Mono")
-
-    def test_explorer_line_height_uses_terminal_metrics_and_offset(self):
-        values = {"font_family": "monospace", "font_size": 14.0, "font_offset_y": -7}
-        with patch.object(theme, "settings", return_value=values), \
-                patch.object(theme, "font_height", return_value=25) as metrics:
-            self.assertEqual(theme.explorer_font(), {"family": "monospace", "size": 14.0, "lineHeight": 18})
-            metrics.assert_called_once_with("monospace", 14.0)
-            values["font_offset_y"] = -100
-            self.assertEqual(theme.explorer_font()["lineHeight"], 1)
-        self.assertGreater(theme.font_height("monospace", 14), 14)
 
 
 if __name__ == "__main__":

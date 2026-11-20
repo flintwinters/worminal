@@ -58,5 +58,5 @@ daemon log.
   (Windows itself draws no caption). With `worminal.wsl_window_frame` (default on) windows instead draw a compact
   GTK title bar in the terminal colors with a close button; Weston then leaves them undecorated. Drag the bar to
   move, double-click it to maximize, drag the edges to resize. Nothing changes outside WSL.
-- `src/config` is the only resolver. Python tooling (explorer font) calls
+- `src/config` is the only resolver. Python tooling calls
   `worminald config --json` instead of reimplementing the rules.

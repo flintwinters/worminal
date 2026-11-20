@@ -266,7 +266,7 @@ impl Settings {
         })
     }
 
-    /// Stable machine-readable form for tools outside Rust (explorer font).
+    /// Stable machine-readable form for tools outside Rust.
     pub fn to_json(&self) -> Value {
         json!({
             "font_family": self.font_family,

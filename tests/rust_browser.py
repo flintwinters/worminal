@@ -391,7 +391,7 @@ class RustBrowserTest(unittest.TestCase):
             large = base / 'large'
             with large.open('wb') as output: output.truncate(32 * 1024 * 1024 + 1)
             other.write_text("<!doctype html><script>document.title='Other:'+typeof window.worminal</script>")
-            # Real WebKit executes the same selected-document API as the independent explorer.
+            # Real WebKit executes the selected-document API that local HTML tools use.
             script = r'''
                 if (window !== top) { parent.postMessage(typeof window.worminal, '*'); }
                 else (async () => {
