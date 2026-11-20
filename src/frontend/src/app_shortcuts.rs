@@ -27,7 +27,11 @@ impl App {
             return true;
         }
         let value = event.keyval().to_lower();
-        if let Some(browser) = self.browser(self.active.get()) {
+        // The panel's own keys (Escape, arrows, Enter) must reach it, not the page behind it.
+        if let Some(browser) = self
+            .browser(self.active.get())
+            .filter(|_| !self.panel.has_focus())
+        {
             if browser.shortcut(event) {
                 return true;
             }
@@ -96,6 +100,10 @@ impl App {
         }
         let mut zoom = self.fonts.borrow().zoom();
         if state == control_shift {
+            // A paste while the panel is asking for a host goes to that question, not to the terminal beside it.
+            if value == key::v && self.panel.paste() {
+                return true;
+            }
             match value {
                 key::t => {
                     self.new_tab();
@@ -126,6 +134,15 @@ impl App {
                 }
                 key::x => {
                     self.unsplit();
+                    return true;
+                }
+                // B for bookmarks; P also works for keyboards that can send it (a membrane keyboard may not).
+                key::b | key::p => {
+                    self.toggle_panel();
+                    return true;
+                }
+                key::d => {
+                    self.toggle_bookmark(self.active.get());
                     return true;
                 }
                 key::c | key::v | key::y => {

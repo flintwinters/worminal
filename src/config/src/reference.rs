@@ -170,7 +170,9 @@ Files, lowest to highest priority:
   2. worminal.yaml: $XDG_CONFIG_HOME/worminal/worminal.yaml (default ~/.config/worminal/worminal.yaml), or the
      file named by WORMINAL_CONFIG (which must exist).
 Device membership is separate: $XDG_CONFIG_HOME/worminal/devices.yaml, never layered or synced
-(`worminald api help` covers it).
+(`worminald api help` covers it). So are bookmarks: $XDG_CONFIG_HOME/worminal/bookmarks.yaml holds
+`bookmarks:`, a list of {{directory: /abs/path, master: HOST, title: T}} (a terminal; master and title
+optional), {{url: URL, title: T}} (a page) or {{host: user@host, title: T}} (a server); hand-editable, shared by every window, never layered or synced.
 Layering is per key: worminal.yaml needs only the differences, and a working Alacritty setup keeps working.
 Alacritty keys Worminal does not use (window, keyboard, ...) are ignored. Every other source of settings is
 absent: nothing is compiled in, and each process reads the files itself, also on headless hosts.

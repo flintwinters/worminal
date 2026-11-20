@@ -280,7 +280,7 @@ impl App {
         self.window.present();
         Ok(())
     }
-    fn master_index(&self, master: &std::ffi::OsStr) -> Option<u32> {
+    pub(super) fn master_index(&self, master: &std::ffi::OsStr) -> Option<u32> {
         if self.config.master.as_deref() == Some(master) && !self.primary_detached.get() {
             Some(0)
         } else {

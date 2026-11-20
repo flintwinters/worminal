@@ -1,4 +1,5 @@
 //! Application state and local transport shared by the Rust service and frontend.
+pub mod bookmarks;
 pub mod broker;
 pub mod browser_target;
 pub mod cli_help;
@@ -16,4 +17,5 @@ pub mod socket;
 pub mod spawn;
 pub mod ssh;
 mod statefile;
+mod yamlfile;
 pub use browser_target::{WORKSPACE_BROWSER_HOME, WORKSPACE_BROWSER_SCHEME};

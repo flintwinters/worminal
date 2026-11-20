@@ -37,6 +37,7 @@ impl App {
                     .into_owned()
                 };
                 page.label.set_text(&label);
+                let (starrable, starred) = self.bookmark_state(page.id);
                 Tab {
                     id: page.id,
                     label,
@@ -45,6 +46,8 @@ impl App {
                     ssh: page.ssh_user.is_some(),
                     busy: page.busy,
                     background_job: page.background_job,
+                    starrable,
+                    starred,
                 }
             })
             .collect();

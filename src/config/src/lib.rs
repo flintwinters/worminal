@@ -11,7 +11,8 @@ pub mod sync;
 pub use reference::{help, unknown_keys, EXAMPLE};
 pub use resolve::{Settings, COLOR_COUNT};
 pub use source::{
-    alacritty_path, devices_path, read, state_home, worminal_default_path, worminal_path,
+    alacritty_path, bookmarks_path, devices_path, read, state_home, worminal_default_path,
+    worminal_path,
 };
 use std::sync::OnceLock;
 
