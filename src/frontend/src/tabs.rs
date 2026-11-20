@@ -58,6 +58,8 @@ struct State {
     metrics: Cell<Option<Metrics>>,
     entries: RefCell<Vec<Tab>>,
     active: Cell<u32>,
+    /// Whether this strip's pane has focus; only then does its selected tab get the solid highlight.
+    focused: Cell<bool>,
     palette: RefCell<Option<Rc<RefCell<Palette>>>>,
     /// Tabs (with severity) that rang the bell and have not received input since; selecting a tab keeps it.
     attention: RefCell<Vec<(u32, u32)>>,
@@ -195,7 +197,7 @@ impl State {
                 .iter()
                 .find(|(id, _)| *id == entry.id)
                 .map_or(0, |(_, severity)| *severity);
-            let (fill, text) = colors(&palette, entry, selected, severity);
+            let (fill, text) = colors(&palette, entry, selected && self.focused.get(), severity);
             if let Some(fill) = fill {
                 paint::source(cr, &fill);
                 cr.rectangle(
@@ -212,13 +214,16 @@ impl State {
                 f64::from(baseline) - f64::from(layout.baseline()) / f64::from(pango::SCALE),
             );
             graphics_ffi::show_layout(cr, layout);
-            cr.rectangle(
-                f64::from(x + metrics.width),
-                f64::from((baseline + 2).min(top - 2 + metrics.height)),
-                f64::from((width - 2 * metrics.width).max(0)),
-                1.0,
-            );
-            cr.fill()?;
+            // The underline marks each pane's selected tab, focused or not.
+            if selected {
+                cr.rectangle(
+                    f64::from(x + metrics.width),
+                    f64::from((baseline + 2).min(top - 2 + metrics.height)),
+                    f64::from((width - 2 * metrics.width).max(0)),
+                    1.0,
+                );
+                cr.fill()?;
+            }
             if let Some((_, after)) = drop.filter(|(to, _)| *to == i) {
                 paint::source(cr, &palette.color(3));
                 let edge = if after { x + width - 2 } else { x };
@@ -328,6 +333,7 @@ impl Tabs {
             metrics: Cell::new(None),
             entries: RefCell::new(Vec::new()),
             active: Cell::new(0),
+            focused: Cell::new(false),
             palette: RefCell::new(None),
             attention: RefCell::new(Vec::new()),
             bells: RefCell::new(Vec::new()),
@@ -438,6 +444,11 @@ impl Tabs {
         let count = attention.len();
         attention.retain(|(alert, _)| *alert != id);
         if attention.len() != count {
+            self.0.widget.queue_draw();
+        }
+    }
+    pub fn focus(&self, focused: bool) {
+        if self.0.focused.replace(focused) != focused {
             self.0.widget.queue_draw();
         }
     }

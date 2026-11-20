@@ -94,7 +94,7 @@ impl App {
     /// The window's first pane; it holds every tab until one is dragged out.
     pub(super) fn start_panes(self: &Rc<Self>) {
         let pane = self.add_pane();
-        self.panes.focused.set(pane.id);
+        self.focus_pane(&pane);
         *self.panes.layout.borrow_mut() = Layout::Leaf(pane.id);
         // After the children, like the drop highlight: an overlay widget would hide drop targets from GTK.
         self.panes.root.connect_local(
@@ -264,9 +264,13 @@ impl App {
     fn can_split(&self, id: u32) -> bool {
         self.terminal(id).is_some() && self.features(id) & WIRE_FEATURE_PANES != 0
     }
+    /// The one place pane focus changes, so only the focused strip highlights its selected tab.
     pub(super) fn focus_pane(&self, pane: &Pane) {
         if self.panes.focused.replace(pane.id) != pane.id {
             self.panes.root.queue_draw();
+        }
+        for other in self.panes() {
+            other.strip.focus(other.id == pane.id);
         }
     }
     /// Focus the pane holding a tab and select its page there.
@@ -478,7 +482,9 @@ impl App {
         }
         if changed && self.pane(self.panes.focused.get()).is_none() {
             let first = self.panes.layout.borrow().leaves()[0];
-            self.panes.focused.set(first);
+            if let Some(pane) = self.pane(first) {
+                self.focus_pane(&pane);
+            }
         }
         changed
     }
