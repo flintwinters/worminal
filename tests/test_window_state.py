@@ -145,6 +145,13 @@ class WindowStateTest(unittest.TestCase):
                         f"{FRONTEND} --new-browser-tab about:blank")
                     key("key", "Return")
                     self.wait_for(lambda: directory("", False), "browser unavailability")
+                    key("key", "ctrl+q")
+                    # The shell takes the browser's slot; merely closing the browser would leave one tab.
+                    self.wait_for(lambda: (rows := snapshot()) and len(rows) == 1 and rows[0][2],
+                                  "a shell replacing the quit browser")
+                    key("key", "ctrl+2")
+                    self.wait_for(lambda: (rows := snapshot()) and rows[0][2] and bytes(rows[0][3]) != os.fsencode(second),
+                                  "the replacement shell is a tab of its own")
                     key("key", "ctrl+1")
                     self.wait_for(lambda: directory(second), "terminal availability restored")
                     original_id = snapshot()[0][0]

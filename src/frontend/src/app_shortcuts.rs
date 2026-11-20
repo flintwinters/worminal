@@ -64,7 +64,14 @@ impl App {
                     self.new_tab();
                 }
             } else {
-                self.send(self.active.get(), CommandKind::Close { receipt: false });
+                let closing = self.active.get();
+                if value == key::q {
+                    // Quitting a browser returns to a shell, as exiting a program does. The shell that ran
+                    // `--new-browser-tab` ended when the browser replaced it, so a fresh one takes its slot:
+                    // the daemon places the new tab after the browser, which then closes beside it.
+                    self.new_tab();
+                }
+                self.send(closing, CommandKind::Close { receipt: false });
             }
             return true;
         }
