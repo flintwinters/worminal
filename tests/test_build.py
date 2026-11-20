@@ -41,24 +41,24 @@ class BuildTests(unittest.TestCase):
                 self.assertIn(unittest.mock.call("build/lib/worminal/" + build.RUST_BROWSER_MODULE, "worminal-browser"),
                               library.call_args_list)
 
-    def test_daemon_builds_natively_without_the_musl_toolchain_unless_portability_is_required(self):
-        # Contributors without musl-tools still build; only a portable (release) build demands the toolchain.
+    def test_daemon_builds_natively_unless_a_portable_release_is_requested(self):
+        # Contributors build without musl-tools by default, even when it is installed; only releases demand it.
         with patch.object(build, "pkg_flags", return_value=[]), patch.object(build, "step"), \
                 patch.object(build, "require_static") as static, \
                 patch.object(build, "musl_missing", return_value="musl-gcc"), patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("WORMINAL_PORTABLE", None)
-            self.assertFalse(build.portable())
+            for value in (None, "", "0"):
+                os.environ.pop("WORMINAL_PORTABLE", None)
+                if value is not None:
+                    os.environ["WORMINAL_PORTABLE"] = value
+                with patch.object(build, "musl_missing", return_value=None):
+                    self.assertFalse(build.portable())
             builder = build.Builder()
             with patch.object(builder, "rust_program") as rust:
                 builder.target("worminald")
             rust.assert_called_once_with("worminald", "worminal-daemon", triple=None)
             static.assert_not_called()
-            os.environ["WORMINAL_PORTABLE"] = "0"
-            with patch.object(build, "musl_missing", return_value=None):
-                self.assertFalse(build.portable())
-                del os.environ["WORMINAL_PORTABLE"]
-                self.assertTrue(build.portable())
             os.environ["WORMINAL_PORTABLE"] = "1"
+            self.assertTrue(build.portable())
             with self.assertRaisesRegex(RuntimeError, "portable daemon needs musl-gcc"):
                 build.Builder().target(build.engine_archive(build.DAEMON_TARGET))
 

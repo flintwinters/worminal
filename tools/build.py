@@ -61,15 +61,12 @@ def musl_missing():
 
 
 def portable():
-    """True when the daemon links musl statically: WORMINAL_PORTABLE=1/0 overrides toolchain detection.
+    """True when WORMINAL_PORTABLE=1 asks for a daemon linked statically against musl, as releases must be.
 
-    A native daemon links this host's glibc, so it builds without musl but version sync can only copy it to peers
-    whose glibc is at least as new; the receiving run check refuses it elsewhere. Releases force portable builds.
+    The default native daemon links this host's glibc, so it builds without musl but version sync can only copy it to
+    peers whose glibc is at least as new; the receiving run check refuses it elsewhere.
     """
-    forced = os.environ.get("WORMINAL_PORTABLE")
-    if forced is not None:
-        return forced not in ("", "0")
-    return musl_missing() is None
+    return os.environ.get("WORMINAL_PORTABLE", "") not in ("", "0")
 
 
 def engine_archive(triple=None):
@@ -246,7 +243,7 @@ class Builder:
             musl = target != engine_archive()
             if musl and (missing := musl_missing()):
                 raise RuntimeError(f"The portable daemon needs {missing}; "
-                                   "build with --native (WORMINAL_PORTABLE=0) for a host-glibc one")
+                                   "build without --portable for a native one")
             cc = [MUSL_CC] if musl else self.cc
             objects = [f"build/obj/engine{'-musl' if musl else ''}/{Path(source).with_suffix('.o')}"
                        for source in ENGINE]
@@ -274,7 +271,7 @@ class Builder:
                 require_static(runtime_binary(target, prefix=ROOT / "build"))
             else:
                 print("Built a native daemon: version sync can only copy it to peers with at least this host's "
-                      "glibc. Install the musl toolchain or build with --portable for a portable one.")
+                      "glibc. Build with --portable (needs the musl toolchain) for a release.")
         elif target.removeprefix("build/") in PROBES and target.startswith("build/"):
             name = target.removeprefix("build/")
             packages = PROBES[name]

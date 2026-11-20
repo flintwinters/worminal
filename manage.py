@@ -135,13 +135,13 @@ def run_headless_checks():
     return 0
 
 
-PORTABLE = typer.Option(None, "--portable/--native", help="Daemon linkage: static musl (releases) or this host's "
-                        "glibc; default portable when the musl toolchain is installed (WORMINAL_PORTABLE).")
+PORTABLE = typer.Option(False, help="Link the daemon statically against musl, as releases need; otherwise it links "
+                        "this host's glibc (also WORMINAL_PORTABLE=1).")
 
 
 def choose_daemon_linkage(portable):
-    if portable is not None:
-        os.environ["WORMINAL_PORTABLE"] = "1" if portable else "0"
+    if portable:
+        os.environ["WORMINAL_PORTABLE"] = "1"
 
 
 @app.command()

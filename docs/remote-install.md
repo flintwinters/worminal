@@ -63,7 +63,7 @@ bootstrap as `install-on-remote`; a newer remote daemon is pulled through that b
 predates `--version` counts as older. Equal versions change nothing.
 
 A portable daemon is a static musl executable, so it runs on any Linux of the same CPU regardless of either side's
-glibc. Native builds (no musl toolchain, see development.md) and older daemons are dynamically linked and only run on
+glibc. Default native builds (see development.md) and older daemons are dynamically linked and only run on
 peers whose glibc is at least as new as their build host's; the run check refuses them ("cannot run here") and nothing
 is installed. A failed sync keeps a view's master link closed: the
 connect helper reports the error to the view, which shows it in the window and once as a desktop notification
