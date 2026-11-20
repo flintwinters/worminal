@@ -25,7 +25,7 @@ class BuildTests(unittest.TestCase):
 
     def test_release_build_does_not_construct_historical_applications(self):
         with patch.object(build, "pkg_flags", return_value=[]), patch.object(build, "step"), \
-                patch.object(build, "require_static") as static:
+                patch.object(build, "require_static") as static, patch.dict(os.environ, {"WORMINAL_PORTABLE": "1"}):
             builder = build.Builder()
             with (patch.object(builder, "program") as program, patch.object(builder, "rust_program") as rust,
                   patch.object(builder, "rust_library") as library):
@@ -40,6 +40,27 @@ class BuildTests(unittest.TestCase):
                               library.call_args_list)
                 self.assertIn(unittest.mock.call("build/lib/worminal/" + build.RUST_BROWSER_MODULE, "worminal-browser"),
                               library.call_args_list)
+
+    def test_daemon_builds_natively_without_the_musl_toolchain_unless_portability_is_required(self):
+        # Contributors without musl-tools still build; only a portable (release) build demands the toolchain.
+        with patch.object(build, "pkg_flags", return_value=[]), patch.object(build, "step"), \
+                patch.object(build, "require_static") as static, \
+                patch.object(build, "musl_missing", return_value="musl-gcc"), patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("WORMINAL_PORTABLE", None)
+            self.assertFalse(build.portable())
+            builder = build.Builder()
+            with patch.object(builder, "rust_program") as rust:
+                builder.target("worminald")
+            rust.assert_called_once_with("worminald", "worminal-daemon", triple=None)
+            static.assert_not_called()
+            os.environ["WORMINAL_PORTABLE"] = "0"
+            with patch.object(build, "musl_missing", return_value=None):
+                self.assertFalse(build.portable())
+                del os.environ["WORMINAL_PORTABLE"]
+                self.assertTrue(build.portable())
+            os.environ["WORMINAL_PORTABLE"] = "1"
+            with self.assertRaisesRegex(RuntimeError, "portable daemon needs musl-gcc"):
+                build.Builder().target(build.engine_archive(build.DAEMON_TARGET))
 
     def test_release_daemon_must_not_need_a_program_interpreter(self):
         # A dynamically linked daemon from a newer-glibc host could not run on an older-glibc peer during sync.

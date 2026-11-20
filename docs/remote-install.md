@@ -62,9 +62,10 @@ the node with the older Cargo version is updated from the newer one. A newer loc
 bootstrap as `install-on-remote`; a newer remote daemon is pulled through that bootstrap run locally. A daemon that
 predates `--version` counts as older. Equal versions change nothing.
 
-The daemon is a static musl executable, so it runs on any Linux of the same CPU regardless of either side's glibc.
-Older dynamically linked daemons only run on peers whose glibc is at least as new as their build host's; the run check
-refuses them ("cannot run here") and nothing is installed. A failed sync keeps a view's master link closed: the
+A portable daemon is a static musl executable, so it runs on any Linux of the same CPU regardless of either side's
+glibc. Native builds (no musl toolchain, see development.md) and older daemons are dynamically linked and only run on
+peers whose glibc is at least as new as their build host's; the run check refuses them ("cannot run here") and nothing
+is installed. A failed sync keeps a view's master link closed: the
 connect helper reports the error to the view, which shows it in the window and once as a desktop notification
 (independent of `update_notifications`) while it retries. The daemon log records the receipt.
 

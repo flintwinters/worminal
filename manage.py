@@ -135,9 +135,19 @@ def run_headless_checks():
     return 0
 
 
+PORTABLE = typer.Option(None, "--portable/--native", help="Daemon linkage: static musl (releases) or this host's "
+                        "glibc; default portable when the musl toolchain is installed (WORMINAL_PORTABLE).")
+
+
+def choose_daemon_linkage(portable):
+    if portable is not None:
+        os.environ["WORMINAL_PORTABLE"] = "1" if portable else "0"
+
+
 @app.command()
-def build():
+def build(portable: bool = PORTABLE):
     """Compile Worminal; appearance is read at runtime from worminal.yaml or Alacritty config."""
+    choose_daemon_linkage(portable)
     native_build.build_targets()
 
 
@@ -622,8 +632,10 @@ def check_browser_target():
 
 @app.command()
 def install(prefix: Path = typer.Option(None, help="Installation prefix (default: PREFIX or ~/.local)."),
-            skip_build: bool = typer.Option(False, help="Publish an existing user build without rebuilding.")):
+            skip_build: bool = typer.Option(False, help="Publish an existing user build without rebuilding."),
+            portable: bool = PORTABLE):
     """Build and install binaries, manual, desktop launcher, and icon; supports DESTDIR staging."""
+    choose_daemon_linkage(portable)
     native_build.install(prefix, skip_build=skip_build)
 
 
