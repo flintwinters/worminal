@@ -178,6 +178,7 @@ impl App {
             ),
             hover: Box::new(glib::clone!(@weak self as app => move |target| app.mark(target))),
             split: Box::new(glib::clone!(@weak self as app => move |id, target| app.drop_tab(id, target))),
+            star: Box::new(glib::clone!(@weak self as app => move |id| app.toggle_bookmark(id))),
         });
         let pane = Rc::new(Pane {
             id,

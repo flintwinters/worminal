@@ -19,13 +19,14 @@ use std::{
 use worminal_engine::input::Encoded;
 use worminal_protocol::cell::MODE_BUSY;
 use worminal_protocol::worp::{
-    commands::{CommandKind, OpenMode},
+    commands::CommandKind,
     events::{Catalog, Event, EventKind, TabKind},
-    launch::Launch,
 };
 use worminal_protocol::*;
 use worminal_workspace::socket;
 
+#[path = "app_bookmarks.rs"]
+mod bookmarks;
 #[path = "app_browser.rs"]
 mod browser_views;
 #[path = "app_chrome.rs"]
@@ -34,6 +35,8 @@ mod chrome;
 mod links;
 #[path = "notifications.rs"]
 mod notifications;
+#[path = "app_open.rs"]
+mod open;
 #[path = "app_shortcuts.rs"]
 mod shortcuts;
 #[path = "app_split.rs"]
@@ -323,6 +326,8 @@ struct App {
     defer_navigation: Cell<bool>,
     geometry_pending: Cell<bool>,
     early_keys: RefCell<VecDeque<gdk::EventKey>>,
+    /// The saved bookmarks as last read, for the stars on the tab strip.
+    bookmarks: RefCell<Vec<worminal_workspace::bookmarks::Bookmark>>,
 }
 impl App {
     fn print(&self, bytes: &[u8]) -> io::Result<()> {
@@ -404,6 +409,7 @@ impl App {
             defer_navigation: Cell::new(staged),
             geometry_pending: Cell::new(true),
             early_keys: RefCell::new(VecDeque::new()),
+            bookmarks: RefCell::new(bookmarks::load()),
         });
         app.start_panes();
         app.window.connect_key_press_event(
@@ -415,6 +421,7 @@ impl App {
                 if !app.replacing.get() && app.pages.borrow().iter().any(|page| page.id == app.active.get() && page.browser) {
                     app.claim_browser(app.active.get());
                 }
+                app.reload_bookmarks();
                 glib::Propagation::Proceed
             }));
         app.window.connect_is_active_notify(|window| {
@@ -912,43 +919,6 @@ impl App {
             self.close_empty_window();
         }
         Ok(())
-    }
-    fn new_tab(self: &Rc<Self>) {
-        // A new tab opens on the host of the tab being viewed.
-        let index = self.active.get() >> LINK_SHIFT;
-        let mut config = self.config_for(index);
-        config.command.clear();
-        config.title = "Worminal".into();
-        config.output.clear();
-        config.line.clear();
-        config.browser_url = None;
-        if let Some(page) = self
-            .pages
-            .borrow()
-            .iter()
-            .find(|page| page.id == self.active.get())
-        {
-            if !page.directory.as_os_str().is_empty() {
-                config.cwd = page.directory.clone();
-            }
-        }
-        match config.launch().and_then(|bytes| Launch::decode(&bytes)) {
-            Ok(launch) => {
-                if let Some(link) = self.link(index) {
-                    link.pending_tabs
-                        .set(link.pending_tabs.get().saturating_add(1));
-                }
-                self.send_link(
-                    index,
-                    0,
-                    CommandKind::Open {
-                        launch,
-                        mode: OpenMode::Subscribe,
-                    },
-                );
-            }
-            Err(error) => self.message(Some(&error.to_string())),
-        }
     }
 }
 pub fn run() -> io::Result<()> {

@@ -128,6 +128,10 @@ impl App {
                     self.unsplit();
                     return true;
                 }
+                key::d => {
+                    self.toggle_bookmark(self.active.get());
+                    return true;
+                }
                 key::c | key::v | key::y => {
                     if let Some(terminal) = self.terminal(self.active.get()) {
                         if value == key::c {

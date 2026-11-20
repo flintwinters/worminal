@@ -236,7 +236,10 @@ class RustApplicationTest(unittest.TestCase):
             script = CHECKS / 'split-shell.sh'
             script.write_text(f'#!/bin/sh\n{fill(blue, "blue")}\n')
             script.chmod(0o755)
-            env.update(GDK_BACKEND='x11', SHELL=str(script))
+            # Tabs carry a star in their left padding: drags start on the label, and the config is private.
+            config = CHECKS / f'split-config-{os.getpid()}'
+            self.addCleanup(shutil.rmtree, config, ignore_errors=True)
+            env.update(GDK_BACKEND='x11', SHELL=str(script), XDG_CONFIG_HOME=str(config))
             env.pop('WAYLAND_DISPLAY', None)
             app = subprocess.Popen([str(runtime_binary("worminal-rust")), '-T', 'Rust split', '-o', '-',
                                     '-e', '/bin/sh', '-c', fill(red, 'red')],
@@ -303,9 +306,9 @@ class RustApplicationTest(unittest.TestCase):
             second_label = max(x for x in range(2, 440) if pixel(x / 900, 4 / 500) != background) - 2
             self.assertLess(second_label, 450, 'fixture labels must fit in one half-width strip')
             # Drag the first tab's label onto the right edge of the pane.
-            xdo('mousemove', '--window', wid, '12', '8', 'mousedown', '1')
+            xdo('mousemove', '--window', wid, '40', '8', 'mousedown', '1')
             for step in range(1, 11):
-                xdo('mousemove', '--window', wid, str(12 + 876 * step // 10), str(8 + 250 * step // 10))
+                xdo('mousemove', '--window', wid, str(40 + 848 * step // 10), str(8 + 250 * step // 10))
                 time.sleep(.02)
             deadline = time.monotonic() + 3
             while pixel(.75, .75) == blue:
@@ -340,17 +343,17 @@ class RustApplicationTest(unittest.TestCase):
             self.assertNotEqual(pixel(.505, 4 / 500), background, 'the right pane has no tab strip of its own')
             self.assertEqual(pixel(second_label / 900, 4 / 500), background, 'the left strip still lists the dropped tab')
             # Dragging the right pane's tab onto the left strip puts it back there and ends the split.
-            xdo('mousemove', '--window', wid, '462', '8', 'mousedown', '1')
+            xdo('mousemove', '--window', wid, '490', '8', 'mousedown', '1')
             for step in range(1, 11):
-                xdo('mousemove', '--window', wid, str(462 - 400 * step // 10), '8')
+                xdo('mousemove', '--window', wid, str(490 - 400 * step // 10), '8')
                 time.sleep(.02)
             xdo('mouseup', '1')
             wait_for(red, red, 'dropping a tab on the other strip did not merge the panes')
             self.assertEqual(pixel(.505, 4 / 500), background, 'the right strip outlived the split')
             # Split again, then Ctrl+Shift+X gathers the tabs.
-            xdo('mousemove', '--window', wid, '12', '8', 'mousedown', '1')
+            xdo('mousemove', '--window', wid, '40', '8', 'mousedown', '1')
             for step in range(1, 11):
-                xdo('mousemove', '--window', wid, str(12 + 876 * step // 10), str(8 + 250 * step // 10))
+                xdo('mousemove', '--window', wid, str(40 + 848 * step // 10), str(8 + 250 * step // 10))
                 time.sleep(.02)
             xdo('mouseup', '1')
             wait_for(blue, red, 'the second split did not happen')
@@ -369,6 +372,54 @@ class RustApplicationTest(unittest.TestCase):
             xdo('key', '--clearmodifiers', 'alt+shift+Right')
             wait_for(blue, blue, 'alt+shift+Right did not move the tab into the right pane')
             self.assertEqual(pixel(.505, 4 / 500), background, 'the emptied pane outlived the move')
+
+    def test_starring_a_tab_bookmarks_its_directory(self):
+        with isolated_display() as env:
+            # Never the real configuration: bookmarks.yaml is the user's own file.
+            root = CHECKS / f'bookmarks-{os.getpid()}'
+            shutil.rmtree(root, ignore_errors=True)
+            cwd = root / 'work dir'
+            cwd.mkdir(parents=True)
+            self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+            saved = root / 'config/worminal/bookmarks.yaml'
+            env.update(GDK_BACKEND='x11', XDG_CONFIG_HOME=str(root / 'config'))
+            env.pop('WAYLAND_DISPLAY', None)
+            app = subprocess.Popen([str(runtime_binary('worminal-rust')), '-T', 'Rust bookmarks', '-o', '-',
+                                    '-e', '/bin/sh', '-c', 'while :; do sleep 1; done'],
+                                   env=env, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.addCleanup(lambda: self.stop(app))
+            wid = window(env, app)
+            xdo = lambda *args: subprocess.run(['xdotool', *args], env=env, check=True)
+            api = lambda *args: subprocess.check_output([str(runtime_binary('worminald')), 'api', *args],
+                                                        env=env, text=True)
+            xdo('windowfocus', '--sync', wid)
+
+            def bookmarked():
+                return saved.read_text() if saved.exists() else ''
+
+            def wait_for(condition, message):
+                deadline = time.monotonic() + 8
+                while not condition():
+                    self.assertIsNone(app.poll())
+                    self.assertLess(time.monotonic(), deadline, message)
+                    time.sleep(.05)
+            # The strip stars only tabs whose directory is known; the daemon reports it shortly after start.
+            wait_for(lambda: json.loads(api('list'))['tabs'][0].get('directory') == str(cwd),
+                     'the tab never reported its directory')
+            # Ctrl+Shift+D bookmarks the tab, and again removes it.
+            xdo('key', '--clearmodifiers', 'ctrl+shift+d')
+            wait_for(lambda: f'directory: {cwd}' in bookmarked(), 'ctrl+shift+d did not bookmark the tab')
+            self.assertEqual(saved.stat().st_mode & 0o777, 0o600)
+            xdo('key', '--clearmodifiers', 'ctrl+shift+d')
+            wait_for(lambda: str(cwd) not in bookmarked() and saved.exists(), 'ctrl+shift+d did not remove it')
+            # The star sits in the tab's left padding; a click there toggles without starting a drag or
+            # selecting anything else.
+            xdo('mousemove', '--window', wid, '5', '8', 'click', '1')
+            wait_for(lambda: f'directory: {cwd}' in bookmarked(), 'clicking the star did not bookmark the tab')
+            xdo('mousemove', '--window', wid, '5', '8', 'click', '1')
+            # Quick clicks arrive as a press and a double-click event; only the press may toggle.
+            wait_for(lambda: str(cwd) not in bookmarked(), 'clicking the star again did not remove it')
+            self.assertEqual(len(json.loads(api('list'))['tabs']), 1)
 
     @staticmethod
     def stop(process):
