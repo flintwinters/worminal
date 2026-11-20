@@ -8,6 +8,9 @@ fresh shell, exactly as restart recovery does. A web bookmark saves its URL and 
 
 - A tab with a known directory (or a web page with a URL) shows a star before its name. Click the star, or press
   **Ctrl+Shift+D**, to bookmark the tab; do it again to remove the bookmark. A filled star is a bookmark.
+  Tabs that share a directory share its bookmark. A tab with an `ssh` client in its foreground has no star: the
+  directory Worminal knows for it is the local shell's, not the remote one, so it cannot be bookmarked. Bookmark
+  the remote place from a tab whose daemon runs there (`--master`).
 - **Ctrl+Shift+P** opens the side panel beside the panes. Pressed while the panel is open but the keyboard is
   elsewhere, it moves the keyboard to the panel; pressed with the keyboard already there, it closes the panel.
 - In the panel: **Up/Down** (or `k`/`j`) move, **Enter** (or a click) opens the bookmark in a new tab and closes the

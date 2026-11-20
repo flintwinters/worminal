@@ -374,7 +374,8 @@ class RustApplicationTest(unittest.TestCase):
             self.assertEqual(pixel(.505, 4 / 500), background, 'the emptied pane outlived the move')
 
     def test_starring_a_tab_bookmarks_its_directory(self):
-        with isolated_display() as env:
+        from Xlib import X, display
+        with isolated_display() as env, ExitStack() as cleanup:
             # Never the real configuration: bookmarks.yaml is the user's own file.
             root = CHECKS / f'bookmarks-{os.getpid()}'
             shutil.rmtree(root, ignore_errors=True)
@@ -384,8 +385,10 @@ class RustApplicationTest(unittest.TestCase):
             saved = root / 'config/worminal/bookmarks.yaml'
             env.update(GDK_BACKEND='x11', XDG_CONFIG_HOME=str(root / 'config'))
             env.pop('WAYLAND_DISPLAY', None)
+            sizes = root / 'sizes.txt'
+            record = f"trap 'stty size >> {shlex.quote(str(sizes))}' WINCH; while :; do sleep 0.2; done"
             app = subprocess.Popen([str(runtime_binary('worminal-rust')), '-T', 'Rust bookmarks', '-o', '-',
-                                    '-e', '/bin/sh', '-c', 'while :; do sleep 1; done'],
+                                    '-e', '/bin/sh', '-c', record],
                                    env=env, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             self.addCleanup(lambda: self.stop(app))
             wid = window(env, app)
@@ -406,9 +409,21 @@ class RustApplicationTest(unittest.TestCase):
             # The strip stars only tabs whose directory is known; the daemon reports it shortly after start.
             wait_for(lambda: json.loads(api('list'))['tabs'][0].get('directory') == str(cwd),
                      'the tab never reported its directory')
+            xdo('windowsize', wid, '900', '500')
+            time.sleep(1.5)
+            server = display.Display(env['DISPLAY'])
+            cleanup.callback(server.close)
+            window_object = server.create_resource_object('window', int(wid))
+
+            # A status line under the panes takes a row from the terminal while it shows, and the shell sees the
+            # screen shrink and grow again: a bounce. The shell records its size on every resize signal.
+            resizes = lambda: sizes.read_text().count('\n') if sizes.exists() else 0
+            quiet = resizes()
             # Ctrl+Shift+D bookmarks the tab, and again removes it.
             xdo('key', '--clearmodifiers', 'ctrl+shift+d')
             wait_for(lambda: f'directory: {cwd}' in bookmarked(), 'ctrl+shift+d did not bookmark the tab')
+            time.sleep(1.5)
+            self.assertEqual(resizes(), quiet, 'bookmarking resized the terminal: a status line bounced the screen')
             self.assertEqual(saved.stat().st_mode & 0o777, 0o600)
             xdo('key', '--clearmodifiers', 'ctrl+shift+d')
             wait_for(lambda: str(cwd) not in bookmarked() and saved.exists(), 'ctrl+shift+d did not remove it')
@@ -419,7 +434,60 @@ class RustApplicationTest(unittest.TestCase):
             xdo('mousemove', '--window', wid, '5', '8', 'click', '1')
             # Quick clicks arrive as a press and a double-click event; only the press may toggle.
             wait_for(lambda: str(cwd) not in bookmarked(), 'clicking the star again did not remove it')
+            time.sleep(1.5)
+            self.assertEqual(resizes(), quiet, 'clicking the star resized the terminal')
             self.assertEqual(len(json.loads(api('list'))['tabs']), 1)
+
+    def test_a_tab_running_ssh_is_not_bookmarkable_as_a_local_directory(self):
+        with isolated_display() as env:
+            # The daemon reports an ssh tab's directory as its local shell's, so bookmarking it would save the
+            # wrong place and light up every tab that shares that directory.
+            root = CHECKS / f'ssh-bookmarks-{os.getpid()}'
+            shutil.rmtree(root, ignore_errors=True)
+            work = root / 'work'
+            work.mkdir(parents=True)
+            self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+            # A shell named ssh is a harmless foreground job the daemon takes for an ssh client.
+            fake = root / 'ssh'
+            fake.symlink_to('/bin/sh')
+            saved = root / 'config/worminal/bookmarks.yaml'
+            env.update(GDK_BACKEND='x11', XDG_CONFIG_HOME=str(root / 'config'), SHELL='/bin/sh')
+            env.pop('WAYLAND_DISPLAY', None)
+            app = subprocess.Popen([str(runtime_binary('worminal-rust')), '-T', 'Rust ssh', '-o', '-',
+                                    '-e', str(fake), '-c', 'read line'],
+                                   env=env, cwd=work, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.addCleanup(lambda: self.stop(app))
+            wid = window(env, app)
+            xdo = lambda *args: subprocess.run(['xdotool', *args], env=env, check=True)
+            api = lambda *args: subprocess.check_output([str(runtime_binary('worminald')), 'api', *args],
+                                                        env=env, text=True)
+            xdo('windowfocus', '--sync', wid)
+            bookmarked = lambda: saved.read_text() if saved.exists() else ''
+
+            def wait_for(condition, message):
+                deadline = time.monotonic() + 8
+                while not condition():
+                    self.assertIsNone(app.poll())
+                    self.assertLess(time.monotonic(), deadline, message)
+                    time.sleep(.05)
+            tabs = lambda: json.loads(api('list'))['tabs']
+            wait_for(lambda: tabs()[0].get('directory') == str(work), 'the ssh tab never reported its directory')
+            time.sleep(2.5)  # the daemon notices the foreground ssh client on its next directory check
+            xdo('key', '--clearmodifiers', 'ctrl+shift+d')
+            time.sleep(1.5)
+            self.assertNotIn(str(work), bookmarked(), 'an ssh tab was bookmarked as its local directory')
+            # A second, ordinary tab in the same directory can be bookmarked.
+            xdo('key', '--clearmodifiers', 'ctrl+shift+t')
+            wait_for(lambda: len(tabs()) == 2 and tabs()[1].get('directory') == str(work), 'no second tab')
+            time.sleep(1)
+            xdo('key', '--clearmodifiers', 'ctrl+shift+d')
+            wait_for(lambda: f'directory: {work}' in bookmarked(), 'the ordinary tab was not bookmarked')
+            # Back on the ssh tab the same keys must leave that bookmark alone, not remove it.
+            xdo('key', '--clearmodifiers', 'alt+1')
+            time.sleep(1)
+            xdo('key', '--clearmodifiers', 'ctrl+shift+d')
+            time.sleep(1.5)
+            self.assertIn(f'directory: {work}', bookmarked(), 'the ssh tab removed another tab\'s bookmark')
 
     def test_the_side_panel_opens_and_removes_bookmarks_from_the_keyboard(self):
         from Xlib import X, display, error
