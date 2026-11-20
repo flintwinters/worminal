@@ -122,6 +122,18 @@ decode the filename; web tabs retain document titles. D-Bus directory arrays ret
 `docs/window-state.md` defines that read-only public contract. X11 activation uses fresh server timestamps; Wayland
 activation remains compositor policy.
 
+## Side panel and bookmarks
+
+Ctrl+Shift+P opens a collapsible side panel beside the panes (`panel.rs`, glue in `app_panel.rs`). It is a Cairo list
+in the terminal's font and palette with its own tabs; a tab implements `PanelTab` (title, rows, press), and Bookmarks
+is the first, so further lists add an implementation. The panel is a sibling of the pane area, never an overlay
+child (GTK drag hit testing would hide drop targets), and its widget exists only while open. Bookmarks are the
+user's `$XDG_CONFIG_HOME/worminal/bookmarks.yaml` (`workspace/src/bookmarks.rs`; `docs/bookmarks.md`): terminal
+directories with an optional SSH master, and URLs, never commands. It follows the `devices.yaml` rules through the
+shared `yamlfile.rs`: bounded no-follow reads, a non-blocking lock around read-modify-publish, atomic replacement,
+and a damaged file reported and kept. Windows re-read it on focus; there is no watching or polling. The tab strip's
+star and Ctrl+Shift+D toggle through `app_bookmarks.rs`.
+
 ## Browser capabilities
 
 Browser URL resolution preserves explicit URLs, prefers existing paths and otherwise defaults bare hosts to HTTPS.

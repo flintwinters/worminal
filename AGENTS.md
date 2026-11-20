@@ -61,7 +61,7 @@ the canonical URL and embeds the shared logo, styles and interactions.
 
 Public contracts and subsystem details:
 
-- [Agent interface](docs/automation.md), [Worp](docs/worp.md), [devices](docs/devices.md).
+- [Agent interface](docs/automation.md), [Worp](docs/worp.md), [devices](docs/devices.md), [bookmarks](docs/bookmarks.md).
 - [Configuration](docs/config.md), [notifications](docs/notifications.md), [window state](docs/window-state.md).
 - [Remote installation and master history](docs/remote-install.md), [upgrades](docs/remote-upgrade.md),
   [window replacement](docs/window-updates.md).
