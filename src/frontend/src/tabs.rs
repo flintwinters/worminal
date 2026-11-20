@@ -31,15 +31,28 @@ pub struct Tab {
 pub struct Actions {
     pub select: Box<dyn Fn(u32)>,
     pub close: Box<dyn Fn(u32)>,
-    /// Dropped on another tab: `moved(dragged, target)` asks to move it into that tab's slot.
-    pub moved: Box<dyn Fn(u32, u32)>,
-    /// The pane region a drop of `dragged` at this strip position would split, if any.
-    pub locate: Box<dyn Fn(u32, f64, f64) -> Option<Target>>,
-    /// The region to mark while a drag hovers it; `None` clears the mark.
-    pub hover: Box<dyn Fn(Option<Target>)>,
-    pub split: Box<dyn Fn(u32, Target)>,
+    /// Dropped within its own strip: `moved(dragged, slot)` asks to move it there.
+    pub moved: Box<dyn Fn(u32, Slot)>,
+    /// Where outside its own strip a drop of `dragged` at this strip position would land, if anywhere.
+    pub locate: Box<dyn Fn(u32, f64, f64) -> Option<Landing>>,
+    /// The landing to mark while a drag hovers it; `None` clears the mark.
+    pub hover: Box<dyn Fn(Option<Landing>)>,
+    pub land: Box<dyn Fn(u32, Landing)>,
     /// The dragged tab to draw under the pointer; `None` when the drag ends.
     pub ghost: Box<dyn Fn(Option<Ghost>)>,
+}
+/// A place in a strip beside one of its tabs, marked by a line on that side.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Slot {
+    pub tab: u32,
+    pub after: bool,
+}
+/// Where a tab dragged out of its own strip lands: in another pane's strip, or on a pane's content, whose
+/// middle moves it into that pane and whose edges split it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Landing {
+    Strip { pane: u32, slot: Slot },
+    Content(Target),
 }
 /// A dragged tab's image, whose top-left sits at `x`, `y` in strip coordinates.
 pub struct Ghost {
@@ -53,10 +66,10 @@ struct Drag {
     x: f64,
     y: f64,
     active: bool,
-    /// The tab whose slot the dragged tab takes if released now.
-    over: Option<u32>,
-    /// The pane region the dragged tab splits if released now; it wins over `over`.
-    target: Option<Target>,
+    /// Where in its own strip the dragged tab goes if released now.
+    over: Option<Slot>,
+    /// Where outside its own strip the dragged tab goes if released now; it wins over `over`.
+    target: Option<Landing>,
     /// The tab's image and the press point within it, made when the drag starts.
     ghost: Option<(cairo::ImageSurface, f64, f64)>,
 }
@@ -70,6 +83,8 @@ struct State {
     active: Cell<u32>,
     /// Whether this strip's pane has focus; only then does its selected tab get the solid highlight.
     focused: Cell<bool>,
+    /// Where a tab dragged in from another strip would go.
+    hint: Cell<Option<Slot>>,
     palette: RefCell<Option<Rc<RefCell<Palette>>>>,
     /// Tabs (with severity) that rang the bell and have not received input since; selecting a tab keeps it.
     attention: RefCell<Vec<(u32, u32)>>,
@@ -233,16 +248,15 @@ impl State {
         let entries = self.entries.borrow();
         paint::source(cr, &palette.color(BG));
         cr.paint()?;
-        // The marker sits on the side the dragged tab approaches from.
-        let drop = self.drag.borrow().as_ref().and_then(|drag| {
-            let from = entries.iter().position(|entry| entry.id == drag.id)?;
-            let to = entries
-                .iter()
-                .position(|entry| Some(entry.id) == drag.over)?;
-            drag.active.then_some((to, to > from))
-        });
+        let marker = self
+            .drag
+            .borrow()
+            .as_ref()
+            .filter(|drag| drag.active)
+            .and_then(|drag| drag.over)
+            .or(self.hint.get());
         let placed = placed(layout, &entries, metrics, right);
-        for (i, (entry, &(x, top, width))) in entries.iter().zip(&placed).enumerate() {
+        for (entry, &(x, top, width)) in entries.iter().zip(&placed) {
             cr.save()?;
             cr.rectangle(
                 2.0,
@@ -268,7 +282,7 @@ impl State {
                 right,
                 selected,
             )?;
-            if let Some((_, after)) = drop.filter(|(to, _)| *to == i) {
+            if let Some(Slot { after, .. }) = marker.filter(|slot| slot.tab == entry.id) {
                 paint::source(cr, &palette.color(3));
                 let edge = if after { x + width - 2 } else { x };
                 cr.rectangle(
@@ -299,6 +313,35 @@ impl State {
                     && x < f64::from((left + width).min(right))
             })
             .map(|(entry, _)| entry.id)
+    }
+    /// The slot a tab arriving at `(x, y)` takes: beside the nearer half of the tab there, or at the end of
+    /// the row (or of the last row) it is past.
+    fn slot(&self, x: f64, y: f64) -> Option<Slot> {
+        let metrics = self.metrics.get()?;
+        let layout = self.layout.borrow();
+        let layout = layout.as_ref()?;
+        let entries = self.entries.borrow();
+        let placed = placed(layout, &entries, metrics, self.widget.allocated_width() - 2);
+        let last = placed.last()?.1;
+        let top = placed
+            .iter()
+            .map(|(_, top, _)| *top)
+            .find(|top| y < f64::from(top + metrics.height))
+            .unwrap_or(last);
+        let row = || {
+            entries
+                .iter()
+                .zip(&placed)
+                .filter(|(_, place)| place.1 == top)
+        };
+        let slot = |(entry, _): (&Tab, _), after| Slot {
+            tab: entry.id,
+            after,
+        };
+        row()
+            .find(|(_, (left, _, width))| x < f64::from(*left) + f64::from(*width) / 2.0)
+            .map(|found| slot(found, false))
+            .or_else(|| row().next_back().map(|found| slot(found, true)))
     }
     fn severity(&self, id: u32) -> u32 {
         self.attention
@@ -375,11 +418,21 @@ impl State {
         let changed = {
             let mut drag = self.drag.borrow_mut();
             let Some(drag) = drag.as_mut() else { return };
-            // Keep the last tab while the pointer crosses gaps; a pane region replaces it.
+            // Keep the last tab while the pointer crosses gaps; a landing elsewhere replaces it. The marker
+            // sits on the side the dragged tab approaches from.
             let over = if target.is_some() {
                 None
             } else {
-                over.filter(|over| *over != drag.id).or(drag.over)
+                let entries = self.entries.borrow();
+                let index = |id| entries.iter().position(|entry| entry.id == id);
+                over.filter(|over| *over != drag.id)
+                    .and_then(|tab| {
+                        Some(Slot {
+                            tab,
+                            after: index(tab)? > index(drag.id)?,
+                        })
+                    })
+                    .or(drag.over)
             };
             let changed = !drag.active || over != drag.over || target != drag.target;
             let moved = target != drag.target;
@@ -436,6 +489,7 @@ impl Tabs {
             entries: RefCell::new(Vec::new()),
             active: Cell::new(0),
             focused: Cell::new(false),
+            hint: Cell::new(None),
             palette: RefCell::new(None),
             attention: RefCell::new(Vec::new()),
             bells: RefCell::new(Vec::new()),
@@ -504,7 +558,7 @@ impl Tabs {
                     (actions.ghost)(None);
                 }
                 match (drag.target, drag.over) {
-                    (Some(target), _) => (actions.split)(drag.id, target),
+                    (Some(target), _) => (actions.land)(drag.id, target),
                     (None, over) => {
                         if let Some(over) = over { (actions.moved)(drag.id, over); }
                         (actions.select)(drag.id);
@@ -551,6 +605,16 @@ impl Tabs {
         let count = attention.len();
         attention.retain(|(alert, _)| *alert != id);
         if attention.len() != count {
+            self.0.widget.queue_draw();
+        }
+    }
+    /// The slot a tab dragged in from another strip at this strip position would take.
+    pub fn slot(&self, x: f64, y: f64) -> Option<Slot> {
+        self.0.slot(x, y)
+    }
+    /// Mark where a tab dragged in from another strip would go; `None` clears it.
+    pub fn hint(&self, slot: Option<Slot>) {
+        if self.0.hint.replace(slot) != slot {
             self.0.widget.queue_draw();
         }
     }

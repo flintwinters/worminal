@@ -355,11 +355,22 @@ class RustApplicationTest(unittest.TestCase):
             # and the left strip no longer has the second tab where the shared strip had it.
             self.assertNotEqual(pixel(.505, 4 / 500), background, 'the right pane has no tab strip of its own')
             self.assertEqual(pixel(second_label / 900, 4 / 500), background, 'the left strip still lists the dropped tab')
-            # Dragging the right pane's tab onto the left strip puts it back there and ends the split.
+            # Dragging the right pane's tab onto the left strip puts it back there and ends the split. Over a strip
+            # the drop is marked by the yellow slot line there, never by the pane highlight, which is for content.
+            # The pointer ends near the strip's top, so the tab image it drags leaves the line's lower end clear,
+            # and over the left half of the strip's tab, so the dropped tab goes before it and stays first.
+            content = next(y for y in range(500) if pixel(.25, y / 500) == blue)
             xdo('mousemove', '--window', wid, '462', '8', 'mousedown', '1')
             for step in range(1, 11):
-                xdo('mousemove', '--window', wid, str(462 - 400 * step // 10), '8')
+                xdo('mousemove', '--window', wid, str(462 - 456 * step // 10), str(8 - 5 * step // 10))
                 time.sleep(.02)
+            yellow = bytes.fromhex(json.loads((ROOT / 'assets/palette.json').read_text())['normal']['yellow'][1:])
+            strip = lambda: root.get_image(0, 0, 450, content, X.ZPixmap, 0xffffffff).data
+            deadline = time.monotonic() + 3
+            while not any(bytes(data[i:i + 3][::-1]) == yellow for data in [strip()] for i in range(0, len(data), 4)):
+                self.assertLess(time.monotonic(), deadline, 'no slot marker in the strip the tab is over')
+                time.sleep(.02)
+            self.assertEqual(pixel(.25, .75), blue, 'a drag over a strip highlighted the pane')
             xdo('mouseup', '1')
             wait_for(red, red, 'dropping a tab on the other strip did not merge the panes')
             self.assertEqual(pixel(.505, 4 / 500), background, 'the right strip outlived the split')

@@ -5,7 +5,7 @@ use super::{App, LINK_SHIFT};
 use crate::{
     layout::{neighbor, Direction, Layout, PaneRect, Target, Zone},
     paint,
-    tabs::{mix, Actions, Ghost, Tabs},
+    tabs::{mix, Actions, Ghost, Landing, Tabs},
 };
 use gtk::prelude::*;
 use std::{
@@ -190,7 +190,7 @@ impl App {
                 glib::clone!(@weak self as app => @default-return None, move |id, x, y| app.locate(id, x, y)),
             ),
             hover: Box::new(glib::clone!(@weak self as app => move |target| app.mark(target))),
-            split: Box::new(glib::clone!(@weak self as app => move |id, target| app.drop_tab(id, target))),
+            land: Box::new(glib::clone!(@weak self as app => move |id, target| app.drop_tab(id, target))),
             ghost: Box::new(glib::clone!(@weak self as app, @weak strip_widget => move |ghost| {
                 app.ghost(&strip_widget, ghost)
             })),
@@ -300,7 +300,7 @@ impl App {
     }
     /// Where a drop of `dragged` at this position (in its own pane's strip) would land: another strip or the
     /// middle of another pane moves it there, a pane's edge splits that pane. Its own strip only reorders.
-    pub(super) fn locate(&self, dragged: u32, x: f64, y: f64) -> Option<Target> {
+    pub(super) fn locate(&self, dragged: u32, x: f64, y: f64) -> Option<Landing> {
         if !self.can_split(dragged) {
             return None;
         }
@@ -314,9 +314,10 @@ impl App {
                 if (0..strip.allocated_width()).contains(&sx)
                     && (0..strip.allocated_height()).contains(&sy)
                 {
-                    return (!own).then_some(Target {
-                        anchor: pane.id,
-                        zone: Zone::Center,
+                    let slot = pane.strip.slot(f64::from(sx), f64::from(sy));
+                    return slot.filter(|_| !own).map(|slot| Landing::Strip {
+                        pane: pane.id,
+                        slot,
                     });
                 }
             }
@@ -329,14 +330,24 @@ impl App {
                 f64::from(content.allocated_height()),
             )?;
             // A pane's only tab cannot split itself, and its own middle holds it already.
-            (!(own && (alone || zone == Zone::Center))).then_some(Target {
+            (!(own && (alone || zone == Zone::Center))).then_some(Landing::Content(Target {
                 anchor: pane.id,
                 zone,
-            })
+            }))
         })
     }
-    /// Mark the region a drag would claim until it moves elsewhere.
-    pub(super) fn mark(&self, target: Option<Target>) {
+    /// Mark where a drag would land until it moves elsewhere: a slot in a strip, or a region of content.
+    pub(super) fn mark(&self, landing: Option<Landing>) {
+        for pane in self.panes() {
+            pane.strip.hint(match landing {
+                Some(Landing::Strip { pane: id, slot }) if id == pane.id => Some(slot),
+                _ => None,
+            });
+        }
+        let target = match landing {
+            Some(Landing::Content(target)) => Some(target),
+            _ => None,
+        };
         let rect = target.and_then(|target| {
             let pane = self.pane(target.anchor)?;
             let widget: gtk::Widget = if target.zone == Zone::Center {
@@ -394,8 +405,19 @@ impl App {
         widget.show();
         self.syncing.set(was);
     }
-    /// A tab dropped on a pane joins it, or on a pane edge gets a new pane beside it; it takes focus.
-    pub(super) fn drop_tab(self: &Rc<Self>, id: u32, target: Target) {
+    /// A tab dropped on a pane joins it (at the slot, on its strip), or on a pane edge gets a new pane beside
+    /// it; it takes focus.
+    pub(super) fn drop_tab(self: &Rc<Self>, id: u32, landing: Landing) {
+        let (target, slot) = match landing {
+            Landing::Strip { pane, slot } => (
+                Target {
+                    anchor: pane,
+                    zone: Zone::Center,
+                },
+                Some(slot),
+            ),
+            Landing::Content(target) => (target, None),
+        };
         let Some(anchor) = self.pane(target.anchor) else {
             return;
         };
@@ -411,6 +433,9 @@ impl App {
         self.collapse();
         self.rebuild();
         self.select_id(id);
+        if let Some(slot) = slot {
+            self.move_tab(id, slot);
+        }
     }
     /// The panes' rectangles in the pane area's coordinates.
     fn pane_rects(&self) -> Vec<(u32, PaneRect)> {
@@ -464,7 +489,7 @@ impl App {
             },
             None => return false,
         };
-        self.drop_tab(id, target);
+        self.drop_tab(id, Landing::Content(target));
         true
     }
     /// A terminal asks to become the current tab: it was pressed, or must take control. Panes of a split are all
