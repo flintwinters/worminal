@@ -4,13 +4,15 @@
 use super::{App, LINK_SHIFT};
 use crate::{
     layout::{neighbor, Direction, Layout, PaneRect, Target, Zone},
-    tabs::{Actions, Tabs},
+    paint,
+    tabs::{mix, Actions, Tabs},
 };
 use gtk::prelude::*;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
+use worminal_engine_sys::{WORMINAL_DEFAULT_BACKGROUND as BG, WORMINAL_DEFAULT_FOREGROUND as FG};
 use worminal_protocol::{worp::commands::CommandKind, WIRE_FEATURE_PANES};
 
 type Rect = (f64, f64, f64, f64);
@@ -94,7 +96,56 @@ impl App {
         let pane = self.add_pane();
         self.panes.focused.set(pane.id);
         *self.panes.layout.borrow_mut() = Layout::Leaf(pane.id);
+        self.panes.mark.connect_draw(
+            glib::clone!(@weak self as app => @default-return glib::Propagation::Proceed,
+            move |_, cr| {
+                if let Err(error) = app.draw_borders(cr) {
+                    eprintln!("worminal: pane borders: {error}");
+                }
+                glib::Propagation::Proceed
+            }),
+        );
         self.rebuild();
+    }
+    /// Outline every pane of a split in the terminal's colors, the focused one brighter on top, so the panes
+    /// read as separate terminals and the one taking keystrokes is plain. A window with one pane has none.
+    fn draw_borders(&self, cr: &gtk::cairo::Context) -> Result<(), gtk::cairo::Error> {
+        let panes = self.panes();
+        if panes.len() < 2 {
+            return Ok(());
+        }
+        let palette = self
+            .pages
+            .borrow()
+            .iter()
+            .find(|page| page.id == self.active.get())
+            .map(|page| page.palette.clone());
+        let Some(palette) = palette else {
+            return Ok(());
+        };
+        let (background, foreground) = {
+            let palette = palette.borrow();
+            (palette.color(BG), palette.color(FG))
+        };
+        let focused = self.panes.focused.get();
+        let rects = self.pane_rects();
+        cr.set_line_width(1.0);
+        // Unfocused outlines first: the focused one covers the edges it shares.
+        for (focus, amount) in [(false, 0.3), (true, 0.75)] {
+            paint::source(cr, &mix(&background, &foreground, amount));
+            for &(id, (x, y, width, height)) in &rects {
+                if (id == focused) == focus {
+                    cr.rectangle(
+                        f64::from(x) + 0.5,
+                        f64::from(y) + 0.5,
+                        f64::from(width - 1),
+                        f64::from(height - 1),
+                    );
+                    cr.stroke()?;
+                }
+            }
+        }
+        Ok(())
     }
     fn add_pane(self: &Rc<Self>) -> Rc<Pane> {
         let id = self.panes.next.replace(self.panes.next.get() + 1);
@@ -211,7 +262,9 @@ impl App {
         self.terminal(id).is_some() && self.features(id) & WIRE_FEATURE_PANES != 0
     }
     pub(super) fn focus_pane(&self, pane: &Pane) {
-        self.panes.focused.set(pane.id);
+        if self.panes.focused.replace(pane.id) != pane.id {
+            self.panes.mark.queue_draw();
+        }
     }
     /// Focus the pane holding a tab and select its page there.
     pub(super) fn show_page(&self, id: u32) {

@@ -93,7 +93,7 @@ fn width(layout: &pango::Layout, entry: &Tab, metrics: Metrics) -> i32 {
     layout.set_text(&entry.label);
     layout.pixel_size().0 + 2 * metrics.width
 }
-fn mix(from: &gdk::RGBA, to: &gdk::RGBA, amount: f64) -> gdk::RGBA {
+pub(super) fn mix(from: &gdk::RGBA, to: &gdk::RGBA, amount: f64) -> gdk::RGBA {
     let blend = |a: f64, b: f64| a + (b - a) * amount;
     gdk::RGBA::new(
         blend(from.red(), to.red()),

@@ -312,6 +312,12 @@ class RustApplicationTest(unittest.TestCase):
             xdo('mouseup', '1')
             # The anchor stays left; the dropped tab takes the right half and focus.
             wait_for(blue, red, 'dropping a tab on the right edge did not split the window')
+            # Split panes are outlined, the focused one (right, just dropped) brighter than the other. Look at the
+            # inner edges: the window's own outer frame is drawn by the display, not by the panes.
+            left_edge, right_edge = pixel(449.5 / 900, .75), pixel(451.5 / 900, .75)
+            self.assertNotEqual(left_edge, blue, 'the left pane has no border')
+            self.assertNotEqual(right_edge, red, 'the right pane has no border')
+            self.assertGreater(sum(right_edge), sum(left_edge), f'the focused border is not brighter: {left_edge} {right_edge}')
             # Clicking the other pane makes its tab the current one, not just the target of typing: Ctrl+Shift+C/V
             # and the window title follow the app's active tab, which a click on an already-live pane once left alone.
             title = lambda: subprocess.check_output(['xdotool', 'getwindowname', wid], env=env, text=True).strip()
