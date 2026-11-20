@@ -5,7 +5,7 @@ use gtk::prelude::*;
 use std::rc::Rc;
 
 impl App {
-    /// Ctrl+Shift+P: open the panel; if it is open but the keyboard is elsewhere, move the keyboard to it;
+    /// Ctrl+Shift+B (or P): open the panel; if it is open but the keyboard is elsewhere, move the keyboard to it;
     /// if it already has the keyboard, close it.
     pub(super) fn toggle_panel(self: &Rc<Self>) {
         if !self.panel.is_open() {

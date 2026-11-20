@@ -132,7 +132,8 @@ impl App {
                     self.unsplit();
                     return true;
                 }
-                key::p => {
+                // B for bookmarks; P also works for keyboards that can send it (a membrane keyboard may not).
+                key::b | key::p => {
                     self.toggle_panel();
                     return true;
                 }

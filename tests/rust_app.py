@@ -537,9 +537,9 @@ class RustApplicationTest(unittest.TestCase):
             tabs = lambda: json.loads(api('list'))['tabs']
             wait_for(lambda: tabs()[0].get('directory') == str(start), 'the tab never reported its directory')
             self.assertFalse(panel_edge(), 'the panel is open before it was asked for')
-            # Ctrl+Shift+P opens the panel; Enter opens the selected bookmark in a new tab and closes it.
-            xdo('key', '--clearmodifiers', 'ctrl+shift+p')
-            wait_for(panel_edge, 'ctrl+shift+p did not open the panel')
+            # Ctrl+Shift+B opens the panel (P is an alias for keyboards that can send it); Enter opens the selected bookmark in a new tab and closes it.
+            xdo('key', '--clearmodifiers', 'ctrl+shift+b')
+            wait_for(panel_edge, 'ctrl+shift+b did not open the panel')
             xdo('key', '--clearmodifiers', 'Return')
             wait_for(lambda: len(tabs()) == 2 and tabs()[1].get('directory') == str(other),
                      'Enter did not open the bookmark in a new tab at its directory')
@@ -550,12 +550,12 @@ class RustApplicationTest(unittest.TestCase):
             wait_for(lambda: (other / 'marker.txt').exists() and (other / 'marker.txt').read_text().strip() == str(other),
                      'the opened tab did not take the keyboard in the bookmarked directory')
             # Escape closes the panel and gives the keyboard back; Delete removes the selected bookmark.
-            xdo('key', '--clearmodifiers', 'ctrl+shift+p')
-            wait_for(panel_edge, 'ctrl+shift+p did not reopen the panel')
+            xdo('key', '--clearmodifiers', 'ctrl+shift+b')
+            wait_for(panel_edge, 'ctrl+shift+b did not reopen the panel')
             xdo('key', '--clearmodifiers', 'Escape')
             wait_for(lambda: not panel_edge(), 'Escape did not close the panel')
             xdo('key', '--clearmodifiers', 'ctrl+shift+p')
-            wait_for(panel_edge, 'ctrl+shift+p did not reopen the panel')
+            wait_for(panel_edge, 'the ctrl+shift+p alias did not open the panel')
             xdo('key', '--clearmodifiers', 'Delete')
             wait_for(lambda: str(other) not in saved.read_text(), 'Delete did not remove the bookmark')
             self.assertEqual(len(tabs()), 2)

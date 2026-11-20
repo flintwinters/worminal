@@ -124,7 +124,7 @@ activation remains compositor policy.
 
 ## Side panel and bookmarks
 
-Ctrl+Shift+P opens a collapsible side panel beside the panes (`panel.rs`, glue in `app_panel.rs`). It is a Cairo list
+Ctrl+Shift+B (or P) opens a collapsible side panel beside the panes (`panel.rs`, glue in `app_panel.rs`). It is a Cairo list
 in the terminal's font and palette with its own tabs; a tab implements `PanelTab` (title, rows, press), and Bookmarks
 is the first, so further lists add an implementation. The panel is a sibling of the pane area, never an overlay
 child (GTK drag hit testing would hide drop targets), and its widget exists only while open. Bookmarks are the
