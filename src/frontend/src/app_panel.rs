@@ -76,6 +76,10 @@ impl App {
                 Ok(_) => self.reload_bookmarks(),
                 Err(error) => self.message(Some(&error.to_string())),
             },
+            PanelAction::RenameBookmark { target, title } => match store().rename(&target, title) {
+                Ok(_) => self.reload_bookmarks(),
+                Err(error) => self.message(Some(&error.to_string())),
+            },
             PanelAction::OpenHost(endpoint) => {
                 self.close_panel();
                 self.open_bookmarked_host(endpoint);

@@ -13,6 +13,11 @@ pub enum PanelAction {
     /// A new tab that runs ssh to this endpoint.
     OpenHost(String),
     AddBookmark(Bookmark),
+    /// Give the bookmark this name, or clear its name.
+    RenameBookmark {
+        target: Target,
+        title: Option<String>,
+    },
     RemoveBookmark(Target),
 }
 /// What the user pressed on a row.
@@ -38,6 +43,14 @@ pub trait PanelTab {
     fn add(&self, _text: &str) -> Result<PanelAction, String> {
         Err("Nothing can be added here.".into())
     }
+    /// The name of a row to start editing from (empty when it has none), or `None` when rows cannot be named.
+    fn name_of(&self, _row: usize) -> Option<String> {
+        None
+    }
+    /// What naming a row asks for; an empty name clears it.
+    fn rename(&self, _row: usize, _name: &str) -> Result<PanelAction, String> {
+        Err("Nothing can be named here.".into())
+    }
 }
 
 /// Saved terminal tabs and web pages.
@@ -61,18 +74,19 @@ fn tilde(path: &str, home: Option<&str>) -> String {
         None => path.to_owned(),
     }
 }
+/// A named bookmark shows its name; otherwise what it opens.
 fn row_label(bookmark: &Bookmark, home: Option<&str>) -> String {
+    if let Some(title) = &bookmark.title {
+        return title.clone();
+    }
     match &bookmark.target {
         Target::Terminal {
             directory,
             master: Some(master),
         } => format!("{master}:{directory}"),
         Target::Terminal { directory, .. } => tilde(directory, home),
-        Target::Web { url } => bookmark.title.clone().unwrap_or_else(|| url.clone()),
-        Target::Host { endpoint } => bookmark
-            .title
-            .clone()
-            .unwrap_or_else(|| format!("ssh {endpoint}")),
+        Target::Web { url } => url.clone(),
+        Target::Host { endpoint } => format!("ssh {endpoint}"),
     }
 }
 impl PanelTab for BookmarksTab {
@@ -102,6 +116,27 @@ impl PanelTab for BookmarksTab {
             .validate()
             .map_err(|_| "Not a server: use host or user@host.".to_owned())?;
         Ok(PanelAction::AddBookmark(bookmark))
+    }
+    fn name_of(&self, row: usize) -> Option<String> {
+        self.items
+            .get(row)
+            .map(|bookmark| bookmark.title.clone().unwrap_or_default())
+    }
+    fn rename(&self, row: usize, name: &str) -> Result<PanelAction, String> {
+        let target = self
+            .items
+            .get(row)
+            .ok_or("Nothing is selected.")?
+            .target
+            .clone();
+        let title = Some(name.trim().to_owned()).filter(|title| !title.is_empty());
+        Bookmark {
+            target: target.clone(),
+            title: title.clone(),
+        }
+        .validate()
+        .map_err(|_| "That name is too long.".to_owned())?;
+        Ok(PanelAction::RenameBookmark { target, title })
     }
     fn press(&self, key: PanelKey, row: usize) -> Option<PanelAction> {
         let bookmark = self.items.get(row)?;
@@ -262,5 +297,55 @@ mod tests {
         }
         assert!(Fixed.add_prompt().is_none());
         assert!(Fixed.add("me@build").is_err());
+    }
+
+    #[test]
+    fn any_bookmark_can_be_named_and_a_name_replaces_what_the_row_shows() {
+        let tab = BookmarksTab::new(
+            vec![
+                terminal("/srv/app", None),
+                web("https://example.org", None),
+                host("me@build", None),
+            ],
+            None,
+        );
+        assert_eq!(
+            tab.rows(),
+            ["/srv/app", "https://example.org", "ssh me@build"]
+        );
+        assert_eq!(tab.name_of(2), Some(String::new()));
+        assert_eq!(tab.name_of(9), None);
+        assert_eq!(
+            tab.rename(2, "  Build box "),
+            Ok(PanelAction::RenameBookmark {
+                target: host("me@build", None).target,
+                title: Some("Build box".into())
+            })
+        );
+        // A blank name clears it.
+        assert_eq!(
+            tab.rename(0, "  "),
+            Ok(PanelAction::RenameBookmark {
+                target: terminal("/srv/app", None).target,
+                title: None
+            })
+        );
+        assert!(tab.rename(1, &"x".repeat(300)).is_err());
+        assert!(tab.rename(9, "x").is_err());
+        let named = BookmarksTab::new(
+            vec![
+                Bookmark {
+                    title: Some("Work".into()),
+                    ..terminal("/srv/app", None)
+                },
+                Bookmark {
+                    title: Some("Luna".into()),
+                    ..host("digitize@Luna", None)
+                },
+            ],
+            None,
+        );
+        assert_eq!(named.rows(), ["Work", "Luna"]);
+        assert_eq!(named.name_of(1), Some("Luna".into()));
     }
 }

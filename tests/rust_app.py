@@ -602,7 +602,14 @@ class RustApplicationTest(unittest.TestCase):
             key('a')
             type_text('bad')
             key('Return')
+            # The host is accepted, then it asks what to call it; nothing is saved until that is answered, and
+            # names (unlike hosts) may contain spaces and the list's keys (r, a).
+            time.sleep(.8)
+            self.assertNotIn('host', text(), 'the server was saved before it was named')
+            type_text('Bad box')
+            key('Return')
             wait_for(lambda: re.search(r"host: ['\"]?bad['\"]?", text()), 'the typed server was not saved')
+            self.assertIn('title: Bad box', text(), 'the name was not saved with the server')
             self.assertNotIn('- directory:', text())   # (the header comment mentions the word)
             key('Return')            # opens the selected row: a tab that runs ssh bad
             wait_for(lambda: len(tabs()) == 2, 'opening the server did not create a tab')
@@ -627,8 +634,21 @@ class RustApplicationTest(unittest.TestCase):
             key('a')
             type_text('30')
             key('Return')
+            key('Return')            # no name
             wait_for(lambda: re.search(r"host: ['\"]?30['\"]?", text()), 'the second server was not saved')
+            self.assertEqual(text().count('title:'), 1, 'an unnamed server got a name')
+            # `r` names the selected row, starting from its current name; here from nothing.
             key('Down')
+            key('r')
+            type_text('Thirty')
+            key('Return')
+            wait_for(lambda: 'title: Thirty' in text(), 'renaming did not save the name')
+            # Renaming again starts from the old name, and a blank answer clears it.
+            key('r')
+            key('ctrl+u')
+            key('Return')
+            wait_for(lambda: 'Thirty' not in text(), 'a blank name did not clear the name')
+            self.assertIn('title: Bad box', text(), 'renaming changed another bookmark')
             key('Return')
             wait_for(lambda: len(tabs()) == 3, 'the second server did not open')
             time.sleep(2.5)          # the daemon notices ssh in front on its next check

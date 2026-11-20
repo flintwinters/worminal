@@ -17,10 +17,13 @@ only an SSH host or `user@host`, for quick access to a machine.
 - In the panel: **Up/Down** (or `k`/`j`) move, **Enter** (or a click) opens the bookmark in a new tab and closes the
   panel, **Delete** removes it, **Left/Right** (or `h`/`l`, Tab) switch panel tabs, **Escape** closes the panel. The
   new tab takes the keyboard. Home/End and Page Up/Down jump.
-- **a** asks for a server. Type `host` or `user@host` and press Enter to add it, Escape to cancel, Ctrl+Shift+V
-  to paste. The panel's own letters (`a`, `j`, `x`, `q`...) are ordinary text while you type, and an entry that
+- **a** asks for a server. Type `host` or `user@host` and press Enter, then give it a name (optional: a blank
+  answer keeps none; names may contain spaces) and press Enter again to save it. Escape cancels, Ctrl+Shift+V
+  pastes. The panel's own letters (`a`, `j`, `x`, `q`...) are ordinary text while you type, and an entry that
   cannot be an SSH endpoint is refused with the reason, nothing saved. Press Ctrl+U to clear what you typed.
-- A server bookmark (shown as `ssh user@host`) opens a new tab on this machine that runs `ssh` to it. When ssh
+- **r** names the selected bookmark of any kind, starting from its current name; a blank answer removes the name.
+  A named bookmark is listed by its name; an unnamed one by its path, page address or `ssh user@host`.
+- A server bookmark opens a new tab on this machine that runs `ssh` to it. When ssh
   ends, whether by logout, a refused connection or Ctrl+C, the tab stays open in your shell with ssh's message
   above, instead of closing. The server needs nothing installed. A server bookmark cannot open in a window that
   shows another host, since the ssh would start from that host.
@@ -46,6 +49,7 @@ bookmarks:
   - url: https://example.org        # a web page
     title: Example
   - host: me@build-host              # a server: opens a tab that runs ssh to it
+    title: Build box                # any entry may have a name; the panel lists it instead of the address
 ```
 
 Each entry has exactly one of `directory` (an absolute path), `url` or `host`. `master` belongs to a `directory`;

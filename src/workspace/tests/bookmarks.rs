@@ -299,3 +299,42 @@ fn hosts_that_could_be_options_or_commands_are_rejected_before_publishing() {
     assert!(store.add(host(&"x".repeat(256))).is_err());
     assert!(!fixture.path().exists());
 }
+
+#[test]
+fn a_bookmark_is_named_renamed_and_unnamed_by_its_target() {
+    let fixture = Fixture::new();
+    let store = fixture.store();
+    let target = host("me@build").target;
+    assert!(store.add(host("me@build")).unwrap());
+    assert!(store.add(terminal("/srv/app", None)).unwrap());
+    assert!(store.rename(&target, Some("Build box".into())).unwrap());
+    assert_eq!(store.list().unwrap()[0].title.as_deref(), Some("Build box"));
+    // Same name again changes nothing on disk; a new one replaces it; None clears it.
+    let before = fs::read(fixture.path()).unwrap();
+    assert!(!store.rename(&target, Some("Build box".into())).unwrap());
+    assert_eq!(fs::read(fixture.path()).unwrap(), before);
+    assert!(store.rename(&target, Some("CI".into())).unwrap());
+    assert!(fs::read_to_string(fixture.path())
+        .unwrap()
+        .contains("title: CI"));
+    assert!(store.rename(&target, None).unwrap());
+    assert_eq!(store.list().unwrap()[0].title, None);
+    // Names work on every kind, keep their order, and are refused when they could not be read back.
+    assert!(store
+        .rename(&terminal("/srv/app", None).target, Some("App".into()))
+        .unwrap());
+    assert_eq!(store.list().unwrap()[0].target, target);
+    assert!(store.rename(&target, Some("a\nb".into())).is_err());
+    assert!(store.rename(&target, Some(String::new())).is_err());
+    assert!(store.rename(&target, Some("x".repeat(257))).is_err());
+    // A bookmark that was removed meanwhile is reported, not recreated.
+    assert!(store.remove(&target).unwrap());
+    assert_eq!(
+        store
+            .rename(&target, Some("Gone".into()))
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::NotFound
+    );
+    assert_eq!(store.list().unwrap().len(), 1);
+}

@@ -257,6 +257,28 @@ impl Bookmarks {
         })
     }
 
+    /// Name the bookmark with this target, or clear its name (`None`). Returns whether anything changed.
+    pub fn rename(&self, target: &Target, title: Option<String>) -> io::Result<bool> {
+        Bookmark {
+            target: target.clone(),
+            title: title.clone(),
+        }
+        .validate()?;
+        self.update(|bookmarks| {
+            let Some(bookmark) = bookmarks.iter_mut().find(|old| &old.target == target) else {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "That bookmark no longer exists.",
+                ));
+            };
+            if bookmark.title == title {
+                return Ok(false);
+            }
+            bookmark.title = title;
+            Ok(true)
+        })
+    }
+
     /// Add the bookmark, or remove the one with the same target. Returns whether it is bookmarked now.
     pub fn toggle(&self, bookmark: Bookmark) -> io::Result<bool> {
         bookmark.validate()?;

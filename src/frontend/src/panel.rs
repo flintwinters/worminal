@@ -17,9 +17,10 @@ use std::{
     rc::Rc,
 };
 use worminal_protocol::cell::{COLOR_DEFAULT_BACKGROUND as BG, COLOR_DEFAULT_FOREGROUND as FG};
+use worminal_workspace::bookmarks::Bookmark;
 
 /// The panel's width in terminal cells.
-const PANEL_CELLS: i32 = 36;
+const PANEL_CELLS: i32 = 40;
 
 /// The selected row and the first visible one, independent of GTK.
 #[derive(Default, Debug, PartialEq, Eq)]
@@ -62,7 +63,25 @@ enum Command {
     Open,
     Remove,
     Add,
+    Rename,
     Close,
+}
+/// What the panel is asking the user to type.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+enum Stage {
+    /// A new bookmark's host (no spaces).
+    #[default]
+    Host,
+    /// An optional name for the bookmark just typed; it is saved when this is answered.
+    Name(Bookmark),
+    /// A new name for the selected row.
+    Rename,
+}
+impl Stage {
+    /// Hosts have no spaces; names do.
+    fn spaces(&self) -> bool {
+        !matches!(self, Self::Host)
+    }
 }
 /// What a key does while the panel is asking the user to type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,8 +93,8 @@ enum Edit {
     Cancel,
 }
 /// Typing keeps every plain key as text (so `j`, `x` and `a` are letters here); Ctrl+U clears, and other Ctrl and
-/// Alt combinations stay with the window.
-fn edit(value: gdk::keys::Key, state: Mod) -> Option<Edit> {
+/// Alt combinations stay with the window. Spaces are text only where `spaces` says so (names, not hosts).
+fn edit(value: gdk::keys::Key, state: Mod, spaces: bool) -> Option<Edit> {
     if state.contains(Mod::CONTROL_MASK) {
         return (value == key::u && !state.contains(Mod::MOD1_MASK)).then_some(Edit::Clear);
     }
@@ -88,9 +107,20 @@ fn edit(value: gdk::keys::Key, state: Mod) -> Option<Edit> {
         key::BackSpace => Some(Edit::Erase),
         _ => value
             .to_unicode()
-            .filter(|c| !c.is_control() && !c.is_whitespace())
+            .filter(|c| !c.is_control() && (spaces || !c.is_whitespace()))
             .map(Edit::Insert),
     }
+}
+/// The bookmark with the typed name (blank: none), or why that name is refused.
+fn name_it(bookmark: &Bookmark, text: &str) -> Result<PanelAction, String> {
+    let named = Bookmark {
+        title: Some(text.trim().to_owned()).filter(|title| !title.is_empty()),
+        ..bookmark.clone()
+    };
+    named
+        .validate()
+        .map_err(|_| "That name is too long.".to_owned())?;
+    Ok(PanelAction::AddBookmark(named))
 }
 /// Longest text the prompt keeps; hosts are far shorter.
 const PROMPT_LIMIT: usize = 255;
@@ -111,6 +141,7 @@ fn command(value: gdk::keys::Key, state: Mod) -> Option<Command> {
         key::Return | key::KP_Enter | key::space => Command::Open,
         key::Delete | key::BackSpace | key::x => Command::Remove,
         key::a => Command::Add,
+        key::r => Command::Rename,
         key::Escape | key::q => Command::Close,
         _ => return None,
     })
@@ -134,6 +165,8 @@ struct View {
     callbacks: Rc<Callbacks>,
     /// The text being typed for the active tab's `add`, while the panel is asking.
     prompt: RefCell<Option<String>>,
+    /// Which question the prompt is answering.
+    stage: RefCell<Stage>,
     /// Why the last submission was refused; it replaces the footer until the next key.
     notice: RefCell<Option<String>>,
 }
@@ -279,10 +312,15 @@ impl View {
             paint::source(cr, &palette_red(&self.palette));
             self.show(cr, &notice, metrics.width, footer, metrics);
         } else if let Some(text) = prompting {
-            let label = tabs
-                .get(self.active.get())
-                .and_then(|tab| tab.add_prompt())
-                .unwrap_or("Add");
+            let label = match &*self.stage.borrow() {
+                Stage::Host => tabs
+                    .get(self.active.get())
+                    .and_then(|tab| tab.add_prompt())
+                    .unwrap_or("Add")
+                    .to_owned(),
+                Stage::Name(_) => "Name (optional)".to_owned(),
+                Stage::Rename => "Name".to_owned(),
+            };
             paint::source(cr, &foreground);
             // The end of a long entry is the part being typed.
             self.layout.set_width(text_width * pango::SCALE);
@@ -299,7 +337,7 @@ impl View {
             paint::source(cr, &mix(&background, &foreground, 0.5));
             self.show(
                 cr,
-                "Enter open  a add  Del remove  Esc",
+                "Enter open  a add  r name  Del remove",
                 metrics.width,
                 footer,
                 metrics,
@@ -349,7 +387,8 @@ impl View {
     }
     /// Keys while typing: edit the text, send it on Enter, leave on Escape.
     fn type_key(&self, event: &gdk::EventKey) -> bool {
-        let Some(edit) = edit(event.keyval(), event.state()) else {
+        let spaces = self.stage.borrow().spaces();
+        let Some(edit) = edit(event.keyval(), event.state(), spaces) else {
             return false;
         };
         self.notice.borrow_mut().take();
@@ -373,33 +412,48 @@ impl View {
             }
             Edit::Cancel => {
                 self.prompt.borrow_mut().take();
+                self.stage.take();
             }
             Edit::Submit => self.submit(),
         }
         self.widget.queue_draw();
         true
     }
-    /// Ask the active tab to add what was typed: a refusal stays in the footer with the text kept for fixing.
+    /// Send what was typed to the question being asked. A refusal stays in the footer with the text kept for
+    /// fixing; a host that was accepted is followed by the question of what to call it.
     fn submit(&self) {
         let text = self.prompt.borrow().clone().unwrap_or_default();
-        let result = self
-            .tabs
-            .borrow()
-            .get(self.active.get())
-            .map(|tab| tab.add(&text));
-        match result {
-            Some(Ok(action)) => {
+        let stage = self.stage.borrow().clone();
+        let selected = self.cursor.borrow().selected;
+        let result = {
+            let tabs = self.tabs.borrow();
+            let tab = tabs.get(self.active.get());
+            match &stage {
+                Stage::Host => tab.map(|tab| tab.add(&text)),
+                Stage::Name(bookmark) => Some(name_it(bookmark, &text)),
+                Stage::Rename => tab.map(|tab| tab.rename(selected, &text)),
+            }
+        };
+        match (result, stage) {
+            // A host was accepted: ask what to call it before saving.
+            (Some(Ok(PanelAction::AddBookmark(bookmark))), Stage::Host) => {
+                *self.stage.borrow_mut() = Stage::Name(bookmark);
+                *self.prompt.borrow_mut() = Some(String::new());
+            }
+            (Some(Ok(action)), _) => {
                 self.prompt.borrow_mut().take();
+                self.stage.take();
                 // Callbacks run with no panel state borrowed.
                 (self.callbacks.act)(action);
             }
-            Some(Err(why)) => *self.notice.borrow_mut() = Some(why),
-            None => {
+            (Some(Err(why)), _) => *self.notice.borrow_mut() = Some(why),
+            (None, _) => {
                 self.prompt.borrow_mut().take();
+                self.stage.take();
             }
         }
     }
-    /// Start typing if the active tab can add something.
+    /// Start typing a new bookmark's host if the active tab can add something.
     fn begin_add(&self) {
         let can = self
             .tabs
@@ -408,6 +462,21 @@ impl View {
             .is_some_and(|tab| tab.add_prompt().is_some());
         if can {
             *self.prompt.borrow_mut() = Some(String::new());
+            *self.stage.borrow_mut() = Stage::Host;
+            self.notice.borrow_mut().take();
+        }
+    }
+    /// Start naming the selected row, from the name it has now.
+    fn begin_rename(&self) {
+        let selected = self.cursor.borrow().selected;
+        let current = self
+            .tabs
+            .borrow()
+            .get(self.active.get())
+            .and_then(|tab| tab.name_of(selected));
+        if let Some(current) = current {
+            *self.prompt.borrow_mut() = Some(current);
+            *self.stage.borrow_mut() = Stage::Rename;
             self.notice.borrow_mut().take();
         }
     }
@@ -423,7 +492,12 @@ impl View {
             };
             let line = text.lines().next().unwrap_or_default();
             if let Some(typed) = view.prompt.borrow_mut().as_mut() {
-                for c in line.trim().chars().filter(|c| !c.is_control()) {
+                let spaces = view.stage.borrow().spaces();
+                for c in line
+                    .trim()
+                    .chars()
+                    .filter(|c| !c.is_control() && (spaces || !c.is_whitespace()))
+                {
                     if typed.len() < PROMPT_LIMIT {
                         typed.push(c);
                     }
@@ -456,6 +530,7 @@ impl View {
             Command::Open => self.press(PanelKey::Open),
             Command::Remove => self.press(PanelKey::Remove),
             Command::Add => self.begin_add(),
+            Command::Rename => self.begin_rename(),
             Command::Close => (self.callbacks.close)(),
         }
         self.widget.queue_draw();
@@ -563,6 +638,7 @@ impl SidePanel {
             cursor: RefCell::new(Cursor::default()),
             callbacks: Rc::new(callbacks),
             prompt: RefCell::new(None),
+            stage: RefCell::new(Stage::default()),
             notice: RefCell::new(None),
         });
         view.widget
@@ -633,6 +709,7 @@ impl SidePanel {
 mod tests {
     use super::*;
     use gtk::gdk::keys::constants as key;
+    use worminal_workspace::bookmarks::Target;
 
     const METRICS: Metrics = Metrics {
         width: 8,
@@ -741,29 +818,70 @@ mod tests {
             key::h,
         ] {
             let c = letter.to_unicode().unwrap();
-            assert_eq!(edit(letter, plain), Some(Edit::Insert(c)));
+            assert_eq!(edit(letter, plain, false), Some(Edit::Insert(c)));
         }
-        assert_eq!(edit(key::G, Mod::SHIFT_MASK), Some(Edit::Insert('G')));
-        assert_eq!(edit(key::at, Mod::SHIFT_MASK), Some(Edit::Insert('@')));
-        assert_eq!(edit(key::_1, plain), Some(Edit::Insert('1')));
-        assert_eq!(edit(key::period, plain), Some(Edit::Insert('.')));
-        assert_eq!(edit(key::Return, plain), Some(Edit::Submit));
-        assert_eq!(edit(key::KP_Enter, plain), Some(Edit::Submit));
-        assert_eq!(edit(key::Escape, plain), Some(Edit::Cancel));
-        assert_eq!(edit(key::BackSpace, plain), Some(Edit::Erase));
-        assert_eq!(edit(key::u, Mod::CONTROL_MASK), Some(Edit::Clear));
+        assert_eq!(
+            edit(key::G, Mod::SHIFT_MASK, false),
+            Some(Edit::Insert('G'))
+        );
+        assert_eq!(
+            edit(key::at, Mod::SHIFT_MASK, false),
+            Some(Edit::Insert('@'))
+        );
+        assert_eq!(edit(key::_1, plain, false), Some(Edit::Insert('1')));
+        assert_eq!(edit(key::period, plain, false), Some(Edit::Insert('.')));
+        assert_eq!(edit(key::Return, plain, false), Some(Edit::Submit));
+        assert_eq!(edit(key::KP_Enter, plain, false), Some(Edit::Submit));
+        assert_eq!(edit(key::Escape, plain, false), Some(Edit::Cancel));
+        assert_eq!(edit(key::BackSpace, plain, false), Some(Edit::Erase));
+        assert_eq!(edit(key::u, Mod::CONTROL_MASK, false), Some(Edit::Clear));
         // Hosts have no spaces, and arrows or function keys are not text.
-        assert_eq!(edit(key::space, plain), None);
-        assert_eq!(edit(key::Tab, plain), None);
-        assert_eq!(edit(key::Up, plain), None);
-        assert_eq!(edit(key::F5, plain), None);
+        assert_eq!(edit(key::space, plain, false), None);
+        assert_eq!(edit(key::Tab, plain, false), None);
+        assert_eq!(edit(key::Up, plain, false), None);
+        assert_eq!(edit(key::F5, plain, false), None);
         for modifier in [
             Mod::CONTROL_MASK,
             Mod::MOD1_MASK,
             Mod::CONTROL_MASK | Mod::SHIFT_MASK,
         ] {
-            assert_eq!(edit(key::a, modifier), None);
-            assert_eq!(edit(key::Return, modifier), None);
+            assert_eq!(edit(key::a, modifier, false), None);
+            assert_eq!(edit(key::Return, modifier, false), None);
         }
+    }
+
+    #[test]
+    fn names_may_contain_spaces_and_hosts_may_not() {
+        let plain = Mod::empty();
+        assert_eq!(edit(key::space, plain, true), Some(Edit::Insert(' ')));
+        assert_eq!(edit(key::space, plain, false), None);
+        assert!(Stage::Name(Bookmark {
+            target: Target::Host {
+                endpoint: "h".into()
+            },
+            title: None,
+        })
+        .spaces());
+        assert!(Stage::Rename.spaces());
+        assert!(!Stage::Host.spaces());
+        assert_eq!(command(key::r, plain), Some(Command::Rename));
+    }
+
+    #[test]
+    fn a_typed_name_is_kept_trimmed_and_a_blank_one_means_no_name() {
+        let host = Bookmark {
+            target: Target::Host {
+                endpoint: "me@build".into(),
+            },
+            title: None,
+        };
+        let named = |text: &str| match name_it(&host, text) {
+            Ok(PanelAction::AddBookmark(bookmark)) => bookmark.title,
+            other => panic!("unexpected {other:?}"),
+        };
+        assert_eq!(named("  Build box  "), Some("Build box".into()));
+        assert_eq!(named(""), None);
+        assert_eq!(named("   "), None);
+        assert!(name_it(&host, &"x".repeat(300)).is_err());
     }
 }
