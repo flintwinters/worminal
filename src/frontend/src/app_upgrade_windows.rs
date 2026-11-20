@@ -56,11 +56,13 @@ impl Candidate {
         Ok(())
     }
     pub(super) fn ready(&self) -> bool {
+        // An unreachable peer cannot settle; waiting for it would postpone every update until it
+        // returns (a dead master timed out each GUI replacement). The candidate keeps retrying it.
         barriers_complete(&self.catalogs)
             && self
                 .windows
                 .iter()
-                .all(|window| window.app.links().iter().all(|link| link.settled()))
+                .all(|window| window.app.links().iter().all(|link| link.quiet()))
     }
     pub(super) fn select(&self) {
         for window in &self.windows {

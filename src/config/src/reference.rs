@@ -186,8 +186,8 @@ To configure for someone:
 Invalid configuration never stops Worminal: it reports to stderr and runs with defaults, so always validate.
 
 When it applies: each process reads configuration once, at start. New windows pick up appearance and
-update_notifications and wsl_window_frame (WSL only: windows restyle the Windows-drawn frame to the terminal
-background; false keeps the stock frame). scrolling.history and worminal.group_tabs_by_title are the daemon's:
+update_notifications and wsl_window_frame (WSL only: windows draw their own title bar in the terminal
+colors; false keeps the WSLg frame). scrolling.history and worminal.group_tabs_by_title are the daemon's:
 they take effect when the daemon next restarts (existing shells are preserved by the normal handoff). Running windows never change.
 Other devices: `worminald config sync` (views also sync after updating on each master connection).
 Only worminal.yaml syncs.",

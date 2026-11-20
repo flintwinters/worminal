@@ -9,6 +9,22 @@ use worminal_protocol::worp::{
 };
 use worminal_protocol::*;
 
+/// First reconnect delay; a link whose delay has grown has not recovered since it was lost.
+pub(super) const RETRY_INITIAL: Duration = Duration::from_millis(250);
+
+impl Link {
+    /// Nothing more to wait for: settled, or lost so that no reply can ever settle it. Updates
+    /// wait on this, never on an unreachable peer.
+    pub(super) fn quiet(&self) -> bool {
+        self.down() || self.settled()
+    }
+    /// Lost and not yet recovered. Only a catalog resets the backoff, so this holds through the
+    /// brief reconnect attempts of an unreachable peer too.
+    pub(super) fn down(&self) -> bool {
+        self.retry_delay.get() != RETRY_INITIAL
+    }
+}
+
 impl App {
     pub(super) fn link(&self, index: u32) -> Option<Rc<Link>> {
         if index == 0 {
@@ -360,6 +376,13 @@ impl App {
             .borrow_mut()
             .retain(|remote| remote.index != index);
     }
+    /// A reselect or catalog from a healthy link must not erase a disconnect another link still
+    /// has: the report would flash for one frame and vanish while the retries continue.
+    pub(super) fn clear_message(&self) {
+        if self.links().iter().all(|link| !link.down()) {
+            self.message(None);
+        }
+    }
     pub(super) fn lost(self: &Rc<Self>, index: u32, error: &str) {
         if self.closing.get() {
             return;
@@ -380,13 +403,18 @@ impl App {
             }
         }
         if let Some(report) = &report {
-            if link.alerted.borrow().as_ref() != Some(report) {
+            if !report.starts_with(worminal_workspace::ssh::UNREACHABLE_REPORT)
+                && link.alerted.borrow().as_ref() != Some(report)
+            {
                 *link.alerted.borrow_mut() = Some(report.clone());
                 super::upgrade::alert(report);
             }
         }
         let error = report.as_deref().unwrap_or(error);
-        self.message(Some(&format!("Disconnected: {error}. Reconnecting…")));
+        self.message(Some(&format!(
+            "Disconnected: {}. Reconnecting…",
+            error.trim_end_matches('.')
+        )));
         window_state::changed();
         if link.reconnect.borrow().is_none() {
             let weak = Rc::downgrade(self);

@@ -67,6 +67,12 @@ impl Command {
                 character: Some('\0'),
                 ..
             } => return Err(invalid()),
+            // The engine takes a signed row count; a wrapped amount would scroll a page the wrong way.
+            CommandKind::Scroll { amount: lines, .. } | CommandKind::Wheel { lines, .. }
+                if *lines > i32::MAX as u32 =>
+            {
+                return Err(invalid())
+            }
             CommandKind::Wheel { notches, .. } if *notches > crate::input::MAX_WHEEL_NOTCHES => {
                 return Err(invalid())
             }

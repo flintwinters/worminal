@@ -20,7 +20,6 @@ except ModuleNotFoundError as error:
 from tools import timing
 from tools.paths import CHECKS, runtime_binary
 from tools import build as native_build
-from tools.theme import explorer_font
 from tools.git_index import tracked_files
 
 
@@ -390,11 +389,9 @@ def setup_audio():
 
 @app.command("setup-check-runtime")
 def setup_check_runtime():
-    """Prepare explorer, audio and private Weston/Muffin runtimes; idempotent."""
+    """Prepare audio and private Weston/Muffin runtimes; idempotent."""
     if native_build.headless():
         return
-    from tools import explorer
-    explorer.prepare()
     from tools.audio import setup as setup_audio
     from tools import weston
     setup_audio()
@@ -614,16 +611,6 @@ def check_install(installed: bool = typer.Option(False, help='Verify published /
     raise typer.Exit(run([sys.executable, "tests/installation.py", *(['--installed'] if installed else [])]))
 
 
-def explorer_command(command):
-    script = ROOT / "file-explorer/manage.py"
-    if not script.exists():
-        typer.echo("Initialize the file-explorer submodule first: git submodule update --init", err=True)
-        raise typer.Exit(1)
-    raise typer.Exit(run([sys.executable, str(script), command],
-                         env={**os.environ, "WORMINAL_PALETTE": str(ROOT / "assets/palette.json"),
-                              "WORMINAL_FONT_JSON": json.dumps(explorer_font())}))
-
-
 @app.command("check-browser-target")
 def check_browser_target():
     """Check browser target detection, path encoding and terminal conversion privately."""
@@ -631,25 +618,6 @@ def check_browser_target():
     native_build.build_targets("worminal", "worminald")
     raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                          "-p", "test_preview_workspace.py", "-k", "browser_command", "-q"]))
-
-
-@app.command("explorer-build")
-def explorer_build():
-    """Build file-explorer/dist/index.html (run npm ci in the submodule first)."""
-    explorer_command("build")
-
-
-@app.command("explorer-check")
-def explorer_check():
-    """Check explorer types, directory behavior, DOM interactions, and standalone output."""
-    check_file_limits()
-    explorer_command("check")
-
-
-@app.command("explorer-lint")
-def explorer_lint():
-    """Run the explorer's pinned Hyperlinter architecture and style audit."""
-    explorer_command("lint")
 
 
 @app.command()
@@ -736,7 +704,7 @@ def browser_perf(trials: int = typer.Option(5, min=1),
                  trace_startup: bool = typer.Option(False, help="Log startup milestones; timings include log I/O."),
                  profile_cpu: bool = typer.Option(
                      False, help="Diagnostically sample startup CPU without perf privileges."),
-                 kind: str = typer.Option("all", help="Target: all, http, file, or explorer.")):
+                 kind: str = typer.Option("all", help="Target: all, http or file.")):
     """Measure browser presentation, including direct cold launches, on private Xvfb."""
     native_build.build_targets("worminal", "worminald", "build/latency_echo")
     options = (["--snapshot", str(snapshot)] if snapshot else []) + (["--compare", str(compare)] if compare else [])

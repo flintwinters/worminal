@@ -76,7 +76,8 @@ pub struct Mouse {
     pub last: (i32, i32),
 }
 /// Browser-style middle-click autoscroll: the pointer's distance from the click anchor sets the
-/// scroll speed, with a dead zone around the anchor.
+/// scroll speed linearly, with a dead zone around the anchor. There is no fixed ceiling: speed keeps
+/// following the pointer as far as it can report.
 pub struct Autoscroll {
     anchor: f64,
     pub y: f64,
@@ -87,7 +88,6 @@ impl Autoscroll {
     const DEAD_ZONE: f64 = 12.0;
     /// Lines per second for each line height of pointer distance beyond the dead zone.
     const GAIN: f64 = 4.0;
-    const MAX_RATE: f64 = 80.0;
     pub fn new(y: f64) -> Self {
         Self {
             anchor: y,
@@ -103,7 +103,7 @@ impl Autoscroll {
             self.carry = 0.0;
             return None;
         }
-        let rate = (beyond / line_height.max(1.0) * Self::GAIN).min(Self::MAX_RATE);
+        let rate = beyond / line_height.max(1.0) * Self::GAIN;
         self.carry += rate * seconds * offset.signum();
         let lines = self.carry.abs().floor();
         self.carry -= lines * self.carry.signum();
@@ -138,8 +138,13 @@ mod tests {
             None,
             "returning to the anchor stops"
         );
-        scroll.y = 1.0e6;
-        assert_eq!(scroll.step(1.0, 16.0), Some((false, 80)), "rate is capped");
+        // Forty line heights away: past the former fixed ceiling of 80 lines per second.
+        scroll.y = 100.0 + 12.0 + 16.0 * 40.0;
+        assert_eq!(
+            scroll.step(1.0, 16.0),
+            Some((false, 160)),
+            "speed stays linear without a ceiling"
+        );
     }
 
     #[test]

@@ -223,9 +223,18 @@ fn v2_bytes_are_unchanged_and_malformed_commands_are_rejected() {
     );
     for (kind, body) in [
         (WIRE_RESIZE, vec![0; 7]),
+        // Bounds hold for every decoded command, not only the input kinds.
+        (
+            WIRE_RESIZE,
+            [0u32.to_be_bytes(), 24u32.to_be_bytes()].concat(),
+        ),
         (
             WIRE_SCROLL,
             [2u32.to_be_bytes(), 1u32.to_be_bytes()].concat(),
+        ),
+        (
+            WIRE_SCROLL,
+            [1u32.to_be_bytes(), (i32::MAX as u32 + 1).to_be_bytes()].concat(),
         ),
         (WIRE_FOCUS_STATE, 2u32.to_be_bytes().to_vec()),
         (WIRE_CONTROL, 3u32.to_be_bytes().to_vec()),
@@ -242,6 +251,12 @@ fn v2_bytes_are_unchanged_and_malformed_commands_are_rejected() {
         (
             WIRE_PASTE,
             [&0u32.to_be_bytes()[..], &[b'x'; input::MAX_PASTE_BYTES + 1]].concat(),
+        ),
+        (
+            WIRE_WHEEL,
+            [0u32, 1, i32::MAX as u32 + 1, 0, 0, 0]
+                .map(u32::to_be_bytes)
+                .concat(),
         ),
         (
             WIRE_WHEEL,

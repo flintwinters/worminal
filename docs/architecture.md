@@ -129,7 +129,5 @@ Browser URL resolution preserves explicit URLs, prefers existing paths and other
 documents have bounded, read-only file/directory APIs through a private per-view credential held by a top-frame-only
 script. Subframes and other navigated documents have no capability. Native error/find chrome is Rust; its shared
 scripts/templates remain under `src/gtk`. Renderer recovery retains the last valid URI because WebKit can clear it
-after termination. Release Rust borrows before entering reentrant GTK/WebKit operations. The independent TypeScript
-`file-explorer` workspace opens its HTML artifact through the native browser CLI. Its changes take effect only on
-explicit reload/reopen; do not add live updates. Native builds do not embed it. Parent explorer build commands
-supply palette/font inputs; standalone builds retain their own defaults.
+after termination. Release Rust borrows before entering reentrant GTK/WebKit operations. Local HTML tools open through the native
+browser CLI; their changes take effect only on explicit reload/reopen, and native builds embed none of them.

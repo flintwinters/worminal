@@ -88,8 +88,6 @@ fn input(packet: &Packet) -> io::Result<CommandKind> {
             }
         }
     };
-    // Bounds matter before encoding: a wheel's notches multiply the bytes it produces.
-    Command::new(packet.tab, kind.clone()).validate()?;
     Ok(kind)
 }
 fn string(bytes: &[u8]) -> io::Result<Vec<u8>> {
@@ -214,7 +212,11 @@ pub fn decode(packet: Packet) -> io::Result<Option<Command>> {
         },
         _ => return Ok(None),
     };
-    Ok(Some(Command { tab, kind }))
+    // Bounds matter on every decoded command, not only the input kinds: a wheel's notches multiply
+    // the bytes it produces and an oversized scroll or terminal size would reach the engine.
+    let command = Command { tab, kind };
+    command.validate()?;
+    Ok(Some(command))
 }
 
 #[expect(

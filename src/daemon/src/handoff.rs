@@ -297,12 +297,11 @@ pub(crate) fn receive(
     let version = cursor.number()?;
     let count = cursor.number()?;
     if magic != HANDOFF_MAGIC
-        || version
-            != if upgrading {
-                HANDOFF_UPGRADE_VERSION
-            } else {
-                HANDOFF_MANUAL_VERSION
-            }
+        || if upgrading {
+            !(HANDOFF_UPGRADE_MIN_VERSION..=HANDOFF_UPGRADE_VERSION).contains(&version)
+        } else {
+            version != HANDOFF_MANUAL_VERSION
+        }
         || count > HANDOFF_MAX_TABS
         || (!upgrading && count == 0)
         || next_id.checked_add(count).is_none()
