@@ -318,9 +318,19 @@ class RustApplicationTest(unittest.TestCase):
                 self.assertLess(time.monotonic(), deadline, 'split target highlight did not paint over content')
                 time.sleep(.02)
             self.assertEqual(pixel(.25, .75), blue, 'split target highlight covered the wrong half')
+            # A translucent copy of the tab follows the pointer (at 888, 258), held where it was grabbed: just
+            # left of the pointer lies the tab's padding, which differs from the highlighted content around it.
+            under = lambda: pixel(880 / 900, 258 / 500)
+            marked = pixel(.75, .75)
+            deadline = time.monotonic() + 3
+            while under() == marked:
+                self.assertLess(time.monotonic(), deadline, 'no dragged tab image under the pointer')
+                time.sleep(.02)
+            self.assertNotEqual(pixel(880 / 900, 300 / 500), under(), 'the dragged tab image is too tall')
             xdo('mouseup', '1')
             # The anchor stays left; the dropped tab takes the right half and focus.
             wait_for(blue, red, 'dropping a tab on the right edge did not split the window')
+            self.assertEqual(under(), red, 'the dragged tab image outlived the drop')
             # Split panes are outlined, the focused one (right, just dropped) brighter than the other. Look at the
             # inner edges: the window's own outer frame is drawn by the display, not by the panes.
             left_edge, right_edge = pixel(449.5 / 900, .75), pixel(451.5 / 900, .75)

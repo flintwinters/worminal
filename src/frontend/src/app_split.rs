@@ -5,7 +5,7 @@ use super::{App, LINK_SHIFT};
 use crate::{
     layout::{neighbor, Direction, Layout, PaneRect, Target, Zone},
     paint,
-    tabs::{mix, Actions, Tabs},
+    tabs::{mix, Actions, Ghost, Tabs},
 };
 use gtk::prelude::*;
 use std::{
@@ -32,6 +32,8 @@ pub(super) struct Panes {
     host: gtk::Box,
     /// Region a hovering tab drag would claim, in `root` coordinates.
     marked: Rc<Cell<Option<Rect>>>,
+    /// The dragged tab's image and its top-left, in `root` coordinates.
+    ghost: Rc<RefCell<Option<(cairo::ImageSurface, f64, f64)>>>,
     list: RefCell<Vec<Rc<Pane>>>,
     layout: RefCell<Layout>,
     focused: Cell<u32>,
@@ -47,10 +49,11 @@ impl Panes {
         // Draw after children instead of using an overlay widget: GTK drag hit testing
         // ignores overlay pointer pass-through and would hide terminal drop targets.
         let marked = Rc::new(Cell::new(None::<Rect>));
+        let ghost = Rc::new(RefCell::new(None::<(cairo::ImageSurface, f64, f64)>));
         root.connect_local(
             "draw",
             true,
-            glib::clone!(@strong marked => move |values| {
+            glib::clone!(@strong marked, @strong ghost => move |values| {
                 let cr = values[1].get::<cairo::Context>().unwrap();
                 if let Some((x, y, width, height)) = marked.get() {
                     cr.rectangle(x, y, width, height);
@@ -64,6 +67,14 @@ impl Panes {
                         eprintln!("worminal: split mark: {error}");
                     }
                 }
+                if let Some((image, x, y)) = ghost.borrow().as_ref() {
+                    if let Err(error) = cr
+                        .set_source_surface(image, *x, *y)
+                        .and_then(|()| cr.paint_with_alpha(0.6))
+                    {
+                        eprintln!("worminal: dragged tab: {error}");
+                    }
+                }
                 Some(false.to_value())
             }),
         );
@@ -71,6 +82,7 @@ impl Panes {
             root,
             host,
             marked,
+            ghost,
             list: RefCell::new(Vec::new()),
             layout: RefCell::new(Layout::Leaf(0)),
             focused: Cell::new(0),
@@ -167,6 +179,7 @@ impl App {
             if let Some(id) = id { app.activate(id); }
             None
         }));
+        let strip_widget = strip.widget().clone();
         strip.connect(Actions {
             select: Box::new(glib::clone!(@weak self as app => move |id| app.select_id(id))),
             close: Box::new(
@@ -178,6 +191,9 @@ impl App {
             ),
             hover: Box::new(glib::clone!(@weak self as app => move |target| app.mark(target))),
             split: Box::new(glib::clone!(@weak self as app => move |id, target| app.drop_tab(id, target))),
+            ghost: Box::new(glib::clone!(@weak self as app, @weak strip_widget => move |ghost| {
+                app.ghost(&strip_widget, ghost)
+            })),
         });
         let pane = Rc::new(Pane {
             id,
@@ -337,6 +353,24 @@ impl App {
         });
         self.panes.marked.set(rect);
         self.panes.root.queue_draw();
+    }
+    /// Draw the dragged tab at its strip position, redrawing only the area it leaves and enters.
+    fn ghost(&self, strip: &gtk::DrawingArea, ghost: Option<Ghost>) {
+        let root = &self.panes.root;
+        let placed = ghost.and_then(|ghost| {
+            let (x, y) = strip.translate_coordinates(root, 0, 0)?;
+            Some((ghost.image, f64::from(x) + ghost.x, f64::from(y) + ghost.y))
+        });
+        let old = self.panes.ghost.replace(placed);
+        for (image, x, y) in old.iter().chain(self.panes.ghost.borrow().iter()) {
+            let scale = f64::from(root.scale_factor());
+            root.queue_draw_area(
+                x.floor() as i32,
+                y.floor() as i32,
+                (f64::from(image.width()) / scale).ceil() as i32 + 1,
+                (f64::from(image.height()) / scale).ceil() as i32 + 1,
+            );
+        }
     }
     /// Move a tab's page into `dest`, leaving the pane that held it.
     fn move_page(&self, id: u32, dest: &Pane) {

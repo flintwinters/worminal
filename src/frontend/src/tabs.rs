@@ -38,6 +38,14 @@ pub struct Actions {
     /// The region to mark while a drag hovers it; `None` clears the mark.
     pub hover: Box<dyn Fn(Option<Target>)>,
     pub split: Box<dyn Fn(u32, Target)>,
+    /// The dragged tab to draw under the pointer; `None` when the drag ends.
+    pub ghost: Box<dyn Fn(Option<Ghost>)>,
+}
+/// A dragged tab's image, whose top-left sits at `x`, `y` in strip coordinates.
+pub struct Ghost {
+    pub image: cairo::ImageSurface,
+    pub x: f64,
+    pub y: f64,
 }
 /// A primary-button press on a tab. It becomes a reorder or a split once the pointer travels past `DRAG_SLOP`.
 struct Drag {
@@ -49,6 +57,8 @@ struct Drag {
     over: Option<u32>,
     /// The pane region the dragged tab splits if released now; it wins over `over`.
     target: Option<Target>,
+    /// The tab's image and the press point within it, made when the drag starts.
+    ghost: Option<(cairo::ImageSurface, f64, f64)>,
 }
 const DRAG_SLOP: f64 = 6.0;
 struct State {
@@ -94,6 +104,65 @@ const BUSY: u32 = 8;
 fn width(layout: &pango::Layout, entry: &Tab, metrics: Metrics) -> i32 {
     layout.set_text(&entry.label);
     layout.pixel_size().0 + 2 * metrics.width
+}
+/// Each tab's `(x, top, width)` in strip coordinates; drawing, hit testing and drag images share it.
+fn placed(
+    layout: &pango::Layout,
+    entries: &[Tab],
+    metrics: Metrics,
+    right: i32,
+) -> Vec<(i32, i32, i32)> {
+    let widths: Vec<i32> = entries
+        .iter()
+        .map(|entry| width(layout, entry, metrics))
+        .collect();
+    place(&widths, right)
+        .into_iter()
+        .zip(widths)
+        .map(|((row, x), width)| (x, 2 + row * metrics.height, width))
+        .collect()
+}
+/// One tab's fill, label and (when selected) underline, clipped at `right`.
+#[expect(clippy::too_many_arguments, reason = "one tab's geometry and colors")]
+fn paint_tab(
+    cr: &cairo::Context,
+    layout: &pango::Layout,
+    metrics: Metrics,
+    label: &str,
+    (fill, text): (Option<gdk::RGBA>, gdk::RGBA),
+    (x, top, width): (i32, i32, i32),
+    right: i32,
+    selected: bool,
+) -> Result<(), cairo::Error> {
+    layout.set_text(label);
+    let baseline = top + (metrics.height - metrics.ink_height) / 2 + metrics.ascent;
+    if let Some(fill) = fill {
+        paint::source(cr, &fill);
+        cr.rectangle(
+            f64::from(x),
+            f64::from(top),
+            f64::from(width.min(right - x)),
+            f64::from(metrics.height),
+        );
+        cr.fill()?;
+    }
+    paint::source(cr, &text);
+    cr.move_to(
+        f64::from(x + metrics.width),
+        f64::from(baseline) - f64::from(layout.baseline()) / f64::from(pango::SCALE),
+    );
+    graphics_ffi::show_layout(cr, layout);
+    // The underline marks each pane's selected tab, focused or not.
+    if selected {
+        cr.rectangle(
+            f64::from(x + metrics.width),
+            f64::from((baseline + 2).min(top - 2 + metrics.height)),
+            f64::from((width - 2 * metrics.width).max(0)),
+            1.0,
+        );
+        cr.fill()?;
+    }
+    Ok(())
 }
 pub(super) fn mix(from: &gdk::RGBA, to: &gdk::RGBA, amount: f64) -> gdk::RGBA {
     let blend = |a: f64, b: f64| a + (b - a) * amount;
@@ -162,10 +231,6 @@ impl State {
         };
         let palette = palette.borrow();
         let entries = self.entries.borrow();
-        let widths: Vec<i32> = entries
-            .iter()
-            .map(|entry| width(layout, entry, metrics))
-            .collect();
         paint::source(cr, &palette.color(BG));
         cr.paint()?;
         // The marker sits on the side the dragged tab approaches from.
@@ -176,9 +241,8 @@ impl State {
                 .position(|entry| Some(entry.id) == drag.over)?;
             drag.active.then_some((to, to > from))
         });
-        for (i, (entry, (row, x))) in entries.iter().zip(place(&widths, right)).enumerate() {
-            let top = 2 + row * metrics.height;
-            let width = widths[i];
+        let placed = placed(layout, &entries, metrics, right);
+        for (i, (entry, &(x, top, width))) in entries.iter().zip(&placed).enumerate() {
             cr.save()?;
             cr.rectangle(
                 2.0,
@@ -187,43 +251,23 @@ impl State {
                 f64::from(metrics.height),
             );
             cr.clip();
-            // Measuring left the layout holding the last label.
-            layout.set_text(&entry.label);
-            let baseline = top + (metrics.height - metrics.ink_height) / 2 + metrics.ascent;
             let selected = entry.id == self.active.get();
-            let severity = self
-                .attention
-                .borrow()
-                .iter()
-                .find(|(id, _)| *id == entry.id)
-                .map_or(0, |(_, severity)| *severity);
-            let (fill, text) = colors(&palette, entry, selected && self.focused.get(), severity);
-            if let Some(fill) = fill {
-                paint::source(cr, &fill);
-                cr.rectangle(
-                    f64::from(x),
-                    f64::from(top),
-                    f64::from(width.min(right - x)),
-                    f64::from(metrics.height),
-                );
-                cr.fill()?;
-            }
-            paint::source(cr, &text);
-            cr.move_to(
-                f64::from(x + metrics.width),
-                f64::from(baseline) - f64::from(layout.baseline()) / f64::from(pango::SCALE),
+            let colors = colors(
+                &palette,
+                entry,
+                selected && self.focused.get(),
+                self.severity(entry.id),
             );
-            graphics_ffi::show_layout(cr, layout);
-            // The underline marks each pane's selected tab, focused or not.
-            if selected {
-                cr.rectangle(
-                    f64::from(x + metrics.width),
-                    f64::from((baseline + 2).min(top - 2 + metrics.height)),
-                    f64::from((width - 2 * metrics.width).max(0)),
-                    1.0,
-                );
-                cr.fill()?;
-            }
+            paint_tab(
+                cr,
+                layout,
+                metrics,
+                &entry.label,
+                colors,
+                (x, top, width),
+                right,
+                selected,
+            )?;
             if let Some((_, after)) = drop.filter(|(to, _)| *to == i) {
                 paint::source(cr, &palette.color(3));
                 let edge = if after { x + width - 2 } else { x };
@@ -245,22 +289,62 @@ impl State {
         let layout = layout.as_ref()?;
         let entries = self.entries.borrow();
         let right = self.widget.allocated_width() - 2;
-        let widths: Vec<i32> = entries
-            .iter()
-            .map(|entry| width(layout, entry, metrics))
-            .collect();
         entries
             .iter()
-            .zip(place(&widths, right))
-            .zip(&widths)
-            .find(|((_, (row, left)), width)| {
-                let top = 2 + row * metrics.height;
-                y >= f64::from(top)
+            .zip(placed(layout, &entries, metrics, right))
+            .find(|(_, (left, top, width))| {
+                y >= f64::from(*top)
                     && y < f64::from(top + metrics.height)
                     && x >= f64::from(*left)
-                    && x < f64::from((left + **width).min(right))
+                    && x < f64::from((left + width).min(right))
             })
-            .map(|((entry, _), _)| entry.id)
+            .map(|(entry, _)| entry.id)
+    }
+    fn severity(&self, id: u32) -> u32 {
+        self.attention
+            .borrow()
+            .iter()
+            .find(|(alert, _)| *alert == id)
+            .map_or(0, |(_, severity)| *severity)
+    }
+    /// The tab as a focused selection, with the strip point `(x, y)` relative to its top-left.
+    fn image(&self, id: u32, x: f64, y: f64) -> Option<(cairo::ImageSurface, f64, f64)> {
+        let metrics = self.metrics.get()?;
+        let layout = self.layout.borrow();
+        let layout = layout.as_ref()?;
+        let palette = self.palette.borrow();
+        let palette = palette.as_ref()?.borrow();
+        let entries = self.entries.borrow();
+        let right = self.widget.allocated_width() - 2;
+        let (entry, &(left, top, width)) = entries
+            .iter()
+            .zip(&placed(layout, &entries, metrics, right))
+            .find(|(entry, _)| entry.id == id)?;
+        let width = width.min(right - left).max(1);
+        let scale = self.widget.scale_factor();
+        let image = cairo::ImageSurface::create(
+            cairo::Format::ARgb32,
+            width * scale,
+            metrics.height * scale,
+        )
+        .ok()?;
+        image.set_device_scale(f64::from(scale), f64::from(scale));
+        let cr = cairo::Context::new(&image).ok()?;
+        cr.translate(f64::from(-left), f64::from(-top));
+        let colors = colors(&palette, entry, true, self.severity(id));
+        paint_tab(
+            &cr,
+            layout,
+            metrics,
+            &entry.label,
+            colors,
+            (left, top, width),
+            left + width,
+            true,
+        )
+        .ok()?;
+        drop(cr);
+        Some((image, x - f64::from(left), y - f64::from(top)))
     }
     fn drag_to(&self, x: f64, y: f64) {
         let over = self.hit(x, y);
@@ -277,6 +361,14 @@ impl State {
         }
         // Window callbacks run with no strip state borrowed.
         let actions = self.actions.borrow().clone();
+        // The image keeps the point where the tab was grabbed under the pointer.
+        let press = self
+            .drag
+            .borrow()
+            .as_ref()
+            .filter(|drag| drag.ghost.is_none())
+            .map(|drag| (drag.x, drag.y));
+        let image = press.and_then(|(px, py)| self.image(id, px, py));
         let target = actions
             .as_ref()
             .and_then(|actions| (actions.locate)(id, x, y));
@@ -294,8 +386,18 @@ impl State {
             drag.active = true;
             drag.over = over;
             drag.target = target;
-            changed.then_some(moved)
+            drag.ghost = drag.ghost.take().or(image);
+            let ghost = drag.ghost.as_ref().map(|(image, dx, dy)| Ghost {
+                image: image.clone(),
+                x: x - dx,
+                y: y - dy,
+            });
+            (changed.then_some(moved), ghost)
         };
+        let (changed, ghost) = changed;
+        if let (Some(actions), Some(ghost)) = (actions.as_ref(), ghost) {
+            (actions.ghost)(Some(ghost));
+        }
         if let Some(moved) = changed {
             self.widget.queue_draw();
             if let Some(actions) = actions.filter(|_| moved) {
@@ -382,7 +484,7 @@ impl Tabs {
                 let (x, y) = event.position();
                 let Some(id) = state.hit(x, y) else { return glib::Propagation::Proceed };
                 match event.button() {
-                    1 => *state.drag.borrow_mut() = Some(Drag { id, x, y, active: false, over: None, target: None }),
+                    1 => *state.drag.borrow_mut() = Some(Drag { id, x, y, active: false, over: None, target: None, ghost: None }),
                     2 => {
                         let actions = state.actions.borrow().clone();
                         if let Some(actions) = actions { (actions.close)(id); }
@@ -399,6 +501,7 @@ impl Tabs {
                 if drag.active {
                     state.widget.queue_draw();
                     (actions.hover)(None);
+                    (actions.ghost)(None);
                 }
                 match (drag.target, drag.over) {
                     (Some(target), _) => (actions.split)(drag.id, target),
