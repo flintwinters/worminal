@@ -1,16 +1,10 @@
 //! Explicit per-user membership in a hand-editable YAML file. Reachability observations never
 //! rewrite enrollment.
-use crate::statefile;
+use crate::yamlfile;
 use serde_yaml_ng::{Mapping, Value};
-use std::{
-    fs::{File, OpenOptions},
-    io::{self, Read},
-    os::{fd::AsRawFd, unix::fs::OpenOptionsExt},
-    path::PathBuf,
-};
+use std::{io, path::PathBuf};
 use worminal_protocol::worp::devices::{Device, MAX_DEVICES};
 
-const FILE_LIMIT: usize = 65536;
 const HEADER: &str =
     "# Worminal device membership: NAME: {endpoint: SSH_ENDPOINT}. Hand edits are fine;\n\
 # `worminald api enroll/forget` rewrite this file without comments.\n";
@@ -100,59 +94,29 @@ impl Registry {
     }
 
     pub fn list(&self) -> io::Result<Vec<Device>> {
-        let file = OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-            .open(&self.path);
-        let file = match file {
-            Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(error) => return Err(error),
-        };
-        let metadata = file.metadata()?;
-        if !metadata.is_file() || metadata.len() > FILE_LIMIT as u64 {
-            return Err(invalid("not a regular file under 64 KiB"));
+        match yamlfile::read(&self.path, &|reason| invalid(reason))? {
+            Some(text) => decode(&text),
+            None => Ok(Vec::new()),
         }
-        let mut bytes = Vec::new();
-        file.take(FILE_LIMIT as u64 + 1).read_to_end(&mut bytes)?;
-        if bytes.len() > FILE_LIMIT {
-            return Err(invalid("larger than 64 KiB"));
-        }
-        decode(std::str::from_utf8(&bytes).map_err(invalid)?)
     }
 
     fn update(
         &self,
         change: impl FnOnce(&mut Vec<Device>) -> io::Result<bool>,
     ) -> io::Result<bool> {
-        statefile::prepare_directory(&self.path)?;
-        let mut lock_path = self.path.as_os_str().to_os_string();
-        lock_path.push(".lock");
-        let lock: File = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .mode(0o600)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-            .open(lock_path)?;
-        if !lock.metadata()?.is_file() {
-            return Err(invalid("lock is not a regular file"));
-        }
-        // Scopes share this per-user registry. Serialize read-modify-publish, including
-        // separate daemon processes, without blocking any terminal event loop on a lock.
-        if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::WouldBlock,
-                "Registry is busy; try again.",
-            ));
-        }
-        let mut devices = self.list()?;
-        let changed = change(&mut devices)?;
-        if changed {
-            statefile::atomic_write(&self.path, &encode(&devices)?)?;
-        }
-        Ok(changed)
+        yamlfile::update(
+            &self.path,
+            &|reason| invalid(reason),
+            "Registry is busy; try again.",
+            || {
+                let mut devices = self.list()?;
+                if change(&mut devices)? {
+                    Ok(Some(encode(&devices)?))
+                } else {
+                    Ok(None)
+                }
+            },
+        )
     }
 
     pub fn enroll(&self, device: Device) -> io::Result<bool> {

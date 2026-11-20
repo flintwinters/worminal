@@ -46,6 +46,11 @@ pub fn devices_path() -> PathBuf {
     config_home().join("worminal/devices.yaml")
 }
 
+/// Hand-editable saved terminal tabs and web pages; per user, never layered or synced like worminal.yaml.
+pub fn bookmarks_path() -> PathBuf {
+    config_home().join("worminal/bookmarks.yaml")
+}
+
 /// `WORMINAL_CONFIG`, else `$XDG_CONFIG_HOME/worminal/worminal.yaml` when present.
 pub fn worminal_path() -> Result<Option<PathBuf>, String> {
     if let Some(path) = explicit("WORMINAL_CONFIG", "Worminal config")? {
