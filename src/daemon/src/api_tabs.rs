@@ -16,7 +16,7 @@ impl Service {
 
     pub(crate) fn created_reply(&mut self, index: usize, now: i64) -> io::Result<Reply> {
         let id = self.tabs[index].id;
-        let metadata = record(&mut self.tabs[index], now);
+        let metadata = record(&mut self.tabs[index], now, &self.workspace_id);
         self.publish(now)?;
         Ok(success(format!(
             "{{\"ok\":true,\"id\":{id},\"created\":true,\"tab\":{metadata}}}"
@@ -46,7 +46,11 @@ impl Service {
             }
             Request::Close { tab } => {
                 let Some(index) = self.index(*tab) else {
-                    return Ok(Some(failure("Tab not found; run worminald api list.")));
+                    return Ok(Some(crate::api::failure_code(
+                        "tab_not_found",
+                        "Tab not found; run worminald api list.",
+                        Some("Run worminald api list."),
+                    )));
                 };
                 self.close(index);
                 self.publish(now)?;

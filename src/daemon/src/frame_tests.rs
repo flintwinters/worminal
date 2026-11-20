@@ -327,6 +327,47 @@ fn spans_and_moves_reconstruct_engine_cells_and_queue_rejection_keeps_the_baseli
 
 const LINKED: u32 = WIRE_FEATURE_COPY_ROWS | WIRE_FEATURE_ROW_SPAN | WIRE_FEATURE_ROW_LINKS;
 
+#[test]
+fn full_refresh_sends_clean_and_damaged_rows_and_rejects_old_width_baselines() {
+    let mut engine = Engine::new(8, 4).unwrap();
+    let mut screen = Screen::default();
+    feed(&mut engine, "Aé界\r\nsecond".as_bytes(), 1);
+    for tick in 1..=4 {
+        if tick == 3 {
+            feed(&mut engine, b"\x1b[2;1H\x1b[31mchanged", tick);
+        } else if tick == 4 {
+            // Same cell count, different row width: old slices cannot be reused.
+            engine.resize(4, 8).unwrap();
+        }
+        let mut output = Queue::new(8192);
+        screen
+            .replicate_encoded(&mut engine, &mut output, 1, true, 0, false, tick)
+            .unwrap();
+        let packets = packets(&output);
+        let frame = engine.frame(tick).unwrap();
+        assert_eq!(
+            packets
+                .iter()
+                .filter(|packet| packet.kind == WIRE_ROW)
+                .count(),
+            frame.rows as usize
+        );
+        let mut replica = Vec::new();
+        apply(
+            &mut replica,
+            &packets,
+            frame.columns as usize,
+            frame.rows as usize,
+        );
+        let mut fresh = Screen::default();
+        fresh
+            .replicate_encoded(&mut engine, &mut Queue::new(8192), 1, true, 0, false, tick)
+            .unwrap();
+        assert_eq!(replica, fresh.bytes, "refresh {tick}");
+        assert_eq!(screen.bytes, fresh.bytes);
+    }
+}
+
 fn send(engine: &mut Engine, screen: &mut Screen, features: u32, full: bool, now: i64) -> Queue {
     let mut output = Queue::new(65536);
     screen

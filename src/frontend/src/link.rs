@@ -3,7 +3,7 @@
 //! Ported from the retired X11 frontend's url.c; detection reads only the imported viewport.
 use std::ops::RangeInclusive;
 use worminal_engine::Cell;
-use worminal_engine_sys::{ATTR_WDUMMY, ATTR_WRAP};
+use worminal_protocol::cell::{ATTR_WDUMMY, ATTR_WRAP};
 
 const LIMIT: usize = 8192;
 

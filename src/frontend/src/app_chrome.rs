@@ -43,6 +43,8 @@ impl App {
                     browser: page.browser,
                     remote: self.master_of(page.id).is_some(),
                     ssh: page.ssh_user.is_some(),
+                    busy: page.busy,
+                    background_job: page.background_job,
                 }
             })
             .collect();
@@ -112,19 +114,18 @@ impl App {
 pub(super) fn outline(window: &gtk::Window, content: &gtk::Box) {
     let overlay = gtk::Overlay::new();
     overlay.add(content);
-    let border = gtk::DrawingArea::new();
-    // A windowed overlay would intercept wheel events above terminal/WebKit content.
-    border.set_has_window(false);
-    overlay.add_overlay(&border);
-    overlay.set_overlay_pass_through(&border, true);
-    border.connect_draw(glib::clone!(@weak window => @default-return glib::Propagation::Proceed, move |widget, cr| {
+    // Decorative widgets intercept GTK drag hit testing even with pointer pass-through.
+    // Painting after the container's children keeps file drops aimed at terminal content.
+    overlay.connect_local("draw", true, glib::clone!(@weak window => @default-return None, move |values| {
+        let widget = values[0].get::<gtk::Overlay>().unwrap();
+        let cr = values[1].get::<cairo::Context>().unwrap();
         let shade = if window.is_active() { 0.6 } else { 0.3 };
         cr.set_source_rgb(shade, shade, shade); cr.set_line_width(1.0);
         cr.rectangle(0.5, 0.5, f64::from(widget.allocated_width() - 1), f64::from(widget.allocated_height() - 1));
         if let Err(error) = cr.stroke() { eprintln!("worminal: outline: {error}"); }
-        glib::Propagation::Proceed
+        Some(false.to_value())
     }));
-    window.connect_is_active_notify(glib::clone!(@weak border => move |_| {
+    window.connect_is_active_notify(glib::clone!(@weak overlay as border => move |_| {
         let width = border.allocated_width(); let height = border.allocated_height();
         let edges = [(0, 0, width, 1), (0, height - 1, width, 1),
             (0, 0, 1, height), (width - 1, 0, 1, height)];

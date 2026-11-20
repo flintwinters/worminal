@@ -263,21 +263,6 @@ te_selclear(TermEngine *session)
 	selection_dirty(session, sel.nb.y, sel.ne.y);
 }
 
-int
-te_tattrset(TermEngine *session, int attr)
-{
-	int i, j;
-
-	for (i = 0; i < term.row-1; i++) {
-		for (j = 0; j < term.col-1; j++) {
-			if (term.line[i][j].mode & attr)
-				return 1;
-		}
-	}
-
-	return 0;
-}
-
 void
 te_tsetdirt(TermEngine *session, int top, int bot)
 {
@@ -291,21 +276,6 @@ te_tsetdirt(TermEngine *session, int top, int bot)
 
 	for (i = top; i <= bot; i++)
 		term.dirty[i] = 1;
-}
-
-void
-te_tsetdirtattr(TermEngine *session, int attr)
-{
-	int i, j;
-
-	for (i = 0; i < term.row-1; i++) {
-		for (j = 0; j < term.col-1; j++) {
-			if (term.line[i][j].mode & attr) {
-				te_tsetdirt(session, i, i);
-				break;
-			}
-		}
-	}
 }
 
 void
@@ -331,6 +301,7 @@ te_tcursor(TermEngine *session, int mode)
 void
 te_treset(TermEngine *session)
 {
+	session->output_epoch++;
 	uint i;
 	te_setsync(session, 0);
 
@@ -400,6 +371,7 @@ te_thistorypush(TermEngine *session, Line line)
 	recycled = term.hist[term.histi];
 	term.hist[term.histi] = line;
 	term.histi = (term.histi + 1) % te_history_size;
+	session->output_base++;
 	if (term.histlen < te_history_size)
 		term.histlen++;
 	if (term.scr)
@@ -442,6 +414,7 @@ te_kscrolldown(TermEngine *session, const Arg *arg)
 void
 te_tswapscreen(TermEngine *session)
 {
+	session->output_epoch++;
 	Line *tmp = term.line;
 
 	if (term.scr)
@@ -462,6 +435,7 @@ te_tisaltscr(TermEngine *session)
 static void
 te_tscrolldown(TermEngine *session, int orig, int n)
 {
+	session->output_epoch++;
 	int i;
 	Line temp;
 
@@ -488,6 +462,10 @@ te_tscrollup(TermEngine *session, int orig, int n)
 	LIMIT(n, 0, term.bot-orig+1);
 	if (!n)
 		return;
+    if (IS_SET(MODE_ALTSCREEN) || orig != 0 || term.top != 0 || term.bot != term.row - 1)
+        session->output_epoch++;
+    else if (!te_history_size)
+        session->output_base += n;
 	/* Only a full main-screen scroll contributes to command history. */
 	if (!IS_SET(MODE_ALTSCREEN) && orig == 0 &&
 	    term.top == 0 && term.bot == term.row - 1 && te_history_size) {

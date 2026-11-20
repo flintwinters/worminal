@@ -26,6 +26,9 @@ use worminal_workspace::{
 };
 
 pub(crate) struct Service {
+    pub workspace_id: String,
+    pub api_waits: BTreeMap<ClientId, crate::api_wait::Pending>,
+    pub api_wait_check: i64,
     pub listener: UnixListener,
     pub clients: BTreeMap<ClientId, Client>,
     pub tabs: Vec<Tab>,
@@ -142,6 +145,7 @@ impl Service {
     pub fn drop_client(&mut self, client: ClientId) {
         self.clients.remove(&client);
         self.pending_replace.remove(&client);
+        self.api_waits.remove(&client);
         for tab in &mut self.tabs {
             if tab.controller == Some(client) {
                 tab.release();
@@ -187,10 +191,11 @@ impl Service {
     pub fn close(&mut self, index: usize) {
         self.closed = self.tabs[index].id;
         self.pending_replace.retain(|_, (id, _)| *id != self.closed);
-        self.fallback = self
-            .tabs
-            .get(index + 1)
-            .or_else(|| index.checked_sub(1).map(|i| &self.tabs[i]))
+        // Selection moves left, as in other tabbed UIs; only the first tab falls back to its right neighbour.
+        self.fallback = index
+            .checked_sub(1)
+            .map(|i| &self.tabs[i])
+            .or_else(|| self.tabs.get(index + 1))
             .map_or(0, |tab| tab.id);
         self.release(index);
         self.tabs.remove(index);
@@ -491,7 +496,10 @@ impl Service {
             sources.push(Source::Client(id));
         }
         let now = self.now();
-        let mut deadline = None;
+        let mut deadline = self.api_waits.values().map(|wait| wait.deadline).min();
+        if !self.api_waits.is_empty() {
+            deadline = Some(deadline.unwrap().min(self.api_wait_check));
+        }
         for tab in &mut self.tabs {
             if let Some(terminal) = &mut tab.terminal {
                 if let Some(fd) = terminal.pty.fd() {
@@ -557,6 +565,7 @@ impl Service {
         if emitted {
             self.last_frame = now;
         }
+        self.finish_api_waits(now)?;
         self.group_by_title();
         if self.closed != 0
             || self
@@ -623,6 +632,11 @@ fn create(scope: &[u8], listener: UnixListener) -> io::Result<(Service, io::Resu
         .unwrap_or_else(|| PathBuf::from(home).join(".local/state"));
     let (recovery, recipes) = Recovery::open(recovery::path(&root, scope)?);
     let service = Service {
+        workspace_id: std::fs::read_to_string("/proc/sys/kernel/random/uuid")?
+            .trim()
+            .to_owned(),
+        api_waits: BTreeMap::new(),
+        api_wait_check: 0,
         listener,
         clients: BTreeMap::new(),
         tabs: Vec::new(),

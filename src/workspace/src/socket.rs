@@ -47,6 +47,15 @@ fn address(uid: u32, scope: &[u8]) -> io::Result<SocketAddr> {
     SocketAddr::from_abstract_name(name)
 }
 
+/// Printable diagnostic identity derived from the same address used by connect/listen.
+pub fn endpoint(uid: u32, scope: &[u8]) -> io::Result<String> {
+    let address = address(uid, scope)?;
+    Ok(format!(
+        "@{}",
+        String::from_utf8_lossy(address.as_abstract_name().unwrap_or_default())
+    ))
+}
+
 pub fn connect(uid: u32, scope: &[u8]) -> io::Result<UnixStream> {
     UnixStream::connect_addr(&address(uid, scope)?)
 }

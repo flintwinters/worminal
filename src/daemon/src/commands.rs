@@ -4,7 +4,7 @@ use crate::{
     state::{core, ClientId},
 };
 use std::io;
-use worminal_engine::{MODE_FOCUS, WORMINAL_PRINT_SCREEN, WORMINAL_TOGGLE_PRINTER};
+use worminal_engine::{input::Encoded, MODE_FOCUS, WORMINAL_PRINT_SCREEN, WORMINAL_TOGGLE_PRINTER};
 use worminal_protocol::{
     worp::{
         commands::*,
@@ -35,7 +35,20 @@ impl Service {
             Ok(Some(command)) => self.command(client, command),
             Ok(None) => Ok(()),
             Err(error) if unary => {
-                self.reply(client, tab, crate::api::failure(&error.to_string()));
+                let code = if error.kind() == io::ErrorKind::Unsupported {
+                    "unsupported_operation"
+                } else {
+                    "invalid_request"
+                };
+                self.reply(
+                    client,
+                    tab,
+                    crate::api::failure_code(
+                        code,
+                        &error.to_string(),
+                        Some("Check api help session and target daemon version."),
+                    ),
+                );
                 Ok(())
             }
             Err(error) if launch => Err(error),
@@ -71,6 +84,36 @@ impl Service {
         let peer_pid = peer.pid;
         let now = self.now();
         match command.kind {
+            CommandKind::Call(worp::Request::Wait {
+                tab,
+                after,
+                timeout_ms,
+            }) => {
+                return self.start_api_wait(
+                    client,
+                    tab,
+                    crate::api_wait::Condition::Revision(after),
+                    timeout_ms,
+                    now,
+                );
+            }
+            CommandKind::Call(worp::Request::WaitCommand {
+                tab,
+                workspace,
+                command_id,
+                timeout_ms,
+            }) => {
+                return self.start_api_wait(
+                    client,
+                    tab,
+                    crate::api_wait::Condition::Command {
+                        workspace,
+                        id: command_id,
+                    },
+                    timeout_ms,
+                    now,
+                );
+            }
             CommandKind::Call(request) => {
                 let reply = self.handle(request)?;
                 self.reply(client, command.tab, reply);
@@ -120,7 +163,8 @@ impl Service {
                                     | WIRE_FEATURE_NOTIFICATIONS
                                     | WIRE_FEATURE_ATTENTION
                                     | WIRE_FEATURE_PANES
-                                    | WIRE_FEATURE_ROW_LINKS,
+                                    | WIRE_FEATURE_ROW_LINKS
+                                    | WIRE_FEATURE_INPUT,
                             ),
                         },
                     );
@@ -387,20 +431,48 @@ impl Service {
                 }
             }
             CommandKind::Close { .. } => self.close(index),
-            CommandKind::Scroll { up, amount } => {
-                self.take_control(index, client);
-                core(
-                    self.tabs[index]
-                        .terminal
-                        .as_mut()
-                        .unwrap()
-                        .engine
-                        .scroll(up, amount as i32),
-                )?;
-                self.tabs[index].frame_reply = true;
-                self.send_frame(index, false, now)?;
-            }
+            CommandKind::Scroll { up, amount } => self.scroll(index, client, up, amount, now)?,
+            CommandKind::Key { .. }
+            | CommandKind::Mouse { .. }
+            | CommandKind::Paste { .. }
+            | CommandKind::Wheel { .. } => self.semantic_input(index, client, &command, now)?,
             _ => {}
+        }
+        Ok(())
+    }
+
+    fn scroll(
+        &mut self,
+        index: usize,
+        client: ClientId,
+        up: bool,
+        amount: u32,
+        now: i64,
+    ) -> io::Result<()> {
+        self.take_control(index, client);
+        let engine = &mut self.tabs[index].terminal.as_mut().unwrap().engine;
+        core(engine.scroll(up, amount as i32))?;
+        self.tabs[index].frame_reply = true;
+        self.send_frame(index, false, now)?;
+        Ok(())
+    }
+
+    /// Encodes semantic input against the tab's live modes, which a view only knows a frame late.
+    fn semantic_input(
+        &mut self,
+        index: usize,
+        client: ClientId,
+        command: &Command,
+        now: i64,
+    ) -> io::Result<()> {
+        let tab = &mut self.tabs[index];
+        let alternate = core(tab.terminal.as_mut().unwrap().engine.frame(now))?.alternate != 0;
+        match worminal_engine::input::encode(&command.kind, tab.mode, alternate) {
+            Some(Encoded::Input(bytes)) => {
+                self.input_operation(command.tab, &bytes, Some(client), now)?;
+            }
+            Some(Encoded::Scroll { up, lines }) => self.scroll(index, client, up, lines, now)?,
+            None => {}
         }
         Ok(())
     }

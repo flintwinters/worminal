@@ -120,3 +120,23 @@ pub const WIRE_FEATURE_ATTENTION: u32 = 1 << 7;
 /// leaves exactly one tab shown. The daemon advertises the feature; views never send the packet without it.
 pub const WIRE_PANE: u32 = 38;
 pub const WIRE_FEATURE_PANES: u32 = 1 << 8;
+
+/// Semantic input the daemon encodes against the tab's live modes, so a view needs no terminal encoder
+/// and cannot race a mode change it has not yet seen (`worminal_protocol::worp::commands` documents each
+/// payload). The daemon advertises the feature; views never send these packets without it.
+pub const WIRE_KEY: u32 = 39;
+pub const WIRE_MOUSE: u32 = 40;
+pub const WIRE_PASTE: u32 = 41;
+pub const WIRE_WHEEL: u32 = 42;
+pub const WIRE_FEATURE_INPUT: u32 = 1 << 9;
+
+// Extended unary agent operations; older operations keep their original payloads.
+pub const WORP_READ_MANY: u32 = 10;
+pub const WORP_KEYS: u32 = 11;
+pub const WORP_PASTE: u32 = 12;
+pub const WORP_GUARDED_INPUT: u32 = 13;
+pub const WORP_WAIT: u32 = 14;
+
+pub const WORP_PASTE_KEYS: u32 = 15;
+pub const WORP_WAIT_COMMAND: u32 = 16;
+pub const WORP_READ_OUTPUT: u32 = 17;

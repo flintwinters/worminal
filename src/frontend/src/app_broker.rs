@@ -8,10 +8,7 @@ use std::{
     os::{
         fd::AsRawFd,
         linux::net::SocketAddrExt,
-        unix::{
-            ffi::OsStrExt,
-            net::{SocketAddr, UnixListener, UnixStream},
-        },
+        unix::net::{SocketAddr, UnixListener, UnixStream},
     },
     rc::Rc,
     time::Duration,
@@ -20,16 +17,7 @@ use worminal_workspace::broker::{self, Forward, Incoming, Request};
 
 pub(super) fn forward(request: &Request) -> io::Result<Option<UnixListener>> {
     let mut checksum = glib::Checksum::new(glib::ChecksumType::Sha256).unwrap();
-    for name in [
-        "GDK_BACKEND",
-        "WAYLAND_DISPLAY",
-        "DISPLAY",
-        "WORMINAL_SHARED_SOCKET_SCOPE",
-    ] {
-        let value = std::env::var_os(name).unwrap_or_default();
-        checksum.update(&(value.as_bytes().len() as u64).to_be_bytes());
-        checksum.update(value.as_bytes());
-    }
+    checksum.update(&broker::display_key(true));
     let hash = checksum.string().unwrap();
     let address = SocketAddr::from_abstract_name(format!(
         "worminal-rust-ui-{}-{}",
@@ -102,7 +90,14 @@ pub(super) fn serve(listener: UnixListener, candidate: bool) -> io::Result<Rc<Se
                                 => return ControlFlow::Continue,
                             result => {
                                 let result = result.and_then(|request| {
-                                    match Config::parse(&request.expect("complete launch"), candidate)? {
+                                    let request = request.expect("complete launch");
+                                    if let Some((action, master)) = broker::master_action(&request.args)? {
+                                        return match action {
+                                            broker::MasterAction::Detach => App::detach_master(master),
+                                            broker::MasterAction::Close => App::close_master(master),
+                                        };
+                                    }
+                                    match Config::parse(&request, candidate)? {
                                         Some(config) => App::launch(config).map(|_| ()), None => Ok(()),
                                     }
                                 });

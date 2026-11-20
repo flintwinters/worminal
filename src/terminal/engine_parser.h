@@ -2,16 +2,13 @@
 #ifndef WORMINAL_ENGINE_PARSER_H
 #define WORMINAL_ENGINE_PARSER_H
 #include "engine_state.h"
-#include "win.h"
 void te_selinit(TermEngine *session);
 void te_selstart(TermEngine *session, int col, int row, int snap);
 void te_selextend(TermEngine *session, int col, int row, int type, int done);
 int te_selected(TermEngine *session, int x, int y);
 char * te_getsel(TermEngine *session);
 void te_selclear(TermEngine *session);
-int te_tattrset(TermEngine *session, int attr);
 void te_tsetdirt(TermEngine *session, int top, int bot);
-void te_tsetdirtattr(TermEngine *session, int attr);
 void te_tfulldirt(TermEngine *session);
 void te_tcursor(TermEngine *session, int mode);
 void te_treset(TermEngine *session);
@@ -27,7 +24,6 @@ void te_tmoveto(TermEngine *session, int x, int y);
 void te_tsetscroll(TermEngine *session, int t, int b);
 void te_toggleprinter(TermEngine *session, const Arg *arg);
 void te_printscreen(TermEngine *session, const Arg *arg);
-void te_printsel(TermEngine *session, const Arg *arg);
 int te_twrite(TermEngine *session, const char *buf, int buflen, int show_ctrl);
 void te_tresize(TermEngine *session, int col, int row);
 void te_resettitle(TermEngine *session);

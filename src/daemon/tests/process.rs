@@ -78,6 +78,7 @@ fn child_gets_its_own_session_cwd_environment_and_initial_geometry() {
         "-c".into(),
         concat!(
         "printf 'START:%s|%s|%s|%s\\n' \"$PWD\" \"$TERM\" \"$WINDOWID\" \"${ONLY_VALUE-unset}\"; ",
+        "printf 'DAEMON:%s\\n' \"${WORMINAL_DAEMON-unset}\"; ",
         "/bin/stty size; read -r answer; /bin/stty size; printf 'DONE:%s\\n' \"$answer\""
     )
         .into(),
@@ -87,6 +88,9 @@ fn child_gets_its_own_session_cwd_environment_and_initial_geometry() {
     assert!(output
         .windows(b"|xterm-256color|42|kept".len())
         .any(|bytes| bytes == b"|xterm-256color|42|kept"));
+    // Agents in a tab find the serving worminald here, even though the launch environment was explicit.
+    let expected = format!("DAEMON:{}\r\n", std::env::current_exe().unwrap().display());
+    assert!(String::from_utf8_lossy(&output).contains(&expected));
     let pid = pty.live_pid();
     assert!(pid > 0);
     assert_eq!(session_of(pid).unwrap(), pid);

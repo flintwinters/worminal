@@ -10,7 +10,7 @@ use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
-use worminal_engine_sys::{WORMINAL_DEFAULT_BACKGROUND as BG, WORMINAL_DEFAULT_FOREGROUND as FG};
+use worminal_protocol::cell::{COLOR_DEFAULT_BACKGROUND as BG, COLOR_DEFAULT_FOREGROUND as FG};
 use worminal_protocol::{ATTENTION_DONE, ATTENTION_FAILED, ATTENTION_HELP};
 
 #[derive(Clone)]
@@ -22,6 +22,9 @@ pub struct Tab {
     pub remote: bool,
     /// An SSH client is in the terminal's foreground.
     pub ssh: bool,
+    /// A task in the terminal is reporting progress.
+    pub busy: bool,
+    pub background_job: bool,
 }
 /// What the strip asks of the window. A tab is selected when its button is released, so a drag that
 /// starts on it leaves the panes it is dragged over on screen.
@@ -60,9 +63,6 @@ struct State {
     attention: RefCell<Vec<(u32, u32)>>,
     /// Bells rung by each tab in its latest burst, with the time of the last one.
     bells: RefCell<Vec<(u32, u32, std::time::Instant)>>,
-    /// Attention glow strength, 0..=1. The timer runs only while some tab needs attention.
-    glow: Cell<f64>,
-    blink: RefCell<Option<glib::SourceId>>,
     drag: RefCell<Option<Drag>>,
     actions: RefCell<Option<Rc<Actions>>>,
 }
@@ -85,10 +85,10 @@ fn place(widths: &[i32], right: i32) -> Vec<(i32, i32)> {
         })
         .collect()
 }
-/// Seconds per full fade out and back in.
 /// ANSI magenta: tabs whose foreground is an SSH session.
 const SSH: u32 = 5;
-const GLOW_PERIOD: f64 = 2.0;
+/// ANSI bright black: dark gray behind tabs whose task is busy.
+const BUSY: u32 = 8;
 fn width(layout: &pango::Layout, entry: &Tab, metrics: Metrics) -> i32 {
     layout.set_text(&entry.label);
     layout.pixel_size().0 + 2 * metrics.width
@@ -102,26 +102,27 @@ pub(super) fn mix(from: &gdk::RGBA, to: &gdk::RGBA, amount: f64) -> gdk::RGBA {
         1.0,
     )
 }
-/// Background fill (none for resting tabs) and text color of one tab at the given glow strength.
+/// Background fill (none for resting tabs) and text color; attention stays solid until input.
 fn colors(
     palette: &Palette,
     entry: &Tab,
     selected: bool,
-    glow: f64,
     severity: u32,
 ) -> (Option<gdk::RGBA>, gdk::RGBA) {
-    let selected_fill = palette.color(if entry.ssh { SSH } else { FG });
-    let fill = if glow > 0.0 {
-        let from = if selected {
-            selected_fill
-        } else {
-            palette.color(BG)
-        };
-        Some(mix(&from, &palette.color(severity_color(severity)), glow))
+    if severity > 0 {
+        return (
+            Some(palette.color(severity_color(severity))),
+            palette.color(BG),
+        );
+    }
+    let fill = if entry.background_job {
+        Some(palette.color(6))
+    } else if selected {
+        Some(palette.color(if entry.ssh { SSH } else { FG }))
     } else {
-        selected.then_some(selected_fill)
+        entry.busy.then(|| palette.color(BUSY))
     };
-    let resting = palette.color(if selected {
+    let text = palette.color(if selected || entry.background_job {
         BG
     } else if entry.ssh {
         SSH
@@ -132,7 +133,7 @@ fn colors(
     } else {
         7
     });
-    (fill, mix(&resting, &palette.color(BG), glow))
+    (fill, text)
 }
 /// Palette color of an alert: green when finished, yellow when the user is needed, red on failure.
 fn severity_color(severity: u32) -> u32 {
@@ -144,10 +145,6 @@ fn severity_color(severity: u32) -> u32 {
 }
 /// Bells closer together than this belong to one burst, whose length is the alert's severity.
 const BELL_BURST: std::time::Duration = std::time::Duration::from_millis(1500);
-/// Attention glow for `seconds` into an alert: starts at full strength, then breathes on a cosine.
-fn glow_at(seconds: f64) -> f64 {
-    (1.0 + (seconds * std::f64::consts::TAU / GLOW_PERIOD).cos()) / 2.0
-}
 impl State {
     fn draw(&self, cr: &cairo::Context, right: i32) -> Result<(), cairo::Error> {
         let Some(metrics) = self.metrics.get() else {
@@ -198,8 +195,7 @@ impl State {
                 .iter()
                 .find(|(id, _)| *id == entry.id)
                 .map_or(0, |(_, severity)| *severity);
-            let glow = if severity > 0 { self.glow.get() } else { 0.0 };
-            let (fill, text) = colors(&palette, entry, selected, glow, severity);
+            let (fill, text) = colors(&palette, entry, selected, severity);
             if let Some(fill) = fill {
                 paint::source(cr, &fill);
                 cr.rectangle(
@@ -335,8 +331,6 @@ impl Tabs {
             palette: RefCell::new(None),
             attention: RefCell::new(Vec::new()),
             bells: RefCell::new(Vec::new()),
-            glow: Cell::new(0.0),
-            blink: RefCell::new(None),
             drag: RefCell::new(None),
             actions: RefCell::new(None),
         });
@@ -406,7 +400,7 @@ impl Tabs {
                 glib::Propagation::Proceed
             }));
     }
-    /// Fade a tab in and out until it receives input; a waiting agent is not answered by looking at it.
+    /// Highlight a tab until it receives input; a waiting agent is not answered by looking at it.
     /// Severity only rises until input answers the tab. Returns the new severity if it changed.
     pub fn alert(&self, id: u32, severity: u32) -> Option<u32> {
         let state = &self.0;
@@ -419,31 +413,7 @@ impl Tabs {
                 None => attention.push((id, severity)),
             }
         }
-        if state.blink.borrow().is_some() {
-            state.widget.queue_draw();
-            return Some(severity);
-        }
-        let start = std::time::Instant::now();
-        state.glow.set(glow_at(0.0));
         state.widget.queue_draw();
-        let weak = Rc::downgrade(state);
-        *state.blink.borrow_mut() = Some(glib::timeout_add_local(
-            std::time::Duration::from_millis(33),
-            move || {
-                let Some(state) = weak.upgrade() else {
-                    return glib::ControlFlow::Break;
-                };
-                if state.attention.borrow().is_empty() {
-                    state.glow.set(0.0);
-                    state.widget.queue_draw();
-                    state.blink.borrow_mut().take();
-                    return glib::ControlFlow::Break;
-                }
-                state.glow.set(glow_at(start.elapsed().as_secs_f64()));
-                state.widget.queue_draw();
-                glib::ControlFlow::Continue
-            },
-        ));
         Some(severity)
     }
     /// Count a bell into its tab's burst: one bell finished, two need the user, three failed.
@@ -496,7 +466,51 @@ impl Tabs {
 
 #[cfg(test)]
 mod tests {
-    use super::place;
+    use super::{colors, place, severity_color, Tab, ATTENTION_HELP, BUSY, FG};
+    use crate::paint::Palette;
+    fn tab(busy: bool) -> Tab {
+        Tab {
+            id: 1,
+            label: String::new(),
+            browser: false,
+            remote: false,
+            ssh: false,
+            busy,
+            background_job: false,
+        }
+    }
+    #[test]
+    fn a_busy_tab_is_gray_unless_selected_or_alerting() {
+        let palette = Palette::default();
+        assert_eq!(colors(&palette, &tab(false), false, 0).0, None);
+        assert_eq!(
+            colors(&palette, &tab(true), false, 0).0,
+            Some(palette.color(BUSY))
+        );
+        assert_eq!(
+            colors(&palette, &tab(true), true, 0).0,
+            Some(palette.color(FG))
+        );
+        assert_eq!(
+            colors(&palette, &tab(true), false, ATTENTION_HELP).0,
+            Some(palette.color(severity_color(ATTENTION_HELP)))
+        );
+    }
+    #[test]
+    fn background_jobs_are_cyan_including_selected_and_busy_tabs() {
+        let palette = Palette::default();
+        let mut entry = tab(true);
+        entry.background_job = true;
+        for selected in [false, true] {
+            let (fill, text) = colors(&palette, &entry, selected, 0);
+            assert_eq!(fill, Some(palette.color(6)));
+            assert_eq!(text, palette.color(super::BG));
+            assert_eq!(
+                colors(&palette, &entry, selected, ATTENTION_HELP).0,
+                Some(palette.color(severity_color(ATTENTION_HELP)))
+            );
+        }
+    }
     #[test]
     fn tabs_wrap_in_order_and_oversized_tab_sits_alone() {
         assert_eq!(place(&[], 100), vec![]);

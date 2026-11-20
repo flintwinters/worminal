@@ -1,4 +1,4 @@
-"""Deterministic combined-frontend checks; invoked only through manage.py."""
+"""Private HTTP, profile, audio, display and broker fixtures for current app checks."""
 from runtime import CHECKS
 
 from runtime import runtime_binary
@@ -21,6 +21,7 @@ import time
 from http_fixture import serving
 from x11 import isolated_display
 from tools import explorer
+from tools.paths import socket_directory
 from workspace_protocol import send as wire_send, wait_kind as wire_wait, service_pid
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -74,13 +75,13 @@ def fixture(tls=False, handler=Fixture):
 def profile(env):
     checks = CHECKS
     checks.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="preview-", dir=checks) as directory:
+    with (tempfile.TemporaryDirectory(prefix="preview-", dir=checks) as directory,
+          socket_directory() as runtime_directory):
         base = Path(directory)
-        runtime = base / "runtime"
-        runtime.mkdir(mode=0o700)
+        runtime = Path(runtime_directory)
         yield {**env, "XDG_RUNTIME_DIR": str(runtime), "XDG_DATA_HOME": str(base / "data"),
                "XDG_CACHE_HOME": str(base / "cache"), "XDG_STATE_HOME": str(base / "state"),
-               "NO_AT_BRIDGE": "1", "SHELL": "/bin/sh",
+               "NO_AT_BRIDGE": "1", "SHELL": "/bin/sh", "GIO_USE_VFS": "local",
                # Browser GPU helpers can finish cache writes after the UI process exits.
                "MESA_SHADER_CACHE_DISABLE": "true",
                "WEBKIT_DISABLE_DMABUF_RENDERER": "1", "G_DEBUG": "fatal-criticals"}
@@ -183,91 +184,10 @@ def wayland_display():
                 compositor.wait(timeout=5)
 
 
-@contextmanager
-def qtile_display():
-    with isolated_display() as env:
-        log_path = CHECKS / "preview-qtile.log"
-        with log_path.open("wb") as log:
-            manager = subprocess.Popen(
-                ["qtile", "start", "--backend", "x11", "--no-spawn", "--config",
-                 str(ROOT / "tests/fixtures/preview_qtile.py"), "--socket",
-                 str(CHECKS / "preview-qtile.sock"),
-                 "--log-path", str(log_path)], env=env, stdout=log, stderr=log)
-            try:
-                deadline = time.monotonic() + 10
-                while True:
-                    result = subprocess.run(["xprop", "-root", "_NET_SUPPORTING_WM_CHECK"], env=env,
-                                            capture_output=True, text=True)
-                    if "window id #" in result.stdout:
-                        break
-                    if manager.poll() is not None or time.monotonic() > deadline:
-                        raise RuntimeError(f"Qtile did not start; see {log_path}")
-                    time.sleep(.05)
-                yield env
-            finally:
-                manager.terminate()
-                manager.wait(timeout=5)
-
-
-def startup_check(env, log):
-    """Invalid displays and arguments must not start SSH or create a service tab."""
-    failed = {**env, "DISPLAY": "worminal-invalid", "WAYLAND_DISPLAY": "worminal-invalid",
-              "WORMINAL_TRACE_TIMING": "1", "WORMINAL_TEST_BRIDGE_DELAY": "30",
-              "WORMINAL_TEST_DAEMON": str(runtime_binary("worminald")),
-              "PATH": str(ROOT / "tests/fixtures/preview-master") + os.pathsep + env["PATH"]}
-    for arguments, expected, started in ((["-e", "/bin/cat"], 1, False),
-                                         (["--invalid-startup-option"], 2, False)):
-        trial = dict(failed)
-        if expected == 2:
-            for key in ("DISPLAY", "WAYLAND_DISPLAY"):
-                trial.pop(key, None)
-                if key in env:
-                    trial[key] = env[key]
-        process = subprocess.Popen([str(runtime_binary("worminal")), "--master", "preview-test", *arguments],
-                                   env=trial, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
-        try:
-            _, errors = process.communicate(timeout=5)
-            log.write(errors)
-            log.flush()
-            if process.returncode != expected or (b"worminal-timing ssh-started " in errors) != started:
-                raise RuntimeError(f"Invalid-display/argument startup failed: status={process.returncode}, {errors!r}")
-            if expected == 1 and b"cannot open display" not in errors.lower():
-                raise RuntimeError("The initial SSH probe did not reach the expected display failure")
-            try:
-                os.killpg(process.pid, 0)
-            except ProcessLookupError:
-                pass
-            else:
-                raise RuntimeError("Failed startup left an SSH helper running")
-        finally:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            process.wait(timeout=5)
-        with socket.socket(socket.AF_UNIX) as peer:
-            peer.settimeout(3)
-            peer.connect(f"\0worminal-workspace-v2-{os.getuid()}-{env['WORMINAL_SHARED_SOCKET_SCOPE']}")
-            # Two ordered round trips also let already-readable bridge traffic
-            # be processed before accepting an empty-catalog observation.
-            for _ in range(2):
-                wire_send(peer, 19, version=2)
-                _, catalog = wire_wait(peer, 7, version=2)
-                if len(catalog) < 12 or int.from_bytes(catalog[:4], "big"):
-                    raise RuntimeError("Failed GUI startup created an orphan service tab")
-
-
-def broker_check(env, url, log, daemon, *, rust=False):
+def broker_check(env, url, log, daemon):
     """Independent launches must share the GTK owner and the live DOM, not reload a URL."""
-    executable = str(runtime_binary("worminal-rust" if rust else "build/worminal-gtk-c"))
-    if not rust:
-        # The old C launcher expects modules in build/ next to its executable.
-        base = Path(env["XDG_STATE_HOME"]).parent / "c-runtime"
-        (base / "build").mkdir(parents=True, exist_ok=True)
-        shutil.copy2(executable, base / "worminal")
-        for name in ("frontend.so", "browser.so"): shutil.copy2(ROOT / "build" / name, base / "build" / name)
-        executable = str(base / "worminal")
-    forwarder = str(runtime_binary("worminal")) if not rust else executable
+    executable = str(runtime_binary("worminal-rust"))
+    forwarder = executable
     title = f"Broker terminal {os.getpid()}"
     first = subprocess.Popen([executable, "-T", title, "-o", "-", "-e", "/bin/sh", "-c",
                               "stty raw -echo; printf BROKER_READY; exec cat"],
@@ -299,8 +219,6 @@ def broker_check(env, url, log, daemon, *, rust=False):
     try:
         read(first.stdout, b"BROKER_READY")
         mappings = Path(f"/proc/{first.pid}/maps").read_text()
-        if not rust and "frontend.so" not in mappings:
-            raise RuntimeError("Window owner did not load the GTK frontend module")
         if "libwebkit2gtk" in mappings:
             raise RuntimeError("Terminal-only frontend loaded WebKit before opening a browser")
         terminal_window = window(title)
@@ -384,55 +302,3 @@ def broker_check(env, url, log, daemon, *, rust=False):
             forwarded.stdout.close()
     finally:
         first.terminate(); first.communicate(timeout=5)
-
-
-def main():
-    backend = sys.argv[1] if len(sys.argv) == 2 else "x11"
-    display = {"x11": isolated_display, "wayland": wayland_display, "qtile": qtile_display}[backend]
-    with display() as display_env, profile(display_env) as env, audio(env) as env, \
-            fixture() as url, fixture(tls=True) as tls_url:
-        if backend == "wayland":
-            # Preserve the compositor's socket directory, while isolating browser storage.
-            env["XDG_RUNTIME_DIR"] = display_env["XDG_RUNTIME_DIR"]
-        env["GDK_BACKEND"] = "wayland" if backend == "wayland" else "x11"
-        env["WORMINAL_TEST_EXECUTABLE"] = str(runtime_binary("worminal"))
-        local_app = ROOT / "file-explorer/dist/index.html"
-        if local_app.is_file():
-            if explorer.dist_stale():
-                raise RuntimeError("file-explorer/dist is older than its sources; run manage.py explorer-build")
-            env["WORMINAL_PREVIEW_LOCAL_APP"] = local_app.as_uri()
-        env["WORMINAL_PREVIEW_FIXTURE"] = url
-        env["WORMINAL_PREVIEW_TLS_FIXTURE"] = tls_url
-        env["GTK_USE_PORTAL"] = "0"
-        if backend == "qtile":
-            env["WORMINAL_PREVIEW_TILED"] = "1"
-        env.pop("DBUS_SESSION_BUS_ADDRESS", None)
-        for remote in (False, True):
-            trial_env = dict(env)
-            # Local and remote proofs start independent workspaces, including recovery state.
-            trial_env["WORMINAL_SHARED_SOCKET_SCOPE"] += "-remote" if remote else "-local"
-            if remote:
-                trial_env["PATH"] = str(ROOT / "tests/fixtures/preview-master") + os.pathsep + env["PATH"]
-                trial_env["WORMINAL_PREVIEW_TEST_MASTER"] = "preview-test"
-                trial_env["WORMINAL_TEST_DAEMON"] = env.get(
-                    "WORMINAL_TEST_PREVIEW_DAEMON", str(runtime_binary("worminald")))
-            log_path = ROOT / f"build/checks/preview-{backend}-{'remote' if remote else 'local'}.log"
-            with service(trial_env) as private_daemon, log_path.open("wb") as log:
-                startup_check(trial_env, log)
-                command = [str(ROOT / "build/preview_test")]
-                if os.environ.get("WORMINAL_PREVIEW_DEBUG"):
-                    command = ["gdb", "-batch", "-ex", "run", "-ex", "bt", "--args", *command]
-                result = subprocess.run(["dbus-run-session", "--", *command],
-                                        env=trial_env, stdout=log, stderr=log, timeout=90)
-                if not result.returncode and backend == "x11" and not remote:
-                    broker_check(trial_env, url, log, private_daemon)
-            output = log_path.read_text(errors="replace")
-            if result.returncode or not any(line.startswith("Preview ") for line in output.splitlines()):
-                print(output[-4000:], file=sys.stderr)
-                return result.returncode or 1
-            print(next((line for line in output.splitlines() if line.startswith("Preview ")), output[-500:]))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

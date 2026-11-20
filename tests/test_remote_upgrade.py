@@ -99,6 +99,42 @@ class PublishTest(unittest.TestCase):
         self.assertFalse(result['active'])
         self.assertEqual(result['session_processes_missing'], [999999999])
 
+    def promotion(self):
+        """A desktop release over a headless target: the launcher and module do not exist yet."""
+        extra = [b'new-launcher', b'new-module']
+        files = [row('lib/worminal/frontend.so', extra[1]), row('bin/worminal', extra[0])]
+        for item in files:
+            (self.prefix / item['role']).parent.mkdir(parents=True, exist_ok=True)
+            item['previous'] = None
+        self.layout = {'graphics': True, 'files': files + self.layout['files']}
+        self.data = [extra[1], extra[0], *self.data]
+
+    def test_desktop_release_promotes_a_headless_target_by_creating_files(self):
+        self.promotion()
+        self.publish()
+        for item, data in zip(self.layout['files'], self.data):
+            self.assertEqual((self.prefix / item['role']).read_bytes(), data)
+        self.assertEqual(list(self.prefix.rglob('.worminal-upgrade-*')), [])
+
+    def test_failed_promotion_removes_created_files_and_restores_originals(self):
+        self.promotion()
+        original = agent.exchange
+        def fail(parent, left, right, create=False):
+            if right == 'worminald':
+                raise OSError('injected publication failure')
+            original(parent, left, right, create)
+        with patch.object(agent, 'exchange', side_effect=fail), self.assertRaises(OSError):
+            self.publish()
+        self.assertFalse((self.prefix / 'bin/worminal').exists())
+        self.assertFalse((self.prefix / 'lib/worminal/frontend.so').exists())
+        self.assertEqual((self.prefix / 'bin/worminald').stat().st_ino, self.old[0])
+        self.assertEqual(list(self.prefix.rglob('.worminal-upgrade-*')), [])
+
+    def test_headless_release_never_replaces_a_desktop_target(self):
+        (self.prefix / 'bin/worminal').write_bytes(b'desktop')
+        with patch.object(agent, 'owners', return_value=[]), self.assertRaisesRegex(ValueError, 'desktop installation'):
+            agent.preflight(self.layout)
+
     def test_symlink_and_layout_mismatch_are_refused(self):
         destination = self.prefix / 'bin/worminald'
         destination.unlink()

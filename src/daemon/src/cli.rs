@@ -17,7 +17,11 @@ use worminal_protocol::worp::{
     session::Session,
 };
 use worminal_protocol::*;
-use worminal_workspace::{browser_target, socket};
+use worminal_workspace::{
+    browser_target, cli_output,
+    cli_schema::{AttachOption, Daemon},
+    socket,
+};
 
 fn connect(scope: &[u8]) -> io::Result<std::os::unix::net::UnixStream> {
     socket::connect(process::uid(), scope)
@@ -28,7 +32,7 @@ fn ensure(scope: &[u8]) -> io::Result<(std::os::unix::net::UnixStream, Option<Ch
         return Ok((socket, None));
     }
     let mut command = process::detached_command(&std::env::current_exe()?);
-    let mut child = command.arg("--serve").spawn()?;
+    let mut child = command.arg(Daemon::Serve.name()).spawn()?;
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
         if let Ok(socket) = connect(scope) {
@@ -52,17 +56,33 @@ fn ensure(scope: &[u8]) -> io::Result<(std::os::unix::net::UnixStream, Option<Ch
 }
 
 pub(crate) fn bridge(scope: &[u8], existing: bool) -> io::Result<()> {
-    let (mut socket, mut child) = if existing {
+    let (socket, mut child) = if existing {
         (connect(scope)?, None)
     } else {
         ensure(scope)?
     };
+    let result = relay(socket);
+    if let Some(child) = &mut child {
+        let _ = child.try_wait();
+    }
+    result
+}
+
+/// Bounded bidirectional transport, shared by local bridges and authenticated remote views.
+pub(crate) fn relay(socket: std::os::unix::net::UnixStream) -> io::Result<()> {
+    relay_observed(socket, |_| {})
+}
+
+pub(crate) fn relay_observed(
+    mut socket: std::os::unix::net::UnixStream,
+    mut observe: impl FnMut(&[u8]),
+) -> io::Result<()> {
     socket.set_nonblocking(true)?;
     let mut input = process::StdioDescriptor::new(0)?;
     let mut output = process::StdioDescriptor::new(1)?;
     let mut incoming = Queue::new(WORKSPACE_IO_BYTES as usize);
     let mut outgoing = Queue::new(WORKSPACE_IO_BYTES as usize);
-    let result = (|| loop {
+    loop {
         let interests = [
             Interest {
                 fd: 0,
@@ -97,6 +117,7 @@ pub(crate) fn bridge(scope: &[u8], existing: bool) -> io::Result<()> {
                         if ready.index == 0 {
                             incoming.append(&bytes[..count])?;
                         } else {
+                            observe(&bytes[..count]);
                             outgoing.append(&bytes[..count])?;
                         }
                     }
@@ -115,12 +136,51 @@ pub(crate) fn bridge(scope: &[u8], existing: bool) -> io::Result<()> {
                 outgoing.flush(&mut output, WORKSPACE_IO_BYTES as usize)?;
             }
         }
-    })();
-    if let Some(child) = &mut child {
-        let _ = child.try_wait();
     }
-    result
 }
+
+/// The public frontend entry point: the same framed v2 stream as `api --session`, locally or through
+/// the authenticated, version-synced master bridge that GUI `--master` views use.
+fn attach(scope: &[u8], arguments: &[OsString]) -> io::Result<i32> {
+    let (mut master, mut existing) = (None, false);
+    let mut arguments = arguments.iter();
+    while let Some(argument) = arguments.next() {
+        match argument.to_str().and_then(AttachOption::parse) {
+            Some(AttachOption::Master) if master.is_none() => {
+                master = Some(arguments.next().ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "--master needs an SSH endpoint.",
+                    )
+                })?);
+            }
+            Some(AttachOption::Existing) if !existing => existing = true,
+            _ => {
+                eprintln!("{}", cli_output::error(reference(Daemon::Attach)));
+                return Ok(2);
+            }
+        }
+    }
+    let Some(endpoint) = master else {
+        bridge(scope, existing)?;
+        return Ok(0);
+    };
+    let mode = if existing {
+        Daemon::BridgeExisting
+    } else {
+        Daemon::Bridge
+    };
+    crate::remote_connect::run(&[endpoint.clone(), mode.name().into()])
+}
+
+const ATTACH_HELP: &str = "\
+worminald attach [--master HOST] [--existing]
+Speak framed Worp v2 on stdin/stdout to this node's daemon, starting it (and restoring its tabs)
+unless --existing. With --master, first authenticate over SSH and sync versions and configuration,
+exactly as `worminal --master` views do, then bridge to that node's daemon. The stream is the same
+as `api --session`; alternative frontends need only worminal_protocol or `worminald api help session`.
+Under the INPUT feature send KEY/MOUSE/PASTE/WHEEL and the daemon encodes them with live modes.
+";
 
 fn request(scope: &[u8], kind: CommandKind) -> io::Result<i32> {
     let socket =
@@ -143,69 +203,129 @@ fn request(scope: &[u8], kind: CommandKind) -> io::Result<i32> {
         EventKind::Error(bytes) => bytes,
         _ => b"Preview service rejected the command.".to_vec(),
     };
-    eprintln!("{}", String::from_utf8_lossy(&error));
+    eprintln!("{}", cli_output::error(String::from_utf8_lossy(&error)));
     Ok(1)
+}
+
+/// The same detail providers serve native help and the dynamically enumerated search corpus.
+fn detail(command: Daemon) -> Option<String> {
+    match command {
+        Daemon::Help => Some(crate::api_help::overview()),
+        Daemon::Api => Some(format!(
+            "{}{}",
+            crate::api::help(),
+            crate::api_help::index()
+        )),
+        Daemon::Attach => Some(format!("{ATTACH_HELP}{}", AttachOption::GROUP.reference())),
+        Daemon::Config => Some(crate::config_cli::reference()),
+        Daemon::ListMasters => Some(crate::master_history::HELP.to_owned()),
+        Daemon::InstallRemote => Some(crate::remote_install::HELP.to_owned()),
+        Daemon::UpgradeRemote => Some(crate::remote_install::UPGRADE_HELP.to_owned()),
+        _ => None,
+    }
+}
+
+pub(crate) fn reference(command: Daemon) -> String {
+    detail(command).unwrap_or_else(|| {
+        let entry = command.entry();
+        format!(
+            "worminald {} {}\n{}\n",
+            entry.names.join(" | "),
+            entry.arguments,
+            entry.summary
+        )
+    })
+}
+
+pub(crate) fn help_documents() -> Vec<(String, String)> {
+    let mut documents = worminal_workspace::cli_schema::documents();
+    documents.push((
+        "worminal --help".to_owned(),
+        worminal_workspace::cli_help::launcher("worminal", env!("CARGO_PKG_VERSION")),
+    ));
+    documents.extend(Daemon::ALL.iter().filter_map(|command| {
+        detail(*command).map(|text| {
+            let help = if *command == Daemon::Help {
+                "worminald --help".to_owned()
+            } else {
+                format!("worminald {} --help", command.name())
+            };
+            (help, text)
+        })
+    }));
+    documents.extend(crate::api_help::documents());
+    documents
+}
+
+fn service_command(scope: &[u8], command: Option<Daemon>) -> io::Result<Option<i32>> {
+    match command {
+        Some(Daemon::Serve) => {
+            process::prepare_service()?;
+            crate::serve(scope)?;
+        }
+        Some(Daemon::UpgradeReceiver | Daemon::HandoffReceiver) => {
+            process::prepare_service()?;
+            crate::service::receive_upgrade(scope, command == Some(Daemon::HandoffReceiver))?;
+        }
+        Some(Daemon::Bridge | Daemon::BridgeExisting) => {
+            bridge(scope, command == Some(Daemon::BridgeExisting))?;
+        }
+        Some(Daemon::Stop) => {
+            let socket = connect(scope)?;
+            Session::new(socket.try_clone()?, socket).send(&Command::new(0, CommandKind::Stop))?;
+        }
+        _ => return Ok(None),
+    }
+    Ok(Some(0))
 }
 
 pub fn run(arguments: &[OsString]) -> io::Result<i32> {
     let scope = std::env::var_os("WORMINAL_SHARED_SOCKET_SCOPE").unwrap_or_default();
     let scope = scope.as_os_str().as_bytes();
-    if arguments
+    let command = arguments
         .get(1)
-        .is_some_and(|value| value == "install-on-remote")
-    {
-        return crate::remote_install::run(&arguments[2..], false);
+        .and_then(|value| value.to_str())
+        .and_then(Daemon::parse);
+    if arguments.len() == 3 && Daemon::Help.matches(&arguments[2]) {
+        if let Some(command) = command {
+            print!("{}", cli_output::text(reference(command)));
+            return Ok(0);
+        }
     }
-    if arguments
-        .get(1)
-        .is_some_and(|value| value == "upgrade-remote")
-    {
-        return crate::remote_install::run(&arguments[2..], true);
+    match command {
+        Some(Daemon::SshChild) => return crate::remote_connect::ssh_child(&arguments[2..]),
+        Some(Daemon::ConnectMaster) => return crate::remote_connect::run(&arguments[2..]),
+        Some(Daemon::InstallRemote) => return crate::remote_install::run(&arguments[2..], false),
+        Some(Daemon::UpgradeRemote) => return crate::remote_install::run(&arguments[2..], true),
+        Some(Daemon::Attach) => return attach(scope, &arguments[2..]),
+        Some(Daemon::Config) => return crate::config_cli::run(&arguments[2..]),
+        Some(Daemon::ListMasters) => return crate::master_history::run(&arguments[2..]),
+        _ => {}
     }
-    if arguments.get(1).is_some_and(|value| value == "config") {
-        return crate::config_cli::run(&arguments[2..]);
-    }
-    if arguments.len() == 2 && arguments[1] == "--version" {
-        println!("worminald {}", env!("CARGO_PKG_VERSION"));
+    if arguments.len() == 2 && command == Some(Daemon::Version) {
+        println!(
+            "{}",
+            cli_output::text(format!("worminald {}", env!("CARGO_PKG_VERSION")))
+        );
         return Ok(0);
     }
-    if arguments.get(1).is_some_and(|value| value == "api") {
+    if command == Some(Daemon::Api) {
         return crate::api_cli::run(scope, &arguments[2..]);
     }
-    if arguments.len() == 2 && matches!(arguments[1].to_str(), Some("--help" | "-h")) {
-        print!("{}", crate::api_help::OVERVIEW);
+    if arguments.len() == 2 && command == Some(Daemon::Help) {
+        print!("{}", cli_output::text(reference(Daemon::Help)));
         return Ok(0);
     }
     if arguments.len() == 2 {
-        match arguments[1].as_os_str().as_bytes() {
-            b"--serve" => {
-                process::prepare_service()?;
-                crate::serve(scope)?;
-                return Ok(0);
-            }
-            b"--upgrade-receiver" | b"--handoff-receiver" => {
-                process::prepare_service()?;
-                crate::service::receive_upgrade(scope, arguments[1] == "--handoff-receiver")?;
-                return Ok(0);
-            }
-            b"--bridge" | b"--bridge-existing" => {
-                bridge(scope, arguments[1] == "--bridge-existing")?;
-                return Ok(0);
-            }
-            b"--stop" => {
-                let socket = connect(scope)?;
-                Session::new(socket.try_clone()?, socket)
-                    .send(&Command::new(0, CommandKind::Stop))?;
-                return Ok(0);
-            }
-            _ => {}
+        if let Some(status) = service_command(scope, command)? {
+            return Ok(status);
         }
     }
     if arguments.len() == 3 {
-        let kind = match arguments[1].as_os_str().as_bytes() {
-            b"--handin" => Some(WIRE_HANDIN),
-            b"--handoff" => Some(WIRE_HANDOFF),
-            b"--new-browser-tab" => Some(WIRE_BROWSER_REPLACE),
+        let kind = match command {
+            Some(Daemon::Handin) => Some(WIRE_HANDIN),
+            Some(Daemon::Handoff) => Some(WIRE_HANDOFF),
+            Some(Daemon::NewBrowser) => Some(WIRE_BROWSER_REPLACE),
             _ => None,
         };
         if let Some(kind) = kind {
@@ -226,17 +346,21 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
             let result = request(scope, command);
             if kind != WIRE_BROWSER_REPLACE && !matches!(&result, Ok(0)) {
                 eprintln!(
-                    "Handoff unavailable or rejected; no automatic daemon restart was attempted."
+                    "{}", cli_output::error("Handoff unavailable or rejected; no automatic daemon restart was attempted.")
                 );
             }
             return result;
         }
     }
     eprintln!(
-        "usage: worminald api COMMAND (run 'worminald api help' for commands)\n\
+        "{}",
+        cli_output::error(
+            "usage: worminald api COMMAND (run 'worminald api help' for commands)\n\
+               worminald attach [--master HOST] [--existing]\n       \
                worminald --serve|--bridge|--stop\n\
                worminald --handin NAME | --handoff NAME\n       \
                worminald --new-browser-tab URL|FILE"
+        )
     );
     Ok(2)
 }

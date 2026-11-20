@@ -2,16 +2,29 @@
 
 Run `worminald --help`, then `worminald api help` (plus `api help schema` for reply JSON and `api help session` for the
 binary stream) to discover the native command interface from the executable alone.
+`worminald api help search QUERY...` searches native launcher/daemon help and all API topic contents without a daemon.
+Search is case-insensitive, tolerates word typos, and requires every query term on a matching line.
+The parser-backed command registry automatically contributes every command, option and alias, including
+`--close-master` and `--detach-master`. Detailed help uses the native commands’ own reference providers.
+It prints up to 20 ranked lines with their actual help commands; no matches is a successful empty search.
+Queries accept 1..256 UTF-8 bytes and at most 16 whitespace-separated terms.
 It works on headless hosts and uses [Worp](worp.md), independently of the selected delivery transport.
 It never starts a daemon or restores shells as a side effect of inspection.
 [Install a new remote node](remote-install.md) with the separate native `install-on-remote` bootstrap command.
 
 ```sh
+worminald api doctor --json  # passive connection/version/shell-marker diagnostics
 worminald api list
+worminald api self   # from inside a tab: which tab am I (local only)
 worminald api open --cwd /path/to/project -- /bin/sh
 worminald api open --browser https://example.org/
 worminald api close 12
 worminald api read 12
+worminald api read 12 15 --tail 200
+worminald api wait 12 --after REVISION --timeout 30
+worminald api type 12 --guard INPUT_GUARD 'text'
+worminald api type 12 --stdin < message.txt
+worminald api key 12 Ctrl-Left F5
 worminald api type 12 'What are you working on?'
 worminald api key 12 Enter
 ```
@@ -66,12 +79,83 @@ mutations and are never retried automatically. A lost reply can leave the outcom
 issuing another open or close. Titles/URLs are descriptive metadata, not globally unique tab identities.
 
 `type` sends literal UTF-8 text with no automatic Enter. Control characters are rejected; `key` sends explicitly
-named keystrokes: Enter, Tab, Escape (Esc), Backspace, and Ctrl-A through Ctrl-Z, case-insensitively. Multiple keys
+named keystrokes including arrows, navigation, F1..F35 and Ctrl-/Alt-/Shift-/Super- modifiers; `api help keys` is the complete reference. Encoding uses the target terminal mode and the same table as GUI input. Multiple keys
 are sent in the supplied order. Input is limited to 65536 bytes per request. Input goes to the selected tab's PTY
 without taking its graphical controller or resizing it. Sending Enter may submit a command or prompt; Ctrl-C may
 interrupt work. These commands do not detect whether the intended application still owns the terminal.
 
-All operations return one JSON object on stdout. Success has `"ok": true` and exit status 0; failures have
+`worminald --list-masters` passively lists currently and previously connected master SSH routes as JSON. It is local
+per-user connection history, separate from enrolled devices; run `worminald --list-masters --help` for its contract.
+
+`worminal --close-master user@host` queues normal closure of that master's catalogued tabs through the existing
+GUI connections in this display/workspace. Terminal programs are terminated; browser records are removed.
+Use the exact SSH endpoint. Mirrored tabs close once, and other hosts are unaffected. Success means the closes
+were queued, not that every process has exited. No owner or no connected matching tabs is an error. A transport
+failure may leave partial closure; inspect the remaining tabs before retrying. No SSH connection or workspace is
+created by this command. `worminal --detach-master user@host` instead removes the views and keeps shells running.
+
+## CLI presentation
+
+`worminal` and `worminald` color human help, versions, status and errors only when the relevant output
+stream is a terminal. Redirected output is plain. `NO_COLOR` (even empty), `CLICOLOR=0` or `TERM=dumb`
+disables color. Agent markers also disable it, even when set to an empty value: `CODEX_*`, `CLAUDE_CODE_*`,
+`AIDER_*`, `OPENCODE_*`, `GEMINI_CLI_*`, `CLAUDECODE`, `CURSOR_AGENT`, `AIDER`, `OPENCODE`, `GEMINI_CLI`,
+`CLINE_ACTIVE`, `ROO_CODE`, `AGENT`, `AGENT_MODE` and `AI_AGENT`. API keys and SSH authentication-agent
+variables do not identify an AI agent. The shared policy lives in `src/workspace/src/cli_output.rs`.
+JSON, binary sessions, shell integration source and configuration examples always remain plain.
+CLI commands that reply with JSON (`--list-masters`, `config sync`, remote install/upgrade) pass it through
+`cli_output::reply`: a human terminal gets generated tables and key/value lists, while agents, pipes and
+redirection receive the exact compact JSON. New commands need no separate human renderer.
+
+## Observation, waiting and input safety
+
+`api help observe` documents passive inspection and its limits; `api help keys` lists application keys.
+`read TAB... [--tail N]` returns ordered `results`, each with its own success/error. Batch reads accept
+1..16 tabs; `--tail` accepts 1..1000 physical rows and includes the active screen's blank rows. Tail reads
+preserve soft-wrap boundaries and report `total_lines` and `truncated`. Alternate screens exclude primary
+history. These reads never move the user's viewport or selection. A batch that exhausts the stream reply budget reports per-tab errors; request fewer tabs or rows.
+
+Read replies include an opaque `revision`, a daemon-instance `workspace`, and `state`; list records also
+include state. State reports advisory busy status, view ownership, the foreground process-group leader,
+an opaque `input_guard`, and optional shell phase/command counter/exit status. Unknown identities/statuses
+are null. The group leader does not identify every pipeline member or an application beyond SSH.
+
+`wait TAB --after REVISION --timeout SECONDS` waits inside the daemon without taking control or repeatedly
+opening SSH sessions. It returns a current viewport with `changed` and `timed_out`; an unchanged timeout
+is successful. Deadlines are bounded to 60 seconds. Changes are checked at most every 50ms while waits
+are pending, with one pending wait per connection and at most 32 per workspace. Disconnect cancels the wait;
+closed tabs fail. Re-read after daemon upgrade/restart. Revisions include output generation, so output that
+only enters history still wakes a waiter. A quiet screen never proves command completion.
+
+`type` and `key` accept `--guard TOKEN` before their payload. Copy `state.input_guard` from a recent read;
+the daemon rejects input if its workspace/tab/foreground identity has changed. Identity includes the group
+leader's PID, start time, executable and argv. This check occurs before queueing, but programs can still
+change afterward; receipts never certify application consumption. A null guard means identity is unavailable.
+
+`type TAB --stdin` reads bounded UTF-8, allowing tabs and line endings. It reuses native paste filtering
+and bracketed paste. Multiline text requires the target to enable bracketed paste, otherwise it is rejected
+to avoid implicit command submission. No Enter is appended. Input including the envelope must fit the
+65536-byte limit. Use `--` before literal TEXT that could be mistaken for an option.
+
+## Optional shell integration
+
+The executable supplies opt-in integration; no shell startup files are edited automatically. Add the relevant
+line to your interactive startup file:
+
+```sh
+# Bash 4.4+, ~/.bashrc
+[[ -n ${WORMINAL_DAEMON-} ]] && eval "$("$WORMINAL_DAEMON" api help shell-bash)"
+# Zsh, ~/.zshrc
+[[ -n ${WORMINAL_DAEMON-} ]] && eval "$("$WORMINAL_DAEMON" api help shell-zsh)"
+```
+
+The snippets install prompt/execution hooks only inside Worminal and only once per shell. OSC 133 A/B/C/D
+reports prompt/input/running/finished; D carries an exit status. `state.shell.command_id` advances on C,
+and `exit_status` survives the next prompt and clears at the next command. Working directory continues
+through the existing process-directory resolver. Other applications may emit the same markers; these
+are untrusted observations, not authenticated command receipts. Handoff/restart clears shell observations.
+
+All operations return one JSON object on stdout (help topics print reference text or shell source). Success has `"ok": true` and exit status 0; failures have
 `"ok": false`, an `error` message and exit status 1. Input acknowledgements report bytes queued for the PTY;
 they do not certify application processing or a reply. Re-read the screen to observe the result. Retries can
 repeat input: callers should inspect uncertain outcomes before sending again.
@@ -107,3 +191,65 @@ Operation 8 closes a tab (`tab=id`, no fields). Registry responses carry members
 are a caller-side operation, outside the daemon loop. Replies use message 33 and the same tab ID, with
 a big-endian status u32 (1 success, 0 failure), followed by the UTF-8 JSON object. JSON `api_version` is currently
 1 in list replies. Unknown operations and missing tabs return explicit errors. Read/input require a terminal; close accepts both kinds.
+
+Extended operations preserve all older payloads: 10 reads a batch/tail (tail u32, count u32, tab IDs u32;
+envelope tab=0); 11 sends named keys (guard string, count u32, key strings); 12 pastes (guard string,
+UTF-8 text string); 13 guards raw input (guard string, bytes string); 14 waits (revision string,
+timeout milliseconds u32). Empty guards mean unguarded input. `api help session` describes these fields
+from the executable. A wait reply is deferred on the same connection and tab; avoid multiple outstanding
+unary operations with the same tab because unary framing has no independent request identifier.
+
+Tab operands accept `self` locally, including batch reads, close, wait and input. Resolution uses the same
+caller ancestry as `api self`; text/key payloads remain literal. Remote `--master` rejects `self`.
+Failures retain `error` and add stable `code` and nullable `hint`; scripts should branch on `code`.
+`api help schema` lists codes. `doctor --json` returns list/error plus caller scope/target/socket,
+client/daemon versions, API compatibility and observed per-terminal shell-marker availability.
+It never starts a daemon; an unreachable target has unknown compatibility and a failure exit status.
+
+## Atomic input and command observations
+
+`type TAB [--guard TOKEN] --then KEY TEXT|--stdin` filters a paste and encodes the following named key
+against the target mode, validates the entire request, then queues it as one input operation. For example:
+
+```sh
+worminald api type 12 --guard INPUT_GUARD --then Enter 'cargo test'
+worminald api wait 12 --command 42 --workspace WORKSPACE --timeout 30
+worminald api read 12 --command 42
+```
+
+`--then` follows `--guard` and precedes the payload. Enter is explicit; multiline paste still requires
+bracketed paste. Combined encoded bytes, including the envelope and key, must fit the existing input limit.
+This prevents interleaving inside the queued operation; it does not certify application consumption.
+
+Command waits require the workspace from the observation that supplied the command ID. They use the same
+bounded deferred mechanism as revision waits, returning `completed`, `exit_status`, and `timed_out`.
+A D marker completes a command even if no valid exit status was supplied. Missing shell integration,
+a changed workspace, closed tabs, and expired command observations are explicit failures. Future command
+IDs can be waited for after shell integration has been observed. Quiet output never implies completion.
+
+Command reads expose cells between the C and D marker positions, excluding later prompts. Running commands
+return their current retained cells. At D, the daemon captures at most 1000 physical rows/256 KiB, retaining
+at most 16 completed commands and 256 KiB total per tab. `gap` means a boundary was invalidated or evicted;
+`truncated` means the bound omitted output. Neither result is a complete transcript in those cases.
+Completed captures survive later screen edits, but reset with daemon handoff/restart.
+
+## Incremental retained output
+
+Every read supplies an opaque `output_cursor`, distinct from the change-wait `revision`:
+
+```sh
+worminald api read 12
+worminald api read 12 --since OUTPUT_CURSOR
+```
+
+`--since` returns newly retained physical rows in `lines`. When `replace_last_line` is true and lines are
+nonempty, replace the previous unfinished physical row before appending. When seeding from a viewport
+read, that row is its cursor row; trailing unused viewport rows are not an output transcript. This handles carriage-return
+progress updates and text appended to an existing line. Rows reflect current terminal cells, not raw PTY
+bytes or an immutable transcript. Changes before the anchor invalidate it conservatively.
+
+Each reply is bounded to 1000 rows/256 KiB. While `truncated` is true, repeat using its returned
+`output_cursor` to continue; the cursor advances only through returned rows. `gap` is true after history
+eviction, screen/layout invalidation, or a foreign cursor, and the reply resumes from retained cells.
+A screen reset, resize/reflow, or alternate-screen transition invalidates old anchors. Inspection preserves
+selection, scrolling, geometry, focus and controller ownership. The same requests work over SSH.

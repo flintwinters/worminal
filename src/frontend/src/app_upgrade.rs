@@ -32,7 +32,12 @@ const ACTIVATE: u32 = 101;
 const LIVE: u32 = 102;
 const FINISH: u32 = 103;
 const ABORT: u32 = 104;
+const REFRESH: u32 = 105;
+const COMMITTED: u32 = 106;
+const ATOMIC_STATE: &[u8] = b"atomic-state-v1";
+const FINAL_STATE: &[u8] = b"final-state-v1";
 const LIMIT: Duration = Duration::from_secs(gui_handoff::TIMEOUT_SECONDS);
+const PREPARE_LIMIT: Duration = Duration::from_secs(180);
 type Identity = (u64, u64, u64, i64, i64);
 struct Artifact {
     path: PathBuf,
@@ -101,7 +106,12 @@ fn windows() -> Vec<Rc<App>> {
     })
 }
 /// Update status appears in every window and, when configured, once on the desktop.
+fn trace(message: &str) {
+    worminal_workspace::diagnostics::log(libc::LOG_INFO, message);
+    eprintln!("worminal: {message}");
+}
 fn notice(text: &str) {
+    worminal_workspace::diagnostics::log(libc::LOG_NOTICE, text);
     let apps = windows();
     if let Some(app) = apps
         .first()
@@ -114,15 +124,29 @@ fn notice(text: &str) {
         app.message(Some(text));
     }
 }
+/// Version sync failures need the user's action (e.g. a peer's release cannot run here), so they reach
+/// the desktop regardless of update_notifications, which covers local window-update progress.
+pub(super) fn alert(text: &str) {
+    if let Some(app) = windows().first() {
+        app.notification_desktop
+            .show(super::notifications::Message::update(text), |_| {});
+    }
+}
+pub(super) type UpdateBarrier = (Rc<super::Link>, u64);
+fn barriers_complete(barriers: &[UpdateBarrier]) -> bool {
+    let active = windows()
+        .iter()
+        .flat_map(|app| app.links())
+        .collect::<Vec<_>>();
+    barriers.iter().all(|(link, revision)| {
+        !active.iter().any(|current| Rc::ptr_eq(current, link))
+            || link.update_fences.borrow().complete(*revision)
+    })
+}
 fn snapshot() -> io::Result<Vec<Window>> {
     windows()
         .into_iter()
         .map(|app| {
-            if !app.links().iter().all(|link| link.settled()) {
-                return Err(io::Error::other(
-                    "Windows are reconnecting or have pending input",
-                ));
-            }
             let (x, y) = app.window.position();
             let (width, height) = app.window.size();
             let state = app
@@ -132,9 +156,12 @@ fn snapshot() -> io::Result<Vec<Window>> {
                 .unwrap_or_else(gtk::gdk::WindowState::empty);
             let flags = u32::from(app.window.is_maximized())
                 | (u32::from(state.contains(gtk::gdk::WindowState::FULLSCREEN)) << 1)
-                | (u32::from(app.window.is_active()) << 2);
+                | (u32::from(app.window.is_active()) << 2)
+                | (u32::from(app.primary_detached.get()) * gui_handoff::PRIMARY_DETACHED)
+                | (u32::from(app.close_after_update.get()) * gui_handoff::CLOSE_REQUESTED);
             let zoom = app.fonts.borrow().zoom();
             Ok(Window {
+                id: app.state_id,
                 request: app.config.replacement_request()?,
                 links: app
                     .remotes
@@ -155,17 +182,14 @@ fn snapshot() -> io::Result<Vec<Window>> {
         })
         .collect()
 }
-fn stable_state() -> io::Result<Vec<u8>> {
-    let mut state = snapshot()?;
-    for window in &mut state {
-        window.flags &= 3;
-    }
-    gui_handoff::encode(&state)
-}
 fn freeze(value: bool) {
     for app in windows() {
         app.replacing.set(value);
+        app.handoff_frozen.set(value);
         app.window.set_sensitive(!value);
+        if !value {
+            app.resume_update_reads();
+        }
     }
 }
 fn discard_views() {
@@ -187,6 +211,11 @@ fn restore_views() {
     if let Some(app) = apps.iter().find(|app| app.window.is_active()) {
         app.window.present();
     }
+    for app in apps {
+        if app.close_after_update.replace(false) {
+            app.window.close();
+        }
+    }
 }
 fn address(token: &str) -> io::Result<SocketAddr> {
     if token.len() != 48 || !token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -206,6 +235,7 @@ fn channel(socket: UnixStream) -> io::Result<Connection> {
     Ok(Connection {
         socket,
         _ssh: None,
+        report: None,
         decoder: Default::default(),
         output: Default::default(),
         offset: 0,
@@ -284,9 +314,12 @@ impl Workers {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Phase {
     Peer,
     Preparing,
+    Draining,
+    Refreshing,
     Exporting,
     Retiring,
     Activating,
@@ -297,7 +330,9 @@ struct Transaction {
     listener: UnixListener,
     child: Option<spawn::Child>,
     state: Option<Vec<Window>>,
-    encoded: Vec<u8>,
+    ready: bool,
+    committed: bool,
+    barriers: Vec<UpdateBarrier>,
     target: Vec<Option<Identity>>,
     lease: Option<File>,
     cookies: Vec<u8>,
@@ -311,6 +346,31 @@ struct Transaction {
     rollback_started: bool,
     retirement_known: bool,
 }
+impl Transaction {
+    fn timeout_reason(&self) -> String {
+        if matches!(self.phase, Phase::Draining) {
+            for app in windows() {
+                for (index, link) in app.links().iter().enumerate() {
+                    let fence_pending = self.barriers.iter().any(|(pending, revision)| {
+                        Rc::ptr_eq(pending, link)
+                            && !link.update_fences.borrow().complete(*revision)
+                    });
+                    let connection = link.connection.borrow();
+                    trace(&format!(
+                        "GUI update drain: window={} link={index} connected={} catalog_pending={} \
+                         pending_tabs={} queued_bytes={} fence_pending={fence_pending}",
+                        app.state_id,
+                        connection.is_some(),
+                        link.initial_claim.get(),
+                        link.pending_tabs.get(),
+                        connection.as_ref().map_or(0, |connection| connection.bytes),
+                    ));
+                }
+            }
+        }
+        format!("timed out during {:?}", self.phase)
+    }
+}
 pub(super) struct Watcher {
     broker: RefCell<Rc<broker::Server>>,
     candidate: bool,
@@ -318,6 +378,7 @@ pub(super) struct Watcher {
     timer: RefCell<Option<glib::SourceId>>,
     due: Cell<Instant>,
     attempted: RefCell<Vec<Option<Identity>>>,
+    deferred: Cell<bool>,
     transaction: RefCell<Option<Transaction>>,
 }
 impl Drop for Watcher {
@@ -354,10 +415,13 @@ impl Watcher {
     }
     fn begin(&self) -> io::Result<()> {
         if !self.broker.borrow().idle() {
-            return Err(io::Error::other("A window launch is pending"));
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "A window launch is pending",
+            ));
         }
         let state = snapshot()?;
-        let encoded = stable_state()?;
+        gui_handoff::encode(&state)?;
         let lease = browser::lease()?;
         browser::pin_for_update();
         let token = token()?;
@@ -371,7 +435,9 @@ impl Watcher {
             listener,
             child: Some(child),
             state: Some(state),
-            encoded,
+            ready: false,
+            committed: false,
+            barriers: Vec::new(),
             target: target(),
             lease,
             cookies: Vec::new(),
@@ -379,19 +445,13 @@ impl Watcher {
             transfer: None,
             channel: None,
             phase: Phase::Peer,
-            deadline: Instant::now() + LIMIT,
+            deadline: Instant::now() + PREPARE_LIMIT,
             workers: Workers(Vec::new()),
             retired: false,
             rollback_started: false,
             retirement_known: true,
         });
         Ok(())
-    }
-    fn valid(&self, transaction: &Transaction) -> bool {
-        self.broker.borrow().idle()
-            && target() == transaction.target
-            && stable_state().ok().as_ref() == Some(&transaction.encoded)
-            && browser::lease().ok().flatten().is_some() == transaction.lease.is_some()
     }
     fn rollback(&self, transaction: &mut Transaction, message: &str) {
         if matches!(transaction.phase, Phase::RollingBack) {
@@ -423,25 +483,59 @@ impl Watcher {
             {
                 return false;
             }
-            *self.attempted.borrow_mut() = current;
+            if !self.broker.borrow().idle() {
+                self.due.set(Instant::now() + Duration::from_millis(50));
+                return true;
+            }
             if let Err(error) = self.begin() {
+                // Connection/launch readiness can change without another installation
+                // event. Do not consume this build's attempt until staging can begin.
+                if error.kind() == io::ErrorKind::WouldBlock {
+                    if !self.deferred.replace(true) {
+                        notice(&format!("Update pending: {error}."));
+                    }
+                    self.due.set(Instant::now() + Duration::from_secs(1));
+                    return true;
+                }
+                *self.attempted.borrow_mut() = current;
                 notice(&format!("Update pending: {error}."));
                 return false;
             }
+            self.deferred.set(false);
+            *self.attempted.borrow_mut() = current;
+            notice("Update started: replacement owner is being prepared.");
         }
         let mut slot = self.transaction.borrow_mut();
         let transaction = slot.as_mut().unwrap();
-        if !matches!(transaction.phase, Phase::RollingBack)
-            && (Instant::now() > transaction.deadline
-                || transaction.child.as_ref().is_some_and(spawn::Child::exited))
-        {
-            self.rollback(transaction, "replacement did not become ready");
+        if !matches!(transaction.phase, Phase::RollingBack) {
+            if Instant::now() > transaction.deadline {
+                let reason = transaction.timeout_reason();
+                self.rollback(transaction, &reason);
+            } else if transaction.channel.is_none()
+                && transaction.child.as_ref().is_some_and(spawn::Child::exited)
+            {
+                self.rollback(transaction, "replacement exited before connecting");
+            }
         }
+        let previous = transaction.phase;
         let result = self.advance(transaction);
+        if previous != transaction.phase {
+            trace(&format!(
+                "GUI update: {previous:?} -> {:?}",
+                transaction.phase
+            ));
+        }
         match result {
             Ok(true) => {
                 slot.take();
-                false
+                // An installation can advance while a candidate is being retired. The latest
+                // target still needs its own attempt even if its file event arrived mid-transaction.
+                if target() != *self.attempted.borrow() {
+                    self.due.set(Instant::now() + Duration::from_millis(50));
+                    true
+                } else {
+                    false
+                }
             }
             Ok(false) => true,
             Err(error) => {
@@ -488,7 +582,11 @@ impl Watcher {
             restore_views();
             let listener = self.broker.borrow().listener()?;
             *self.broker.borrow_mut() = broker::serve(listener, self.candidate)?;
-            notice("Update failed; previous windows and terminal sessions remain. Browser pages were reloaded.");
+            notice(if transaction.retired {
+                "Update failed; previous windows and terminal sessions remain. Browser pages were reloaded."
+            } else {
+                "Update could not prepare a replacement; current windows and terminal sessions remain."
+            });
             return Ok(true);
         }
         if matches!(transaction.phase, Phase::Peer) {
@@ -496,6 +594,7 @@ impl Watcher {
                 match receiver.try_recv() {
                     Ok(result) => {
                         transaction.channel = Some(channel(result?)?);
+                        transaction.transfer = None;
                         transaction.phase = Phase::Preparing;
                     }
                     Err(mpsc::TryRecvError::Empty) => return Ok(false),
@@ -529,6 +628,81 @@ impl Watcher {
                 return Ok(false);
             }
         }
+        if matches!(transaction.phase, Phase::Preparing)
+            && transaction.ready
+            && self.broker.borrow().idle()
+            && windows().iter().all(|app| {
+                app.links()
+                    .iter()
+                    .all(|link| !link.initial_claim.get() && link.pending_tabs.get() == 0)
+            })
+        {
+            if target() != transaction.target {
+                return Err(io::Error::other("Installation changed during preparation"));
+            }
+            self.broker.borrow().pause();
+            freeze(true);
+            transaction.barriers = windows()
+                .iter()
+                .flat_map(|app| app.update_barriers())
+                .collect();
+            transaction.deadline = Instant::now() + LIMIT;
+            transaction.phase = Phase::Draining;
+        }
+        if matches!(transaction.phase, Phase::Draining)
+            && barriers_complete(&transaction.barriers)
+            && windows()
+                .iter()
+                .all(|app| app.links().iter().all(|link| link.settled()))
+        {
+            for app in windows() {
+                app.pause_update_reads();
+            }
+            // This is the authoritative topology boundary. The warm-up snapshot is disposable;
+            // input is drained and broker/window edits are now gated, so topology is stable.
+            transaction.state = Some(snapshot()?);
+            transaction.lease = browser::lease()?;
+            send(transaction.channel.as_mut().unwrap(), REFRESH, Vec::new())?;
+            transaction.phase = Phase::Refreshing;
+        }
+        if matches!(transaction.phase, Phase::Refreshing) {
+            if let Some(receiver) = &transaction.transfer {
+                match receiver.try_recv() {
+                    Ok(result) => {
+                        result?;
+                        transaction.transfer = None;
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {}
+                    Err(_) => return Err(io::Error::other("Window refresh transfer failed")),
+                }
+            } else if transaction.state.is_some() {
+                if let Ok((mut peer, _)) = transaction.listener.accept() {
+                    if socket::peer_pid(peer.as_raw_fd())?
+                        != transaction.child.as_ref().unwrap().pid()
+                    {
+                        return Err(io::Error::other("Unexpected window refresh peer"));
+                    }
+                    let listener = self.broker.borrow().listener()?;
+                    let lease = transaction
+                        .lease
+                        .as_ref()
+                        .map(File::try_clone)
+                        .transpose()?
+                        .unwrap_or(File::open("/dev/null")?);
+                    let state = transaction.state.take().unwrap();
+                    let (sender, receiver) = mpsc::sync_channel(1);
+                    transaction.transfer = Some(receiver);
+                    std::thread::spawn(move || {
+                        let result = (|| {
+                            peer.set_write_timeout(Some(LIMIT))?;
+                            gui_handoff::send(&mut peer, &listener, &lease, &state)?;
+                            Ok(peer)
+                        })();
+                        let _ = sender.send(result);
+                    });
+                }
+            }
+        }
         let packets = if let Some(channel) = transaction.channel.as_mut() {
             channel.flush()?;
             channel.read()?
@@ -540,12 +714,23 @@ impl Watcher {
                 if packet.kind == ABORT {
                     return Err(io::Error::other("candidate rejected the replacement"));
                 }
-                if packet.kind == READY && matches!(transaction.phase, Phase::Preparing) {
-                    if !self.valid(transaction) {
-                        return Err(io::Error::other("window state changed during preparation"));
+                if packet.kind == COMMITTED && matches!(transaction.phase, Phase::Finalizing) {
+                    if !packet.body.is_empty() {
+                        return Err(io::Error::other("Invalid GUI commit receipt"));
                     }
-                    self.broker.borrow().pause();
-                    freeze(true);
+                    transaction.committed = true;
+                } else if packet.kind == READY && matches!(transaction.phase, Phase::Preparing) {
+                    if packet.body != ATOMIC_STATE {
+                        return Err(io::Error::other(
+                            "Candidate does not support atomic window refresh",
+                        ));
+                    }
+                    transaction.ready = true;
+                } else if packet.kind == READY && matches!(transaction.phase, Phase::Refreshing) {
+                    if packet.body != FINAL_STATE || transaction.state.is_some() {
+                        return Err(io::Error::other("Invalid refreshed window acknowledgement"));
+                    }
+                    transaction.transfer.take();
                     discard_views();
                     let result = transaction.result.clone();
                     if transaction.lease.is_some() {
@@ -555,23 +740,31 @@ impl Watcher {
                     }
                     transaction.phase = Phase::Exporting;
                 } else if packet.kind == LIVE && matches!(transaction.phase, Phase::Activating) {
-                    if target() != transaction.target || stable_state()? != transaction.encoded {
+                    if target() != transaction.target {
                         return Err(io::Error::other("installation changed during replacement"));
                     }
                     let channel = transaction.channel.as_mut().unwrap();
-                    send(channel, FINISH, Vec::new())?;
+                    let views = snapshot()?
+                        .iter()
+                        .map(Window::presentation)
+                        .collect::<Vec<_>>();
+                    send(channel, FINISH, gui_handoff::encode_presentations(&views)?)?;
                     channel.flush()?;
                     transaction.phase = Phase::Finalizing;
                 }
             }
         }
         if matches!(transaction.phase, Phase::Finalizing)
+            && transaction.committed
             && transaction
                 .channel
                 .as_ref()
                 .is_some_and(|channel| channel.output.is_empty())
         {
+            trace("GUI update committed");
             for app in windows() {
+                app.handoff_frozen.set(false);
+                app.replacing.set(false);
                 app.window.close();
             }
             std::mem::forget(transaction.child.take().unwrap());
@@ -618,6 +811,7 @@ pub(super) fn watch(broker: Rc<broker::Server>, candidate: bool) -> io::Result<R
         timer: RefCell::new(None),
         due: Cell::new(Instant::now()),
         attempted: RefCell::new(Vec::new()),
+        deferred: Cell::new(false),
         transaction: RefCell::new(None),
     });
     let directories: std::collections::BTreeSet<_> = RUNTIME.with(|slot| {
@@ -644,213 +838,8 @@ pub(super) fn watch(broker: Rc<broker::Server>, candidate: bool) -> io::Result<R
     Ok(owner)
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "candidate handshake and GTK event loop form one ordered transaction"
-)]
-pub(super) fn receive(token: &OsStr, candidate: bool) -> io::Result<()> {
-    let token = token
-        .to_str()
-        .ok_or_else(|| io::Error::other("Invalid update token"))?;
-    let mut peer = UnixStream::connect_addr(&address(token)?)?;
-    peer.set_read_timeout(Some(LIMIT))?;
-    let (listener, lease, states) = gui_handoff::receive(&mut peer)?;
-    crate::browser::configure_profile(candidate)?;
-    gtk::init().map_err(io::Error::other)?;
-    let _state = super::window_state::start();
-    let mut focus = None;
-    let mut selections = Vec::new();
-    for state in states {
-        let Some(mut config) = Config::parse(&state.request, candidate)? else {
-            return Err(io::Error::other("Invalid update launch"));
-        };
-        config.attach = true;
-        config.command.clear();
-        config.browser_url = None;
-        config.zoom = state.zoom;
-        let app = App::open_mode(config, true)?;
-        for link in state.links {
-            let Some(mut config) = Config::parse(&link.request, candidate)? else {
-                return Err(io::Error::other("Invalid remote update launch"));
-            };
-            config.attach = true;
-            config.command.clear();
-            config.browser_url = None;
-            app.restore_remote(link.index, config)?;
-        }
-        selections.push((app.clone(), state.selected));
-        app.geometry_pending.set(false);
-        app.window
-            .set_default_size(state.geometry[2], state.geometry[3]);
-        app.window.resize(state.geometry[2], state.geometry[3]);
-        if crate::graphics_ffi::x11(&app.window) {
-            app.window.move_(state.geometry[0], state.geometry[1]);
-        }
-        if state.flags & 1 != 0 {
-            app.window.maximize();
-        }
-        if state.flags & 2 != 0 {
-            app.window.fullscreen();
-        }
-        if state.flags & 4 != 0 {
-            focus = Some(app.state_id);
-        }
-    }
-    let connection = Rc::new(RefCell::new(channel(peer)?));
-    let phase = Rc::new(Cell::new(0u32));
-    let result = Rc::new(RefCell::new(None::<io::Result<Vec<u8>>>));
-    let lease = Rc::new(RefCell::new(Some(lease)));
-    let finished = Rc::new(Cell::new(false));
-    let broker_slot = Rc::new(RefCell::new(None));
-    let monitor_slot = Rc::new(RefCell::new(None));
-    let listener = Rc::new(RefCell::new(Some(listener)));
-    let deadline = Instant::now() + LIMIT;
-    let tick = glib::timeout_add_local(Duration::from_millis(25), {
-        let connection = connection.clone();
-        let phase = phase.clone();
-        let result = result.clone();
-        let lease = lease.clone();
-        let finished = finished.clone();
-        let broker_slot = broker_slot.clone();
-        let monitor_slot = monitor_slot.clone();
-        move || {
-            let action = (|| -> io::Result<bool> {
-                connection.borrow_mut().flush()?;
-                let packets = connection.borrow_mut().read()?;
-                for packet in packets {
-                    match packet.kind {
-                        ACTIVATE if phase.get() == 1 => {
-                            if !packet.body.is_empty() {
-                                browser::adopt(lease.borrow_mut().take().unwrap())?;
-                                let result = result.clone();
-                                browser::cookies(Some(&packet.body), move |value| {
-                                    *result.borrow_mut() = Some(value)
-                                })?;
-                            } else {
-                                *result.borrow_mut() = Some(Ok(Vec::new()));
-                            }
-                            phase.set(2);
-                        }
-                        FINISH if phase.get() == 3 => {
-                            for app in windows() {
-                                app.defer_navigation.set(false);
-                                let pages = app.pages.borrow().clone();
-                                for page in pages {
-                                    if let Some(view) = page.view.borrow().as_ref() {
-                                        view.navigate(&page.url);
-                                    }
-                                }
-                                app.window.set_sensitive(true);
-                                if Some(app.state_id) == focus {
-                                    app.activate(app.active.get());
-                                    app.window.present();
-                                }
-                                if !crate::graphics_ffi::x11(&app.window) {
-                                    app.message(Some("Updated; window placement is controlled by the compositor."));
-                                }
-                            }
-                            let broker =
-                                broker::serve(listener.borrow_mut().take().unwrap(), candidate)?;
-                            *monitor_slot.borrow_mut() = Some(watch(broker.clone(), candidate)?);
-                            *broker_slot.borrow_mut() = Some(broker);
-                            finished.set(true);
-                            return Ok(true);
-                        }
-                        ABORT => return Err(io::Error::other("replacement cancelled")),
-                        _ => return Err(io::Error::other("Invalid replacement handshake")),
-                    }
-                }
-                if phase.get() == 0
-                    && windows()
-                        .iter()
-                        .all(|app| app.links().iter().all(|link| link.settled()))
-                {
-                    for (app, selected) in &selections {
-                        if *selected != 0
-                            && !app.pages.borrow().iter().any(|page| page.id == *selected)
-                        {
-                            return Err(io::Error::other("Selected tab disappeared during update"));
-                        }
-                        if *selected != 0 {
-                            app.select_id(*selected);
-                        }
-                    }
-                    if windows()
-                        .iter()
-                        .any(|app| app.pages.borrow().iter().any(|page| page.browser))
-                    {
-                        browser::preflight()?;
-                    }
-                    send(&mut connection.borrow_mut(), READY, Vec::new())?;
-                    phase.set(1);
-                }
-                if phase.get() == 2 {
-                    let value = result.borrow_mut().take();
-                    if let Some(value) = value {
-                        value?;
-                        for app in windows() {
-                            app.window.set_sensitive(false);
-                            app.replacing.set(false);
-                            crate::graphics_ffi::show_window(&app.window);
-                            if app.active.get() != 0 {
-                                app.activate(app.active.get());
-                            }
-                        }
-                        phase.set(4);
-                    }
-                }
-                if phase.get() == 4
-                    && windows().iter().all(|app| {
-                        app.active.get() == 0
-                            || app.replacement_frame.get()
-                            || app
-                                .pages
-                                .borrow()
-                                .iter()
-                                .any(|page| page.id == app.active.get() && page.browser)
-                    })
-                {
-                    if windows().iter().any(|app| {
-                        app.pages
-                            .borrow()
-                            .iter()
-                            .any(|page| page.id == app.active.get() && page.browser)
-                            && !windows().iter().any(|owner| {
-                                owner.config.master == app.config.master
-                                    && owner.browser(app.active.get()).is_some()
-                            })
-                    }) {
-                        return Err(io::Error::other("Candidate browser failed to initialize"));
-                    }
-                    send(&mut connection.borrow_mut(), LIVE, Vec::new())?;
-                    phase.set(3);
-                }
-                if Instant::now() > deadline {
-                    return Err(io::Error::other("replacement handshake timed out"));
-                }
-                Ok(false)
-            })();
-            match action {
-                Ok(false) => glib::ControlFlow::Continue,
-                Ok(true) => glib::ControlFlow::Break,
-                Err(_) => {
-                    let _ = send(&mut connection.borrow_mut(), ABORT, Vec::new());
-                    for app in windows() {
-                        // Hidden staged windows have never mapped: close() would not destroy them.
-                        unsafe {
-                            app.window.destroy();
-                        }
-                    }
-                    glib::MainContext::default().wakeup();
-                    glib::ControlFlow::Break
-                }
-            }
-        }
-    });
-    gtk::main();
-    if !finished.get() {
-        let _ = tick;
-        return Err(io::Error::other("Window replacement did not commit"));
-    }
-    Ok(())
-}
+#[path = "app_upgrade_receive.rs"]
+mod receiver;
+pub(super) use receiver::receive;
+#[path = "app_upgrade_windows.rs"]
+mod candidate_windows;

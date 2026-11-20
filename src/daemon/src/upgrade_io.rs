@@ -57,14 +57,19 @@ pub(crate) struct Watch {
     attempted: Option<Identity>,
     refresh_needed: bool,
 }
+/// The running daemon's own file. A replaced executable reads back with a " (deleted)" suffix; the
+/// atomic upgrade put the successor at the same path, so the suffix is dropped.
+pub fn executable_path() -> io::Result<PathBuf> {
+    let mut bytes = fs::read_link("/proc/self/exe")?.into_os_string().into_vec();
+    if bytes.ends_with(b" (deleted)") {
+        bytes.truncate(bytes.len() - b" (deleted)".len());
+    }
+    Ok(PathBuf::from(OsString::from_vec(bytes)))
+}
 impl Watch {
     pub fn new() -> io::Result<Self> {
         let loaded = Identity::of(&fs::metadata("/proc/self/exe")?);
-        let mut bytes = fs::read_link("/proc/self/exe")?.into_os_string().into_vec();
-        if bytes.ends_with(b" (deleted)") {
-            bytes.truncate(bytes.len() - b" (deleted)".len());
-        }
-        let path = PathBuf::from(OsString::from_vec(bytes));
+        let path = executable_path()?;
         let directory = path
             .parent()
             .ok_or_else(|| io::Error::other("executable has no directory"))?;

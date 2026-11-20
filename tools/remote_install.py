@@ -9,10 +9,14 @@ import stat
 import subprocess
 import sys
 import tempfile
+from ctypes.util import find_library
 
 PREFIX = Path('/usr/local')
 LIMIT = 64 * 1024 * 1024
 HEADER_LIMIT = 16384
+# Members of the root group can already administer the host, so its group write does not widen trust.
+# Distributions ship such directories: Ubuntu's /usr/local/share/man/man1 is root:root 0775.
+TRUSTED_GROUP = 0
 
 
 def message(value):
@@ -37,6 +41,38 @@ def exact(stream, size):
             raise ValueError('Transfer interrupted; no complete installation was published.')
         remaining -= len(data)
         yield data
+
+
+def graphics_available():
+    """True when the target carries the runtime libraries the graphical `worminal` command needs."""
+    return all(find_library(name) for name in ('gtk-3', 'webkit2gtk-4.1', 'pangocairo-1.0'))
+
+
+def widen(layout, value):
+    """Add the optional desktop files when the controller sent them; the daemon and manual are always required."""
+    desktop = layout.get('desktop', [])
+    records = value.get('files')
+    if desktop and isinstance(records, list) and len(records) == len(layout['files']) + len(desktop):
+        return {**layout, 'files': layout['files'] + desktop}
+    return layout
+
+
+def desktop_runs(paths, layout, directory):
+    """The staged launcher runs here, with its modules where it looks for them (`../lib/worminal`).
+
+    Even `--version` enters the native layer, which loads the frontend module, so the launcher alone cannot pass.
+    """
+    root = Path(directory) / 'probe'
+    for item, path in zip(layout['desktop'], paths):
+        if item['role'] in ('launcher', 'frontend', 'browser'):
+            target = root / item['path']
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, target)
+    try:
+        return subprocess.run([str(root / 'bin/worminal'), '--version'], capture_output=True,
+                              timeout=10).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 
 def destinations(layout):
@@ -94,6 +130,11 @@ def payload(layout, stream, value=None):
     return records
 
 
+def writable_by_others(info):
+    return (info.st_uid != os.geteuid() or info.st_mode & 0o002
+            or (info.st_mode & 0o020 and info.st_gid != TRUSTED_GROUP))
+
+
 def private_parent(path):
     # PREFIX is fixed, not supplied by the remote request. Walk its descendants with
     # directory descriptors so privileged publication cannot follow user-created symlinks.
@@ -104,7 +145,7 @@ def private_parent(path):
     fd = os.open(PREFIX, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         info = os.fstat(fd)
-        if info.st_uid != os.geteuid() or info.st_mode & 0o022:
+        if writable_by_others(info):
             raise ValueError('Installation prefix is writable by another user; refusing publication.')
         for component in path.parent.relative_to(PREFIX).parts:
             try:
@@ -115,7 +156,7 @@ def private_parent(path):
             os.close(fd)
             fd = next_fd
             info = os.fstat(fd)
-            if info.st_uid != os.geteuid() or info.st_mode & 0o022:
+            if writable_by_others(info):
                 raise ValueError('Installation directory is writable by another user; refusing publication.')
         return fd
     except BaseException:
@@ -160,8 +201,10 @@ def publish(layout, stream, replace=False):
             if replace:
                 # rename swaps the inode atomically, so the running daemon keeps its mapped code and its
                 # executable watch hands live shells to the new file. The daemon goes last: an interruption
-                # can leave a newer manual, never a half-written daemon.
-                for (fd, name), (_, path, _) in reversed(list(zip(staged, parents))):
+                # can leave a newer manual, never a half-written daemon. Layout order already puts modules
+                # before the launcher that loads them, so a promoted desktop never exposes a launcher without them.
+                swaps = list(zip(staged, parents))
+                for (fd, name), (_, path, _) in sorted(swaps, key=lambda swap: swap[1][0]['role'] == 'daemon'):
                     os.rename(name, path.name, src_dir_fd=fd, dst_dir_fd=fd)
                     os.fsync(fd)
             else:
@@ -214,7 +257,9 @@ def send(layout):
 
 
 def bootstrap(layout, source, replace=False):
-    ready = {'ready': True, 'system': platform.system(), 'machine': platform.machine()}
+    ready = {'ready': True, 'system': platform.system(), 'machine': platform.machine(),
+             # The controller sends the graphical command only to a target that can run it and lacks it.
+             'graphics': graphics_available(), 'desktop': os.path.lexists(PREFIX / 'bin/worminal')}
     first = None
     if replace:
         ready['version'] = installed_version(layout)
@@ -228,6 +273,8 @@ def bootstrap(layout, source, replace=False):
             return send(layout)
         if legacy_workspace():
             raise ValueError('A v1 Worminal workspace is active; it is never upgraded implicitly. Nothing was replaced.')
+    first = first or header(sys.stdin.buffer)
+    base, layout = layout, widen(layout, first)
     records = payload(layout, sys.stdin.buffer, first)
     if not replace:
         refuse_existing(layout)
@@ -246,7 +293,7 @@ def bootstrap(layout, source, replace=False):
                 for data in exact(sys.stdin.buffer, record['size']):
                     digest.update(data)
                     output.write(data)
-            path.chmod(0o700 if record['role'] == 'daemon' else 0o600)
+            path.chmod(0o700 if record['role'] in ('daemon', 'launcher') else 0o600)
             record['sha256'] = digest.hexdigest()
             paths.append(path)
         candidate = paths[[item['role'] for item in layout['files']].index('daemon')]
@@ -257,28 +304,40 @@ def bootstrap(layout, source, replace=False):
                              'Nothing was installed.') from error
         if result.returncode or b'Worp' not in result.stdout:
             raise ValueError('The staged daemon cannot run here (runtime/libc incompatibility). Nothing was installed.')
+        if layout is not base and not desktop_runs(paths[len(base['files']):], layout, directory):
+            # A half-present graphics stack must not cost the node its daemon: install the required files only.
+            layout, records, paths = base, records[:len(base['files'])], paths[:len(base['files'])]
         if not replace:
             refuse_existing(layout)
         # The privileged publisher consumes bytes from stdin, never user-controlled source paths.
         process = subprocess.Popen(root_command(layout, source, replace), stdin=subprocess.PIPE,
                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         try:
-            process.stdin.write((json.dumps({'files': records})+'\n').encode())
-            for path in paths:
-                with path.open('rb') as input_file:
-                    shutil.copyfileobj(input_file, process.stdin, 65536)
-            process.stdin.close()
+            try:
+                process.stdin.write((json.dumps({'files': records})+'\n').encode())
+                for path in paths:
+                    with path.open('rb') as input_file:
+                        shutil.copyfileobj(input_file, process.stdin, 65536)
+                process.stdin.close()
+            except BrokenPipeError:
+                # The publisher refused before consuming the payload; its reply below says why.
+                pass
             output = process.stdout.read(HEADER_LIMIT + 1)
-            if process.wait(timeout=30):
-                raise ValueError('Privileged publication failed; existing destinations were not replaced.')
-            result = json.loads(output)
-            if not result.get('ok'):
-                raise ValueError(result.get('error', 'Privileged publication failed.'))
+            failed = process.wait(timeout=30)
+            try:
+                result = json.loads(output)
+            except ValueError:
+                result = {}
+            if failed or not result.get('ok'):
+                # The publisher's own refusal is the actionable reason; keep it.
+                raise ValueError(result.get('error') or
+                                 'Privileged publication failed; existing destinations were not replaced.')
         finally:
             if process.poll() is None:
                 process.kill()
                 process.wait()
     return {'ok': True, 'installed': True, 'upgraded': replace, 'started': False, 'prefix': str(PREFIX),
+            'desktop': layout is not base,
             'files': [{'role': row['role'], 'sha256': row['sha256']} for row in records]}
 
 

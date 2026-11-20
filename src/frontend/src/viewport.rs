@@ -1,8 +1,8 @@
 //! One imported viewport. Frame deltas remain bounded and private until FRAME_FINISH.
 use std::{io, ops::RangeInclusive, rc::Rc};
 use worminal_engine::{Cell, Frame, Selection, SelectionRange};
-use worminal_engine_sys::{
-    ATTR_WIDE, ATTR_WRAP, WORMINAL_DEFAULT_BACKGROUND, WORMINAL_DEFAULT_FOREGROUND,
+use worminal_protocol::cell::{
+    ATTR_BLINK, ATTR_WIDE, ATTR_WRAP, COLOR_DEFAULT_BACKGROUND, COLOR_DEFAULT_FOREGROUND,
 };
 use worminal_protocol::worp::events::{Event, EventKind};
 use worminal_protocol::worp::v2_events;
@@ -21,8 +21,8 @@ fn blank() -> Cell {
     Cell {
         rune: u32::from(' '),
         attributes: 0,
-        foreground: WORMINAL_DEFAULT_FOREGROUND,
-        background: WORMINAL_DEFAULT_BACKGROUND,
+        foreground: COLOR_DEFAULT_FOREGROUND,
+        background: COLOR_DEFAULT_BACKGROUND,
     }
 }
 fn dimensions(columns: u32, rows: u32) -> io::Result<()> {
@@ -112,6 +112,8 @@ impl Pending {
 pub struct Viewport {
     frame: Frame,
     cells: Vec<Cell>,
+    /// Derived from committed cells so idle blink ticks never scan the screen.
+    blinking: Vec<bool>,
     /// Link runs per row, allocated when the first non-empty run list arrives. Rc keeps row copies cheap.
     links: Vec<Rc<[LinkRun]>>,
     pending: Option<Pending>,
@@ -130,6 +132,7 @@ impl Viewport {
                 ..Frame::default()
             },
             cells: Vec::new(),
+            blinking: Vec::new(),
             links: Vec::new(),
             pending: None,
             live: false,
@@ -153,19 +156,45 @@ impl Viewport {
         let first = row * self.frame.columns as usize;
         Some(&self.cells[first..first + self.frame.columns as usize])
     }
+    pub fn row_blinks(&self, row: usize) -> bool {
+        self.blinking.get(row).copied().unwrap_or(false)
+    }
     pub fn selected(&self, column: usize, row: usize) -> bool {
         self.selected
             .get(row)
             .is_some_and(|range| column >= range.first as usize && column < range.end as usize)
     }
-    /// Explicit OSC 8 target under a cell and the row-major cells its run covers.
+    /// Explicit OSC 8 target under a cell and its contiguous visible runs across rows.
     pub fn link_at(&self, column: usize, row: usize) -> Option<(&str, RangeInclusive<usize>)> {
         let columns = self.frame.columns as usize;
         let run = self.links.get(row)?.iter().find(|run| {
             (run.column as usize..(run.column + run.count) as usize).contains(&column)
         })?;
-        let first = row * columns + run.column as usize;
-        Some((&run.uri, first..=first + run.count as usize - 1))
+        let mut first = row * columns + run.column as usize;
+        let mut end = first + run.count as usize;
+        // ROW_LINKS splits a hyperlink into physical-row runs. Keep one hover binding for
+        // adjoining segments with the same authoritative URI; never reconstruct it from labels.
+        while first > 0 && first.is_multiple_of(columns) {
+            let previous = self
+                .links
+                .get(first / columns - 1)
+                .and_then(|runs| runs.last());
+            let Some(previous) = previous.filter(|previous| {
+                previous.column as usize + previous.count as usize == columns
+                    && previous.uri == run.uri
+            }) else {
+                break;
+            };
+            first -= previous.count as usize;
+        }
+        while end.is_multiple_of(columns) {
+            let next = self.links.get(end / columns).and_then(|runs| runs.first());
+            let Some(next) = next.filter(|next| next.column == 0 && next.uri == run.uri) else {
+                break;
+            };
+            end += next.count as usize;
+        }
+        Some((&run.uri, first..=end - 1))
     }
     pub fn release(&mut self) {
         self.live = false;
@@ -363,6 +392,16 @@ impl Viewport {
                         damage[row] = true;
                     }
                 }
+            }
+        }
+        // Resize can retain/crop cells without row operations; moves can overlap and be followed
+        // by spans. Derive from the final cells rather than individual wire operations.
+        self.blinking.resize(rows, false);
+        for (row, dirty) in damage.iter().enumerate() {
+            if full || *dirty {
+                self.blinking[row] = self.cells[row * columns..(row + 1) * columns]
+                    .iter()
+                    .any(|cell| cell.attributes & ATTR_BLINK != 0);
             }
         }
         self.frame = frame;

@@ -3,6 +3,8 @@
 import json
 import tomllib
 import os
+import platform
+import struct
 from pathlib import Path
 import shlex
 import shutil
@@ -18,8 +20,6 @@ from tools.test_runner import available_cpus
 
 ROOT = Path(__file__).resolve().parent.parent
 HEADLESS_INSTALL = json.loads((ROOT / "assets/headless-install.json").read_text())
-FONT_DIRECTORY = Path("assets/fonts/atkinson-hyperlegible-mono")
-FONT_FILES = ("AtkinsonHyperlegibleMono[wght].ttf", "AtkinsonHyperlegibleMono-Italic[wght].ttf", "OFL.txt")
 VERSION = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"]["version"]
 RUST_BROWSER_MODULE = next(line.split('"')[1]
                           for line in (ROOT / "src/gtk/rust_browser_module.h").read_text().splitlines()
@@ -33,12 +33,33 @@ RUST_FRONTEND_SYMBOL = next(line.split('"')[1]
 ENGINE_DEFAULTS = "terminal/engine_defaults.c"
 ENGINE = ("terminal/engine.c", ENGINE_DEFAULTS, "terminal/engine_parser.c",
           "terminal/engine_events.c", "terminal/engine_sync.c", "terminal/engine_snapshot.c",
-          "terminal/engine_view_selection.c")
+          "terminal/engine_view_selection.c", "terminal/engine_output.c")
 CPPFLAGS = ("-I.", "-Isrc", "-Isrc/terminal", "-Isrc/workspace",
             f'-DVERSION="{VERSION}"', "-D_XOPEN_SOURCE=600")
 PACKAGES = ()
-PROBES = {"key_injector": ("x11", "xtst"), "placement_wm": ("x11",),
-          "overlap_probe": ("x11",), "border_probe": ("x11",), "icon_probe": ("x11",), "latency_echo": ()}
+PROBES = {"latency_echo": ()}
+# Version sync copies the installed daemon between devices (docs/remote-install.md), so it must run on any
+# Linux with the same CPU. A dynamically linked daemon built against a newer glibc fails to load on an older
+# peer (Ubuntu glibc 2.44 -> Debian 2.36 did), so the daemon links musl statically. GUI binaries stay dynamic:
+# they need the host's GTK/WebKit and are never copied between distributions by sync.
+DAEMON_TARGET = f"{platform.machine()}-unknown-linux-musl"
+MUSL_CC = "musl-gcc"
+
+
+def engine_archive(triple=None):
+    """The C engine archive for a Rust target; src/engine-sys/build.rs selects the same path."""
+    return f"build/{triple}/libworminal_engine.a" if triple else "build/libworminal_engine.a"
+
+
+def require_static(path):
+    """Refuse a daemon that needs a program interpreter (ld.so), i.e. one bound to this host's libc."""
+    data = Path(path).read_bytes()
+    if data[:4] != b"\x7fELF" or data[4] != 2:
+        raise RuntimeError(f"{path}: expected a 64-bit ELF executable")
+    phoff, = struct.unpack_from("<Q", data, 0x20)
+    size, count = struct.unpack_from("<HH", data, 0x36)
+    if any(struct.unpack_from("<I", data, phoff + index * size)[0] == 3 for index in range(count)):  # PT_INTERP
+        raise RuntimeError(f"{path} is dynamically linked; the daemon must be static to sync across devices")
 
 
 def words(name, default=""):
@@ -151,17 +172,17 @@ class Builder:
         step(output, [*self.cc, *objects, *(self.libs if libs is None else libs)],
              [*objects, *link_dependencies])
 
-    def rust_artifact(self, package, binary=None, *, library=False):
+    def rust_artifact(self, package, binary=None, *, library=False, triple=None):
         if package in ("worminal-daemon", "worminal-frontend"):
-            self.target("build/libworminal_engine.a")
+            self.target(engine_archive(triple))
         invoke(["cargo", "build", "--locked", "--release", "--quiet", "-p", package,
+                *(["--target", triple] if triple else []),
                 *(["--lib"] if library else ["--bin", binary] if binary else [])])
         artifact = f"lib{package.replace('-', '_')}.so" if library else binary or package
-        return ROOT / "build/cargo/release" / artifact
+        return ROOT / "build/cargo" / (triple or "") / "release" / artifact
 
-    def rust_program(self, output, package, binary=None):
-        source = self.rust_artifact(package, binary) if binary else self.rust_artifact(package)
-        self.publish_rust(output, source)
+    def rust_program(self, output, package, binary=None, *, triple=None):
+        self.publish_rust(output, self.rust_artifact(package, binary, triple=triple))
 
     def rust_library(self, output, package):
         self.publish_rust(output, self.rust_artifact(package, library=True))
@@ -182,7 +203,7 @@ class Builder:
 
     def independent(self, target):
         """C-only targets whose outputs and inputs no other target shares, so they can build alongside any other."""
-        return (target in ("build/engine_test", "build/browser_cpu.so", "build/gui-peer.so", "build/scrollback_test")
+        return (target in ("build/engine_test", "build/browser_cpu.so", "build/gui-peer.so")
                 or target.startswith("build/") and target.removeprefix("build/") in PROBES)
 
     def target(self, target):
@@ -194,9 +215,15 @@ class Builder:
             self.rust_library(target, "worminal-frontend")
         elif target == "build/lib/worminal/" + RUST_BROWSER_MODULE:
             self.rust_library(target, "worminal-browser")
-        elif target == "build/libworminal_engine.a":
-            objects = [f"build/obj/engine/{Path(source).with_suffix('.o')}" for source in ENGINE]
-            concurrently(partial(step, obj, [*self.cc, *CPPFLAGS, *words("CPPFLAGS"), *words("CFLAGS", "-O3"),
+        elif target in (engine_archive(), engine_archive(DAEMON_TARGET)):
+            musl = target != engine_archive()
+            if musl and not shutil.which(MUSL_CC):
+                raise RuntimeError(f"{MUSL_CC} not found: install musl-tools (Debian/Ubuntu) and run "
+                                   f"`rustup target add {DAEMON_TARGET}` to build the static daemon")
+            cc = [MUSL_CC] if musl else self.cc
+            objects = [f"build/obj/engine{'-musl' if musl else ''}/{Path(source).with_suffix('.o')}"
+                       for source in ENGINE]
+            concurrently(partial(step, obj, [*cc, *CPPFLAGS, *words("CPPFLAGS"), *words("CFLAGS", "-O3"),
                                              "-ffunction-sections", "-fdata-sections",
                                              "-c", f"src/{source}"], [f"src/{source}"], depfile=True)
                          for obj, source in zip(objects, ENGINE))
@@ -210,38 +237,20 @@ class Builder:
                          libs=["-shared", "-lrt"])
         elif target == "build/gui-peer.so":
             self.program(target, ["tests/gui_peer.c"], variant="gui-peer", flags=["-fPIC"], libs=["-shared", "-ldl"])
-        elif target in ("worminal", "worminal-preview"):
+        elif target == "worminal":
             self.target("build/lib/worminal/" + RUST_BROWSER_MODULE)
             self.target("build/lib/worminal/" + RUST_FRONTEND_MODULE)
             self.rust_program(target, "worminal-launcher")
-        elif target in ("worminald", "worminald-preview"):
-            self.rust_program(target, "worminal-daemon")
+        elif target == "worminald":
+            self.rust_program(target, "worminal-daemon", triple=DAEMON_TARGET)
+            require_static(runtime_binary(target, prefix=ROOT / "build"))
         elif target.removeprefix("build/") in PROBES and target.startswith("build/"):
             name = target.removeprefix("build/")
             packages = PROBES[name]
             step(target, [*self.cc, "-O2", *pkg_flags("--cflags", packages), f"tests/{name}.c",
                           *pkg_flags("--libs", packages)], [f"tests/{name}.c"])
-        elif target == "build/scrollback_test":
-            support = ("terminal/defaults.c", *__getattr__("SESSION_SUPPORT"))
-            self.program(target, ["tests/scrollback.c", *(f"src/{source}" for source in support)],
-                         variant="scrollback_test", flags=["-O1", "-g", "-fsanitize=address,undefined",
-                         "-ffunction-sections", "-fdata-sections"],
-                         libs=["-fsanitize=address,undefined", "-Wl,--gc-sections", "-lm"])
         else:
-            from tools.reference import target as historical_target
-            historical_target(target)
-
-
-def __getattr__(name):
-    # Test fixtures inherit their historical build decisions from Git; shipping builds never enter here.
-    if name in ("SESSION_SUPPORT", "PREVIEW_PACKAGES", "TERMINAL_PACKAGES", "BROWSER_MODULE",
-                "SERVER", "CLIENT", "COMMON", "PREVIEW", "SOURCES"):
-        from tools.reference import module
-        historical = module()
-        if name == "SESSION_SUPPORT":
-            return (*[source for source in historical.SESSION_SUPPORT if source not in historical.ENGINE], *ENGINE)
-        return getattr(historical, name)
-    raise AttributeError(name)
+            raise ValueError(f"Unknown build target: {target}")
 
 
 def run_all(builder, targets):
@@ -253,7 +262,7 @@ def build_targets(*targets):
     builder = Builder()
     core = ("worminald",) if headless() else ("worminal", "worminald")
     targets = list(dict.fromkeys((*core, *targets)))
-    # Cargo, shared C outputs and historical (Git-built) targets stay in order on one lane; it runs beside
+    # Cargo and shared C outputs stay in order on one lane; it runs beside
     # the independent C targets. Rust build steps need the engine archive, so it exists before either lane starts.
     builder.target("build/libworminal_engine.a")
     lane = [target for target in targets if not builder.independent(target)]
@@ -269,10 +278,6 @@ def analyze():
 
 
 def clean():
-    from tools import reference
-    if ROOT == reference.ROOT:
-        reference.cleanup()
-    reference.remove_fixture_links(ROOT)
     # Preserve diagnostics and user-owned virtualenvs; compiled output and caches are disposable.
     directory = ROOT / 'build'
     if directory.exists():
@@ -310,8 +315,6 @@ def installation_files(prefix=None, *, headless_only=None):
     files += [("docs/man/worminal.1", manprefix / "man1/worminal.1", 0o644),
               ("assets/worminal.desktop", prefix / "share/applications/worminal.desktop", 0o644),
               ("assets/worminal.svg", prefix / "share/icons/hicolor/scalable/apps/worminal.svg", 0o644)]
-    files += [(str(FONT_DIRECTORY / name), prefix / "share/fonts/worminal" / name, 0o644)
-              for name in FONT_FILES]
     return [(ROOT / source, staging / str(destination).lstrip("/"), mode) for source, destination, mode in files]
 
 

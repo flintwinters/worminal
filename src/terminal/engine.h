@@ -56,6 +56,7 @@ enum win_mode {
 	MODE_BRCKTPASTE  = 1 << 16,
 	MODE_NUMLOCK     = 1 << 17,
 	MODE_ALTSCROLL   = 1 << 18,
+	MODE_BUSY        = 1 << 19, /* OSC 9;4 reports an active task: normal progress or indeterminate */
 	MODE_MOUSE       = MODE_MOUSEBTN|MODE_MOUSEMOTION|MODE_MOUSEX10\
 	                  |MODE_MOUSEMANY,
 };
@@ -110,7 +111,8 @@ enum worminal_event_type {
 	WORMINAL_PRINT,
 	WORMINAL_DIAGNOSTIC,
 	WORMINAL_WRITE,
-	WORMINAL_NOTIFICATION
+	WORMINAL_NOTIFICATION,
+	WORMINAL_SHELL
 };
 enum worminal_control { WORMINAL_TOGGLE_PRINTER = 0, WORMINAL_PRINT_SCREEN = 1 };
 
@@ -136,6 +138,16 @@ int worminal_engine_allow_alternate(WorminalEngine *, int32_t);
 int worminal_engine_control(WorminalEngine *, uint32_t);
 int worminal_engine_selection(WorminalEngine *, uint8_t *, size_t, size_t *);
 /* Snapshot retained history and the active screen, preserving selection and scroll position. */
+/* Last N physical rows of retained history + active screen, without changing selection/viewport.
+ * total counts available physical rows; alternate screens exclude primary history. */
+int worminal_engine_tail(WorminalEngine *, int32_t, uint8_t *, size_t, size_t *, int32_t *);
+/* Ephemeral physical-row anchors; reset/reflow/screen swaps invalidate the epoch. */
+typedef struct { uint64_t epoch, row; int32_t column; } WorminalOutputPosition;
+int worminal_engine_output_position(WorminalEngine *, WorminalOutputPosition *);
+/* Bounded current cell text between anchors, never a raw PTY transcript. next resumes pagination.
+ * flags: bit 0 gap (eviction/invalidation), bit 1 more retained rows. No selection/view mutation. */
+int worminal_engine_output(WorminalEngine *, WorminalOutputPosition, WorminalOutputPosition,
+                           uint8_t *, size_t, size_t *, WorminalOutputPosition *, uint32_t *);
 int worminal_engine_all_text(WorminalEngine *, uint8_t *, size_t, size_t *);
 int worminal_engine_frame(WorminalEngine *, int64_t, WorminalFrame *);
 int worminal_engine_row(WorminalEngine *, int32_t, WorminalCell *, size_t, size_t *, int32_t *);

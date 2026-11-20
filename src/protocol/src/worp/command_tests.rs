@@ -3,7 +3,7 @@ use crate::*;
 use std::io::{Cursor, Write};
 
 fn variants() -> Vec<CommandKind> {
-    vec![
+    let mut kinds = vec![
         CommandKind::Open {
             launch: Launch::restore(vec![b'/', 0xff]),
             mode: OpenMode::Subscribe,
@@ -80,6 +80,57 @@ fn variants() -> Vec<CommandKind> {
             token: b"x".to_vec(),
         },
         CommandKind::Call(Request::Read { tab: 7 }),
+    ];
+    kinds.extend(input_variants());
+    kinds
+}
+
+fn input_variants() -> Vec<CommandKind> {
+    vec![
+        CommandKind::Key {
+            keysym: 0x63,
+            modifiers: input::MOD_CONTROL,
+            character: Some('c'),
+            numlock: true,
+        },
+        CommandKind::Key {
+            keysym: 0xff52,
+            modifiers: 0,
+            character: None,
+            numlock: false,
+        },
+        CommandKind::Mouse {
+            button: input::MOUSE_NONE,
+            column: 3,
+            row: 4,
+            modifiers: input::MOD_SHIFT,
+            action: MouseAction::Motion,
+        },
+        CommandKind::Mouse {
+            button: 0,
+            column: 0,
+            row: 0,
+            modifiers: 0,
+            action: MouseAction::Release,
+        },
+        CommandKind::Paste {
+            bytes: b"a\r\nb".to_vec(),
+            begin: true,
+            end: false,
+        },
+        CommandKind::Paste {
+            bytes: Vec::new(),
+            begin: false,
+            end: true,
+        },
+        CommandKind::Wheel {
+            up: true,
+            notches: 2,
+            lines: 3,
+            column: 5,
+            row: 6,
+            modifiers: input::MOD_ALT,
+        },
     ]
 }
 
@@ -178,6 +229,26 @@ fn v2_bytes_are_unchanged_and_malformed_commands_are_rejected() {
         ),
         (WIRE_FOCUS_STATE, 2u32.to_be_bytes().to_vec()),
         (WIRE_CONTROL, 3u32.to_be_bytes().to_vec()),
+        (
+            WIRE_KEY,
+            [0u32, 0, 0xd800, 0].map(u32::to_be_bytes).concat(),
+        ),
+        (WIRE_KEY, [0u32, 0, 0, 2].map(u32::to_be_bytes).concat()),
+        (
+            WIRE_MOUSE,
+            [0u32, 0, 0, 0, 3].map(u32::to_be_bytes).concat(),
+        ),
+        (WIRE_PASTE, 4u32.to_be_bytes().to_vec()),
+        (
+            WIRE_PASTE,
+            [&0u32.to_be_bytes()[..], &[b'x'; input::MAX_PASTE_BYTES + 1]].concat(),
+        ),
+        (
+            WIRE_WHEEL,
+            [0u32, input::MAX_WHEEL_NOTCHES + 1, 1, 0, 0, 0]
+                .map(u32::to_be_bytes)
+                .concat(),
+        ),
     ] {
         assert!(v2_commands::decode(Packet { kind, tab: 7, body }).is_err());
     }

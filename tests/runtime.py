@@ -11,6 +11,12 @@ from tools.build import RUST_BROWSER_MODULE, RUST_FRONTEND_MODULE, RUST_FRONTEND
 from tools.paths import runtime_binary, module_path, CHECKS
 
 
+def preloadable_daemon():
+    """A dynamically linked daemon build: LD_PRELOAD fault injection cannot enter the static release worminald."""
+    from tools.build import Builder
+    return Builder().rust_artifact("worminal-daemon")
+
+
 def copy_runtime(directory, *, browser=False):
     base = Path(directory)
     (base / 'bin').mkdir(exist_ok=True)

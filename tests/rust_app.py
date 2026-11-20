@@ -20,7 +20,7 @@ import unittest
 from unittest.mock import patch
 
 os.environ['WORMINAL_FRONTEND'] = 'worminal-rust'
-from test_keys import NavigationKeysTest, read_bytes, read_through
+from test_keys import NavigationKeysTest, read_bytes, read_through, wait_title
 from workspace_protocol import send, wait_kind, catalog_records, service_pid
 from x11 import isolated_display, close_window
 from preview import profile, service, wayland_display
@@ -30,29 +30,13 @@ from test_notifications import NotificationTests
 from runtime import copy_runtime, window, stop_application
 from rust_module import RustModuleTest
 from test_runtime import RuntimeCleanupTest
+from test_file_drop import FileDropTest
+from test_master_detach import MasterDetachTest
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
 class RustApplicationTest(unittest.TestCase):
-    def test_rust_view_uses_historical_c_v2_service_without_restarting_its_shell(self):
-        with isolated_display() as display, profile(display) as env:
-            env.update(GDK_BACKEND='x11', WORMINAL_TEST_PREVIEW_DAEMON=str(ROOT / 'build/worminald-c-v2'))
-            env.pop('WAYLAND_DISPLAY', None)
-            with service(env):
-                app = subprocess.Popen([str(runtime_binary("worminal-rust")), '-T', 'C service attachment', '-o', '-',
-                    '-e', '/bin/sh', '-c', "stty raw -echo; printf 'C:%s\\n' $$; exec cat"], env=env,
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                self.addCleanup(lambda: self.stop(app))
-                shell = int(read_through(app.stdout, b'\n')[2:].strip())
-                tty = os.readlink(f'/proc/{shell}/fd/0')
-                wid = window(env, app)
-                subprocess.run(['xdotool', 'windowfocus', '--sync', wid, 'type', '--clearmodifiers', 'peer'],
-                               env=env, check=True)
-                self.assertEqual(read_bytes(app.stdout, 4), b'peer')
-                close_window(env, 'C service attachment')
-                self.assertEqual(app.wait(timeout=5), 0)
-                self.assertEqual(os.readlink(f'/proc/{shell}/fd/0'), tty)
 
     def test_empty_attach_can_open_its_first_terminal(self):
         with isolated_display() as env:
@@ -212,6 +196,13 @@ class RustApplicationTest(unittest.TestCase):
                                               text=True).strip() != 'Rust vertical':
                     self.assertLess(time.monotonic(), deadline, 'tab shortcut did not return to the original shell')
                     time.sleep(.01)
+                # Both directions wrap, using the same tab order as Ctrl+Tab.
+                subprocess.run(['xdotool', 'mousemove', '--window', wid, '20', '80'], env=env, check=True)
+                for button, expected in (('5', 'Worminal'), ('5', 'Rust vertical'),
+                                         ('4', 'Worminal'), ('4', 'Rust vertical')):
+                    subprocess.run(['xdotool', 'keydown', 'ctrl', 'click', button, 'keyup', 'ctrl'],
+                                   env=env, check=True)
+                    wait_title(env, wid, expected)
                 subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+shift+n'], env=env, check=True)
                 deadline = time.monotonic() + 5
                 while len(catalog_records(wait_kind(observer, 7, version=2)[1])) != 3:
@@ -304,11 +295,23 @@ class RustApplicationTest(unittest.TestCase):
                 time.sleep(.05)
             # The new tab is selected and fills the window.
             wait_for(blue, blue, 'second tab did not fill the window')
+            data = root.get_image(0, 0, 900, 500, X.ZPixmap, 0xffffffff).data
+            Image.frombuffer('RGB', (900, 500), data, 'raw', 'BGRX', 0, 1).save(CHECKS / 'split-before.png')
+            # Locate the selected second label rather than assuming a particular font
+            # size or directory basename width. Its right edge must clear the first label.
+            background = pixel(.49, 4 / 500)
+            second_label = max(x for x in range(2, 440) if pixel(x / 900, 4 / 500) != background) - 2
+            self.assertLess(second_label, 450, 'fixture labels must fit in one half-width strip')
             # Drag the first tab's label onto the right edge of the pane.
             xdo('mousemove', '--window', wid, '12', '8', 'mousedown', '1')
             for step in range(1, 11):
                 xdo('mousemove', '--window', wid, str(12 + 876 * step // 10), str(8 + 250 * step // 10))
                 time.sleep(.02)
+            deadline = time.monotonic() + 3
+            while pixel(.75, .75) == blue:
+                self.assertLess(time.monotonic(), deadline, 'split target highlight did not paint over content')
+                time.sleep(.02)
+            self.assertEqual(pixel(.25, .75), blue, 'split target highlight covered the wrong half')
             xdo('mouseup', '1')
             # The anchor stays left; the dropped tab takes the right half and focus.
             wait_for(blue, red, 'dropping a tab on the right edge did not split the window')
@@ -334,9 +337,8 @@ class RustApplicationTest(unittest.TestCase):
                 time.sleep(.05)
             # Each pane has its own strip holding only its tabs: the dropped tab is selected in the right strip,
             # and the left strip no longer has the second tab where the shared strip had it.
-            background = (24, 24, 24)
             self.assertNotEqual(pixel(.505, 4 / 500), background, 'the right pane has no tab strip of its own')
-            self.assertEqual(pixel(100 / 900, 4 / 500), background, 'the left strip still lists the dropped tab')
+            self.assertEqual(pixel(second_label / 900, 4 / 500), background, 'the left strip still lists the dropped tab')
             # Dragging the right pane's tab onto the left strip puts it back there and ends the split.
             xdo('mousemove', '--window', wid, '462', '8', 'mousedown', '1')
             for step in range(1, 11):
@@ -374,7 +376,15 @@ class RustApplicationTest(unittest.TestCase):
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-k')
+    match = parser.parse_args().k
+    if match:
+        unittest.defaultTestLoader.testNamePatterns = [f'*{match}*']
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(RustApplicationTest)
+    suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(FileDropTest))
+    suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(MasterDetachTest))
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(WindowStateTest))
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(WindowActivationTests))
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(RustModuleTest))
@@ -382,7 +392,8 @@ def main():
     for name in ('test_navigation_keys', 'test_alternate_scroll_sends_cursor_keys',
                  'test_clipboard_paste_bytes', 'test_ctrl_end_in_micro', 'test_master_navigation_keys',
                  'test_master_alternate_scroll_sends_cursor_keys', 'test_master_clipboard_paste_bytes'):
-        suite.addTest(NavigationKeysTest(name))
+        if not match or match in name:
+            suite.addTest(NavigationKeysTest(name))
     with (private_bus(os.environ) as env,
           patch.dict(os.environ, {'DBUS_SESSION_BUS_ADDRESS': env['DBUS_SESSION_BUS_ADDRESS']})):
         return 0 if unittest.TextTestRunner(verbosity=1).run(suite).wasSuccessful() else 1

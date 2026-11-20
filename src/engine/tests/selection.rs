@@ -86,3 +86,27 @@ fn whole_buffer_export_preserves_selection_and_scroll() {
     assert!(alternate.windows(3).any(|part| part == b"ALT"));
     assert!(!alternate.windows(8).any(|part| part == b"abcdefgh"));
 }
+
+#[test]
+fn bounded_tail_preserves_physical_wraps_selection_scroll_and_alternate_isolation() {
+    let mut owner = Engine::new(6, 2).unwrap();
+    feed(&mut owner, "abcdefgh\r\né中".as_bytes());
+    owner.scroll(true, 1).unwrap();
+    owner.select(1, 0, true, 0, false, false).unwrap();
+    owner.select(3, 0, false, 0, false, true).unwrap();
+    let selected = owner.selection().unwrap();
+    let (text, total) = owner.tail(1000).unwrap();
+    assert_eq!(total, 3);
+    assert_eq!(text, "abcdef\ngh\né中\n".as_bytes());
+    assert_eq!(owner.tail(1).unwrap(), ("é中\n".as_bytes().to_vec(), total));
+    assert_eq!(owner.selection().unwrap(), selected);
+    assert_eq!(owner.frame(1).unwrap().scroll, 1);
+    for count in [0, 1001] {
+        assert!(owner.tail(count).is_err());
+    }
+    feed(&mut owner, b"\x1b[?1049hALT");
+    let (text, total) = owner.tail(1000).unwrap();
+    assert_eq!(total, 2);
+    assert!(text.windows(3).any(|part| part == b"ALT"));
+    assert!(!text.windows(6).any(|part| part == b"abcdef"));
+}

@@ -12,49 +12,135 @@ pub mod session;
 pub mod stream;
 pub mod tabs;
 pub mod v2;
+mod v2_agent;
 pub mod v2_commands;
 pub mod v2_events;
+mod validation;
 
 pub const MAX_INPUT_BYTES: usize = 65536;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
     List,
-    OpenTerminal { options: tabs::TerminalOptions },
-    OpenBrowser { url: String },
-    Close { tab: u32 },
+    PasteKeys {
+        tab: u32,
+        text: String,
+        names: Vec<String>,
+        guard: String,
+    },
+    WaitCommand {
+        tab: u32,
+        workspace: String,
+        command_id: u64,
+        timeout_ms: u32,
+    },
+    ReadOutput {
+        tab: u32,
+        since: String,
+        command_id: u64,
+    },
+    ReadMany {
+        tabs: Vec<u32>,
+        tail: u32,
+    },
+    Keys {
+        tab: u32,
+        names: Vec<String>,
+        guard: String,
+    },
+    Paste {
+        tab: u32,
+        text: String,
+        guard: String,
+    },
+    GuardedInput {
+        tab: u32,
+        bytes: Vec<u8>,
+        guard: String,
+    },
+    Wait {
+        tab: u32,
+        after: String,
+        timeout_ms: u32,
+    },
+    OpenTerminal {
+        options: tabs::TerminalOptions,
+    },
+    OpenBrowser {
+        url: String,
+    },
+    Close {
+        tab: u32,
+    },
     Devices,
-    Enroll { device: devices::Device },
-    Forget { name: String },
-    Read { tab: u32 },
-    Input { tab: u32, bytes: Vec<u8> },
+    Enroll {
+        device: devices::Device,
+    },
+    Forget {
+        name: String,
+    },
+    Read {
+        tab: u32,
+    },
+    Input {
+        tab: u32,
+        bytes: Vec<u8>,
+    },
 }
 
 impl Request {
     pub fn tab(&self) -> u32 {
         match self {
             Self::List
+            | Self::ReadMany { .. }
             | Self::OpenTerminal { .. }
             | Self::OpenBrowser { .. }
             | Self::Devices
             | Self::Enroll { .. }
             | Self::Forget { .. } => 0,
-            Self::Read { tab } | Self::Input { tab, .. } | Self::Close { tab } => *tab,
+            Self::PasteKeys { tab, .. }
+            | Self::WaitCommand { tab, .. }
+            | Self::ReadOutput { tab, .. }
+            | Self::Keys { tab, .. }
+            | Self::Paste { tab, .. }
+            | Self::GuardedInput { tab, .. }
+            | Self::Wait { tab, .. }
+            | Self::Read { tab }
+            | Self::Input { tab, .. }
+            | Self::Close { tab } => *tab,
         }
     }
 
     /// Validate at both delivery boundaries, before a handler can mutate state.
     pub fn validate(&self) -> io::Result<()> {
+        validation::agent(self)?;
         match self {
             Self::OpenTerminal { options } => options.validate()?,
             Self::OpenBrowser { url } => tabs::validate_url(url)?,
             Self::Enroll { device } => device.validate()?,
             Self::Forget { name } => devices::validate_name(name)?,
+            Self::ReadMany { tabs, tail }
+                if tabs.is_empty() || tabs.len() > 16 || tabs.contains(&0) || *tail > 1000 =>
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Read requires 1..16 positive tab IDs; --tail is 1..1000.",
+                ))
+            }
             _ => {}
         }
         if matches!(
             self,
-            Self::Read { .. } | Self::Input { .. } | Self::Close { .. }
+            Self::ReadOutput { .. }
+                | Self::PasteKeys { .. }
+                | Self::WaitCommand { .. }
+                | Self::Read { .. }
+                | Self::Input { .. }
+                | Self::Close { .. }
+                | Self::Keys { .. }
+                | Self::Paste { .. }
+                | Self::GuardedInput { .. }
+                | Self::Wait { .. }
         ) && self.tab() == 0
         {
             return Err(io::Error::new(

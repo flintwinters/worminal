@@ -4,33 +4,13 @@ mod native;
 use std::{
     ffi::OsString,
     io,
-    os::{
-        linux::net::SocketAddrExt,
-        unix::{ffi::OsStrExt, net::SocketAddr},
-    },
+    os::{linux::net::SocketAddrExt, unix::net::SocketAddr},
     process::ExitCode,
 };
-use worminal_workspace::broker::Forward;
+use worminal_workspace::{broker::Forward, cli_schema::Launcher};
 
 fn forward(args: &[OsString], candidate: bool) -> io::Result<Forward> {
-    let mut key = Vec::new();
-    for (index, name) in [
-        "GDK_BACKEND",
-        "WAYLAND_DISPLAY",
-        "DISPLAY",
-        "WORMINAL_SHARED_SOCKET_SCOPE",
-    ]
-    .iter()
-    .enumerate()
-    {
-        let value = std::env::var_os(name).unwrap_or_default();
-        if candidate {
-            key.extend_from_slice(&(value.as_bytes().len() as u64).to_be_bytes());
-        } else if index != 0 {
-            key.push(b':');
-        }
-        key.extend_from_slice(value.as_bytes());
-    }
+    let key = worminal_workspace::broker::display_key(candidate);
     let hash = native::hash(&key)?;
     let name = format!(
         "{}-{}-{}",
@@ -51,18 +31,26 @@ fn run(candidate: bool) -> io::Result<()> {
     native::timing("main");
     let args: Vec<_> = std::env::args_os().collect();
     worminal_workspace::browser_target::command(&args)?;
-    let local = args.len() == 2
-        && ["-h", "--help", "-v", "--version"]
-            .iter()
-            .any(|flag| args[1] == *flag);
-    let replacing = args.len() == 3 && args[1] == "--replace-owner";
-    let listener = if local || replacing {
+    let master_action = worminal_workspace::broker::master_action(&args)?.is_some();
+    let option = args
+        .get(1)
+        .and_then(|value| value.to_str())
+        .and_then(Launcher::parse);
+    let local = args.len() == 2 && matches!(option, Some(Launcher::Help | Launcher::Version));
+    let replacing = args.len() == 3 && option == Some(Launcher::ReplaceOwner);
+    let listener = if local || replacing || worminal_workspace::ssh::is_askpass(&args) {
         None
     } else {
         let outcome = forward(&args, candidate);
         native::timing("broker");
         match outcome? {
             Forward::Complete => return Ok(()),
+            Forward::Owner(_) if master_action => {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "No connected GUI owner",
+                ));
+            }
             Forward::Owner(listener) => Some(listener),
         }
     };
@@ -73,7 +61,7 @@ pub fn main(candidate: bool) -> ExitCode {
     match run(candidate) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("{error}");
+            eprintln!("{}", worminal_workspace::cli_output::error(&error));
             ExitCode::from(if error.kind() == io::ErrorKind::InvalidInput {
                 2
             } else {

@@ -60,6 +60,15 @@ to stop it and end its tabs.
 connects over SSH to a service on that host; the remote account needs
 .B worminald
 in its PATH. Further hosts can be reached with ordinary SSH inside a tab.
+.B --detach-master user@host
+removes that master's tabs from every window in this display/workspace and disconnects its SSH views.
+Use the exact host spelling passed to --master. Remote tabs and shells keep running; windows left empty close.
+Reconnect with worminal --master user@host --attach. An absent master or GUI owner returns failure.
+.B --close-master user@host
+closes that master's connected tabs in this display/workspace through the normal daemon lifecycle.
+This terminates the tabs' running programs. Use the exact host spelling passed to --master.
+Other masters and local tabs survive. The command queues closure without waiting for process exit;
+an absent owner or no connected matching tabs returns failure. It does not open SSH or retry failed closes.
 .SH AUTOMATION
 Run
 .B worminald --help
@@ -74,6 +83,18 @@ and
 lists existing tabs as JSON.
 .B worminald api read TAB
 reads a terminal viewport without changing its view or terminal size.
+.B worminald api read TAB... --tail N
+reads bounded retained history without moving the view; batch results preserve request order.
+.B worminald api wait TAB --after REVISION --timeout SECONDS
+waits passively for a changed observation. Timeouts do not imply command completion.
+.B worminald api help observe
+explains revisions, foreground identity, input guards, stdin paste and their limits.
+.B worminald api help keys
+lists application key names and modifiers, encoded using the target terminal mode.
+.B worminald api help shell-bash
+and
+.B worminald api help shell-zsh
+print runnable opt-in shell integration with setup comments for command boundaries and exit status.
 .B worminald api type TAB TEXT
 sends literal UTF-8 text without Enter; use
 .B worminald api key TAB Enter
@@ -106,9 +127,20 @@ No credentials, configuration or user state are copied. No daemon is started and
 Open a view afterward with worminal --master user@host; enroll the route explicitly if desired.
 Run worminald install-on-remote --help for details. SSH failure can leave the outcome uncertain; no retry occurs.
 .B worminald upgrade-remote user@host
-runs automatically when a view connects with --master. Whichever of this node and the host has the older
+also supplies version sync for every --master view connection, immediately after SSH authentication.
+Version sync completes before configuration sync, bridge startup or workspace restoration; failure disconnects
+the view. All phases share the authenticated SSH connection. Whichever of this node and the host has the older
 daemon version is updated from the newer one (pushed or pulled), with the same CPU, Python 3, sudo and /usr/local
 requirements. Running shells are handed to the new file, not restarted. Active v1 workspaces are never touched.
+.SH MASTER CONNECTION HISTORY
+.B worminald --list-masters
+prints JSON listing this user's successful master SSH routes, sorted by exact endpoint.
+Each row has endpoint and connected; connected is true while at least one view connection that received a valid
+master catalog remains open. Disconnected routes remain in history across process and machine restarts.
+History begins with this feature and spans displays and workspace scopes sharing XDG_STATE_HOME.
+It is stored under XDG_STATE_HOME/worminal/masters (default ~/.local/state/worminal/masters).
+Listing is passive: it never starts a daemon, opens SSH, probes hosts or takes terminal control.
+Run worminald --list-masters --help for the reply shape and details.
 .SH DAEMON UPGRADES
 The release v2 service watches its executable directory. Replacing its executable automatically starts a
 replacement daemon and transfers live tabs using the validated handoff transaction.
@@ -175,7 +207,7 @@ defines the
 to use when worminal is run, overriding the configured
 .B font.normal.family
 (see worminal.yaml and Alacritty configuration, read at startup).
-The default is bundled Atkinson Hyperlegible Mono at 9 points,
+The default is DejaVu Sans Mono (falling back to Atkinson Hyperlegible Mono if installed) at 9 points,
 with a -3 pixel line offset. Explicit font settings in worminal.yaml or the Alacritty config override these defaults.
 .TP
 .BI \-g " geometry"

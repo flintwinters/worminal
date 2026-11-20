@@ -24,21 +24,35 @@ class BuildTests(unittest.TestCase):
         self.addCleanup(self.root_patch.stop)
 
     def test_release_build_does_not_construct_historical_applications(self):
-        with patch.object(build, "pkg_flags", return_value=[]), patch.object(build, "step"):
+        with patch.object(build, "pkg_flags", return_value=[]), patch.object(build, "step"), \
+                patch.object(build, "require_static") as static:
             builder = build.Builder()
             with (patch.object(builder, "program") as program, patch.object(builder, "rust_program") as rust,
-                  patch.object(builder, "rust_library") as library, patch('tools.reference.target') as historical):
-                for name in ("worminal", "worminald", "worminal-preview", "worminald-preview"):
-                    builder.target(name)
-                    rust.assert_called_with(name, "worminal-launcher" if name in
-                                            ("worminal", "worminal-preview") else "worminal-daemon")
+                  patch.object(builder, "rust_library") as library):
+                builder.target("worminal")
+                rust.assert_called_with("worminal", "worminal-launcher")
+                builder.target("worminald")
+                rust.assert_called_with("worminald", "worminal-daemon", triple=build.DAEMON_TARGET)
+                static.assert_called_once()
                 program.assert_not_called()
-                historical.assert_not_called()
                 self.assertIn(unittest.mock.call("build/lib/worminal/" + build.RUST_FRONTEND_MODULE,
                                                 "worminal-frontend"),
                               library.call_args_list)
                 self.assertIn(unittest.mock.call("build/lib/worminal/" + build.RUST_BROWSER_MODULE, "worminal-browser"),
                               library.call_args_list)
+
+    def test_release_daemon_must_not_need_a_program_interpreter(self):
+        # A dynamically linked daemon from a newer-glibc host could not run on an older-glibc peer during sync.
+        with self.assertRaisesRegex(RuntimeError, "dynamically linked"):
+            build.require_static(os.path.realpath("/bin/sh"))
+        header = bytearray(64 + 56)
+        header[:5] = b"\x7fELF\x02"
+        header[0x20:0x28] = (64).to_bytes(8, "little")
+        header[0x36:0x3a] = (56).to_bytes(2, "little") + (1).to_bytes(2, "little")
+        header[64:68] = (1).to_bytes(4, "little")  # PT_LOAD only: a static executable
+        static = self.root / "static"
+        static.write_bytes(header)
+        build.require_static(static)
 
     def test_independent_steps_run_together_and_every_one_finishes_before_a_failure_is_raised(self):
         # A serial implementation never gets three parties to the barrier, so it fails with BrokenBarrierError.
@@ -67,10 +81,10 @@ class BuildTests(unittest.TestCase):
         with (patch.object(build, "headless", return_value=True),
               patch.object(build.Builder, "__init__", lambda self: None),
               patch.object(build.Builder, "target", target)):
-            build.build_targets("build/engine_test", "build/historical_probe")
+            build.build_targets("build/engine_test", "build/ordered_probe")
         self.assertEqual(events[0], "build/libworminal_engine.a")
-        self.assertCountEqual(events[1:], ["worminald", "build/historical_probe", "build/engine_test"])
-        self.assertLess(events.index("worminald"), events.index("build/historical_probe"))
+        self.assertCountEqual(events[1:], ["worminald", "build/ordered_probe", "build/engine_test"])
+        self.assertLess(events.index("worminald"), events.index("build/ordered_probe"))
 
     def test_headless_target_builds_and_installs_only_the_daemon(self):
         names = lambda: {destination.name for _, destination, _ in build.installation_files("/usr/local")}
@@ -88,15 +102,6 @@ class BuildTests(unittest.TestCase):
             with patch.object(build.subprocess, "run", side_effect=subprocess.CalledProcessError(1, "pkg-config")):
                 self.assertTrue(build.headless())
 
-    def test_historical_c_targets_delegate_to_disposable_git_fixtures(self):
-        with patch.object(build, "pkg_flags", return_value=[]), patch('tools.reference.target') as historical:
-            builder = build.Builder()
-            with patch.object(builder, 'program') as program:
-                for name in ('worminal-x11', 'worminald-x11', 'build/worminald-c-v2',
-                             'build/frontend.so', 'build/browser.so', 'build/worminal-gtk-c'):
-                    builder.target(name)
-                    historical.assert_called_with(name)
-                program.assert_not_called()
 
     def test_first_rust_publication_creates_bin_and_module_directories(self):
         source = self.root / "compiled"
@@ -215,8 +220,7 @@ class BuildTests(unittest.TestCase):
                        "build/lib/worminal/" + build.RUST_BROWSER_MODULE,
                        "build/lib/worminal/" + build.RUST_FRONTEND_MODULE,
                        "docs/man/worminal.1",
-                       "assets/worminal.desktop", "assets/worminal.svg",
-                       *(str(build.FONT_DIRECTORY / name) for name in build.FONT_FILES)):
+                       "assets/worminal.desktop", "assets/worminal.svg"):
             path = self.root / source
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("VERSION\n")
@@ -253,8 +257,7 @@ class BuildTests(unittest.TestCase):
             build.install("/opt/worminal", skip_build=True)
             compile_build.assert_not_called()
             files = build.installation_files("/opt/worminal")
-            for name in build.FONT_FILES:
-                self.assertEqual((installed / "share/fonts/worminal" / name).read_text(), "VERSION\n")
+            self.assertFalse((installed / "share/fonts").exists())
             self.assertLess(next(i for i, (source, _, _) in enumerate(files)
                                  if source.name == build.RUST_FRONTEND_MODULE),
                             next(i for i, (source, _, _) in enumerate(files) if source.name == "worminal"))

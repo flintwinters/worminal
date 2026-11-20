@@ -2,7 +2,9 @@
 //! No native-layout structures are sent on the wire.
 use std::{io, mem};
 
+pub mod cell;
 mod constants;
+pub mod input;
 mod links;
 pub mod worp;
 pub use constants::*;
@@ -37,6 +39,7 @@ impl Buffer {
     }
 
     /// Reserve additional storage without changing encoded bytes or bypassing the bound.
+    #[inline]
     pub fn reserve(&mut self, extra: usize) -> io::Result<()> {
         if extra > self.limit.saturating_sub(self.bytes.len()) {
             return Err(invalid("wire buffer limit exceeded"));
@@ -49,6 +52,9 @@ impl Buffer {
         self.put_bytes(&value.to_be_bytes())
     }
 
+    // Cell encoding crosses the crate boundary for every fixed-size cell. Inlining lets the caller
+    // specialize the copy instead of invoking the generic slice append thousands of times per frame.
+    #[inline]
     pub fn put_bytes(&mut self, bytes: &[u8]) -> io::Result<()> {
         self.reserve(bytes.len())?;
         self.bytes.extend_from_slice(bytes);

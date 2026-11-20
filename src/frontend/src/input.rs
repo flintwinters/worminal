@@ -3,22 +3,11 @@ use gtk::gdk::{
     keys::{constants as key, Key},
     ModifierType as Mod,
 };
-use worminal_engine_sys::*;
-
-struct KeyEntry {
-    key: Key,
-    mask: u32,
-    bytes: &'static [u8],
-    appkey: i32,
-    appcursor: i32,
-}
-#[path = "keymap.rs"]
-mod keymap;
-use keymap::KEYS;
+use worminal_protocol::{input::MOD_KEYS, worp::commands::CommandKind};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum KeyAction {
-    Bytes(Vec<u8>),
+    Send(CommandKind),
     PastePrimary,
     Scroll { up: bool, rows: u32 },
     Control(u32),
@@ -63,132 +52,62 @@ impl Keyboard {
                 rows: rows.saturating_sub(1).max(1),
             };
         }
-        if let Some(bytes) = self.mapping(value, state, mode) {
-            return KeyAction::Bytes(bytes.to_vec());
-        }
-        if state.contains(Mod::CONTROL_MASK) {
-            // Encode ASCII Control before the input method, including NUL and numeric aliases.
-            // Locale strings can lose embedded NUL; punctuation pairs share five-bit encoding.
-            if let Some(c) = value.to_unicode().and_then(|c| match c {
-                '@'..='~' | ' ' => Some(c as u8 & 31),
-                '2' => Some(0),
-                '3'..='7' => Some(c as u8 - b'3' + 27),
-                '8' | '?' => Some(127),
-                '/' => Some(31),
-                _ => None,
-            }) {
-                let mut bytes = Vec::new();
-                if state.contains(Mod::MOD1_MASK) {
-                    bytes.push(0x1b);
-                }
-                bytes.push(c);
-                return KeyAction::Bytes(bytes);
-            }
-        }
-        if state.contains(Mod::MOD1_MASK) {
-            if let Some(c) = value.to_unicode().filter(|c| (' '..'\u{7f}').contains(c)) {
-                let mut bytes = Vec::new();
-                let c = if mode & MODE_8BIT != 0 {
-                    char::from_u32(u32::from(c) | 0x80).unwrap()
-                } else {
-                    bytes.push(0x1b);
-                    c
-                };
-                bytes.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
-                return KeyAction::Bytes(bytes);
-            }
+        // The daemon encodes the key against its live modes; the view's modes only decide that
+        // the terminal, not the input method, takes it.
+        let (keysym, modifiers) = (*value, state.bits() & MOD_KEYS);
+        let character = value.to_unicode().filter(|&c| c != '\0');
+        if worminal_engine::keys::encode(keysym, character, modifiers, mode, self.numlock).is_some()
+        {
+            return KeyAction::Send(CommandKind::Key {
+                keysym,
+                modifiers,
+                character,
+                numlock: self.numlock,
+            });
         }
         KeyAction::Ime
-    }
-    fn mapping(&self, value: Key, state: Mod, mode: u32) -> Option<&'static [u8]> {
-        let mask = (state
-            & (Mod::SHIFT_MASK
-                | Mod::CONTROL_MASK
-                | Mod::MOD1_MASK
-                | Mod::MOD4_MASK
-                | Mod::MOD3_MASK))
-            .bits();
-        KEYS.iter()
-            .find(|entry| {
-                entry.key == value
-                    && (entry.mask == u32::MAX || entry.mask == mask)
-                    && (if mode & MODE_APPKEYPAD != 0 {
-                        entry.appkey >= 0
-                    } else {
-                        entry.appkey <= 0
-                    })
-                    && !(self.numlock && entry.appkey == 2)
-                    && (if mode & MODE_APPCURSOR != 0 {
-                        entry.appcursor >= 0
-                    } else {
-                        entry.appcursor <= 0
-                    })
-            })
-            .map(|entry| entry.bytes)
     }
 }
 
 #[derive(Default)]
 pub struct Mouse {
+    /// The held GDK button, 0 for none.
     pub button: u32,
     pub last: (i32, i32),
 }
-impl Mouse {
-    pub fn report(
-        &self,
-        mode: u32,
-        live: bool,
-        button: u32,
-        x: i32,
-        y: i32,
-        state: Mod,
-        release: bool,
-        motion: bool,
-    ) -> Option<Vec<u8>> {
-        if motion && !live || mode & MODE_MOUSEX10 != 0 && (release || motion) {
+/// Browser-style middle-click autoscroll: the pointer's distance from the click anchor sets the
+/// scroll speed, with a dead zone around the anchor.
+pub struct Autoscroll {
+    anchor: f64,
+    pub y: f64,
+    /// Signed fractional lines (negative is up) left over from the previous step.
+    carry: f64,
+}
+impl Autoscroll {
+    const DEAD_ZONE: f64 = 12.0;
+    /// Lines per second for each line height of pointer distance beyond the dead zone.
+    const GAIN: f64 = 4.0;
+    const MAX_RATE: f64 = 80.0;
+    pub fn new(y: f64) -> Self {
+        Self {
+            anchor: y,
+            y,
+            carry: 0.0,
+        }
+    }
+    /// Whole lines to scroll after `seconds`, as `(up, lines)`.
+    pub fn step(&mut self, seconds: f64, line_height: f64) -> Option<(bool, u32)> {
+        let offset = self.y - self.anchor;
+        let beyond = (offset.abs() - Self::DEAD_ZONE).max(0.0);
+        if beyond == 0.0 {
+            self.carry = 0.0;
             return None;
         }
-        if motion
-            && mode & MODE_MOUSEMANY == 0
-            && !(self.button != 0 && mode & MODE_MOUSEMOTION != 0)
-        {
-            return None;
-        }
-        let mut code = button.checked_add(if motion { 32 } else { 0 })?;
-        if mode & MODE_MOUSEX10 == 0 {
-            if state.contains(Mod::SHIFT_MASK) {
-                code = code.checked_add(4)?;
-            }
-            if state.contains(Mod::MOD1_MASK) {
-                code = code.checked_add(8)?;
-            }
-            if state.contains(Mod::CONTROL_MASK) {
-                code = code.checked_add(16)?;
-            }
-        }
-        if mode & MODE_MOUSESGR != 0 {
-            Some(
-                format!(
-                    "\x1b[<{code};{};{}{}",
-                    x + 1,
-                    y + 1,
-                    if release { 'm' } else { 'M' }
-                )
-                .into_bytes(),
-            )
-        } else {
-            if !(0..223).contains(&x) || !(0..223).contains(&y) || code > 223 {
-                return None;
-            }
-            Some(vec![
-                0x1b,
-                b'[',
-                b'M',
-                if release { 35 } else { 32 + code as u8 },
-                33 + x as u8,
-                33 + y as u8,
-            ])
-        }
+        let rate = (beyond / line_height.max(1.0) * Self::GAIN).min(Self::MAX_RATE);
+        self.carry += rate * seconds * offset.signum();
+        let lines = self.carry.abs().floor();
+        self.carry -= lines * self.carry.signum();
+        (lines >= 1.0).then_some((offset < 0.0, lines as u32))
     }
 }
 pub fn position(px: f64, py: f64, width: i32, height: i32, columns: i32, rows: i32) -> (i32, i32) {
@@ -201,13 +120,36 @@ pub fn position(px: f64, py: f64, width: i32, height: i32, columns: i32, rows: i
 #[cfg(test)]
 mod tests {
     use super::*;
+    use worminal_protocol::cell::*;
+
+    #[test]
+    fn autoscroll_speed_follows_pointer_distance() {
+        let mut scroll = Autoscroll::new(100.0);
+        scroll.y = 108.0;
+        assert_eq!(scroll.step(1.0, 16.0), None, "inside the dead zone");
+        scroll.y = 100.0 + 12.0 + 32.0;
+        assert_eq!(scroll.step(1.0, 16.0), Some((false, 8)));
+        scroll.y = 100.0 - 12.0 - 16.0;
+        assert_eq!(scroll.step(0.1, 16.0), None, "fractions carry");
+        assert_eq!(scroll.step(0.2, 16.0), Some((true, 1)));
+        scroll.y = 100.0;
+        assert_eq!(
+            scroll.step(1.0, 16.0),
+            None,
+            "returning to the anchor stops"
+        );
+        scroll.y = 1.0e6;
+        assert_eq!(scroll.step(1.0, 16.0), Some((false, 80)), "rate is capped");
+    }
 
     #[test]
     fn keyboard_mapping_matches_pre_migration_behavior() {
         // Freeze the observable C-table behavior before moving its source to Rust.
         // Cover every mapped key, all supported modifier combinations and both
         // application modes with Num Lock on/off. Ordering and wildcard masks matter.
-        let mut keys: Vec<_> = KEYS.iter().map(|entry| entry.key).collect();
+        let mut keys: Vec<_> = worminal_engine::keys::mapped_keys()
+            .map(Key::from)
+            .collect();
         keys.sort_by_key(|key| **key);
         keys.dedup();
         let modifiers = [
@@ -239,7 +181,8 @@ mod tests {
                         for byte in (*value).to_le_bytes() {
                             record(byte);
                         }
-                        let result = Keyboard { numlock }.mapping(value, state, mode);
+                        let mask = state.bits() & MOD_KEYS;
+                        let result = worminal_engine::keys::mapping(*value, mask, mode, numlock);
                         record(result.map_or(255, |bytes| bytes.len() as u8));
                         if let Some(bytes) = result {
                             for &byte in bytes {

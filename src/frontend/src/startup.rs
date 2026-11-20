@@ -1,15 +1,12 @@
 //! Detached helpers (the local daemon, link openers) start through the shared GUI-safe spawn
 //! boundary: own session, /dev/null stdio, and a reaper thread.
 use std::{
-    ffi::{CString, OsStr, OsString},
+    ffi::CString,
     fs::OpenOptions,
     io,
     os::{fd::AsFd, unix::ffi::OsStrExt},
     path::Path,
-    sync::{
-        mpsc::{self, Receiver},
-        Mutex,
-    },
+    sync::mpsc::{self, Receiver},
     thread,
 };
 
@@ -21,6 +18,16 @@ pub fn daemon(path: &Path) -> io::Result<Receiver<io::Result<i32>>> {
 }
 pub fn open_url(url: &str) -> io::Result<()> {
     detached(&[CString::new("xdg-open").unwrap(), CString::new(url)?]).map(drop)
+}
+/// A hidden Windows PowerShell through WSL interop; `encoded` is its `-EncodedCommand` payload.
+pub fn powershell(encoded: &str) -> io::Result<Receiver<io::Result<i32>>> {
+    detached(&[
+        CString::new("powershell.exe").unwrap(),
+        CString::new("-NoProfile").unwrap(),
+        CString::new("-NonInteractive").unwrap(),
+        CString::new("-EncodedCommand").unwrap(),
+        CString::new(encoded)?,
+    ])
 }
 fn detached(arguments: &[CString]) -> io::Result<Receiver<io::Result<i32>>> {
     let null = OpenOptions::new()
@@ -57,22 +64,4 @@ pub fn replacement(executable: &Path, token: &str) -> io::Result<worminal_worksp
         true,
     )?;
     worminal_workspace::spawn::own(pid, "worminal-ui-replacement")
-}
-
-/// Sync the daemon versions of this machine and a connected master, once per host per owner.
-/// The helper runs `worminald upgrade-remote`, which updates whichever side is older and logs the outcome.
-pub fn sync_versions(master: &OsStr) -> io::Result<()> {
-    static CHECKED: Mutex<Vec<OsString>> = Mutex::new(Vec::new());
-    let mut checked = CHECKED.lock().unwrap();
-    if checked.iter().any(|host| host == master) {
-        return Ok(());
-    }
-    checked.push(master.to_owned());
-    let daemon = std::env::current_exe()?.with_file_name("worminald");
-    detached(&[
-        CString::new(daemon.as_os_str().as_bytes())?,
-        CString::new("upgrade-remote").unwrap(),
-        CString::new(master.as_bytes())?,
-    ])
-    .map(drop)
 }

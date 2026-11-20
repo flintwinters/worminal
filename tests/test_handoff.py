@@ -15,11 +15,10 @@ import time
 import unittest
 import uuid
 
-from workspace_protocol import number, string, send, wait_kind, catalog_records, rust_daemon, stop_workspace
+from workspace_protocol import number, string, send, wait_kind, catalog_records, stop_workspace
 
 ROOT = Path(__file__).resolve().parent.parent
-BINARIES = {1: runtime_binary("worminald-x11"),
-            2: runtime_binary(os.environ.get("WORMINAL_TEST_PREVIEW_DAEMON", "worminald-preview"))}
+BINARIES = {2: runtime_binary(os.environ.get("WORMINAL_TEST_PREVIEW_DAEMON", "worminald"))}
 
 
 def catalog_rows(payload, version):
@@ -126,11 +125,7 @@ class HandoffFixture:
 
 class HandoffTest(HandoffFixture, unittest.TestCase):
     def test_live_round_trips_merge_without_replacing_shells(self):
-        pairs = [(source, destination, None, None) for source, destination in ((1, 2), (2, 1), (1, 1), (2, 2))]
-        baseline = os.environ.get("WORMINAL_TEST_HANDOFF_BASELINE")
-        if baseline:
-            self.assertTrue(Path(baseline).is_file())
-            pairs.extend(((2, 2, baseline, None), (2, 2, None, baseline)))
+        pairs = [(2, 2, None, None)]
         for source, destination, source_binary, target_binary in pairs:
             with self.subTest(source=source, destination=destination, old_donor=bool(source_binary),
                               old_receiver=bool(target_binary)):
@@ -142,7 +137,7 @@ class HandoffTest(HandoffFixture, unittest.TestCase):
                 self.assert_screen(donor, source, tab, "before-transfer")
                 self.command(destination, target_env, "--handin")
                 self.command(source, source_env, "--handoff")
-                if destination == 2 and target_binary is None and rust_daemon(BINARIES[2]):
+                if destination == 2 and target_binary is None:
                     self.assertEqual(os.getsid(receiver_process.pid), receiver_process.pid)
                 _, catalog = wait_kind(receiver, 7, version=destination)
                 records = catalog_rows(catalog, destination)
@@ -163,7 +158,7 @@ class HandoffTest(HandoffFixture, unittest.TestCase):
                 self.assert_screen(receiver, destination, imported, "after-transfer")
 
     def test_receiver_owns_shutdown_of_imported_shell(self):
-        for source, destination in ((1, 2), (2, 1)):
+        for source, destination in ((2, 2),):
             with self.subTest(source=source, destination=destination):
                 donor, env, parent = self.start(source)
                 receiver, target_env, _ = self.start(destination)
@@ -182,7 +177,7 @@ class HandoffTest(HandoffFixture, unittest.TestCase):
                 self.assertIsNone(parent.poll())
 
     def test_pending_input_survives_handoff_without_loss_or_duplication(self):
-        donor, env, _ = self.start(1)
+        donor, env, _ = self.start(2)
         receiver, target_env, _ = self.start(2)
         self.launch(receiver, 2, "existing")
         payload = b"queued-input-" * 16000
@@ -194,7 +189,7 @@ class HandoffTest(HandoffFixture, unittest.TestCase):
                 "print('HASH:' + hashlib.sha256(data).hexdigest()[:16], flush=True)\n"
                 "time.sleep(30)\n")
         command = "stty raw -echo; exec python3 -u -c " + shlex.quote(code)
-        tab, pid = self.launch(donor, 1, "queued", command)
+        tab, pid = self.launch(donor, 2, "queued", command)
         os.kill(pid, signal.SIGSTOP)
         try:
             deadline = time.monotonic() + 3
@@ -203,16 +198,16 @@ class HandoffTest(HandoffFixture, unittest.TestCase):
                     self.fail("test reader did not stop")
                 time.sleep(.01)
             for offset in range(0, len(payload), 65536):
-                send(donor, 3, tab, payload[offset:offset + 65536])
-            send(donor, 4, tab, number(41) + number(8))
+                send(donor, 3, tab, payload[offset:offset + 65536], version=2)
+            send(donor, 4, tab, number(41) + number(8), version=2)
             for _ in range(32):
-                _, frame = wait_kind(donor, 8, tab)
+                _, frame = wait_kind(donor, 8, tab, version=2)
                 if struct.unpack_from("!I", frame)[0] == 41:
                     break
             else:
                 self.fail("input queue barrier was not processed")
             self.command(2, target_env, "--handin")
-            self.command(1, env, "--handoff")
+            self.command(2, env, "--handoff")
             _, catalog = wait_kind(receiver, 7, version=2)
             imported = catalog_rows(catalog, 2)[-1][0]
             send(receiver, 4, imported, number(40) + number(8), version=2)
@@ -222,7 +217,7 @@ class HandoffTest(HandoffFixture, unittest.TestCase):
         self.assert_screen(receiver, 2, imported, expected)
 
     def test_unavailable_receiver_retains_live_shell(self):
-        for version in (1, 2):
+        for version in (2,):
             with self.subTest(version=version):
                 peer, env, _ = self.start(version)
                 tab, pid = self.launch(peer, version, "retained")
@@ -245,33 +240,21 @@ class HandoffTest(HandoffFixture, unittest.TestCase):
                 self.assertEqual(peer.recv(1), b"")
             finally:
                 os.close(fd)
-        donor, source_env, _ = self.start(1)
-        self.launch(donor, 1, "incoming")
-        self.command(1, source_env, "--handoff")
+        donor, source_env, _ = self.start(2)
+        self.launch(donor, 2, "incoming")
+        self.command(2, source_env, "--handoff")
         _, payload = wait_kind(receiver, 7, version=2)
         self.assertEqual([r[1] for r in catalog_rows(payload, 2)], ["existing", "incoming"])
 
-    def test_v1_rejects_browser_records_without_removing_them(self):
-        donor, env, _ = self.start(2)
-        self.launch(donor, 2, "terminal")
-        send(donor, 17, payload=string("https://example.invalid/"), version=2)
-        wait_kind(donor, 7, version=2)
-        _, target_env, _ = self.start(1)
-        self.command(1, target_env, "--handin")
-        self.command(2, env, "--handoff", okay=False)
-        # Query the donor's catalog through a fresh v2 attach.
-        send(donor, 19, version=2)
-        _, payload = wait_kind(donor, 7, version=2)
-        self.assertEqual(len(catalog_rows(payload, 2)), 2)
 
     def test_receiver_disconnect_before_ready_rolls_back_donor(self):
-        donor, env, _ = self.start(1)
-        tab, pid = self.launch(donor, 1, "retained")
+        donor, env, _ = self.start(2)
+        tab, pid = self.launch(donor, 2, "retained")
         address = f"\0worminal-handoff-{os.getuid()}-{self.token}"
         with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as listener:
             listener.bind(address)
             listener.listen(1)
-            process = subprocess.Popen([str(BINARIES[1]), "--handoff", self.token], env=env,
+            process = subprocess.Popen([str(BINARIES[2]), "--handoff", self.token], env=env,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             listener.settimeout(3)
             peer, _ = listener.accept()
@@ -280,11 +263,11 @@ class HandoffTest(HandoffFixture, unittest.TestCase):
             process.communicate(timeout=3)
             self.assertNotEqual(process.returncode, 0)
         self.assertTrue(Path(f"/proc/{pid}").exists())
-        send(donor, 3, tab, b"rollback-working", version=1)
-        self.assert_screen(donor, 1, tab, "rollback-working")
+        send(donor, 3, tab, b"rollback-working", version=2)
+        self.assert_screen(donor, 2, tab, "rollback-working")
 
     def test_commit_delivery_disowns_even_when_receiver_acknowledgement_is_lost(self):
-        for version in (1, 2):
+        for version in (2,):
             with self.subTest(version=version):
                 donor, env, service = self.start(version)
                 _, pid = self.launch(donor, version, "committed")
@@ -323,7 +306,7 @@ class HandoffTest(HandoffFixture, unittest.TestCase):
                         command.communicate(timeout=3)
 
     def test_commit_write_failure_after_ready_retains_donor(self):
-        for version in (1, 2):
+        for version in (2,):
             with self.subTest(version=version):
                 donor, env, _ = self.start(version)
                 tab, pid = self.launch(donor, version, "uncommitted")
@@ -344,15 +327,15 @@ class HandoffTest(HandoffFixture, unittest.TestCase):
                 self.assert_screen(donor, version, tab, "commit-rollback")
 
     def test_rejected_descriptor_layout_never_signals_staged_shells(self):
-        for version in (1, 2):
+        for version in (2,):
             with self.subTest(receiver=version):
-                donor, env, _ = self.start(1)
-                incoming, pid = self.launch(donor, 1, "unpublished")
+                donor, env, _ = self.start(2)
+                incoming, pid = self.launch(donor, 2, "unpublished")
                 capture = self.token + "-capture"
                 with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as listener:
                     listener.bind(f"\0worminal-handoff-{os.getuid()}-{capture}")
                     listener.listen(1); listener.settimeout(3)
-                    command = subprocess.Popen([str(BINARIES[1]), "--handoff", capture], env=env,
+                    command = subprocess.Popen([str(BINARIES[2]), "--handoff", capture], env=env,
                                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                     peer, _ = listener.accept()
                     with peer:
@@ -374,12 +357,12 @@ class HandoffTest(HandoffFixture, unittest.TestCase):
                             self.assertEqual(peer.recv(1), b"", "invalid layout reached ready/commit")
                         self.assertTrue(Path(f"/proc/{pid}").exists())
                         marker = f"layout-{index}".encode()
-                        send(donor, 3, incoming, marker, version=1)
-                        self.assert_screen(donor, 1, incoming, marker.decode())
+                        send(donor, 3, incoming, marker, version=2)
+                        self.assert_screen(donor, 2, incoming, marker.decode())
                         send(receiver, 3, existing, marker, version=version)
                         self.assert_screen(receiver, version, existing, marker.decode())
                     # Rejections retain the listener, but a later valid transaction consumes it.
-                    self.command(1, env, "--handoff")
+                    self.command(2, env, "--handoff")
                     _, payload = wait_kind(receiver, 7, version=version)
                     rows = catalog_rows(payload, version)
                     self.assertEqual([row[1] for row in rows], ["existing", "unpublished"])

@@ -46,6 +46,38 @@ te_strhandle(TermEngine *session)
 			if (narg > 1)
 				te_xsettitle(session, strescseq.args[1]);
 			return;
+		case 9: /* OSC 9 ; 4 ; state ; value -- task progress (ConEmu); plain OSC 9 text is not supported */
+			if (narg > 2 && !strcmp(strescseq.args[1], "4")) {
+				j = atoi(strescseq.args[2]);
+				te_xsetmode(session, j == 1 || j == 3, MODE_BUSY);
+			}
+			return;
+		case 7501: /* Program status used by coding agents; fields are colon separated. */
+			if (narg != 2)
+				return;
+			if (!strcmp(strescseq.args[1], "?")) {
+				te_ttywrite(session, "\033]7501;?\033\\", sizeof("\033]7501;?\033\\") - 1, 0);
+				return;
+			}
+			/* Compare the whole state field: titles/messages must never change activity. */
+			p = strescseq.args[1];
+			dec = strchr(p, ':');
+			if (dec)
+				*dec = '\0';
+			if (!strcmp(p, "state=working"))
+				te_xsetmode(session, 1, MODE_BUSY);
+			else if (!strcmp(p, "state=idle") || !strcmp(p, "state=done") ||
+			         !strcmp(p, "state=blocked") || !strcmp(p, "state=clear"))
+				te_xsetmode(session, 0, MODE_BUSY);
+			return;
+        case 133: /* Optional shell integration: prompt, input, execution, completion. */
+            if (narg >= 2 && strlen(strescseq.args[1]) == 1 &&
+                strchr("ABCD", strescseq.args[1][0])) {
+                const char *status = narg >= 3 ? strescseq.args[2] : "";
+                te_emit(session, WORMINAL_SHELL, strescseq.args[1][0], 0,
+                        status, strlen(status));
+            }
+            return;
 		case 8: /* hyperlink: OSC 8 ; params ; URI */
 			te_oschyperlink(session);
 			return;
@@ -199,12 +231,6 @@ void
 te_printscreen(TermEngine *session, const Arg *arg)
 {
 	te_tdump(session);
-}
-
-void
-te_printsel(TermEngine *session, const Arg *arg)
-{
-	te_tdumpsel(session);
 }
 
 static void
@@ -475,6 +501,7 @@ te_eschandle(TermEngine *session, uchar ascii)
 		te_xsetmode(session, 0, MODE_HIDE);
 		te_xsetmode(session, 0, MODE_BRCKTPASTE);
 		te_xsetmode(session, 0, MODE_ALTSCROLL);
+		te_xsetmode(session, 0, MODE_BUSY);
 		break;
 	case '=': /* DECPAM -- Application keypad */
 		te_xsetmode(session, 1, MODE_APPKEYPAD);

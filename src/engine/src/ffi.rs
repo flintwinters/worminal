@@ -3,6 +3,7 @@ use std::ptr::NonNull;
 use worminal_engine_sys as sys;
 
 pub type Cell = sys::WorminalCell;
+pub type OutputPosition = sys::WorminalOutputPosition;
 pub type Frame = sys::WorminalFrame;
 pub type TransportState = sys::WorminalTransportState;
 
@@ -113,6 +114,69 @@ impl Engine {
 
     pub fn selection(&mut self) -> Result<Vec<u8>, Error> {
         self.read_text(false)
+    }
+
+    pub fn tail(&mut self, count: i32) -> Result<(Vec<u8>, i32), Error> {
+        let (mut size, mut total) = (0, 0);
+        let status = unsafe {
+            sys::worminal_engine_tail(
+                self.handle.as_ptr(),
+                count,
+                std::ptr::null_mut(),
+                0,
+                &mut size,
+                &mut total,
+            )
+        };
+        if status != sys::WORMINAL_CAPACITY as i32 {
+            check(status)?;
+        }
+        let mut data = vec![0; size];
+        check(unsafe {
+            sys::worminal_engine_tail(
+                self.handle.as_ptr(),
+                count,
+                data.as_mut_ptr(),
+                data.len(),
+                &mut size,
+                &mut total,
+            )
+        })?;
+        data.truncate(size);
+        Ok((data, total))
+    }
+
+    pub fn output_position(&mut self) -> Result<OutputPosition, Error> {
+        let mut position = OutputPosition::default();
+        check(unsafe {
+            sys::worminal_engine_output_position(self.handle.as_ptr(), &mut position)
+        })?;
+        Ok(position)
+    }
+
+    pub fn output(
+        &mut self,
+        start: OutputPosition,
+        end: OutputPosition,
+    ) -> Result<(Vec<u8>, OutputPosition, u32), Error> {
+        let mut bytes = vec![0; 256 * 1024];
+        let mut size = 0;
+        let mut next = OutputPosition::default();
+        let mut flags = 0;
+        check(unsafe {
+            sys::worminal_engine_output(
+                self.handle.as_ptr(),
+                start,
+                end,
+                bytes.as_mut_ptr(),
+                bytes.len(),
+                &mut size,
+                &mut next,
+                &mut flags,
+            )
+        })?;
+        bytes.truncate(size);
+        Ok((bytes, next, flags))
     }
 
     pub fn all_text(&mut self) -> Result<Vec<u8>, Error> {

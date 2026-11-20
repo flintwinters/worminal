@@ -1,5 +1,6 @@
 //! Rust-owned frontend state. The release module remains C until its replacement is complete.
 pub mod app;
+mod askpass;
 mod boundary;
 mod browser;
 pub mod fonts;
@@ -13,6 +14,7 @@ mod startup;
 pub mod tabs;
 pub mod terminal;
 pub mod viewport;
+mod wsl_frame;
 
 pub(crate) fn timing(event: &str) {
     if std::env::var_os("WORMINAL_TRACE_TIMING").is_some() {

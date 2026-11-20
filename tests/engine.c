@@ -346,9 +346,59 @@ notifications(void)
 	worminal_engine_destroy(engine);
 }
 
+/* Next MODE event's (set, flags), skipping other events, or -1 when none is queued. */
+static int
+next_mode(WorminalEngine *engine, uint32_t *flags)
+{
+	WorminalEvent event;
+	uint8_t payload[256];
+	while (worminal_engine_event(engine, &event, payload, sizeof(payload)) == WORMINAL_OK) {
+		if (event.type != WORMINAL_MODE)
+			continue;
+		*flags = event.flags;
+		return event.argument != 0;
+	}
+	return -1;
+}
+
+static void
+progress(void)
+{
+	WorminalEngine *engine;
+	uint32_t flags;
+	assert(worminal_engine_create(8, 3, &engine) == WORMINAL_OK);
+	/* Normal and indeterminate progress mean an active task; both terminators and fragments work. */
+	feed(engine, "\033]9;4;3\007", 1);
+	assert(next_mode(engine, &flags) == 1 && flags == MODE_BUSY);
+	feed(engine, "\033]9;4;1;40\033\\", 1);
+	assert(next_mode(engine, &flags) == 1 && flags == MODE_BUSY);
+	/* Removal, error and paused all end the activity. */
+	const char *ends[] = { "\033]9;4;0;\033\\", "\033]9;4;2;50\007", "\033]9;4;4;50\007" };
+	for (int i = 0; i < 3; i++) {
+		feed(engine, ends[i], 1);
+		assert(next_mode(engine, &flags) == 0 && flags == MODE_BUSY);
+	}
+	/* A reset clears a progress report its application never withdrew. */
+	feed(engine, "\033]9;4;3\007", 1);
+	assert(next_mode(engine, &flags) == 1);
+	feed(engine, "\033c", 1);
+	int cleared = 0;
+	while (next_mode(engine, &flags) >= 0)
+		cleared |= flags == MODE_BUSY;
+	assert(cleared);
+	/* Plain OSC 9 text and other subcommands are not progress. */
+	const char *ignored[] = { "\033]9;hello\007", "\033]9;3;3\007", "\033]9;4\007" };
+	for (int i = 0; i < 3; i++) {
+		feed(engine, ignored[i], 1);
+		assert(next_mode(engine, &flags) == -1);
+	}
+	worminal_engine_destroy(engine);
+}
+
 int
 main(void)
 {
+	progress();
 	notifications();
 	events_and_isolation();
 	sync_and_utf8();

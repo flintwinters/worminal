@@ -21,7 +21,7 @@ from x11 import isolated_display
 class RuntimeCleanupTest(unittest.TestCase):
     def start(self, directory, env, version, cleanup):
         executable = Path(directory) / ('owner-v' + str(version))
-        shutil.copy2(runtime_binary('worminald' if version == 2 else 'worminald-x11'), executable)
+        shutil.copy2(runtime_binary('worminald'), executable)
         env['XDG_STATE_HOME'] = str(Path(directory) / 'state')
         process = subprocess.Popen([str(executable), '--serve'], env=env,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -44,7 +44,7 @@ class RuntimeCleanupTest(unittest.TestCase):
         cleanup.callback(os.close, identity)
         return process, identity
 
-    def test_display_teardown_awaits_both_protocol_owners_before_runtime_deletion(self):
+    def test_display_teardown_awaits_current_owner_before_runtime_deletion(self):
         class BodyFailure(Exception):
             pass
 
@@ -58,7 +58,7 @@ class RuntimeCleanupTest(unittest.TestCase):
                     expected = self.assertRaises(BodyFailure) if fail else nullcontext()
                     with expected:
                         with isolated_display() as env:
-                            for version in (1, 2):
+                            for version in (2,):
                                 owners.append(self.start(directory, env, version, cleanup))
                             if fail:
                                 raise BodyFailure('exercise exceptional context unwinding')
@@ -99,7 +99,7 @@ class RuntimeCleanupTest(unittest.TestCase):
 
 
 def prove_cleanup():
-    test = RuntimeCleanupTest('test_display_teardown_awaits_both_protocol_owners_before_runtime_deletion')
+    test = RuntimeCleanupTest('test_display_teardown_awaits_current_owner_before_runtime_deletion')
     log_path = CHECKS / 'runtime-cleanup-proof.log'
     with log_path.open('w') as log, patch('x11.stop_workspace'):
         result = unittest.TextTestRunner(stream=log, verbosity=2).run(unittest.TestSuite([test]))

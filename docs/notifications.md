@@ -38,3 +38,22 @@ Older views that do not negotiate notification support receive no notification p
 desktop with a mock notification service (system Python needs PyGObject). The same test runs in
 `check-rust-app`; `check-rust-frontend --unit-only` also checks private D-Bus action/token routing,
 close events, service restarts, sender filtering and resource bounds.
+
+## Task progress
+
+Worminal also reads the ConEmu/Windows Terminal progress sequence `OSC 9;4;state;value`. Applications that
+report normal progress (`1`) or indeterminate progress (`3`) mark their tab busy; `0` (remove), `2` (error) and
+`4` (paused) end it. A busy tab that is not selected is drawn with a static dark gray (ANSI bright black)
+background; attention colors and the selected highlight take precedence. The state is the engine's `MODE_BUSY`
+bit, so it travels in the tab catalog's mode word, reaches every view (including remote ones) and survives
+daemon handoff. A reset clears it, and so does the shell regaining the terminal's foreground, which keeps a task
+that died mid-progress from leaving the tab busy. Plain `OSC 9` text and other `9;N` subcommands are ignored.
+
+```sh
+printf '\033]9;4;3\033\\'   # busy
+printf '\033]9;4;0\033\\'   # idle
+```
+
+Agent program status (`OSC 7501`) also drives this same busy indicator: `state=working` starts it;
+`idle`, `done`, `blocked` and `clear` end it. Worminal answers the `OSC 7501;?` capability probe.
+Agents already running when this support was installed may need restarting to repeat their capability probe.

@@ -1,7 +1,7 @@
 """Preview protocol records, version coexistence and PTY backpressure limits."""
 from runtime import CHECKS
 
-from runtime import runtime_binary
+from runtime import preloadable_daemon, runtime_binary
 
 
 from functools import partial
@@ -27,14 +27,14 @@ from workspace_protocol import (TextReplica, number, string, catalog_records, se
 from perf_metrics import cpu_time, memory
 
 ROOT = Path(__file__).resolve().parent.parent
-DAEMON = runtime_binary(os.environ.get("WORMINAL_TEST_PREVIEW_DAEMON", "worminald-preview"))
+DAEMON = runtime_binary(os.environ.get("WORMINAL_TEST_PREVIEW_DAEMON", "worminald"))
 send = partial(wire_send, version=2)
 wait_kind = partial(wire_wait, version=2)
 
 
 records = partial(catalog_records, version=2)
 
-@unittest.skipUnless(DAEMON.exists(), "run manage.py build-preview first")
+@unittest.skipUnless(DAEMON.exists(), "run manage.py build first")
 class PreviewWorkspaceTest(unittest.TestCase):
     def test_pause_resume_and_disconnected_view_preserve_shell(self):
         tab = self.launch("stty raw -echo; printf READY; exec cat")
@@ -347,7 +347,7 @@ class PreviewWorkspaceTest(unittest.TestCase):
             library, log = Path(directory) / "transport.so", Path(directory) / "send.log"
             subprocess.run(["cc", "-shared", "-fPIC", "-Wall", "-Wextra", "-o", str(library),
                             str(ROOT / "tests/service_transport.c"), "-ldl"], check=True)
-            self.daemon = subprocess.Popen([str(DAEMON), "--serve"],
+            self.daemon = subprocess.Popen([str(preloadable_daemon()), "--serve"],
                                            env={**self.env, "LD_PRELOAD": str(library),
                                                 "WORMINAL_TEST_SEND_LOG": str(log)},
                                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -808,20 +808,19 @@ class ServiceDiagnosticsTest(unittest.TestCase):
                 "WORMINAL_SHARED_SOCKET_SCOPE": f"diagnostics-{uuid.uuid4().hex}"}
 
     def test_event_loop_failure_records_operation_and_errno(self):
-        result = subprocess.run([str(DAEMON), "--serve"],
-                                env={**self.environment(), "WORMINAL_TEST_PSELECT_FAILURE": "1"},
+        result = subprocess.run([str(preloadable_daemon()), "--serve"],
+                                env={**self.environment(), "WORMINAL_TEST_PPOLL_FAILURE": "1"},
                                 capture_output=True, text=True, timeout=3)
         self.assertEqual(result.returncode, 1)
         self.assertIn("JOURNAL[5] Workspace service started (protocol 2)", result.stderr)
-        from workspace_protocol import rust_daemon
-        operation = "ppoll" if rust_daemon(DAEMON) else "pselect"
+        operation = "ppoll"
         self.assertIn(f"JOURNAL[3] workspace {operation} failed:", result.stderr)
         self.assertIn("(errno 9)", result.stderr)
         self.assertIn("JOURNAL[3] Workspace service exited with status 1", result.stderr)
 
     def test_fatal_pty_failure_is_reported_to_journal_and_stderr(self):
         env = self.environment()
-        service = subprocess.Popen([str(DAEMON), "--serve"], env=env,
+        service = subprocess.Popen([str(preloadable_daemon()), "--serve"], env=env,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         try:
             deadline = time.monotonic() + 3
@@ -840,8 +839,7 @@ class ServiceDiagnosticsTest(unittest.TestCase):
                 send(peer, 1, payload=launch)
                 _, errors = service.communicate(timeout=3)
             self.assertEqual(service.returncode, 1)
-            from workspace_protocol import rust_daemon
-            operation = b"posix_openpt" if rust_daemon(DAEMON) else b"openpty"
+            operation = b"posix_openpt"
             message = operation + b" failed: Too many open files"
             self.assertIn(b"JOURNAL[3] " + message, errors)
             self.assertEqual(errors.count(message), 2)

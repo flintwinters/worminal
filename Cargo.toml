@@ -1,11 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["src/platform", "src/engine-sys", "src/engine", "src/protocol", "src/workspace",
+members = ["src/engine-sys", "src/engine", "src/protocol", "src/workspace",
            "src/launcher", "src/config", "src/daemon", "src/frontend", "src/browser-api", "src/browser"]
 
 [workspace.package]
 # Product version for every executable and module.
-version = "0.9.3"
+version = "0.9.22"
 edition = "2021"
 publish = false
 

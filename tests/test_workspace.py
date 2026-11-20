@@ -18,8 +18,8 @@ from workspace_protocol import number, string, send as wire_send, wait_kind as w
 
 
 ROOT = Path(__file__).resolve().parent.parent
-DAEMON = runtime_binary(os.environ.get("WORMINAL_TEST_WORKSPACE_DAEMON", "worminald-x11"))
-VERSION = int(os.environ.get("WORMINAL_TEST_BRIDGE_VERSION", "1"))
+DAEMON = runtime_binary(os.environ.get("WORMINAL_TEST_WORKSPACE_DAEMON", "worminald"))
+VERSION = int(os.environ.get("WORMINAL_TEST_BRIDGE_VERSION", "2"))
 ENDPOINT = "worminal-workspace-v2" if VERSION == 2 else "worminal-workspace"
 send = partial(wire_send, version=VERSION)
 wait_kind = partial(wire_wait, version=VERSION)

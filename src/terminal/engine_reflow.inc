@@ -297,6 +297,7 @@ te_treflow(TermEngine *session, int col, int row)
 void
 te_tresize(TermEngine *session, int col, int row)
 {
+    if (col != term.col || row != term.row) session->output_epoch++;
 	if (col > 0 && row > 0 && term.row > 0 && col != term.col &&
 	    !IS_SET(MODE_ALTSCREEN)) {
 		if (sel.ob.x != -1)

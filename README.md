@@ -4,29 +4,46 @@
 
 # Worminal
 
-Worminal is a small Linux terminal that keeps your work independent of its windows: shells and tabs live in a background service, locally or over SSH, so closing every window leaves your programs running.
+Your shells, web tools and remote machines, together in a small Linux terminal.
 
-Its integrated browser lets a shell command turn the current terminal tab into a web page or local HTML tool, putting graphical tools directly into your shell workflow. Local HTML tools can read files and list directories through a limited, read-only API, so something like a file explorer can live beside your shells as an ordinary web document you can edit and reload without rebuilding Worminal.
+[Visit the website](https://flintwinters.github.io/worminal/).
 
-Updates [replace open windows automatically](docs/window-updates.md) while keeping terminal processes alive.
-Browser pages reload with their profile and cookies retained.
+Worminal keeps your workspace alive independently of its windows. Use it yourself, let an agent work alongside you,
+and come back without starting over.
 
-The aim is to make the terminal useful for more of your work while keeping the interface small and memory use low.
+- **Work that stays running.** Close every window and return to the same tabs, shells and running programs.
+  Local and remote sessions live in a background service.
 
-Worp is Worminal's high-level protocol for abstracting away the communication medium. It is an API layer that allows
-Worminal nodes to not care about the underlying method used to send messages: TCP, UDP, SSH, HTTP, etc.
-See [Worp architecture](docs/worp.md) for its shared command/event contract and currently supported transports.
-Native windows and other clients use the same Worp operations, including catalog/frame subscriptions, input and tab lifecycle.
+- **Multiple machines, one interface.** Keep local and SSH-backed tabs in the same window. Work with headless
+  hosts, enroll devices in a shared registry, and check their availability when you need them.
+  [Remote connections](docs/remote-install.md) · [Devices](docs/devices.md)
 
-Agents can discover and control existing terminal sessions with `worminald api help`;
-see [the agent interface](docs/automation.md) for listing tabs, reading screens and sending keystrokes.
-Shell applications can send [OSC 99 desktop notifications](docs/notifications.md), including from remote tabs.
-A small [explicit device registry](docs/devices.md) shares enrolled SSH routes through one authority, with
-on-demand availability checks and no heartbeats.
-Use [`worminald install-on-remote HOST`](docs/remote-install.md) to bootstrap a new compatible headless node over SSH.
-For existing devices, [`python3 manage.py upgrade HOST`](docs/remote-upgrade.md) copies this device’s installed release.
+- **Web tools belong beside your shell.** A shell command can turn its tab into a web page or local HTML tool.
+  Build a file explorer, report or project dashboard as an ordinary web document. Local tools can use a limited,
+  read-only file and directory API; edit and reload them without rebuilding the terminal.
 
-Installations include Atkinson Hyperlegible Mono as the default font, at 9 pt with a -3 pixel line offset.
-Font settings in `worminal.yaml` or an Alacritty config (see [docs/config.md](docs/config.md)) and the `-f` command-line option override the defaults.
+- **Agents can work with your actual sessions.** A discoverable native API lets agents find tabs, read screens
+  and retained output, wait for changes, and send guarded input locally or over SSH. Inspection leaves your focus,
+  scroll position and terminal size alone. Optional shell integration adds command completion and exit status.
+  [Agent interface](docs/automation.md)
 
-Built with Rust, GTK, WebKitGTK, and a terminal engine derived from [st](https://git.suckless.org/st/); see [LICENSE](LICENSE).
+- **Updates keep your shells alive.** Daemons transfer live sessions and windows replace themselves automatically.
+  Browser pages reload with their profile and cookies retained. Failed handoffs keep the existing owner running.
+  [Live updates](docs/window-updates.md)
+
+- **Arrange work as you go.** Drag tabs onto pane edges to split a window, move them between panes, and cycle
+  through them with the keyboard or Ctrl+scroll. Shells and browser tools share the same workspace.
+
+- **See what needs attention.** Tab colors distinguish busy tasks, SSH sessions and background shell jobs.
+  Applications can send desktop notifications from local or remote tabs; clicking one takes you to its tab.
+  [Notifications](docs/notifications.md)
+
+- **Bring your settings across machines.** Reuse supported font, color and scrollback settings from an Alacritty
+  config. Worminal settings sync when connecting to peers, merging independent edits and reporting conflicts.
+  Compatible peers also sync daemon versions automatically. [Configuration](docs/config.md)
+
+- **Keep the terminal small.** Native Wayland and X11 support, a lightweight launcher, and a shared terminal engine.
+  Hidden busy tabs avoid streaming terminal frames. CPU and network limits are checked as part of the test suite.
+
+Built with Rust, GTK and WebKitGTK, with a terminal engine derived from [st](https://git.suckless.org/st/).
+[License](LICENSE).

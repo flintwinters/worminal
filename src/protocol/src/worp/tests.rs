@@ -18,7 +18,53 @@ impl Handler for Echo {
 
 fn requests() -> Vec<Request> {
     vec![
+        Request::PasteKeys {
+            tab: 1,
+            text: "literal\n世界".into(),
+            names: vec!["Enter".into()],
+            guard: "guard".into(),
+        },
+        Request::WaitCommand {
+            tab: 1,
+            workspace: "workspace".into(),
+            command_id: u64::MAX,
+            timeout_ms: 60000,
+        },
+        Request::ReadOutput {
+            tab: 1,
+            since: "cursor".into(),
+            command_id: 0,
+        },
+        Request::ReadOutput {
+            tab: 1,
+            since: String::new(),
+            command_id: u64::MAX,
+        },
         Request::List,
+        Request::ReadMany {
+            tabs: vec![12, 13],
+            tail: 200,
+        },
+        Request::Keys {
+            tab: 12,
+            names: vec!["Ctrl-Left".into(), "F5".into()],
+            guard: "identity".into(),
+        },
+        Request::Paste {
+            tab: 12,
+            text: "one\ntwo".into(),
+            guard: String::new(),
+        },
+        Request::GuardedInput {
+            tab: 12,
+            bytes: b"literal".to_vec(),
+            guard: "identity".into(),
+        },
+        Request::Wait {
+            tab: 12,
+            after: "revision".into(),
+            timeout_ms: 1000,
+        },
         Request::OpenTerminal {
             options: tabs::TerminalOptions {
                 directory: "/target".into(),
@@ -158,5 +204,61 @@ fn lifecycle_validation_rejects_ambiguous_or_unbounded_targets() {
         },
     ] {
         assert!(Request::OpenTerminal { options }.validate().is_err());
+    }
+}
+
+#[test]
+fn extended_requests_reject_invalid_bounds_and_trailing_data() {
+    for request in [
+        Request::ReadMany {
+            tabs: vec![],
+            tail: 1,
+        },
+        Request::ReadMany {
+            tabs: vec![1; 17],
+            tail: 1,
+        },
+        Request::ReadMany {
+            tabs: vec![0],
+            tail: 1,
+        },
+        Request::ReadMany {
+            tabs: vec![1],
+            tail: 1001,
+        },
+        Request::Wait {
+            tab: 1,
+            after: "r".into(),
+            timeout_ms: 60001,
+        },
+        Request::Keys {
+            tab: 1,
+            names: vec![],
+            guard: String::new(),
+        },
+        Request::Paste {
+            tab: 1,
+            text: "\x1b[201~".into(),
+            guard: String::new(),
+        },
+    ] {
+        assert!(request.validate().is_err());
+    }
+    for request in requests().into_iter().filter(|r| {
+        matches!(
+            r,
+            Request::ReadMany { .. }
+                | Request::PasteKeys { .. }
+                | Request::WaitCommand { .. }
+                | Request::ReadOutput { .. }
+                | Request::Keys { .. }
+                | Request::Paste { .. }
+                | Request::GuardedInput { .. }
+                | Request::Wait { .. }
+        )
+    }) {
+        let mut packet = v2::encode_request(&request).unwrap();
+        packet.body.push(0);
+        assert!(v2::decode_request(&packet).is_err());
     }
 }

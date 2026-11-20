@@ -73,13 +73,16 @@ pub fn local_user() -> Vec<u8> {
     }
 }
 
-/// The foreground job of the terminal on `master`, when its leader is an ssh client.
-pub fn foreground_user(master: RawFd, local_user: &[u8]) -> Option<Vec<u8>> {
+/// The foreground process group of the terminal on `master`.
+pub fn foreground_group(master: RawFd) -> Option<libc::pid_t> {
     // SAFETY: tcgetpgrp only reads the descriptor's terminal state.
     let group = unsafe { libc::tcgetpgrp(master) };
-    if group <= 0 {
-        return None;
-    }
+    (group > 0).then_some(group)
+}
+
+/// The foreground job of the terminal on `master`, when its leader is an ssh client.
+pub fn foreground_user(master: RawFd, local_user: &[u8]) -> Option<Vec<u8>> {
+    let group = foreground_group(master)?;
     let cmdline = std::fs::read(format!("/proc/{group}/cmdline")).ok()?;
     let args: Vec<Vec<u8>> = cmdline
         .split(|byte| *byte == 0)

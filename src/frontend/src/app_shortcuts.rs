@@ -71,15 +71,7 @@ impl App {
         if (state == Mod::CONTROL_MASK || state == control_shift)
             && [key::Tab, key::ISO_Left_Tab].contains(&value)
         {
-            let count = self.notebook().n_pages();
-            if count != 0 {
-                let current = self.notebook().current_page().unwrap_or(0);
-                self.select_index(if state == control_shift {
-                    (current + count - 1) % count
-                } else {
-                    (current + 1) % count
-                });
-            }
+            self.cycle_tab(state == control_shift);
             return true;
         }
         // Ctrl+Shift+arrow focuses the pane that way; Alt+Shift+arrow moves the tab there like a drag would.
@@ -176,7 +168,14 @@ impl App {
         } else {
             return false;
         }
-        self.fonts.borrow_mut().set_zoom(zoom.clamp(-10.0, 40.0));
+        self.set_zoom(zoom);
+        true
+    }
+
+    pub(super) fn set_zoom(self: &Rc<Self>, zoom: f64) {
+        // Every page must receive the same bounded zoom, including browser views.
+        let zoom = zoom.clamp(-10.0, 40.0);
+        self.fonts.borrow_mut().set_zoom(zoom);
         let terminals: Vec<_> = self
             .pages
             .borrow()
@@ -192,6 +191,17 @@ impl App {
             }
         }
         self.refresh_tabs();
-        true
+    }
+
+    pub(super) fn cycle_tab(self: &Rc<Self>, previous: bool) {
+        let count = self.notebook().n_pages();
+        if count != 0 {
+            let current = self.notebook().current_page().unwrap_or(0);
+            self.select_index(if previous {
+                (current + count - 1) % count
+            } else {
+                (current + 1) % count
+            });
+        }
     }
 }

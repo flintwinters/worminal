@@ -17,9 +17,13 @@ use std::{
     ptr,
     rc::Rc,
 };
+use worminal_workspace::diagnostics::log;
 use worminal_workspace::launch::Launch;
 
 const PROCESS_TERM_NAME: &str = "xterm-256color";
+/// Set in every tab's environment: its presence says the program runs in a Worminal tab and its
+/// value is the `worminald` that serves it (`$WORMINAL_DAEMON api help` teaches the rest).
+pub const PROCESS_DAEMON_ENV: &str = "WORMINAL_DAEMON";
 const PROCESS_SHELL: &str = "/bin/sh";
 const PROCESS_STTY: &str = "stty raw pass8 nl -echo -iexten -cstopb 38400";
 
@@ -28,14 +32,6 @@ fn checked(result: libc::c_int) -> io::Result<libc::c_int> {
         Err(io::Error::last_os_error())
     } else {
         Ok(result)
-    }
-}
-
-fn log(priority: libc::c_int, message: &str) {
-    if let Ok(message) = std::ffi::CString::new(message) {
-        unsafe {
-            libc::syslog(priority, c"%s".as_ptr().cast(), message.as_ptr());
-        }
     }
 }
 
@@ -447,6 +443,10 @@ impl Pty {
         environment.insert("HOME".into(), account.home);
         environment.insert("SHELL".into(), shell.clone());
         environment.insert("TERM".into(), PROCESS_TERM_NAME.into());
+        environment.insert(
+            PROCESS_DAEMON_ENV.into(),
+            crate::upgrade_io::executable_path()?.into_os_string(),
+        );
         if !launch.window_id.is_empty() {
             environment.insert(
                 "WINDOWID".into(),

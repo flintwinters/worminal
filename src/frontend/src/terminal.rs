@@ -1,27 +1,33 @@
 //! GTK terminal widget. All host actions run after releasing widget state borrows.
 use crate::{
     fonts::Fonts,
-    input::{self, KeyAction, Keyboard, Mouse},
+    input::{self, Autoscroll, KeyAction, Keyboard, Mouse},
     link_action,
     paint::{Painter, Palette, Style},
     viewport::{Damage, Viewport},
 };
 use gtk::{gdk, prelude::*};
 use std::{cell::RefCell, io, rc::Rc, time::Duration};
-use worminal_engine::{paste_begin, paste_end, PasteFilter};
-use worminal_engine_sys::*;
+use worminal_engine::{input::Encoded, paste_chunks};
+use worminal_protocol::cell::*;
+use worminal_protocol::input::{MOD_KEYS, MOUSE_NONE};
 use worminal_protocol::worp::{
-    commands::{CommandKind, Control, ControlAction, SelectionOperation},
+    commands::{CommandKind, Control, ControlAction, MouseAction, SelectionOperation},
     events::{Event, EventKind},
 };
 use worminal_protocol::{WORKSPACE_MAX_COLS, WORKSPACE_MAX_ROWS};
 
+mod file_drop;
+mod scroll;
+
 #[derive(Debug)]
 pub enum Action {
     Send(CommandKind),
+    /// Input for the application, with the view's encoding of it for daemons that predate
+    /// `WIRE_FEATURE_INPUT`; newer daemons encode the command against their live modes.
+    Input(CommandKind, Encoded),
     Claim,
-    /// A press landed on this already-live terminal; the app makes its tab the current one.
-    Pointed,
+    CycleTab(bool),
     Resized(u32, u32),
     Print(Vec<u8>),
     Error(String),
@@ -33,6 +39,9 @@ struct State {
     timer: Option<glib::SourceId>,
     keyboard: Keyboard,
     mouse: Mouse,
+    tab_scroll: f64,
+    /// Middle-click autoscroll and its frame timer; any later press, key or focus loss ends it.
+    autoscroll: Option<(Autoscroll, glib::SourceId)>,
     mode: u32,
     cursor: u32,
     blink: bool,
@@ -84,6 +93,8 @@ impl Terminal {
                 timer: None,
                 keyboard: Keyboard::default(),
                 mouse: Mouse::default(),
+                tab_scroll: 0.0,
+                autoscroll: None,
                 mode: 0,
                 cursor: 2,
                 blink: false,
@@ -150,10 +161,8 @@ impl Terminal {
             glib::clone!(@weak inner => @default-return glib::Propagation::Proceed,
             move |_, _| { inner.state.borrow_mut().pointer = None; inner.hover(); glib::Propagation::Proceed }),
         );
-        inner.widget.connect_scroll_event(
-            glib::clone!(@weak inner => @default-return glib::Propagation::Proceed,
-            move |_, event| { inner.wheel(event); glib::Propagation::Stop }),
-        );
+        inner.connect_wheel();
+        inner.connect_file_drop();
         inner.widget.connect_focus_in_event(
             glib::clone!(@weak inner => @default-return glib::Propagation::Proceed,
             move |_, _| { inner.focus(true); glib::Propagation::Proceed }),
@@ -164,6 +173,7 @@ impl Terminal {
         );
         inner.widget.connect_destroy(glib::clone!(@weak inner => move |_| {
             inner.clear_all_selection();
+            inner.stop_autoscroll();
             let (timer, im) = { let mut state = inner.state.borrow_mut(); state.destroyed = true;
                 (state.timer.take(), state.im.take()) };
             if let Some(timer) = timer { timer.remove(); }
@@ -332,7 +342,11 @@ impl Terminal {
 }
 impl Drop for Inner {
     fn drop(&mut self) {
-        if let Some(timer) = self.state.get_mut().timer.take() {
+        let state = self.state.get_mut();
+        if let Some(timer) = state.timer.take() {
+            timer.remove();
+        }
+        if let Some((_, timer)) = state.autoscroll.take() {
             timer.remove();
         }
     }
@@ -482,9 +496,7 @@ impl Inner {
                         && state.viewport.live()
                         && state.mode & MODE_HIDE == 0
                         && state.cursor & 1 != 0)
-                        || state.viewport.row(*row).is_some_and(|cells| {
-                            cells.iter().any(|cell| cell.attributes & ATTR_BLINK != 0)
-                        })
+                        || state.viewport.row_blinks(*row)
                 })
                 .collect();
             Damage { full: false, rows }
@@ -492,29 +504,41 @@ impl Inner {
         self.damage(&damage);
     }
     fn input(self: &Rc<Self>, bytes: &[u8]) {
-        if self.state.borrow().mode & MODE_KBDLOCK != 0 {
-            return;
-        }
-        self.prepare();
-        self.clear_all_selection();
-        crate::timing("input");
-        let (damage, claim) = {
-            let mut state = self.state.borrow_mut();
-            let damage = state.viewport.clear_selection();
-            state.input_pending |= !bytes.is_empty();
-            (damage, !state.viewport.live())
-        };
-        match damage {
-            Ok(damage) => self.damage(&damage),
-            Err(error) => self.error(error),
-        }
-        if claim {
-            self.emit(Action::Claim);
-        }
-        self.send(CommandKind::Input {
+        self.deliver(CommandKind::Input {
             bytes: bytes.to_vec(),
             control: Control::Acquire,
         });
+    }
+    /// Delivers application input. The view encodes it with the modes it draws only to decide
+    /// its own effects: the daemon's live modes may already differ.
+    fn deliver(self: &Rc<Self>, kind: CommandKind) {
+        let encoded = {
+            let state = self.state.borrow();
+            let alternate = state.viewport.frame().alternate != 0;
+            worminal_engine::input::encode(&kind, state.mode, alternate)
+        };
+        let Some(encoded) = encoded else {
+            return;
+        };
+        if let Encoded::Input(bytes) = &encoded {
+            self.prepare();
+            self.clear_all_selection();
+            crate::timing("input");
+            let (damage, claim) = {
+                let mut state = self.state.borrow_mut();
+                let damage = state.viewport.clear_selection();
+                state.input_pending |= !bytes.is_empty();
+                (damage, !state.viewport.live())
+            };
+            match damage {
+                Ok(damage) => self.damage(&damage),
+                Err(error) => self.error(error),
+            }
+            if claim {
+                self.emit(Action::Claim);
+            }
+        }
+        self.emit(Action::Input(kind, encoded));
     }
     fn key(self: &Rc<Self>, event: &gdk::EventKey) -> bool {
         self.prepare();
@@ -522,6 +546,7 @@ impl Inner {
         if event.event_type() == gdk::EventType::KeyRelease {
             return im.is_some_and(|im| im.filter_keypress(event));
         }
+        self.stop_autoscroll();
         let action = {
             let mut state = self.state.borrow_mut();
             let mode = state.mode;
@@ -531,7 +556,7 @@ impl Inner {
                 .press(event.keyval(), event.state(), mode, rows)
         };
         match action {
-            KeyAction::Bytes(bytes) => self.input(&bytes),
+            KeyAction::Send(kind) => self.deliver(kind),
             KeyAction::PastePrimary => self.paste(gdk::SELECTION_PRIMARY),
             KeyAction::Scroll { up, rows } => self.send(CommandKind::Scroll { up, amount: rows }),
             KeyAction::Control(value) => self.send(CommandKind::Control(match value {
@@ -634,24 +659,26 @@ impl Inner {
                 return;
             };
             if let Some(text) = text {
-                let bracketed = inner.state.borrow().mode & MODE_BRCKTPASTE != 0;
-                let mut filter = PasteFilter::new(bracketed);
-                let mut bytes = text.as_bytes().to_vec();
-                let length = filter.filter(&mut bytes);
-                if bracketed {
-                    inner.input(paste_begin());
-                }
-                for chunk in bytes[..length].chunks(32768) {
-                    inner.input(chunk);
-                }
-                if bracketed {
-                    inner.input(paste_end());
-                }
+                inner.paste_bytes(text.as_bytes().to_vec());
             }
         });
     }
+    fn paste_bytes(self: &Rc<Self>, bytes: Vec<u8>) {
+        let chunks = paste_chunks(&bytes);
+        let last = chunks.len() - 1;
+        for (index, chunk) in chunks.into_iter().enumerate() {
+            self.deliver(CommandKind::Paste {
+                bytes: chunk.to_vec(),
+                begin: index == 0,
+                end: index == last,
+            });
+        }
+    }
     fn focus(self: &Rc<Self>, focused: bool) {
         self.prepare();
+        if !focused {
+            self.stop_autoscroll();
+        }
         let im = self.state.borrow().im.clone();
         if let Some(im) = im {
             im.set_client_window(self.widget.window().as_ref());
@@ -686,22 +713,25 @@ impl Inner {
     fn button(self: &Rc<Self>, event: &gdk::EventButton) {
         self.prepare();
         let release = event.event_type() == gdk::EventType::ButtonRelease;
-        // `grab_focus` below moves typing here, but copy, paste, new tabs and pane focus follow the app's active
-        // tab. Panes of a split are all live, so only a terminal that is not yet live used to claim the tab: a
-        // click on the other pane typed there while Ctrl+Shift+C/V still used the previous tab.
+        let was_scrolling = !release && self.stop_autoscroll();
+        let shift = event.state().contains(gdk::ModifierType::SHIFT_MASK);
+        // `grab_focus` below moves typing here; the app decides whether that makes this tab the current one.
         if !release {
-            self.emit(if self.state.borrow().viewport.live() {
-                Action::Pointed
-            } else {
-                Action::Claim
-            });
+            self.emit(Action::Claim);
         }
         self.widget.grab_focus();
         let (px, py) = event.position();
         let (x, y) = self.pointer(px, py);
+        if event.button() == 2 && !shift {
+            // A press that ended autoscroll must not restart it; its release is ignored too.
+            if !(release || was_scrolling) {
+                self.start_autoscroll(py);
+            }
+            return;
+        }
         // Links take button 1 before mouse reporting, as in the retired X11 frontend; Shift
         // bypasses them to select or report. Both press and release stay local.
-        if event.button() == 1 && !event.state().contains(gdk::ModifierType::SHIFT_MASK) {
+        if event.button() == 1 && !shift {
             let mut state = self.state.borrow_mut();
             if release {
                 if let Some((url, column, row)) = state.link.take() {
@@ -729,31 +759,24 @@ impl Inner {
                 }
             }
         }
-        let bytes = {
+        // An application reporting the mouse owns unshifted buttons, even when the daemon's
+        // live modes encode no report for this one.
+        let reported = {
             let mut state = self.state.borrow_mut();
-            if state.mode & MODE_MOUSE != 0
-                && !event.state().contains(gdk::ModifierType::SHIFT_MASK)
-            {
+            let reported = state.mode & MODE_MOUSE != 0 && !shift;
+            if reported {
                 state.mouse.button = if release { 0 } else { event.button() };
-                Some(event.button().checked_sub(1).and_then(|button| {
-                    state.mouse.report(
-                        state.mode,
-                        state.viewport.live(),
-                        button,
-                        x,
-                        y,
-                        event.state(),
-                        release,
-                        false,
-                    )
-                }))
-            } else {
-                None
             }
+            reported
         };
-        if let Some(bytes) = bytes {
-            if let Some(bytes) = bytes {
-                self.input(&bytes);
+        if reported {
+            let action = if release {
+                MouseAction::Release
+            } else {
+                MouseAction::Press
+            };
+            if let Some(button) = event.button().checked_sub(1) {
+                self.deliver(mouse(button, (x, y), event.state(), action));
             }
             return;
         }
@@ -828,29 +851,29 @@ impl Inner {
         self.prepare();
         let (px, py) = event.position();
         let (x, y) = self.pointer(px, py);
-        self.state.borrow_mut().pointer = Some((x, y));
-        self.hover();
+        let moved = {
+            let mut state = self.state.borrow_mut();
+            if let Some((scroll, _)) = &mut state.autoscroll {
+                scroll.y = py;
+            }
+            state.pointer.replace((x, y)) != Some((x, y))
+        };
+        // Frame commits refresh hover separately; subcell motion cannot change the target.
+        if moved {
+            self.hover();
+        }
         let result = {
             let mut state = self.state.borrow_mut();
             if state.mode & MODE_MOUSE != 0
                 && !event.state().contains(gdk::ModifierType::SHIFT_MASK)
             {
-                let bytes = if state.mouse.last != (x, y) {
-                    state.mouse.report(
-                        state.mode,
-                        state.viewport.live(),
-                        state.mouse.button.checked_sub(1).unwrap_or(3),
-                        x,
-                        y,
-                        event.state(),
-                        false,
-                        true,
-                    )
-                } else {
-                    None
-                };
+                // Motion reports only reach a live view's application.
+                let report = (state.mouse.last != (x, y) && state.viewport.live()).then(|| {
+                    let button = state.mouse.button.checked_sub(1).unwrap_or(MOUSE_NONE);
+                    mouse(button, (x, y), event.state(), MouseAction::Motion)
+                });
                 state.mouse.last = (x, y);
-                (bytes, None)
+                (report, None)
             } else if state.selecting {
                 (
                     None,
@@ -867,8 +890,8 @@ impl Inner {
                 (None, None)
             }
         };
-        if let Some(bytes) = result.0 {
-            self.input(&bytes);
+        if let Some(report) = result.0 {
+            self.deliver(report);
         }
         if let Some(result) = result.1 {
             match result {
@@ -877,50 +900,65 @@ impl Inner {
             }
         }
     }
-    fn wheel(self: &Rc<Self>, event: &gdk::EventScroll) {
-        self.prepare();
-        let smooth = event.direction() == gdk::ScrollDirection::Smooth;
-        if smooth && event.delta().1 == 0.0 {
-            return;
-        }
-        let up = event.direction() == gdk::ScrollDirection::Up || smooth && event.delta().1 < 0.0;
-        let (px, py) = event.position();
-        let (x, y) = self.pointer(px, py);
-        let (mouse, bytes, alternate, appcursor) = {
-            let state = self.state.borrow();
-            (
-                state.mode & MODE_MOUSE != 0
-                    && !event.state().contains(gdk::ModifierType::SHIFT_MASK),
-                state.mouse.report(
-                    state.mode,
-                    state.viewport.live(),
-                    if up { 64 } else { 65 },
-                    x,
-                    y,
-                    event.state(),
-                    false,
-                    false,
-                ),
-                state.viewport.frame().alternate != 0 && state.mode & MODE_ALTSCROLL != 0,
-                state.mode & MODE_APPCURSOR != 0,
-            )
-        };
-        if mouse {
-            if let Some(bytes) = bytes {
-                self.input(&bytes);
+    fn start_autoscroll(self: &Rc<Self>, y: f64) {
+        const FRAME: Duration = Duration::from_millis(16);
+        let weak = Rc::downgrade(self);
+        let timer = glib::timeout_add_local(FRAME, move || match weak.upgrade() {
+            Some(inner) => {
+                inner.autoscroll_frame(FRAME.as_secs_f64());
+                glib::ControlFlow::Continue
             }
-        } else if alternate {
-            self.input(match (appcursor, up) {
-                (true, true) => b"\x1bOA",
-                (true, false) => b"\x1bOB",
-                (false, true) => b"\x1b[A",
-                (false, false) => b"\x1b[B",
-            });
-        } else {
-            self.send(CommandKind::Scroll {
-                up,
-                amount: worminal_config::get().scroll_multiplier as u32,
-            });
+            None => glib::ControlFlow::Break,
+        });
+        self.state.borrow_mut().autoscroll = Some((Autoscroll::new(y), timer));
+        self.set_cursor(Some("all-scroll"));
+    }
+    /// Ends autoscroll, reporting whether it was running.
+    fn stop_autoscroll(&self) -> bool {
+        let Some((_, timer)) = self.state.borrow_mut().autoscroll.take() else {
+            return false;
+        };
+        timer.remove();
+        self.set_cursor(None);
+        true
+    }
+    fn set_cursor(&self, name: Option<&str>) {
+        if let Some(window) = self.widget.window() {
+            let cursor = name.and_then(|name| gdk::Cursor::from_name(&window.display(), name));
+            window.set_cursor(cursor.as_ref());
         }
+    }
+    fn autoscroll_frame(self: &Rc<Self>, seconds: f64) {
+        let step = {
+            let mut state = self.state.borrow_mut();
+            let height = state
+                .painter
+                .as_ref()
+                .map_or(1.0, |painter| f64::from(painter.font().metrics.height));
+            state
+                .autoscroll
+                .as_mut()
+                .and_then(|(scroll, _)| scroll.step(seconds, height))
+        };
+        if let Some((up, lines)) = step {
+            let cell = self.state.borrow().pointer.unwrap_or_default();
+            self.scroll(up, lines, lines, cell, gdk::ModifierType::empty());
+        }
+    }
+}
+
+/// A mouse command for cell `(x, y)`; pointer coordinates are clamped to the grid.
+fn mouse(
+    button: u32,
+    (x, y): (i32, i32),
+    state: gdk::ModifierType,
+    action: MouseAction,
+) -> CommandKind {
+    CommandKind::Mouse {
+        button,
+        column: x.max(0) as u32,
+        row: y.max(0) as u32,
+        modifiers: state.bits() & MOD_KEYS,
+        action,
     }
 }

@@ -8,8 +8,8 @@ const KEYS: &[(&str, &str, &str)] = &[
     ("font.size", "number > 0 (points)", "9"),
     (
         "font.normal.family",
-        "font family name",
-        "Atkinson Hyperlegible Mono",
+        "font family name (a comma-separated list falls back in order)",
+        "DejaVu Sans Mono, Atkinson Hyperlegible Mono",
     ),
     ("font.offset.y", "integer (pixels of line spacing)", "-3"),
     ("font.glyph_offset.y", "integer (pixels)", "0"),
@@ -65,6 +65,7 @@ const KEYS: &[(&str, &str, &str)] = &[
     ),
     ("worminal.update_notifications", "boolean", "false"),
     ("worminal.group_tabs_by_title", "boolean", "true"),
+    ("worminal.wsl_window_frame", "boolean", "true"),
     (
         "general.import",
         "list of file paths (Alacritty import)",
@@ -84,7 +85,7 @@ font:
   size: 9
   offset: {y: -3}
   glyph_offset: {y: 0}
-  normal: {family: Atkinson Hyperlegible Mono}
+  normal: {family: 'DejaVu Sans Mono, Atkinson Hyperlegible Mono'}
 scrolling:
   history: 10000
   multiplier: 3
@@ -99,6 +100,7 @@ colors:
 worminal:
   update_notifications: false
   group_tabs_by_title: true
+  wsl_window_frame: true
 ";
 
 fn matches(pattern: &str, path: &[String]) -> bool {
@@ -184,9 +186,11 @@ To configure for someone:
 Invalid configuration never stops Worminal: it reports to stderr and runs with defaults, so always validate.
 
 When it applies: each process reads configuration once, at start. New windows pick up appearance and
-update_notifications. scrolling.history and worminal.group_tabs_by_title are the daemon's: they take effect when
-the daemon next restarts (existing shells are preserved by the normal handoff). Running windows never change.
-Other devices: `worminald config sync` (views also run it once per host on connect). Only worminal.yaml syncs.",
+update_notifications and wsl_window_frame (WSL only: windows restyle the Windows-drawn frame to the terminal
+background; false keeps the stock frame). scrolling.history and worminal.group_tabs_by_title are the daemon's:
+they take effect when the daemon next restarts (existing shells are preserved by the normal handoff). Running windows never change.
+Other devices: `worminald config sync` (views also sync after updating on each master connection).
+Only worminal.yaml syncs.",
         keys = keys_text()
     )
 }

@@ -1,15 +1,28 @@
 //! `worminald config`: inspect and validate the runtime configuration without starting a service.
 use std::{ffi::OsString, io};
 use worminal_config::sync::Prefer;
+use worminal_workspace::{
+    cli_output,
+    cli_schema::{Config, ConfigOption as Flag},
+};
 
 const USAGE: &str = "usage: worminald config [--json [--defaults]|--paths|--example|--help]\n\
     worminald config sync [--prefer local|remote] SSH_ENDPOINT\n\
     Run worminald config --help for the complete reference.";
 
+pub(crate) fn reference() -> String {
+    format!(
+        "{}\n{}\n{}",
+        Config::GROUP.reference(),
+        Flag::GROUP.reference(),
+        worminal_config::help()
+    )
+}
+
 fn sync(arguments: &[OsString]) -> io::Result<i32> {
     let (prefer, endpoint) = match arguments {
         [endpoint] => (Prefer::Neither, endpoint),
-        [flag, side, endpoint] if flag == "--prefer" => match side.to_str() {
+        [flag, side, endpoint] if Flag::Prefer.matches(flag) => match side.to_str() {
             Some("local") => (Prefer::Local, endpoint),
             Some("remote") => (Prefer::Remote, endpoint),
             _ => return usage(),
@@ -21,38 +34,46 @@ fn sync(arguments: &[OsString]) -> io::Result<i32> {
         .ok_or_else(|| io::Error::other("SSH endpoint must be UTF-8."))
         .and_then(|endpoint| crate::config_sync::run(endpoint, prefer))
         .unwrap_or_else(|error| serde_json::json!({"ok": false, "error": error.to_string()}));
-    println!("{result}");
+    print!("{}", cli_output::reply(&result));
     Ok(i32::from(result["ok"] == false))
 }
 
 fn usage() -> io::Result<i32> {
-    eprintln!("{USAGE}");
+    eprintln!("{}", cli_output::error(USAGE));
     Ok(2)
 }
 
 pub fn run(arguments: &[OsString]) -> io::Result<i32> {
-    match arguments.first().and_then(|word| word.to_str()) {
-        Some("sync") => return sync(&arguments[1..]),
-        Some("exchange") if arguments.len() == 1 => {
+    match arguments
+        .first()
+        .and_then(|word| word.to_str())
+        .and_then(Config::parse)
+    {
+        Some(Config::Sync) => return sync(&arguments[1..]),
+        Some(Config::Exchange) if arguments.len() == 1 => {
             crate::config_sync::exchange()?;
             return Ok(0);
         }
         _ => {}
     }
     let mode = match arguments {
-        [] => "",
-        [flag] if flag == "--json" || flag == "--paths" => flag.to_str().unwrap_or(""),
-        [json, defaults] if json == "--json" && defaults == "--defaults" => "--defaults",
-        [flag] if flag == "--help" || flag == "-h" => {
-            println!("{}", worminal_config::help());
+        [] => None,
+        [flag] if Flag::Json.matches(flag) || Flag::Paths.matches(flag) => {
+            flag.to_str().and_then(Flag::parse)
+        }
+        [json, defaults] if Flag::Json.matches(json) && Flag::Defaults.matches(defaults) => {
+            Some(Flag::Defaults)
+        }
+        [flag] if Flag::Help.matches(flag) => {
+            println!("{}", cli_output::text(reference()));
             return Ok(0);
         }
-        [flag] if flag == "--example" => {
+        [flag] if Flag::Example.matches(flag) => {
             print!("{}", worminal_config::EXAMPLE);
             return Ok(0);
         }
         _ => {
-            eprintln!("{USAGE}");
+            eprintln!("{}", cli_output::error(USAGE));
             return Ok(2);
         }
     };
@@ -60,31 +81,49 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
         path.map(|path| path.map_or_else(|| "none".to_string(), |path| path.display().to_string()))
     };
     let result = (|| {
-        if mode == "--paths" {
-            println!("worminal: {}", found(worminal_config::worminal_path())?);
-            println!("alacritty: {}", found(worminal_config::alacritty_path())?);
+        if mode == Some(Flag::Paths) {
             println!(
-                "worminal_default: {}",
-                worminal_config::worminal_default_path().display()
+                "{}",
+                cli_output::text(format!(
+                    "worminal: {}",
+                    found(worminal_config::worminal_path())?
+                ))
+            );
+            println!(
+                "{}",
+                cli_output::text(format!(
+                    "alacritty: {}",
+                    found(worminal_config::alacritty_path())?
+                ))
+            );
+            println!(
+                "{}",
+                cli_output::text(format!(
+                    "worminal_default: {}",
+                    worminal_config::worminal_default_path().display()
+                ))
             );
             return Ok(());
         }
-        let settings = if mode == "--defaults" {
+        let settings = if mode == Some(Flag::Defaults) {
             worminal_config::Settings::resolve(&serde_json::Value::Null)?
         } else {
             worminal_config::load()?
         };
-        if mode == "--json" || mode == "--defaults" {
+        if mode == Some(Flag::Json) || mode == Some(Flag::Defaults) {
             println!("{}", settings.to_json());
         } else {
-            println!("configuration is valid");
+            println!("{}", cli_output::success("configuration is valid"));
             if let Some(path) = worminal_config::worminal_path()? {
                 let ignored = worminal_config::unknown_keys(&worminal_config::read(&path)?);
                 if !ignored.is_empty() {
                     println!(
-                        "ignored by Worminal in {}: {} (see worminald config --help)",
-                        path.display(),
-                        ignored.join(", ")
+                        "{}",
+                        cli_output::text(format!(
+                            "ignored by Worminal in {}: {} (see worminald config --help)",
+                            path.display(),
+                            ignored.join(", ")
+                        ))
                     );
                 }
             }
@@ -94,7 +133,10 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
     match result {
         Ok(()) => Ok(0),
         Err(error) => {
-            eprintln!("worminal: invalid configuration: {error}");
+            eprintln!(
+                "{}",
+                cli_output::error(format!("worminal: invalid configuration: {error}"))
+            );
             Ok(1)
         }
     }

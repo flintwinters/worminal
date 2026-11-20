@@ -100,8 +100,43 @@ pub(crate) struct Screen {
     pub links: Vec<Vec<u8>>,
 }
 
+#[derive(Default)]
+pub(crate) struct ShellState {
+    pub phase: Option<&'static str>,
+    pub command_id: u64,
+    pub exit_status: Option<i32>,
+    pub completed_command_id: u64,
+    pub completed_exit_status: Option<i32>,
+}
+impl ShellState {
+    fn event(&mut self, marker: i32, data: &[u8]) {
+        match marker as u8 {
+            b'A' => self.phase = Some("prompt"),
+            b'B' => self.phase = Some("input"),
+            b'C' => {
+                self.phase = Some("running");
+                self.command_id = self.command_id.saturating_add(1);
+                self.exit_status = None;
+            }
+            b'D' => {
+                self.phase = Some("finished");
+                self.exit_status = std::str::from_utf8(data)
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .filter(|status| (0..=255).contains(status));
+                self.completed_command_id = self.command_id;
+                self.completed_exit_status = self.exit_status;
+            }
+            _ => {}
+        }
+    }
+}
+
 pub(crate) struct Tab {
     pub id: u32,
+    pub output_revision: u64,
+    pub shell: ShellState,
+    pub output: crate::api_output::History,
     pub terminal: Option<Terminal>,
     pub title: Vec<u8>,
     pub initial_title: Vec<u8>,
@@ -187,6 +222,9 @@ impl Tab {
         Self {
             id,
             terminal: None,
+            output_revision: 0,
+            shell: ShellState::default(),
+            output: crate::api_output::History::default(),
             title: title.to_vec(),
             initial_title: title.to_vec(),
             directory: Vec::new(),
@@ -266,6 +304,31 @@ impl Tab {
             self.catalog_dirty = true;
             self.regroup = true;
         }
+        let background = terminal.pty.fd().is_some_and(|fd| {
+            crate::ssh::foreground_group(fd)
+                .is_some_and(|foreground| crate::jobs::background(pid, foreground))
+        });
+        let bit = worminal_protocol::cell::MODE_BACKGROUND_JOB;
+        let next = if background {
+            self.mode | bit
+        } else {
+            self.mode & !bit
+        };
+        self.catalog_dirty |= self.mode != next;
+        self.mode = next;
+        // A task that exits without withdrawing its OSC 9;4 progress would leave the tab busy forever.
+        // The shell leads its own process group, so the shell in the foreground means nothing is running.
+        if self.mode & terminal::MODE_BUSY != 0
+            && terminal
+                .pty
+                .fd()
+                .filter(|_| pid > 0)
+                .and_then(crate::ssh::foreground_group)
+                == Some(pid)
+        {
+            self.mode &= !terminal::MODE_BUSY;
+            self.catalog_dirty = true;
+        }
     }
 
     /// The name views paint for this tab; grouping compares it.
@@ -340,6 +403,7 @@ impl Tab {
         if self.terminal.is_none() {
             return Ok(Vec::new());
         }
+        self.output_revision = self.output_revision.saturating_add(1);
         let mut notices = Vec::new();
         if self.terminal.as_ref().unwrap().pending.len() >= 4 {
             // Native compatibility snapshots permit a larger unparsed buffer than a live UTF-8 suffix.
@@ -516,6 +580,12 @@ impl Tab {
                             ),
                         ));
                     }
+                }
+                terminal::WORMINAL_SHELL => {
+                    self.shell.event(event.argument, &event.data);
+                    let engine = &mut self.terminal.as_mut().unwrap().engine;
+                    self.output
+                        .event(event.argument as u8, &self.shell, engine)?;
                 }
                 terminal::WORMINAL_NOTIFICATION => {
                     if let Some(client) = self.controller {

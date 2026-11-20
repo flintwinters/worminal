@@ -12,8 +12,11 @@ use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
-use worminal_engine_sys::{WORMINAL_DEFAULT_BACKGROUND as BG, WORMINAL_DEFAULT_FOREGROUND as FG};
-use worminal_protocol::{worp::commands::CommandKind, WIRE_FEATURE_PANES};
+use worminal_protocol::{
+    cell::{COLOR_DEFAULT_BACKGROUND as BG, COLOR_DEFAULT_FOREGROUND as FG},
+    worp::commands::CommandKind,
+    WIRE_FEATURE_PANES,
+};
 
 type Rect = (f64, f64, f64, f64);
 /// One tab strip above the notebook holding just its tabs.
@@ -29,7 +32,6 @@ pub(super) struct Panes {
     host: gtk::Box,
     /// Region a hovering tab drag would claim, in `root` coordinates.
     marked: Rc<Cell<Option<Rect>>>,
-    mark: gtk::DrawingArea,
     list: RefCell<Vec<Rc<Pane>>>,
     layout: RefCell<Layout>,
     focused: Cell<u32>,
@@ -42,15 +44,14 @@ impl Panes {
         let host = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let root = gtk::Overlay::new();
         root.add(&host);
-        let mark = gtk::DrawingArea::new();
-        // A windowed overlay would intercept pointer events above terminal content.
-        mark.set_has_window(false);
-        root.add_overlay(&mark);
-        root.set_overlay_pass_through(&mark, true);
+        // Draw after children instead of using an overlay widget: GTK drag hit testing
+        // ignores overlay pointer pass-through and would hide terminal drop targets.
         let marked = Rc::new(Cell::new(None::<Rect>));
-        mark.connect_draw(
-            glib::clone!(@strong marked => @default-return glib::Propagation::Proceed,
-                move |_, cr| {
+        root.connect_local(
+            "draw",
+            true,
+            glib::clone!(@strong marked => move |values| {
+                let cr = values[1].get::<cairo::Context>().unwrap();
                 if let Some((x, y, width, height)) = marked.get() {
                     cr.rectangle(x, y, width, height);
                     cr.set_source_rgba(0.6, 0.6, 0.6, 0.25);
@@ -63,14 +64,13 @@ impl Panes {
                         eprintln!("worminal: split mark: {error}");
                     }
                 }
-                glib::Propagation::Proceed
+                Some(false.to_value())
             }),
         );
         Self {
             root,
             host,
             marked,
-            mark,
             list: RefCell::new(Vec::new()),
             layout: RefCell::new(Layout::Leaf(0)),
             focused: Cell::new(0),
@@ -96,13 +96,16 @@ impl App {
         let pane = self.add_pane();
         self.panes.focused.set(pane.id);
         *self.panes.layout.borrow_mut() = Layout::Leaf(pane.id);
-        self.panes.mark.connect_draw(
-            glib::clone!(@weak self as app => @default-return glib::Propagation::Proceed,
-            move |_, cr| {
-                if let Err(error) = app.draw_borders(cr) {
+        // After the children, like the drop highlight: an overlay widget would hide drop targets from GTK.
+        self.panes.root.connect_local(
+            "draw",
+            true,
+            glib::clone!(@weak self as app => @default-return None, move |values| {
+                let cr = values[1].get::<gtk::cairo::Context>().ok()?;
+                if let Err(error) = app.draw_borders(&cr) {
                     eprintln!("worminal: pane borders: {error}");
                 }
-                glib::Propagation::Proceed
+                Some(false.to_value())
             }),
         );
         self.rebuild();
@@ -263,7 +266,7 @@ impl App {
     }
     pub(super) fn focus_pane(&self, pane: &Pane) {
         if self.panes.focused.replace(pane.id) != pane.id {
-            self.panes.mark.queue_draw();
+            self.panes.root.queue_draw();
         }
     }
     /// Focus the pane holding a tab and select its page there.
@@ -329,7 +332,7 @@ impl App {
             Some((f64::from(x) + dx, f64::from(y) + dy, width, height))
         });
         self.panes.marked.set(rect);
-        self.panes.mark.queue_draw();
+        self.panes.root.queue_draw();
     }
     /// Move a tab's page into `dest`, leaving the pane that held it.
     fn move_page(&self, id: u32, dest: &Pane) {
@@ -426,6 +429,15 @@ impl App {
         self.drop_tab(id, target);
         true
     }
+    /// A terminal asks to become the current tab: it was pressed, or must take control. Panes of a split are all
+    /// live, so liveness alone cannot tell whether the press changed the current tab. It must: typing follows
+    /// the focused widget, but copy, paste, new tabs and pane focus follow the active tab, and a click on the
+    /// other pane once typed there while Ctrl+Shift+C/V still used the previous tab.
+    pub(super) fn claim(self: &Rc<Self>, id: u32) {
+        if self.active.get() != id || !self.terminal(id).is_some_and(|terminal| terminal.live()) {
+            self.activate(id);
+        }
+    }
     /// Gather every tab into the focused pane again.
     pub(super) fn unsplit(self: &Rc<Self>) {
         let home = self.focused_pane();
@@ -484,7 +496,7 @@ impl App {
             .host
             .pack_start(&self.tree(&layout), true, true, 0);
         self.panes.host.show_all();
-        self.panes.mark.queue_draw();
+        self.panes.root.queue_draw();
     }
     fn tree(&self, layout: &Layout) -> gtk::Widget {
         match layout {

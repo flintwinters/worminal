@@ -8,7 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/signalfd.h>
-#include <sys/socket.h>
 #include <unistd.h>
 
 static int
@@ -33,16 +32,6 @@ signalfd(int fd, const sigset_t *mask, int flags)
 	if (receiver_fault("signals")) { errno = EMFILE; return -1; }
 	int (*original)(int, const sigset_t *, int) = dlsym(RTLD_NEXT, "signalfd");
 	return original(fd, mask, flags);
-}
-
-int
-setsockopt(int fd, int level, int option, const void *value, socklen_t length)
-{
-	if (receiver_fault("transport") && level == SOL_SOCKET && option == SO_RCVTIMEO) {
-		errno = EMFILE; return -1;
-	}
-	int (*original)(int, int, int, const void *, socklen_t) = dlsym(RTLD_NEXT, "setsockopt");
-	return original(fd, level, option, value, length);
 }
 
 static void

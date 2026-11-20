@@ -18,6 +18,20 @@ type Async = unsafe extern "C" fn(
     >,
     *mut c_void,
 );
+type Clear = unsafe extern "C" fn(
+    *mut c_void,
+    u32,
+    i64,
+    *mut gio::ffi::GCancellable,
+    Option<
+        unsafe extern "C" fn(
+            *mut glib::gobject_ffi::GObject,
+            *mut gio::ffi::GAsyncResult,
+            *mut c_void,
+        ),
+    >,
+    *mut c_void,
+);
 type ExportFinish = unsafe extern "C" fn(
     *mut c_void,
     *mut gio::ffi::GAsyncResult,
@@ -43,7 +57,8 @@ type ImportFinish = unsafe extern "C" fn(
 ) -> i32;
 
 struct Transfer {
-    _profile: WebsiteDataManager,
+    profile: WebsiteDataManager,
+    clearing: bool,
     manager: CookieManager,
     callback: WorminalBrowserProfileReply,
     context: *mut c_void,
@@ -108,8 +123,14 @@ unsafe fn completed_inner(result: *mut gio::ffi::GAsyncResult, data: *mut c_void
             Err(())
         }
     } else {
-        let success =
-            unsafe { transfer.import_finish.unwrap()(manager.cast(), result, &mut error) };
+        let profile: *mut webkit2gtk::ffi::WebKitWebsiteDataManager =
+            transfer.profile.to_glib_none().0;
+        let target = if transfer.clearing {
+            profile.cast()
+        } else {
+            manager.cast()
+        };
+        let success = unsafe { transfer.import_finish.unwrap()(target, result, &mut error) };
         if success != 0 && error.is_null() {
             Ok(Vec::new())
         } else {
@@ -137,6 +158,32 @@ pub unsafe extern "C" fn worminal_browser_profile_transfer_v1(
     }))
     .unwrap_or(0)
 }
+fn functions(exporting: bool, clearing: bool) -> Option<(*mut c_void, *mut c_void)> {
+    let (start_name, finish_name) = if exporting {
+        (
+            c"webkit_cookie_manager_get_all_cookies",
+            c"webkit_cookie_manager_get_all_cookies_finish",
+        )
+    } else if clearing {
+        (
+            c"webkit_website_data_manager_clear",
+            c"webkit_website_data_manager_clear_finish",
+        )
+    } else {
+        (
+            c"webkit_cookie_manager_replace_cookies",
+            c"webkit_cookie_manager_replace_cookies_finish",
+        )
+    };
+    let start = unsafe { libc::dlsym(libc::RTLD_DEFAULT, start_name.as_ptr()) };
+    let finish = unsafe { libc::dlsym(libc::RTLD_DEFAULT, finish_name.as_ptr()) };
+    if start.is_null() || finish.is_null() {
+        None
+    } else {
+        Some((start, finish))
+    }
+}
+
 unsafe fn transfer(
     profile: *mut c_void,
     bytes: *const u8,
@@ -148,29 +195,6 @@ unsafe fn transfer(
         return 0;
     }
     let exporting = bytes.is_null();
-    let start = unsafe {
-        libc::dlsym(
-            libc::RTLD_DEFAULT,
-            if exporting {
-                c"webkit_cookie_manager_get_all_cookies".as_ptr()
-            } else {
-                c"webkit_cookie_manager_replace_cookies".as_ptr()
-            },
-        )
-    };
-    let finish = unsafe {
-        libc::dlsym(
-            libc::RTLD_DEFAULT,
-            if exporting {
-                c"webkit_cookie_manager_get_all_cookies_finish".as_ptr()
-            } else {
-                c"webkit_cookie_manager_replace_cookies_finish".as_ptr()
-            },
-        )
-    };
-    if start.is_null() || finish.is_null() {
-        return 0;
-    }
     let profile: WebsiteDataManager = unsafe { from_glib_none(profile.cast()) };
     let Some(manager) = profile.cookie_manager() else {
         return 0;
@@ -204,12 +228,22 @@ unsafe fn transfer(
         if parsed.is_err() {
             return 0;
         }
+    }
+    // replace_cookies rejects a null GList and never invokes its callback. An empty
+    // donor jar therefore needs an acknowledged cookie-only clear, not a skipped import
+    // (which could retain stale persistent cookies) or a hung replacement transaction.
+    let clearing = !exporting && cookies.is_empty();
+    let Some((start, finish)) = functions(exporting, clearing) else {
+        return 0;
+    };
+    if !exporting {
         for cookie in &mut cookies {
             list = unsafe { glib::ffi::g_list_append(list, cookie.to_glib_none_mut().0.cast()) };
         }
     }
     let transfer = Box::new(Transfer {
-        _profile: profile,
+        profile: profile.clone(),
+        clearing,
         manager: manager.clone(),
         callback,
         context,
@@ -226,6 +260,19 @@ unsafe fn transfer(
         let start: Async = unsafe { std::mem::transmute(start) };
         unsafe {
             start(manager.cast(), ptr::null_mut(), Some(completed), data);
+        }
+    } else if clearing {
+        let start: Clear = unsafe { std::mem::transmute(start) };
+        let profile: *mut webkit2gtk::ffi::WebKitWebsiteDataManager = profile.to_glib_none().0;
+        unsafe {
+            start(
+                profile.cast(),
+                WebsiteDataTypes::COOKIES.bits(),
+                0,
+                ptr::null_mut(),
+                Some(completed),
+                data,
+            );
         }
     } else {
         let start: Import = unsafe { std::mem::transmute(start) };

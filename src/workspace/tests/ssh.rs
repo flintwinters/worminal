@@ -81,6 +81,7 @@ set -- $(cat /proc/$$/stat)\necho \"$1 $5 $6\" > \"$WORMINAL_TEST_SSH_ARGUMENTS.
     );
     drop(stream);
     drop(child);
+    verify_prompt_environment(&program);
     // The local service uses the same boundary after GTK starts; it must have an independent
     // session/process group without invoking the GUI's registered fork hooks.
     use std::{ffi::CString, os::fd::AsFd, os::unix::net::UnixStream};
@@ -125,4 +126,54 @@ set -- $(cat /proc/$$/stat)\necho \"$1 $5 $6\" > \"$WORMINAL_TEST_SSH_ARGUMENTS.
         worminal_workspace::spawn::wait(-1).unwrap_err().kind(),
         std::io::ErrorKind::InvalidInput
     );
+}
+
+fn verify_prompt_environment(program: &std::path::Path) {
+    // Per-child prompt policy must not mutate the multithreaded GUI owner's environment.
+    let daemon = program.with_file_name("worminald");
+    let askpass = program.with_file_name("worminal");
+    fs::write(
+        &daemon,
+        concat!(
+            "#!/bin/sh\n",
+            "printf '%s %s %s\\n' \"$SSH_ASKPASS\" \"$SSH_ASKPASS_REQUIRE\" \"$WORMINAL_SSH_ASKPASS\"\n",
+            "printf '%s\\n' \"$@\"\n",
+            // The helper's failure report reaches the view through its own descriptor.
+            "printf 'report %s\\n' \"$WORMINAL_CONNECT_REPORT_FD\" >&3\n",
+        ).as_bytes(),
+    ).unwrap();
+    fs::set_permissions(&daemon, fs::Permissions::from_mode(0o700)).unwrap();
+    let original = std::env::var_os("SSH_ASKPASS");
+    for (interactive, policy) in [(true, "force"), (false, "never")] {
+        for existing in [false, true] {
+            let (mut stream, _child, mut report) = ssh::connect_gui(
+                OsStr::new("user@private"),
+                existing,
+                askpass.as_os_str(),
+                interactive,
+            )
+            .unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut output = String::new();
+            stream.read_to_string(&mut output).unwrap();
+            let bridge = if existing {
+                "--bridge-existing"
+            } else {
+                "--bridge"
+            };
+            assert_eq!(
+                output,
+                format!(
+                    "{} {policy} 1\n--connect-master\nuser@private\n{bridge}\n",
+                    askpass.display()
+                )
+            );
+            let mut reported = String::new();
+            report.read_to_string(&mut reported).unwrap();
+            assert_eq!(reported, format!("report {}\n", ssh::CONNECT_REPORT_FD));
+            assert_eq!(std::env::var_os("SSH_ASKPASS"), original);
+        }
+    }
 }

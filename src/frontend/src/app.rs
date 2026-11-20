@@ -16,6 +16,8 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use worminal_engine::input::Encoded;
+use worminal_protocol::cell::MODE_BUSY;
 use worminal_protocol::worp::{
     commands::{CommandKind, OpenMode},
     events::{Catalog, Event, EventKind, TabKind},
@@ -36,6 +38,8 @@ mod notifications;
 mod shortcuts;
 #[path = "app_split.rs"]
 mod split;
+#[path = "app_update_fences.rs"]
+mod update_fences;
 
 thread_local! { static WINDOWS: RefCell<Vec<Rc<App>>> = const { RefCell::new(Vec::new()) }; }
 use config::Config;
@@ -97,32 +101,44 @@ fn ensure() -> io::Result<()> {
 struct Connection {
     socket: UnixStream,
     _ssh: Option<worminal_workspace::ssh::Child>,
+    report: Option<io::PipeReader>,
     decoder: Decoder,
     output: VecDeque<Vec<u8>>,
     offset: usize,
     bytes: usize,
 }
 impl Connection {
-    fn new(master: Option<&OsStr>, existing: bool) -> io::Result<Self> {
-        let (socket, ssh) = if let Some(master) = master {
-            let (socket, child) = if existing {
-                worminal_workspace::ssh::connect_existing(master)?
-            } else {
-                worminal_workspace::ssh::connect(master)?
-            };
-            (socket, Some(child))
+    fn new(master: Option<&OsStr>, existing: bool, interactive: bool) -> io::Result<Self> {
+        let (socket, ssh, report) = if let Some(master) = master {
+            let executable = std::env::current_exe()?;
+            let (socket, child, report) = worminal_workspace::ssh::connect_gui(
+                master,
+                existing,
+                executable.as_os_str(),
+                interactive,
+            )?;
+            (socket, Some(child), Some(report))
         } else {
-            (connect()?, None)
+            (connect()?, None, None)
         };
         socket.set_nonblocking(true)?;
         Ok(Self {
             socket,
             _ssh: ssh,
+            report,
             decoder: Decoder::default(),
             output: VecDeque::new(),
             offset: 0,
             bytes: 0,
         })
+    }
+    /// Why the master helper closed this link, when it said (e.g. a failed version sync).
+    /// The helper writes before exiting, so the report is complete once the stream has closed.
+    fn failure(&mut self) -> Option<String> {
+        let mut text = Vec::new();
+        let _ = self.report.as_mut()?.take(4096).read_to_end(&mut text);
+        let text = String::from_utf8_lossy(&text).trim().to_owned();
+        (!text.is_empty()).then_some(text)
     }
     fn queue(&mut self, packet: Packet) -> io::Result<()> {
         let bytes = packet.encode()?;
@@ -198,10 +214,15 @@ struct Link {
     reader: RefCell<Option<glib::SourceId>>,
     writer: RefCell<Option<glib::SourceId>>,
     reconnect: RefCell<Option<glib::SourceId>>,
+    retry_delay: Cell<Duration>,
     initial_claim: Cell<bool>,
+    update_fences: RefCell<update_fences::Fences>,
+    catalog_tabs: RefCell<Vec<u32>>,
     pending_tabs: Cell<u32>,
     requested: Cell<u32>,
     features: Cell<u32>,
+    /// The last helper failure shown on the desktop; retries repeating it stay quiet.
+    alerted: RefCell<Option<String>>,
 }
 impl Link {
     fn new() -> Rc<Self> {
@@ -210,9 +231,13 @@ impl Link {
             reader: RefCell::new(None),
             writer: RefCell::new(None),
             reconnect: RefCell::new(None),
+            retry_delay: Cell::new(Duration::from_millis(250)),
             initial_claim: Cell::new(true),
+            update_fences: RefCell::new(update_fences::Fences::default()),
+            catalog_tabs: RefCell::new(Vec::new()),
             pending_tabs: Cell::new(0),
             requested: Cell::new(0),
+            alerted: RefCell::new(None),
             features: Cell::new(0),
         })
     }
@@ -232,6 +257,7 @@ impl Link {
             }
         }
         self.connection.borrow_mut().take();
+        self.update_fences.borrow_mut().disconnected();
     }
 }
 /// Another `--master` host whose tabs are shown in this window beside its own.
@@ -252,6 +278,9 @@ struct Page {
     directory: PathBuf,
     /// Remote user while an SSH client is in the terminal's foreground.
     ssh_user: Option<String>,
+    /// A task in the terminal reports progress (OSC 9;4), as an agent does while it works.
+    busy: bool,
+    background_job: bool,
     browser: bool,
     url: String,
     view: Rc<RefCell<Option<crate::browser::Browser>>>,
@@ -283,10 +312,13 @@ struct App {
     active: Cell<u32>,
     syncing: Cell<bool>,
     primary: Rc<Link>,
+    primary_detached: Cell<bool>,
     remotes: RefCell<Vec<Rc<Remote>>>,
     next_link: Cell<u32>,
     closing: Cell<bool>,
     replacing: Cell<bool>,
+    handoff_frozen: Cell<bool>,
+    close_after_update: Cell<bool>,
     replacement_frame: Cell<bool>,
     defer_navigation: Cell<bool>,
     geometry_pending: Cell<bool>,
@@ -317,7 +349,7 @@ impl App {
         Self::open(config)
     }
     fn open(config: Config) -> io::Result<Rc<Self>> {
-        Self::open_mode(config, false)
+        Self::open_mode(config, false, false)
     }
     fn replacement_window(config: &Config) -> gtk::Window {
         if let Some(class) = &config.class {
@@ -330,9 +362,9 @@ impl App {
         window.set_title(&config.title);
         window.set_default_size(1000, 600);
         window.set_resizable(!config.fixed);
-        window
+        crate::wsl_frame::style(window)
     }
-    fn open_mode(config: Config, staged: bool) -> io::Result<Rc<Self>> {
+    fn open_mode(config: Config, staged: bool, primary_detached: bool) -> io::Result<Rc<Self>> {
         // New launches may arrive in an existing GTK owner after service loss. The shared
         // posix_spawn boundary can recover the service here without GUI-process fork hooks.
         if config.master.is_none() && !staged {
@@ -361,10 +393,13 @@ impl App {
             active: Cell::new(0),
             syncing: Cell::new(false),
             primary: Link::new(),
+            primary_detached: Cell::new(primary_detached),
             remotes: RefCell::new(Vec::new()),
             next_link: Cell::new(1),
             closing: Cell::new(false),
             replacing: Cell::new(staged),
+            handoff_frozen: Cell::new(false),
+            close_after_update: Cell::new(false),
             replacement_frame: Cell::new(false),
             defer_navigation: Cell::new(staged),
             geometry_pending: Cell::new(true),
@@ -390,6 +425,10 @@ impl App {
         });
         app.window.connect_delete_event(
             glib::clone!(@weak app => @default-return glib::Propagation::Proceed, move |_, _| {
+                if app.handoff_frozen.get() || app.replacing.get() {
+                    app.close_after_update.set(true);
+                    return glib::Propagation::Stop;
+                }
                 app.release_browsers(); glib::Propagation::Proceed
             }),
         );
@@ -402,9 +441,11 @@ impl App {
                     if windows.len() != previous && windows.is_empty() { gtk::main_quit(); } });
                 window_state::changed();
             }));
-        if let Err(error) = app.establish(0, !app.config.attach) {
-            app.window.close();
-            return Err(error);
+        if !primary_detached {
+            if let Err(error) = app.establish(0, !app.config.attach) {
+                app.window.close();
+                return Err(error);
+            }
         }
         WINDOWS.with(|windows| windows.borrow_mut().push(app.clone()));
         window_state::changed();
@@ -482,19 +523,17 @@ impl App {
             return;
         }
         match action {
-            Action::Send(kind) => {
+            Action::Send(kind) => self.send(id, kind),
+            Action::Input(kind, encoded) => {
                 // Keys, paste and mouse reports answer a bell; focus reports use FocusState.
-                if matches!(kind, CommandKind::Input { .. }) {
+                if matches!(encoded, Encoded::Input(_)) {
                     self.strip_of(id).answer(id);
                 }
-                self.send(id, kind)
+                let semantic = self.features(id) & WIRE_FEATURE_INPUT != 0;
+                self.send(id, if semantic { kind } else { encoded.command() })
             }
-            Action::Claim => self.activate(id),
-            Action::Pointed => {
-                if self.active.get() != id {
-                    self.activate(id);
-                }
-            }
+            Action::Claim => self.claim(id),
+            Action::CycleTab(previous) => self.cycle_tab(previous),
             Action::Resized(cols, rows) if !self.syncing.get() && self.is_visible(id) => {
                 if let Some(terminal) = self.terminal(id) {
                     self.fit_geometry(&terminal);
@@ -538,6 +577,9 @@ impl App {
                 link.requested.set(event.tab);
                 link.pending_tabs
                     .set(link.pending_tabs.get().saturating_sub(1));
+            }
+            EventKind::ServiceInfo(_) => {
+                link.update_fences.borrow_mut().acknowledge();
             }
             EventKind::Error(bytes) => self.message(Some(&text(bytes))),
             EventKind::Released => {
@@ -650,6 +692,8 @@ impl App {
                 colors: tab.colors.iter().map(|color| text(color)).collect(),
             });
         }
+        *link.catalog_tabs.borrow_mut() = catalog.tabs.iter().map(|tab| tab.id).collect();
+        link.retry_delay.set(Duration::from_millis(250));
         let initial_claim = link.initial_claim.replace(false);
         let mut replaced_active = false;
         self.syncing.set(true);
@@ -728,6 +772,8 @@ impl App {
                     title: String::new(),
                     directory: PathBuf::new(),
                     ssh_user: None,
+                    busy: false,
+                    background_job: false,
                     browser: record.browser,
                     url: record.url.clone(),
                     view: Rc::new(RefCell::new(None)),
@@ -774,6 +820,9 @@ impl App {
                 }
                 page.directory = record.directory.clone();
                 page.ssh_user = record.ssh_user.clone();
+                page.busy = record.mode & MODE_BUSY != 0;
+                page.background_job =
+                    record.mode & worminal_protocol::cell::MODE_BACKGROUND_JOB != 0;
             }
         }
         {
@@ -859,6 +908,9 @@ impl App {
         }
         self.refresh_tabs();
         window_state::changed();
+        if self.primary_detached.get() {
+            self.close_empty_window();
+        }
         Ok(())
     }
     fn new_tab(self: &Rc<Self>) {
@@ -908,11 +960,23 @@ pub(crate) fn run_with_listener(
     listener: Option<std::os::unix::net::UnixListener>,
     candidate: bool,
 ) -> io::Result<()> {
+    if worminal_workspace::ssh::is_askpass(&arguments) {
+        return crate::askpass::run(&arguments[1]);
+    }
     if arguments.len() == 3 && arguments[1] == "--replace-owner" {
         return upgrade::receive(&arguments[2], candidate);
     }
     worminal_workspace::browser_target::command(&arguments)?;
     let request = worminal_workspace::broker::Request::capture(arguments)?;
+    if worminal_workspace::broker::master_action(&request.args)?.is_some() {
+        return match broker::forward(&request)? {
+            None => Ok(()),
+            Some(_) => Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "No connected GUI owner",
+            )),
+        };
+    }
     let Some(config) = Config::parse(&request, candidate)? else {
         return Ok(());
     };

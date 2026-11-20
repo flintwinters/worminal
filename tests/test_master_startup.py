@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import select
 import signal
+import json
 import subprocess
 import time
 import unittest
@@ -75,3 +76,84 @@ class MasterStartupTest(unittest.TestCase):
                     except subprocess.TimeoutExpired:
                         os.killpg(process.pid, signal.SIGKILL)
                         process.communicate(timeout=5)
+
+    def test_password_prompt_cancel_and_retry_in_existing_window(self):
+        from tempfile import TemporaryDirectory
+        from preview import profile
+        from workspace_protocol import stop_workspace
+        from runtime import window
+
+        if os.environ.get('WORMINAL_TEST_REAL_MASTER'):
+            self.skipTest('Authentication fixture uses a local private daemon')
+        executable = Path(os.environ.get('WORMINAL_TEST_EXECUTABLE', runtime_binary('worminal')))
+        with isolated_display() as display, profile(display) as env, \
+                TemporaryDirectory(prefix='master-password-', dir=CHECKS) as directory:
+            base = Path(directory)
+            attempts, accepted = base/'attempts', base/'accepted'
+            daemon = str(runtime_binary('worminald'))
+            ssh = base/'ssh'
+            ssh.write_text('#!/usr/bin/python3\nimport os,sys,subprocess\n'
+                'from pathlib import Path\n'
+                f'with open({str(attempts)!r},"a") as f: f.write("attempt\\n")\n'
+                'if os.environ.get("SSH_ASKPASS_REQUIRE")!="force": sys.exit(255)\n'
+                'reply=subprocess.run([os.environ["SSH_ASKPASS"],"fixture password:"],capture_output=True)\n'
+                'if reply.returncode or reply.stdout!=b"fixture-secret\\n": sys.exit(255)\n'
+                f'Path({str(accepted)!r}).touch()\n'
+                f'sys.path.insert(0,{str(ROOT / "tests/fixtures")!r})\n'
+                'from master_ssh import run\n'
+                f'run({daemon!r})\n')
+            ssh.chmod(0o700)
+            env.update(GDK_BACKEND='x11', PATH=str(base)+os.pathsep+env['PATH'])
+            env.pop('DBUS_SESSION_BUS_ADDRESS', None)
+            log_path = CHECKS/'master-password.log'
+            with log_path.open('wb') as log:
+                app = subprocess.Popen([str(executable), '--master', 'password-fixture',
+                                        '-T', 'Password fixture', '-e', '/bin/cat'],
+                                       env=env, stdout=log, stderr=log)
+                def wait(predicate, description):
+                    deadline = time.monotonic()+10
+                    while time.monotonic()<deadline:
+                        result = predicate()
+                        if result: return result
+                        self.assertIsNone(app.poll(), log_path.read_text(errors='replace'))
+                        time.sleep(.03)
+                    self.fail(f'Timed out: {description}; see {log_path}')
+                def prompts():
+                    result = subprocess.run(['xdotool','search','--onlyvisible','--name',
+                                             '^Worminal SSH authentication$'],
+                                            env=env,capture_output=True,text=True)
+                    return result.stdout.splitlines()
+                def key(wid, *keys):
+                    subprocess.run(['xdotool','windowfocus','--sync',wid,'key','--clearmodifiers',*keys],
+                                   env=env,check=True,stdout=log,stderr=log)
+                def connected():
+                    result = subprocess.run([daemon, 'api', 'list'], env=env,
+                                            capture_output=True, text=True, timeout=3)
+                    return result.returncode == 0 and bool(json.loads(result.stdout).get('tabs'))
+                try:
+                    prompt = wait(prompts, 'initial password dialog')[0]
+                    key(prompt, 'Escape')
+                    wait(lambda: attempts.exists() and len(attempts.read_text().splitlines())>=2,
+                         'background retry')
+                    time.sleep(2)
+                    self.assertFalse(prompts(), 'Cancelled authentication reopened a password dialog')
+                    self.assertLessEqual(len(attempts.read_text().splitlines()), 5,
+                                         'Failed SSH connections retry without backoff')
+                    self.assertFalse(accepted.exists())
+                    owner_window = window(env, app)
+                    retry = subprocess.run([str(executable), '--master', 'password-fixture',
+                                            '-e', '/bin/cat'], env=env,stdout=log,stderr=log,timeout=10)
+                    self.assertEqual(retry.returncode,0)
+                    prompt = wait(prompts, 'explicit password retry')[0]
+                    subprocess.run(['xdotool','windowfocus','--sync',prompt,'type','--clearmodifiers',
+                                    'fixture-secret'],env=env,check=True,stdout=log,stderr=log)
+                    key(prompt, 'Return')
+                    wait(accepted.exists, 'password delivered privately to SSH')
+                    wait(lambda: not prompts(), 'password dialog closes')
+                    wait(connected, 'version/config sync and master tab setup finish')
+                    self.assertEqual(window(env,app),owner_window,'Authentication replaced the window')
+                    self.assertNotIn('fixture-secret',log_path.read_text(errors='replace'))
+                finally:
+                    app.terminate()
+                    app.wait(timeout=5)
+                    stop_workspace(env)

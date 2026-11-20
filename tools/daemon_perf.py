@@ -1,6 +1,8 @@
 """Release daemon microbenchmarks with revision and raw samples retained under build/checks."""
 from contextlib import ExitStack
 import hashlib
+import io
+import tarfile
 import json
 import os
 from pathlib import Path
@@ -59,13 +61,14 @@ def measure(label, trials, compare=None, *, network=False):
         roots = {"current": build.ROOT}
         revision = None
         if compare:
-            from tools.reference import extract
             revision = subprocess.check_output(["git", "rev-parse", "--verify", compare + "^{commit}"],
                                                cwd=build.ROOT, text=True).strip()
             print(f"Preparing disposable baseline {revision[:12]}", flush=True)
             baseline = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="daemon-baseline-", dir=CHECKS)))
-            extract(revision, baseline, paths=("src", "tests", "tools", "assets", "manage.py",
-                                               "Cargo.toml", "Cargo.lock", ".cargo"))
+            archive = subprocess.check_output(["git", "archive", revision, "src", "tests", "tools", "assets",
+                                               "manage.py", "Cargo.toml", "Cargo.lock", ".cargo"], cwd=build.ROOT)
+            with tarfile.open(fileobj=io.BytesIO(archive)) as source:
+                source.extractall(baseline, filter="data")
             # Both owners execute the exact same workload and CPU clock, independent of their implementations.
             relative = workload
             shutil.copyfile(build.ROOT / relative, baseline / relative)
@@ -113,3 +116,4 @@ def measure(label, trials, compare=None, *, network=False):
     destination.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report["medians"], indent=2))
     print(f"Saved {destination.relative_to(build.ROOT)}")
+    return report

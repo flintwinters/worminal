@@ -19,6 +19,79 @@ fn integer(bytes: &[u8]) -> io::Result<u32> {
     fields.finish()?;
     Ok(value)
 }
+fn boolean(value: u32) -> io::Result<bool> {
+    match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(invalid()),
+    }
+}
+fn integers<const N: usize>(bytes: &[u8]) -> io::Result<[u32; N]> {
+    let mut fields = Payload::new(bytes);
+    let mut values = [0; N];
+    for value in &mut values {
+        *value = fields.u32()?;
+    }
+    fields.finish()?;
+    Ok(values)
+}
+fn input(packet: &Packet) -> io::Result<CommandKind> {
+    let kind = match packet.kind {
+        WIRE_KEY => {
+            let [keysym, modifiers, character, numlock] = integers(&packet.body)?;
+            CommandKind::Key {
+                keysym,
+                modifiers,
+                character: match character {
+                    0 => None,
+                    value => Some(char::from_u32(value).ok_or_else(invalid)?),
+                },
+                numlock: boolean(numlock)?,
+            }
+        }
+        WIRE_MOUSE => {
+            let [button, column, row, modifiers, action] = integers(&packet.body)?;
+            CommandKind::Mouse {
+                button,
+                column,
+                row,
+                modifiers,
+                action: match action {
+                    0 => MouseAction::Press,
+                    1 => MouseAction::Release,
+                    2 => MouseAction::Motion,
+                    _ => return Err(invalid()),
+                },
+            }
+        }
+        WIRE_PASTE => {
+            let mut fields = Payload::new(&packet.body);
+            let flags = fields.u32()?;
+            if flags > 3 {
+                return Err(invalid());
+            }
+            CommandKind::Paste {
+                bytes: packet.body[4..].to_vec(),
+                begin: flags & 1 != 0,
+                end: flags & 2 != 0,
+            }
+        }
+        _ => {
+            let [up, notches, lines, column, row, modifiers] = integers(&packet.body)?;
+            CommandKind::Wheel {
+                up: boolean(up)?,
+                notches,
+                lines,
+                column,
+                row,
+                modifiers,
+            }
+        }
+    };
+    // Bounds matter before encoding: a wheel's notches multiply the bytes it produces.
+    Command::new(packet.tab, kind.clone()).validate()?;
+    Ok(kind)
+}
 fn string(bytes: &[u8]) -> io::Result<Vec<u8>> {
     let mut fields = Payload::new(bytes);
     let value = fields.string()?.split(|b| *b == 0).next().unwrap().to_vec();
@@ -82,6 +155,7 @@ pub fn decode(packet: Packet) -> io::Result<Option<Command>> {
             }
         }
         WIRE_CLOSE => CommandKind::Close { receipt: false },
+        WIRE_KEY | WIRE_MOUSE | WIRE_PASTE | WIRE_WHEEL => input(&packet)?,
         WIRE_SCROLL => {
             let (direction, amount) = pair(&packet.body)?;
             if direction > 1 {
@@ -201,6 +275,57 @@ pub fn encode(command: &Command) -> io::Result<Packet> {
             body.put_u32(u32::from(*up))?;
             body.put_u32(*amount)?;
             WIRE_SCROLL
+        }
+        CommandKind::Key {
+            keysym,
+            modifiers,
+            character,
+            numlock,
+        } => {
+            for value in [
+                *keysym,
+                *modifiers,
+                character.map_or(0, u32::from),
+                u32::from(*numlock),
+            ] {
+                body.put_u32(value)?;
+            }
+            WIRE_KEY
+        }
+        CommandKind::Mouse {
+            button,
+            column,
+            row,
+            modifiers,
+            action,
+        } => {
+            let action = match action {
+                MouseAction::Press => 0,
+                MouseAction::Release => 1,
+                MouseAction::Motion => 2,
+            };
+            for value in [*button, *column, *row, *modifiers, action] {
+                body.put_u32(value)?;
+            }
+            WIRE_MOUSE
+        }
+        CommandKind::Paste { bytes, begin, end } => {
+            body.put_u32(u32::from(*begin) | u32::from(*end) << 1)?;
+            body.put_bytes(bytes)?;
+            WIRE_PASTE
+        }
+        CommandKind::Wheel {
+            up,
+            notches,
+            lines,
+            column,
+            row,
+            modifiers,
+        } => {
+            for value in [u32::from(*up), *notches, *lines, *column, *row, *modifiers] {
+                body.put_u32(value)?;
+            }
+            WIRE_WHEEL
         }
         CommandKind::Control(action) => {
             body.put_u32(match action {

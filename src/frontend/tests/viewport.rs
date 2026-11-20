@@ -1,7 +1,8 @@
-use worminal_engine_sys::{
-    ATTR_WDUMMY, ATTR_WIDE, ATTR_WRAP, WORMINAL_DEFAULT_BACKGROUND, WORMINAL_DEFAULT_FOREGROUND,
-};
 use worminal_frontend::viewport::Viewport;
+use worminal_protocol::cell::{
+    ATTR_BLINK, ATTR_WDUMMY, ATTR_WIDE, ATTR_WRAP, COLOR_DEFAULT_BACKGROUND,
+    COLOR_DEFAULT_FOREGROUND,
+};
 use worminal_protocol::*;
 
 fn packet(kind: u32, values: &[u32]) -> Packet {
@@ -168,8 +169,8 @@ fn row_packet_cells(body: &mut Vec<u8>, text: &str, attributes: u32) {
         for value in [
             u32::from(rune),
             attributes,
-            WORMINAL_DEFAULT_FOREGROUND,
-            WORMINAL_DEFAULT_BACKGROUND,
+            COLOR_DEFAULT_FOREGROUND,
+            COLOR_DEFAULT_BACKGROUND,
         ] {
             body.extend_from_slice(&value.to_be_bytes());
         }
@@ -245,6 +246,44 @@ fn run(column: u32, count: u32, uri: &str) -> LinkRun {
 }
 
 #[test]
+fn wrapped_link_segments_share_target_and_hover_binding() {
+    let mut view = Viewport::new(6, 4).unwrap();
+    header(&mut view, 6, 4);
+    for (index, label) in ["prefix", "middle", "end!!!", "other!"].iter().enumerate() {
+        row(&mut view, index as u32, label, 0);
+    }
+    let uri = "https://example.org/complete-target";
+    links(&mut view, 0, &[run(2, 4, uri)]).unwrap();
+    links(&mut view, 1, &[run(0, 6, uri)]).unwrap();
+    links(
+        &mut view,
+        2,
+        &[run(0, 3, uri), run(3, 3, "https://other.org")],
+    )
+    .unwrap();
+    links(&mut view, 3, &[run(0, 6, uri)]).unwrap();
+    finish(&mut view);
+
+    for position in 2..15 {
+        assert_eq!(
+            view.link_at(position % 6, position / 6),
+            Some((uri, 2..=14)),
+            "every segment shares the target and hover binding"
+        );
+    }
+    assert!(view.link_at(1, 0).is_none());
+    assert_eq!(view.link_at(3, 2), Some(("https://other.org", 15..=17)));
+    assert_eq!(
+        view.link_at(0, 3),
+        Some((uri, 18..=23)),
+        "separate occurrence"
+    );
+    assert_eq!(text(&view, 0), "prefix");
+    assert_eq!(text(&view, 1), "middle");
+    assert_eq!(text(&view, 2), "end!!!");
+}
+
+#[test]
 fn links_apply_at_finish_follow_row_copies_and_clear_with_geometry() {
     let mut view = Viewport::new(6, 3).unwrap();
     header(&mut view, 6, 3);
@@ -316,4 +355,41 @@ fn raw_run(column: u32, count: u32) -> Vec<u8> {
     }
     bytes.push(b'x');
     bytes
+}
+
+#[test]
+fn blink_rows_follow_committed_spans_overlapping_moves_and_resize() {
+    let mut view = Viewport::new(4, 3).unwrap();
+    assert!(!view.row_blinks(0));
+    header(&mut view, 4, 3);
+    span(&mut view, 0, 3, "a", ATTR_BLINK);
+    assert!(!view.row_blinks(0));
+    finish(&mut view);
+    assert!(view.row_blinks(0));
+    assert!(!view.row_blinks(1));
+    header(&mut view, 4, 3);
+    view.packet(&packet(WIRE_COPY_ROWS, &[0, 1, 2])).unwrap();
+    span(&mut view, 0, 3, "a", 0);
+    finish(&mut view);
+    assert!(!view.row_blinks(0));
+    assert!(view.row_blinks(1));
+    assert!(!view.row_blinks(2));
+    header(&mut view, 4, 3);
+    span(&mut view, 1, 0, "b", ATTR_BLINK);
+    assert!(view.packet(&packet(WIRE_COPY_ROWS, &[0, 0, 4])).is_err());
+    assert!(!view.row_blinks(0));
+    header(&mut view, 3, 2);
+    finish(&mut view);
+    assert!(
+        !view.row_blinks(1),
+        "cropping removes the only blinking cell"
+    );
+    assert!(!view.row_blinks(2));
+    header(&mut view, 3, 2);
+    span(&mut view, 0, 0, "b", ATTR_BLINK);
+    finish(&mut view);
+    header(&mut view, 3, 2);
+    view.packet(&packet(WIRE_COPY_ROWS, &[1, 0, 1])).unwrap();
+    finish(&mut view);
+    assert!(!view.row_blinks(0));
 }
