@@ -353,9 +353,13 @@ impl Tabs {
                 glib::Propagation::Proceed
             }),
         );
+        // GTK drops a resize queued while the pane is being allocated, which left a narrowed strip on its old
+        // row count; fitting once the allocation has finished gets the new height laid out.
         state
             .widget
-            .connect_size_allocate(glib::clone!(@weak state => move |_, _| state.fit()));
+            .connect_size_allocate(glib::clone!(@weak state => move |_, _| {
+                glib::idle_add_local_once(glib::clone!(@weak state => move || state.fit()));
+            }));
         state.widget.connect_draw(
             glib::clone!(@weak state => @default-return glib::Propagation::Proceed,
                 move |widget, cr| {

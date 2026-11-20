@@ -36,6 +36,25 @@ from test_master_detach import MasterDetachTest
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def window_size(root):
+    geometry = root.get_geometry()
+    return geometry.width, geometry.height
+
+
+def fix_size(root, xdo, wid, width, height):
+    """Resize once the first terminal has fitted the window to its character grid; returns the settled size."""
+    def settle():
+        last, since = None, time.monotonic()
+        while time.monotonic() - since < .5:
+            if window_size(root) != last:
+                last, since = window_size(root), time.monotonic()
+            time.sleep(.02)
+        return last
+    settle()
+    xdo('windowsize', wid, str(width), str(height))
+    return settle()
+
+
 class RustApplicationTest(unittest.TestCase):
 
     def test_empty_attach_can_open_its_first_terminal(self):
@@ -250,21 +269,8 @@ class RustApplicationTest(unittest.TestCase):
             cleanup.callback(server.close)
             root = server.create_resource_object('window', int(wid))
 
-            def size():
-                geometry = root.get_geometry()
-                return geometry.width, geometry.height
-
-            def settle():
-                # The first terminal fits the window to its character grid, then the test fixes the size.
-                last, since = None, time.monotonic()
-                while time.monotonic() - since < .5:
-                    if size() != last:
-                        last, since = size(), time.monotonic()
-                    time.sleep(.02)
-                return last
-            settle()
-            xdo('windowsize', wid, '900', '500')
-            self.assertEqual(settle(), (900, 500))
+            size = lambda: window_size(root)
+            self.assertEqual(fix_size(root, xdo, wid, 900, 500), (900, 500))
 
             def pixel(fx, fy):
                 try:
@@ -369,6 +375,87 @@ class RustApplicationTest(unittest.TestCase):
             xdo('key', '--clearmodifiers', 'alt+shift+Right')
             wait_for(blue, blue, 'alt+shift+Right did not move the tab into the right pane')
             self.assertEqual(pixel(.505, 4 / 500), background, 'the emptied pane outlived the move')
+
+    def test_tab_strips_rewrap_when_splits_change_their_width(self):
+        from Xlib import X, display
+        red, blue = (200, 30, 30), (20, 40, 210)
+        fill = lambda color: ("while :; do printf '\\033[48;2;%d;%d;%dm\\033[2J'; sleep .2; done" % color)
+        # Labels are the directory basename; at 40 cells two fit a 900px row but only one fits half of it.
+        directory = CHECKS / ('w' * 40)
+        directory.mkdir(exist_ok=True)
+        with isolated_display() as env, ExitStack() as cleanup:
+            script = CHECKS / 'rewrap-shell.sh'
+            script.write_text(f'#!/bin/sh\ncd {shlex.quote(str(directory))}\n{fill(blue)}\n')
+            script.chmod(0o755)
+            env.update(GDK_BACKEND='x11', SHELL=str(script))
+            env.pop('WAYLAND_DISPLAY', None)
+            app = subprocess.Popen([str(runtime_binary("worminal-rust")), '-T', 'Rust rewrap', '-o', '-',
+                                    '-e', '/bin/sh', '-c', fill(red)], cwd=directory,
+                                   env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.addCleanup(lambda: self.stop(app))
+            wid = window(env, app)
+            xdo = lambda *args: subprocess.run(['xdotool', *args], env=env, check=True)
+            api = lambda *args: subprocess.check_output([str(runtime_binary('worminald')), 'api', *args],
+                                                        env=env, text=True)
+            server = display.Display(env['DISPLAY'])
+            cleanup.callback(server.close)
+            root = server.create_resource_object('window', int(wid))
+            self.assertEqual(fix_size(root, xdo, wid, 900, 500), (900, 500))
+
+            def strip_height(x):
+                # The strip ends where the terminal's own fill begins.
+                data = root.get_image(x, 0, 1, 500, X.ZPixmap, 0xffffffff).data
+                column = [tuple(data[4 * y:4 * y + 3][::-1]) for y in range(500)]
+                return next((y for y, color in enumerate(column) if color in (red, blue)), None)
+
+            def fail(message):
+                from PIL import Image
+                data = root.get_image(0, 0, 900, 500, X.ZPixmap, 0xffffffff).data
+                Image.frombuffer('RGB', (900, 500), data, 'raw', 'BGRX', 0, 1).save(CHECKS / 'rust-app-rewrap.png')
+                self.fail(message)
+
+            def wait_height(x, expected, message):
+                deadline = time.monotonic() + 8
+                while strip_height(x) != expected:
+                    self.assertIsNone(app.poll())
+                    if time.monotonic() >= deadline:
+                        fail(f'{message}: {strip_height(x)} != {expected}')
+                    time.sleep(.05)
+
+            def settle(x):
+                # Strip rows are whatever the font makes them, so heights are compared once they stop changing.
+                last, since, deadline = None, time.monotonic(), time.monotonic() + 8
+                while time.monotonic() - since < .5:
+                    self.assertLess(time.monotonic(), deadline, 'the strip height did not settle')
+                    if strip_height(x) != last:
+                        last, since = strip_height(x), time.monotonic()
+                    time.sleep(.05)
+                return last
+
+            one = settle(225)
+            self.assertIsNotNone(one, 'first tab did not paint')
+            xdo('windowfocus', '--sync', wid)
+            for count in (2, 3, 4):
+                xdo('key', '--clearmodifiers', 'ctrl+shift+t')
+                deadline = time.monotonic() + 5
+                while len(json.loads(api('list'))['tabs']) != count:
+                    self.assertLess(time.monotonic(), deadline, f'tab {count} did not open')
+                    time.sleep(.05)
+            # New labels follow each shell's directory once the daemon reports it.
+            deadline = time.monotonic() + 8
+            while strip_height(225) in (one, None):
+                if time.monotonic() >= deadline:
+                    fail(f'four tabs did not wrap onto a second row: {strip_height(225)} at {window_size(root)}')
+                time.sleep(.05)
+            row = settle(225) - one
+            # Splitting off the selected tab leaves three in a half-width strip: one per row.
+            xdo('key', '--clearmodifiers', 'alt+shift+Right')
+            wait_height(225, one + 2 * row, 'the narrowed strip did not wrap onto three rows')
+            wait_height(675, one, 'the new pane strip is not one row')
+            # Gathering the tabs widens the strip again.
+            xdo('key', '--clearmodifiers', 'ctrl+shift+x')
+            wait_height(225, one + row, 'the widened strip did not unwrap to two rows')
+            wait_height(675, one + row, 'the widened strip did not span the window')
 
     @staticmethod
     def stop(process):
