@@ -11,6 +11,7 @@ mod link;
 mod link_action;
 pub mod paint;
 pub mod panel;
+pub mod panel_tabs;
 mod startup;
 pub mod tabs;
 pub mod terminal;

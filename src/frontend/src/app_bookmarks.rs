@@ -115,7 +115,8 @@ impl App {
                 .find(|page| page.id == id)
                 .map(|page| page.title.clone())
                 .filter(|title| !title.is_empty() && title.len() <= 256),
-            Target::Terminal { .. } => None,
+            // A tab's target is never a Host: a tab running ssh is not bookmarkable.
+            Target::Terminal { .. } | Target::Host { .. } => None,
         };
         match store().toggle(Bookmark { target, title }) {
             Ok(_) => self.reload_bookmarks(),

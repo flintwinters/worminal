@@ -16,12 +16,17 @@ impl App {
             .find(|page| page.id == self.active.get())
             .map(|page| page.directory.clone())
             .filter(|directory| !directory.as_os_str().is_empty());
-        self.open_terminal_on(self.active.get() >> LINK_SHIFT, directory);
+        self.open_terminal_on(self.active.get() >> LINK_SHIFT, directory, Vec::new());
     }
-    /// A new shell on one link's daemon, in `directory` when given.
-    fn open_terminal_on(self: &Rc<Self>, index: u32, directory: Option<PathBuf>) {
+    /// A new terminal on one link's daemon, in `directory` when given, running `command` (empty: the shell).
+    fn open_terminal_on(
+        self: &Rc<Self>,
+        index: u32,
+        directory: Option<PathBuf>,
+        command: Vec<OsString>,
+    ) {
         let mut config = self.config_for(index);
-        config.command.clear();
+        config.command = command;
         config.title = "Worminal".into();
         config.output.clear();
         config.line.clear();
@@ -57,7 +62,7 @@ impl App {
         let directory = PathBuf::from(directory);
         let Some(master) = master.map(OsString::from) else {
             if self.config.master.is_none() {
-                self.open_terminal_on(0, Some(directory));
+                self.open_terminal_on(0, Some(directory), Vec::new());
             } else {
                 self.message(Some(
                     "This window shows another host; open a local bookmark from a local window.",
@@ -66,7 +71,7 @@ impl App {
             return;
         };
         if let Some(index) = self.master_index(&master) {
-            self.open_terminal_on(index, Some(directory));
+            self.open_terminal_on(index, Some(directory), Vec::new());
             return;
         }
         let mut config = self.config.clone();
@@ -81,5 +86,53 @@ impl App {
         if let Err(error) = self.add_remote(config) {
             self.message(Some(&error.to_string()));
         }
+    }
+    /// A bookmarked server: a new tab on this machine that runs `ssh` to it and, when ssh ends, stays open in the
+    /// user's shell, so a refused or dropped connection leaves its error on screen instead of closing the tab
+    /// (a tab whose command exits closes at once). The endpoint is one validated argument, never part of the shell
+    /// text. The script runs in an interactive `sh` for two reasons found by trying dash and bash:
+    /// - job control gives ssh its own foreground process group, which is how the daemon recognises a tab that
+    ///   is running ssh: it labels the tab with the user and stops it being bookmarked as a local directory;
+    /// - a non-interactive shell exits when its foreground child dies of SIGINT, which would close the tab on
+    ///   Ctrl+C during the connection. Bash does so even under `set -m` and a trap; an interactive one survives
+    ///   with `trap : INT`. A trap, unlike ignoring the signal, is reset in ssh, so Ctrl+C still aborts it.
+    pub(super) fn open_bookmarked_host(self: &Rc<Self>, endpoint: String) {
+        if self.config.master.is_some() {
+            self.message(Some(
+                "This window shows another host; open a server bookmark from a local window.",
+            ));
+            return;
+        }
+        self.open_terminal_on(0, None, ssh_command(&endpoint));
+    }
+}
+
+/// `sh -ic 'trap : INT; ssh "$1"; exec "$SHELL"' sh ENDPOINT`.
+fn ssh_command(endpoint: &str) -> Vec<OsString> {
+    [
+        "sh",
+        "-ic",
+        "trap : INT; ssh \"$1\"; exec \"${SHELL:-/bin/sh}\"",
+        "sh",
+        endpoint,
+    ]
+    .into_iter()
+    .map(OsString::from)
+    .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ssh_command;
+
+    #[test]
+    fn the_endpoint_is_an_argument_of_the_script_never_part_of_it() {
+        let command = ssh_command("me@build; reboot");
+        assert_eq!(command.len(), 5);
+        assert_eq!(command[4], "me@build; reboot");
+        let script = command[2].to_str().unwrap();
+        assert!(!script.contains("build") && !script.contains("reboot"));
+        assert!(script.contains("ssh \"$1\""));
+        assert!(script.contains("trap : INT"));
     }
 }

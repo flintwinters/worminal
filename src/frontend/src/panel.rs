@@ -1,6 +1,7 @@
 //! The collapsible side panel: tabs of one-line rows, drawn with the terminal's font and colors like the tab
 //! strip and driven from the keyboard. A tab is a `PanelTab`; Bookmarks is the first, and any other list joins
 //! by implementing it. The widget exists only while the panel is open and is freed when it closes.
+pub use crate::panel_tabs::{BookmarksTab, PanelAction, PanelKey, PanelTab};
 use crate::{
     fonts::Fonts,
     graphics_ffi,
@@ -16,94 +17,9 @@ use std::{
     rc::Rc,
 };
 use worminal_protocol::cell::{COLOR_DEFAULT_BACKGROUND as BG, COLOR_DEFAULT_FOREGROUND as FG};
-use worminal_workspace::bookmarks::{Bookmark, Target};
 
 /// The panel's width in terminal cells.
 const PANEL_CELLS: i32 = 36;
-
-/// What a panel tab asks the window to do.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum PanelAction {
-    OpenTerminal {
-        directory: String,
-        master: Option<String>,
-    },
-    OpenUrl(String),
-    RemoveBookmark(Target),
-}
-/// What the user pressed on a row.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PanelKey {
-    Open,
-    Remove,
-}
-
-/// One tab of the panel.
-pub trait PanelTab {
-    fn title(&self) -> &str;
-    /// One line per row.
-    fn rows(&self) -> Vec<String>;
-    /// Shown instead of rows when there are none.
-    fn empty(&self) -> &str;
-    fn press(&self, key: PanelKey, row: usize) -> Option<PanelAction>;
-}
-
-/// Saved terminal tabs and web pages.
-pub struct BookmarksTab {
-    items: Vec<Bookmark>,
-    home: Option<String>,
-}
-impl BookmarksTab {
-    pub fn new(items: Vec<Bookmark>, home: Option<String>) -> Self {
-        Self { items, home }
-    }
-}
-/// `~` for the user's home, so local rows stay short.
-fn tilde(path: &str, home: Option<&str>) -> String {
-    match home.filter(|home| !home.is_empty() && *home != "/") {
-        Some(home) if path == home => "~".into(),
-        Some(home) => path
-            .strip_prefix(home)
-            .filter(|rest| rest.starts_with('/'))
-            .map_or_else(|| path.to_owned(), |rest| format!("~{rest}")),
-        None => path.to_owned(),
-    }
-}
-fn row_label(bookmark: &Bookmark, home: Option<&str>) -> String {
-    match &bookmark.target {
-        Target::Terminal {
-            directory,
-            master: Some(master),
-        } => format!("{master}:{directory}"),
-        Target::Terminal { directory, .. } => tilde(directory, home),
-        Target::Web { url } => bookmark.title.clone().unwrap_or_else(|| url.clone()),
-    }
-}
-impl PanelTab for BookmarksTab {
-    fn title(&self) -> &str {
-        "Bookmarks"
-    }
-    fn rows(&self) -> Vec<String> {
-        self.items
-            .iter()
-            .map(|bookmark| row_label(bookmark, self.home.as_deref()))
-            .collect()
-    }
-    fn empty(&self) -> &str {
-        "No bookmarks yet. Ctrl+Shift+D bookmarks the current tab."
-    }
-    fn press(&self, key: PanelKey, row: usize) -> Option<PanelAction> {
-        let bookmark = self.items.get(row)?;
-        Some(match (key, &bookmark.target) {
-            (PanelKey::Remove, target) => PanelAction::RemoveBookmark(target.clone()),
-            (PanelKey::Open, Target::Terminal { directory, master }) => PanelAction::OpenTerminal {
-                directory: directory.clone(),
-                master: master.clone(),
-            },
-            (PanelKey::Open, Target::Web { url }) => PanelAction::OpenUrl(url.clone()),
-        })
-    }
-}
 
 /// The selected row and the first visible one, independent of GTK.
 #[derive(Default, Debug, PartialEq, Eq)]
@@ -145,8 +61,39 @@ enum Command {
     Tab(isize),
     Open,
     Remove,
+    Add,
     Close,
 }
+/// What a key does while the panel is asking the user to type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Edit {
+    Insert(char),
+    Erase,
+    Clear,
+    Submit,
+    Cancel,
+}
+/// Typing keeps every plain key as text (so `j`, `x` and `a` are letters here); Ctrl+U clears, and other Ctrl and
+/// Alt combinations stay with the window.
+fn edit(value: gdk::keys::Key, state: Mod) -> Option<Edit> {
+    if state.contains(Mod::CONTROL_MASK) {
+        return (value == key::u && !state.contains(Mod::MOD1_MASK)).then_some(Edit::Clear);
+    }
+    if state.contains(Mod::MOD1_MASK) {
+        return None;
+    }
+    match value {
+        key::Return | key::KP_Enter => Some(Edit::Submit),
+        key::Escape => Some(Edit::Cancel),
+        key::BackSpace => Some(Edit::Erase),
+        _ => value
+            .to_unicode()
+            .filter(|c| !c.is_control() && !c.is_whitespace())
+            .map(Edit::Insert),
+    }
+}
+/// Longest text the prompt keeps; hosts are far shorter.
+const PROMPT_LIMIT: usize = 255;
 /// The panel's keys. Ctrl and Alt combinations belong to the window and the applications, not to the list.
 fn command(value: gdk::keys::Key, state: Mod) -> Option<Command> {
     if state.intersects(Mod::CONTROL_MASK | Mod::MOD1_MASK) {
@@ -163,6 +110,7 @@ fn command(value: gdk::keys::Key, state: Mod) -> Option<Command> {
         key::Right | key::l | key::Tab => Command::Tab(1),
         key::Return | key::KP_Enter | key::space => Command::Open,
         key::Delete | key::BackSpace | key::x => Command::Remove,
+        key::a => Command::Add,
         key::Escape | key::q => Command::Close,
         _ => return None,
     })
@@ -184,8 +132,16 @@ struct View {
     active: Cell<usize>,
     cursor: RefCell<Cursor>,
     callbacks: Rc<Callbacks>,
+    /// The text being typed for the active tab's `add`, while the panel is asking.
+    prompt: RefCell<Option<String>>,
+    /// Why the last submission was refused; it replaces the footer until the next key.
+    notice: RefCell<Option<String>>,
 }
 
+/// ANSI red, for a refused entry.
+fn palette_red(palette: &Rc<RefCell<Palette>>) -> gdk::RGBA {
+    palette.borrow().color(1)
+}
 fn header_height(metrics: Metrics) -> i32 {
     metrics.height + 2
 }
@@ -299,14 +255,56 @@ impl View {
             self.show(cr, row, metrics.width, top, metrics);
             self.plain();
         }
-        paint::source(cr, &mix(&background, &foreground, 0.5));
-        self.show(
-            cr,
-            "Enter open  Del remove  Esc close",
-            metrics.width,
-            height - metrics.height,
-            metrics,
-        );
+        self.draw_footer(cr, width, height, metrics)?;
+        Ok(())
+    }
+    /// The last line: the hint, the question while typing, or why the last answer was refused.
+    fn draw_footer(
+        &self,
+        cr: &cairo::Context,
+        width: i32,
+        height: i32,
+        metrics: Metrics,
+    ) -> Result<(), cairo::Error> {
+        let (background, foreground) = {
+            let palette = self.palette.borrow();
+            (palette.color(BG), palette.color(FG))
+        };
+        let text_width = (width - 2 * metrics.width - 1).max(metrics.width);
+        let tabs = self.tabs.borrow();
+        let footer = height - metrics.height;
+        let prompting = self.prompt.borrow().clone();
+        let notice = self.notice.borrow().clone();
+        if let Some(notice) = notice {
+            paint::source(cr, &palette_red(&self.palette));
+            self.show(cr, &notice, metrics.width, footer, metrics);
+        } else if let Some(text) = prompting {
+            let label = tabs
+                .get(self.active.get())
+                .and_then(|tab| tab.add_prompt())
+                .unwrap_or("Add");
+            paint::source(cr, &foreground);
+            // The end of a long entry is the part being typed.
+            self.layout.set_width(text_width * pango::SCALE);
+            self.layout.set_ellipsize(pango::EllipsizeMode::Start);
+            self.show(
+                cr,
+                &format!("{label}: {text}_"),
+                metrics.width,
+                footer,
+                metrics,
+            );
+            self.plain();
+        } else {
+            paint::source(cr, &mix(&background, &foreground, 0.5));
+            self.show(
+                cr,
+                "Enter open  a add  Del remove  Esc",
+                metrics.width,
+                footer,
+                metrics,
+            );
+        }
         Ok(())
     }
     /// Show the rows of the active tab and keep the selection on a real, visible row.
@@ -342,10 +340,104 @@ impl View {
         }
         let next = (self.active.get() as isize + delta).rem_euclid(count as isize) as usize;
         self.active.set(next);
+        self.prompt.borrow_mut().take();
         *self.cursor.borrow_mut() = Cursor::default();
         self.reload();
     }
+    fn has_focus_and_paste(self: &Rc<Self>) -> bool {
+        self.widget.has_focus() && self.paste()
+    }
+    /// Keys while typing: edit the text, send it on Enter, leave on Escape.
+    fn type_key(&self, event: &gdk::EventKey) -> bool {
+        let Some(edit) = edit(event.keyval(), event.state()) else {
+            return false;
+        };
+        self.notice.borrow_mut().take();
+        match edit {
+            Edit::Insert(c) => {
+                if let Some(text) = self.prompt.borrow_mut().as_mut() {
+                    if text.len() < PROMPT_LIMIT {
+                        text.push(c);
+                    }
+                }
+            }
+            Edit::Erase => {
+                if let Some(text) = self.prompt.borrow_mut().as_mut() {
+                    text.pop();
+                }
+            }
+            Edit::Clear => {
+                if let Some(text) = self.prompt.borrow_mut().as_mut() {
+                    text.clear();
+                }
+            }
+            Edit::Cancel => {
+                self.prompt.borrow_mut().take();
+            }
+            Edit::Submit => self.submit(),
+        }
+        self.widget.queue_draw();
+        true
+    }
+    /// Ask the active tab to add what was typed: a refusal stays in the footer with the text kept for fixing.
+    fn submit(&self) {
+        let text = self.prompt.borrow().clone().unwrap_or_default();
+        let result = self
+            .tabs
+            .borrow()
+            .get(self.active.get())
+            .map(|tab| tab.add(&text));
+        match result {
+            Some(Ok(action)) => {
+                self.prompt.borrow_mut().take();
+                // Callbacks run with no panel state borrowed.
+                (self.callbacks.act)(action);
+            }
+            Some(Err(why)) => *self.notice.borrow_mut() = Some(why),
+            None => {
+                self.prompt.borrow_mut().take();
+            }
+        }
+    }
+    /// Start typing if the active tab can add something.
+    fn begin_add(&self) {
+        let can = self
+            .tabs
+            .borrow()
+            .get(self.active.get())
+            .is_some_and(|tab| tab.add_prompt().is_some());
+        if can {
+            *self.prompt.borrow_mut() = Some(String::new());
+            self.notice.borrow_mut().take();
+        }
+    }
+    /// Paste the clipboard's first line into the prompt; false when the panel is not asking for anything.
+    fn paste(self: &Rc<Self>) -> bool {
+        if self.prompt.borrow().is_none() {
+            return false;
+        }
+        let view = Rc::downgrade(self);
+        gtk::Clipboard::get(&gdk::SELECTION_CLIPBOARD).request_text(move |_, text| {
+            let (Some(view), Some(text)) = (view.upgrade(), text) else {
+                return;
+            };
+            let line = text.lines().next().unwrap_or_default();
+            if let Some(typed) = view.prompt.borrow_mut().as_mut() {
+                for c in line.trim().chars().filter(|c| !c.is_control()) {
+                    if typed.len() < PROMPT_LIMIT {
+                        typed.push(c);
+                    }
+                }
+            }
+            view.notice.borrow_mut().take();
+            view.widget.queue_draw();
+        });
+        true
+    }
     fn key(&self, event: &gdk::EventKey) -> bool {
+        if self.prompt.borrow().is_some() {
+            return self.type_key(event);
+        }
         let Some(command) = command(event.keyval(), event.state()) else {
             return false;
         };
@@ -363,6 +455,7 @@ impl View {
             Command::Tab(delta) => self.switch(delta),
             Command::Open => self.press(PanelKey::Open),
             Command::Remove => self.press(PanelKey::Remove),
+            Command::Add => self.begin_add(),
             Command::Close => (self.callbacks.close)(),
         }
         self.widget.queue_draw();
@@ -434,6 +527,11 @@ impl SidePanel {
             .as_ref()
             .is_some_and(|view| view.widget.has_focus())
     }
+    /// Route a paste into the panel's prompt; false when the panel is not asking for anything.
+    pub fn paste(&self) -> bool {
+        let view = self.view.borrow().clone();
+        view.is_some_and(|view| view.has_focus_and_paste())
+    }
     pub fn focus(&self) {
         if let Some(view) = self.view.borrow().as_ref() {
             view.widget.grab_focus();
@@ -464,6 +562,8 @@ impl SidePanel {
             active: Cell::new(0),
             cursor: RefCell::new(Cursor::default()),
             callbacks: Rc::new(callbacks),
+            prompt: RefCell::new(None),
+            notice: RefCell::new(None),
         });
         view.widget
             .set_size_request(PANEL_CELLS * view.metrics().width, -1);
@@ -534,82 +634,12 @@ mod tests {
     use super::*;
     use gtk::gdk::keys::constants as key;
 
-    fn terminal(directory: &str, master: Option<&str>) -> Bookmark {
-        Bookmark {
-            target: Target::Terminal {
-                directory: directory.into(),
-                master: master.map(Into::into),
-            },
-            title: None,
-        }
-    }
-    fn web(url: &str, title: Option<&str>) -> Bookmark {
-        Bookmark {
-            target: Target::Web { url: url.into() },
-            title: title.map(Into::into),
-        }
-    }
     const METRICS: Metrics = Metrics {
         width: 8,
         height: 16,
         ink_height: 12,
         ascent: 12,
     };
-
-    #[test]
-    fn rows_abbreviate_home_and_name_the_host_and_page() {
-        let tab = BookmarksTab::new(
-            vec![
-                terminal("/home/me", None),
-                terminal("/home/me/work", None),
-                terminal("/home/mellow", None),
-                terminal("/srv/app", Some("me@build")),
-                web("https://example.org", Some("Example")),
-                web("https://example.org/x", None),
-            ],
-            Some("/home/me".into()),
-        );
-        assert_eq!(
-            tab.rows(),
-            [
-                "~",
-                "~/work",
-                "/home/mellow",
-                "me@build:/srv/app",
-                "Example",
-                "https://example.org/x"
-            ]
-        );
-    }
-
-    #[test]
-    fn pressing_a_bookmark_opens_or_removes_exactly_that_bookmark() {
-        let tab = BookmarksTab::new(
-            vec![
-                terminal("/srv/app", Some("me@build")),
-                web("https://example.org", None),
-            ],
-            None,
-        );
-        assert_eq!(
-            tab.press(PanelKey::Open, 0),
-            Some(PanelAction::OpenTerminal {
-                directory: "/srv/app".into(),
-                master: Some("me@build".into())
-            })
-        );
-        assert_eq!(
-            tab.press(PanelKey::Open, 1),
-            Some(PanelAction::OpenUrl("https://example.org".into()))
-        );
-        assert_eq!(
-            tab.press(PanelKey::Remove, 1),
-            Some(PanelAction::RemoveBookmark(Target::Web {
-                url: "https://example.org".into()
-            }))
-        );
-        assert_eq!(tab.press(PanelKey::Open, 2), None);
-    }
 
     #[test]
     fn the_cursor_stays_on_a_real_row_and_scrolls_to_keep_it_visible() {
@@ -670,7 +700,7 @@ mod tests {
             Some(Command::Tab(-1))
         );
         assert_eq!(command(key::G, Mod::SHIFT_MASK), Some(Command::Edge(true)));
-        assert_eq!(command(key::a, plain), None);
+        assert_eq!(command(key::z, plain), None);
         for modifier in [
             Mod::CONTROL_MASK,
             Mod::MOD1_MASK,
@@ -693,5 +723,47 @@ mod tests {
         // A 100 px panel holds header, rows and the footer line: (100 - 20 - 16) / 16 rows.
         assert_eq!(visible_rows(100, METRICS), 4);
         assert_eq!(visible_rows(10, METRICS), 0);
+    }
+
+    #[test]
+    fn while_typing_every_plain_key_is_text_and_ctrl_alt_stay_with_the_window() {
+        let plain = Mod::empty();
+        assert_eq!(command(key::a, plain), Some(Command::Add));
+        // The list's own keys are letters in a host name.
+        for letter in [
+            key::a,
+            key::j,
+            key::k,
+            key::x,
+            key::q,
+            key::g,
+            key::l,
+            key::h,
+        ] {
+            let c = letter.to_unicode().unwrap();
+            assert_eq!(edit(letter, plain), Some(Edit::Insert(c)));
+        }
+        assert_eq!(edit(key::G, Mod::SHIFT_MASK), Some(Edit::Insert('G')));
+        assert_eq!(edit(key::at, Mod::SHIFT_MASK), Some(Edit::Insert('@')));
+        assert_eq!(edit(key::_1, plain), Some(Edit::Insert('1')));
+        assert_eq!(edit(key::period, plain), Some(Edit::Insert('.')));
+        assert_eq!(edit(key::Return, plain), Some(Edit::Submit));
+        assert_eq!(edit(key::KP_Enter, plain), Some(Edit::Submit));
+        assert_eq!(edit(key::Escape, plain), Some(Edit::Cancel));
+        assert_eq!(edit(key::BackSpace, plain), Some(Edit::Erase));
+        assert_eq!(edit(key::u, Mod::CONTROL_MASK), Some(Edit::Clear));
+        // Hosts have no spaces, and arrows or function keys are not text.
+        assert_eq!(edit(key::space, plain), None);
+        assert_eq!(edit(key::Tab, plain), None);
+        assert_eq!(edit(key::Up, plain), None);
+        assert_eq!(edit(key::F5, plain), None);
+        for modifier in [
+            Mod::CONTROL_MASK,
+            Mod::MOD1_MASK,
+            Mod::CONTROL_MASK | Mod::SHIFT_MASK,
+        ] {
+            assert_eq!(edit(key::a, modifier), None);
+            assert_eq!(edit(key::Return, modifier), None);
+        }
     }
 }

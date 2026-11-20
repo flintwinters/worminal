@@ -44,6 +44,14 @@ fn terminal(directory: &str, master: Option<&str>) -> Bookmark {
         title: None,
     }
 }
+fn host(endpoint: &str) -> Bookmark {
+    Bookmark {
+        target: Target::Host {
+            endpoint: endpoint.into(),
+        },
+        title: None,
+    }
+}
 fn web(url: &str) -> Bookmark {
     Bookmark {
         target: Target::Web { url: url.into() },
@@ -124,6 +132,12 @@ fn damaged_files_and_symlinks_are_preserved_instead_of_reset() {
         "bookmarks:\n  - directory: /a\n  - directory: /a\n",
         "bookmarks:\n  - directory: /a\n    master: -oProxyCommand=x\n",
         "bookmarks:\n  - url: has space\n",
+        "bookmarks:\n  - host: -oProxyCommand=x\n",
+        "bookmarks:\n  - host: a b\n",
+        "bookmarks:\n  - host: me@build\n    master: other\n",
+        "bookmarks:\n  - host: me@build\n    directory: /a\n",
+        "bookmarks:\n  - host: me@build\n    url: https://example.org\n",
+        "bookmarks:\n  - host: me@build\n  - host: me@build\n",
         "bookmarks: [\n",
     ] {
         let fixture = Fixture::new();
@@ -218,4 +232,70 @@ fn a_full_file_rejects_before_publishing_more_than_it_can_read_back() {
     assert!(added > 10);
     // Everything published still reads back whole.
     assert_eq!(store.list().unwrap().len(), added);
+}
+
+#[test]
+fn a_host_is_an_ssh_endpoint_that_is_added_once_and_read_back_by_hand() {
+    let fixture = Fixture::new();
+    let store = fixture.store();
+    assert!(store.add(host("me@build")).unwrap());
+    // Adding what is there is harmless and changes nothing on disk.
+    let before = fs::read(fixture.path()).unwrap();
+    assert!(!store.add(host("me@build")).unwrap());
+    assert!(!store
+        .add(Bookmark {
+            title: Some("renamed".into()),
+            ..host("me@build")
+        })
+        .unwrap());
+    assert_eq!(fs::read(fixture.path()).unwrap(), before);
+    // The same words as a directory or a page are different bookmarks.
+    assert!(store.add(terminal("/srv/app", Some("me@build"))).unwrap());
+    assert!(store.add(host("[::1]")).unwrap());
+    assert!(store.add(host("build-2.example.org")).unwrap());
+    assert!(fs::read_to_string(fixture.path())
+        .unwrap()
+        .contains("host: me@build"));
+    let listed = store.list().unwrap();
+    assert_eq!(listed.len(), 4);
+    assert_eq!(listed[0], host("me@build"));
+    // Toggling removes the host like any other bookmark.
+    assert!(!store.toggle(host("me@build")).unwrap());
+    assert!(store.remove(&host("[::1]").target).unwrap());
+    assert_eq!(store.list().unwrap().len(), 2);
+
+    // Hand-written entries are read, with an optional title.
+    fs::write(
+        fixture.path(),
+        "bookmarks:\n  - host: digitize@Luna\n    title: Luna\n  - host: 10.0.0.7\n",
+    )
+    .unwrap();
+    let listed = store.list().unwrap();
+    assert_eq!(listed[0].target, host("digitize@Luna").target);
+    assert_eq!(listed[0].title.as_deref(), Some("Luna"));
+    assert_eq!(listed[1], host("10.0.0.7"));
+}
+
+#[test]
+fn hosts_that_could_be_options_or_commands_are_rejected_before_publishing() {
+    let fixture = Fixture::new();
+    let store = fixture.store();
+    for bad in [
+        "",
+        "-oProxyCommand=x",
+        "a b",
+        "me@",
+        "@host",
+        "a@b@c",
+        "host;reboot",
+        "host\n",
+        "$(id)",
+        "a`id`",
+        "user:pw@host",
+    ] {
+        assert!(store.add(host(bad)).is_err(), "{bad:?} was accepted");
+        assert!(store.toggle(host(bad)).is_err(), "{bad:?} was toggled in");
+    }
+    assert!(store.add(host(&"x".repeat(256))).is_err());
+    assert!(!fixture.path().exists());
 }

@@ -6,9 +6,11 @@
 //!     master: me@build-host           # optional: the SSH endpoint whose daemon owns that directory
 //!     title: project                  # optional
 //!   - url: https://example.org        # a web page
+//!   - host: me@build-host             # a server: opens a tab that runs ssh to it
 //! ```
 //!
-//! A bookmark never holds a command: like restart recovery, opening one starts a fresh shell. The file is
+//! A bookmark never holds a command: like restart recovery, opening one starts a fresh shell. A `host` is only a
+//! validated SSH endpoint; the application builds the ssh invocation itself. The file is
 //! per user and shared by every window and workspace scope, so every change is a read-modify-publish under
 //! a lock and a damaged file is reported and kept, never reset.
 use crate::yamlfile::{self, FILE_LIMIT};
@@ -19,8 +21,8 @@ use worminal_protocol::worp::devices::validate_endpoint;
 pub const MAX_BOOKMARKS: usize = 256;
 const PATH_BYTES: usize = 4096;
 const TITLE_BYTES: usize = 256;
-const HEADER: &str = "# Worminal bookmarks: `directory: /abs/path` (optional `master: user@host`) or `url: ...`,\n\
-# each with an optional `title`. Hand edits are fine; the app rewrites this file without comments.\n";
+const HEADER: &str = "# Worminal bookmarks: `directory: /abs/path` (optional `master: user@host`), `url: ...` or\n\
+# `host: user@host`, each with an optional `title`. Hand edits are fine; the app rewrites this file without comments.\n";
 
 /// What a bookmark opens. Two bookmarks with the same target are the same bookmark.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,6 +33,10 @@ pub enum Target {
     },
     Web {
         url: String,
+    },
+    /// A server reached with `ssh`: a host or `user@host`.
+    Host {
+        endpoint: String,
     },
 }
 
@@ -81,6 +87,7 @@ impl Bookmark {
                     validate_endpoint(master)?;
                 }
             }
+            Target::Host { endpoint } => validate_endpoint(endpoint)?,
             Target::Web { url } => {
                 if !plain(url, PATH_BYTES) || url.chars().any(char::is_whitespace) {
                     return Err(rejected(
@@ -106,7 +113,7 @@ fn decode_entry(entry: Value) -> io::Result<Bookmark> {
     let Value::Mapping(fields) = entry else {
         return Err(invalid("each bookmark is a mapping"));
     };
-    let (mut directory, mut master, mut url, mut title) = (None, None, None, None);
+    let (mut directory, mut master, mut url, mut host, mut title) = (None, None, None, None, None);
     for (key, value) in fields {
         let key = key
             .as_str()
@@ -117,18 +124,20 @@ fn decode_entry(entry: Value) -> io::Result<Bookmark> {
             "directory" => &mut directory,
             "master" => &mut master,
             "url" => &mut url,
+            "host" => &mut host,
             "title" => &mut title,
             _ => return Err(invalid(format!("unknown key `{key}`"))),
         };
         *slot = Some(value);
     }
-    let target = match (directory, url, master) {
-        (Some(directory), None, master) => Target::Terminal { directory, master },
-        (None, Some(url), None) => Target::Web { url },
-        (None, Some(_), Some(_)) => return Err(invalid("`master` belongs to a `directory`")),
+    let target = match (directory, url, host, master) {
+        (Some(directory), None, None, master) => Target::Terminal { directory, master },
+        (None, Some(url), None, None) => Target::Web { url },
+        (None, None, Some(endpoint), None) => Target::Host { endpoint },
+        (None, _, _, Some(_)) => return Err(invalid("`master` belongs to a `directory`")),
         _ => {
             return Err(invalid(
-                "each bookmark has exactly one of `directory` or `url`",
+                "each bookmark has exactly one of `directory`, `url` or `host`",
             ))
         }
     };
@@ -182,6 +191,9 @@ fn encode(bookmarks: &[Bookmark]) -> io::Result<Vec<u8>> {
                 Target::Web { url } => {
                     fields.insert("url".into(), url.clone().into());
                 }
+                Target::Host { endpoint } => {
+                    fields.insert("host".into(), endpoint.clone().into());
+                }
             }
             if let Some(title) = &bookmark.title {
                 fields.insert("title".into(), title.clone().into());
@@ -228,6 +240,21 @@ impl Bookmarks {
                 Ok(Some(bytes))
             },
         )
+    }
+
+    /// Add the bookmark unless one with the same target exists. Returns whether it was added.
+    pub fn add(&self, bookmark: Bookmark) -> io::Result<bool> {
+        bookmark.validate()?;
+        self.update(|bookmarks| {
+            if bookmarks.iter().any(|old| old.target == bookmark.target) {
+                return Ok(false);
+            }
+            if bookmarks.len() >= MAX_BOOKMARKS {
+                return Err(rejected("Bookmarks are full; remove one first."));
+            }
+            bookmarks.push(bookmark);
+            Ok(true)
+        })
     }
 
     /// Add the bookmark, or remove the one with the same target. Returns whether it is bookmarked now.

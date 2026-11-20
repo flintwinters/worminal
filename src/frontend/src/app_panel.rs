@@ -72,6 +72,14 @@ impl App {
                 self.close_panel();
                 self.open_bookmarked_terminal(directory, master);
             }
+            PanelAction::AddBookmark(bookmark) => match store().add(bookmark) {
+                Ok(_) => self.reload_bookmarks(),
+                Err(error) => self.message(Some(&error.to_string())),
+            },
+            PanelAction::OpenHost(endpoint) => {
+                self.close_panel();
+                self.open_bookmarked_host(endpoint);
+            }
             PanelAction::OpenUrl(url) => {
                 self.close_panel();
                 self.open_browser(&url);

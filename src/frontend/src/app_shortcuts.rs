@@ -100,6 +100,10 @@ impl App {
         }
         let mut zoom = self.fonts.borrow().zoom();
         if state == control_shift {
+            // A paste while the panel is asking for a host goes to that question, not to the terminal beside it.
+            if value == key::v && self.panel.paste() {
+                return true;
+            }
             match value {
                 key::t => {
                     self.new_tab();

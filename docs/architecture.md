@@ -125,11 +125,14 @@ activation remains compositor policy.
 ## Side panel and bookmarks
 
 Ctrl+Shift+B (or P) opens a collapsible side panel beside the panes (`panel.rs`, glue in `app_panel.rs`). It is a Cairo list
-in the terminal's font and palette with its own tabs; a tab implements `PanelTab` (title, rows, press), and Bookmarks
-is the first, so further lists add an implementation. The panel is a sibling of the pane area, never an overlay
+in the terminal's font and palette with its own tabs; a tab implements `PanelTab` (`panel_tabs.rs`: title, rows, press,
+and optionally an add prompt), and Bookmarks is the first, so further lists add an implementation. The panel is a sibling of the pane area, never an overlay
 child (GTK drag hit testing would hide drop targets), and its widget exists only while open. Bookmarks are the
 user's `$XDG_CONFIG_HOME/worminal/bookmarks.yaml` (`workspace/src/bookmarks.rs`; `docs/bookmarks.md`): terminal
-directories with an optional SSH master, and URLs, never commands. It follows the `devices.yaml` rules through the
+directories with an optional SSH master, URLs, and servers (`host:`, validated SSH endpoints), never commands. Opening a
+server starts `sh -ic 'trap : INT; ssh "$1"; exec "$SHELL"'` in a new local tab with the endpoint as `$1`: ssh gets
+its own foreground process group (so the daemon labels the tab and does not bookmark it as a local directory), and an
+interrupted or failed ssh leaves the user's shell and its error, not a closed tab. It follows the `devices.yaml` rules through the
 shared `yamlfile.rs`: bounded no-follow reads, a non-blocking lock around read-modify-publish, atomic replacement,
 and a damaged file reported and kept. Windows re-read it on focus; there is no watching or polling. The tab strip's
 star and Ctrl+Shift+D toggle through `app_bookmarks.rs`.

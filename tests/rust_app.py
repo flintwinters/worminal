@@ -523,6 +523,127 @@ class RustApplicationTest(unittest.TestCase):
             self.assertTrue({red, green} <= seen,
                             f'selecting the browser pane hid the terminal beside it: saw {seen}')
 
+    def test_a_server_is_typed_into_the_panel_and_opens_a_tab_that_runs_ssh_then_a_shell(self):
+        self.server_flow()
+
+    def test_the_same_server_flow_when_sh_is_bash(self):
+        # Many systems have bash as sh, and a shell exits when its foreground child dies of SIGINT unless it is
+        # interactive and traps the signal: without that, Ctrl+C on a connecting ssh closes the tab under bash.
+        bash = shutil.which('bash')
+        if not bash:
+            self.skipTest('bash is not installed')
+        self.server_flow(interpreter=bash)
+
+    def server_flow(self, interpreter=None):
+        import re
+        from Xlib import X, display, error
+        with isolated_display() as env, ExitStack() as cleanup:
+            root = CHECKS / f'servers-{os.getpid()}-{"bash" if interpreter else "default"}'
+            shutil.rmtree(root, ignore_errors=True)
+            fakes = root / 'bin'
+            fakes.mkdir(parents=True)
+            self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+            # A fake ssh: `ssh 30` sleeps for 30 seconds, `ssh bad` prints sleep's complaint and exits.
+            (fakes / 'ssh').symlink_to('/bin/sleep')
+            if interpreter:
+                # The launcher runs `sh` from PATH, so this decides which shell interprets the ssh script.
+                (fakes / 'sh').symlink_to(interpreter)
+            saved = root / 'config/worminal/bookmarks.yaml'
+            env.update(GDK_BACKEND='x11', XDG_CONFIG_HOME=str(root / 'config'), SHELL='/bin/sh',
+                       PATH=f"{fakes}:{env['PATH']}")
+            env.pop('WAYLAND_DISPLAY', None)
+            app = subprocess.Popen([str(runtime_binary('worminal-rust')), '-T', 'Rust servers', '-o', '-',
+                                    '-e', '/bin/sh', '-c', 'while :; do sleep 1; done'],
+                                   env=env, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.addCleanup(lambda: self.stop(app))
+            wid = window(env, app)
+            xdo = lambda *args: subprocess.run(['xdotool', *args], env=env, check=True)
+            api = lambda *args: subprocess.check_output([str(runtime_binary('worminald')), 'api', *args],
+                                                        env=env, text=True)
+            server = display.Display(env['DISPLAY'])
+            cleanup.callback(server.close)
+            window_object = server.create_resource_object('window', int(wid))
+            xdo('windowfocus', '--sync', wid)
+            xdo('windowsize', wid, '900', '500')
+            time.sleep(1.5)
+
+            def panel_open():
+                try:
+                    row = window_object.get_image(0, 250, 900, 1, X.ZPixmap, 0xffffffff).data
+                except error.BadMatch:
+                    return False
+                return any(len(set(row[x * 4:x * 4 + 3])) == 1 and 70 <= row[x * 4] <= 95 for x in range(60, 600))
+
+            def wait_for(condition, message):
+                deadline = time.monotonic() + 10
+                while not condition():
+                    self.assertIsNone(app.poll())
+                    self.assertLess(time.monotonic(), deadline, message() if callable(message) else message)
+                    time.sleep(.05)
+            text = lambda: saved.read_text() if saved.exists() else ''
+            tabs = lambda: json.loads(api('list'))['tabs']
+            key = lambda *names: xdo('key', '--clearmodifiers', *names)
+            type_text = lambda value: xdo('type', '--delay', '40', value)
+            wait_for(lambda: len(tabs()) == 1, 'no first tab')
+            key('ctrl+shift+b')
+            wait_for(panel_open, 'ctrl+shift+b did not open the panel')
+            # `a` asks for a server. Something that cannot be one is refused and nothing is saved, and the list's
+            # own keys (a, j, x, q) are plain letters while typing.
+            key('a')
+            type_text('x;y')
+            key('Return')
+            time.sleep(.8)
+            self.assertNotIn('host', text(), 'a malformed server was saved')
+            self.assertTrue(panel_open(), 'a refused entry closed the panel')
+            key('Escape')            # cancels the question only ...
+            time.sleep(.5)
+            self.assertTrue(panel_open(), 'Escape while typing closed the whole panel')
+            # ... then a real one. `bad` contains the add key itself.
+            key('a')
+            type_text('bad')
+            key('Return')
+            wait_for(lambda: re.search(r"host: ['\"]?bad['\"]?", text()), 'the typed server was not saved')
+            self.assertNotIn('- directory:', text())   # (the header comment mentions the word)
+            key('Return')            # opens the selected row: a tab that runs ssh bad
+            wait_for(lambda: len(tabs()) == 2, 'opening the server did not create a tab')
+            wait_for(lambda: not panel_open(), 'opening a server left the panel open')
+            bad = tabs()[1]['id']
+            # ssh failed at once, yet the tab stays and shows why: it is a shell now, not a closed tab.
+            # Text a tab prints in its first few milliseconds, before the window has attached and sized it, ends up in
+            # scrollback rather than on the visible screen (any tab the window creates does this), so read retained rows.
+            screen = lambda: ' '.join(json.loads(api('read', str(bad), '--tail', '100'))['results'][0]['lines']).strip()
+            tab_command = lambda tab: Path(f"/proc/{[t for t in tabs() if t['id'] == tab][0]['shell_pid']}/cmdline").read_bytes()
+            wait_for(lambda: 'invalid time interval' in screen(),
+                     lambda: f'no error on screen; it shows {screen()!r}; the tab runs {tab_command(bad)}')
+            time.sleep(2)
+            self.assertEqual(len(tabs()), 2, 'the tab closed when ssh ended')
+            type_text(f"echo up > {root / 'up.txt'}")
+            key('Return')
+            wait_for(lambda: (root / 'up.txt').exists(), 'no shell took over after ssh ended')
+            # A server that stays connected: it is a tab running ssh, so it must not be bookmarkable as a
+            # local directory (the daemon has to see ssh in front, which is what set -m is for).
+            key('ctrl+shift+b')
+            wait_for(panel_open, 'the panel did not reopen')
+            key('a')
+            type_text('30')
+            key('Return')
+            wait_for(lambda: re.search(r"host: ['\"]?30['\"]?", text()), 'the second server was not saved')
+            key('Down')
+            key('Return')
+            wait_for(lambda: len(tabs()) == 3, 'the second server did not open')
+            time.sleep(2.5)          # the daemon notices ssh in front on its next check
+            before = text()
+            key('ctrl+shift+d')
+            time.sleep(1.5)
+            self.assertEqual(text(), before, 'a tab running ssh was bookmarked as a local directory')
+            # Ending ssh leaves the shell, not a closed tab.
+            key('ctrl+c')
+            time.sleep(1)
+            type_text(f"echo back > {root / 'back.txt'}")
+            key('Return')
+            wait_for(lambda: (root / 'back.txt').exists(), 'no shell took over after ssh was interrupted')
+            self.assertEqual(len(tabs()), 3)
+
     def test_a_tab_running_ssh_is_not_bookmarkable_as_a_local_directory(self):
         with isolated_display() as env:
             # The daemon reports an ssh tab's directory as its local shell's, so bookmarking it would save the
