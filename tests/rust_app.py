@@ -438,6 +438,91 @@ class RustApplicationTest(unittest.TestCase):
             self.assertEqual(resizes(), quiet, 'clicking the star resized the terminal')
             self.assertEqual(len(json.loads(api('list'))['tabs']), 1)
 
+    def test_a_browser_tab_moves_into_a_split_keeping_its_page_and_the_terminal_painting(self):
+        from Xlib import X, display, error
+        red, green, white = (200, 30, 30), (30, 160, 30), (255, 255, 255)
+        with isolated_display() as env, ExitStack() as cleanup:
+            root = CHECKS / f'browser-split-{os.getpid()}'
+            shutil.rmtree(root, ignore_errors=True)
+            root.mkdir(parents=True)
+            self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+            # The title is random per load, so a reloaded page (a lost DOM) shows a different one.
+            page = root / 'page.html'
+            page.write_text('<!doctype html><title>t</title><body style="margin:0;background:#fff">'
+                            '<script>document.title="doc-" + Math.floor(Math.random() * 1e9)</script>')
+            # A terminal that changes color every quarter second shows whether its frames still arrive:
+            # a hidden tab would freeze on whichever color it last painted.
+            flip = ("while :; do printf '\\033[48;2;200;30;30m\\033[2J'; sleep .25; "
+                    "printf '\\033[48;2;30;160;30m\\033[2J'; sleep .25; done")
+            env.update(GDK_BACKEND='x11', XDG_CONFIG_HOME=str(root / 'config'))
+            env.pop('WAYLAND_DISPLAY', None)
+            app = subprocess.Popen([str(runtime_binary('worminal-rust')), '-T', 'Rust browser split', '-o', '-',
+                                    '-e', '/bin/sh', '-c', flip],
+                                   env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.addCleanup(lambda: self.stop(app))
+            wid = window(env, app)
+            xdo = lambda *args: subprocess.run(['xdotool', *args], env=env, check=True)
+            api = lambda *args: subprocess.check_output([str(runtime_binary('worminald')), 'api', *args],
+                                                        env=env, text=True)
+            title = lambda: subprocess.check_output(['xdotool', 'getwindowname', wid], env=env, text=True).strip()
+            server = display.Display(env['DISPLAY'])
+            cleanup.callback(server.close)
+            window_object = server.create_resource_object('window', int(wid))
+            xdo('windowfocus', '--sync', wid)
+            xdo('windowsize', wid, '900', '500')
+            time.sleep(1.5)
+
+            def pixel(fx, fy):
+                try:
+                    data = window_object.get_image(int(900 * fx), int(500 * fy), 1, 1, X.ZPixmap, 0xffffffff).data
+                except error.BadMatch:
+                    return None
+                return tuple(data[:3][::-1])
+
+            def wait_for(condition, message):
+                deadline = time.monotonic() + 10
+                while not condition():
+                    self.assertIsNone(app.poll())
+                    self.assertLess(time.monotonic(), deadline, message)
+                    time.sleep(.05)
+            tabs = lambda: json.loads(api('list'))['tabs']
+            api('open', '--browser', page.as_uri())
+            wait_for(lambda: len(tabs()) == 2 and tabs()[1]['kind'] == 'browser', 'no browser tab appeared')
+            xdo('key', '--clearmodifiers', 'alt+2')
+            wait_for(lambda: pixel(.5, .75) == white, 'the browser page was not shown')
+            wait_for(lambda: title().startswith('doc-'), 'the page never reported its title')
+            loaded = title()
+            # Alt+Shift+Right moves the browser tab into a pane of its own, beside the terminal.
+            xdo('key', '--clearmodifiers', 'alt+shift+Right')
+            wait_for(lambda: pixel(.75, .75) == white and pixel(.25, .75) in (red, green),
+                     'the browser tab did not split off beside the terminal')
+            # The page moved with its widget: it was not reloaded.
+            time.sleep(2)
+            self.assertEqual(title(), loaded, 'moving the browser tab reloaded its page')
+            # The terminal beside the browser still paints: both of its colors keep arriving.
+            seen = set()
+            deadline = time.monotonic() + 4
+            while time.monotonic() < deadline and not {red, green} <= seen:
+                seen.add(pixel(.25, .75))
+                time.sleep(.05)
+            self.assertTrue({red, green} <= seen,
+                            f'the terminal beside the browser stopped painting: saw {seen}')
+            self.assertEqual(pixel(.75, .75), white)
+            # Right after the split the terminal's own resize keeps it shown, which hides a fault: selecting the
+            # browser pane again later must not hide the terminal, as an exclusive Focus on the browser would.
+            xdo('key', '--clearmodifiers', 'ctrl+shift+Left')
+            time.sleep(1)
+            xdo('key', '--clearmodifiers', 'ctrl+shift+Right')
+            wait_for(lambda: title() == loaded, 'the browser pane was not selected again')
+            time.sleep(1)
+            seen = set()
+            deadline = time.monotonic() + 4
+            while time.monotonic() < deadline and not {red, green} <= seen:
+                seen.add(pixel(.25, .75))
+                time.sleep(.05)
+            self.assertTrue({red, green} <= seen,
+                            f'selecting the browser pane hid the terminal beside it: saw {seen}')
+
     def test_a_tab_running_ssh_is_not_bookmarkable_as_a_local_directory(self):
         with isolated_display() as env:
             # The daemon reports an ssh tab's directory as its local shell's, so bookmarking it would save the

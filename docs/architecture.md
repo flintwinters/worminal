@@ -113,10 +113,10 @@ snapshot, and acknowledge commit before the donor retires; see
 
 Painting preserves matching background runs, overlapping glyph/cursor damage, fractional-grid fallback and Unicode
 font fallback. Cache printable ASCII shaping only. Views defer unused buffers/layouts/input methods/timers. Dragging
-a terminal tab onto a pane edge splits the window (`layout.rs` tree of pane ids, `app_split.rs` widgets; per window,
+a tab onto a pane edge (or Alt+Shift+arrows) splits the window (`layout.rs` tree of pane ids, `app_split.rs` widgets; per window,
 never persisted). Each pane is its own Cairo strip over a notebook holding only its tabs; a one-pane window is the
 ordinary case. The daemon only learns the shown set (each pane's selected tab): `Focus` shows one tab, `Pane`
-(feature `PANES`) adds one, and `Resize` never hides neighbours. Ctrl+Shift+X gathers all tabs into the focused
+(feature `PANES`) adds one, and `Resize` never hides neighbours. A browser tab has no frames, so it splits freely, but the daemon's `Focus` is exclusive: while terminals are visible beside it, claiming the browser presents those terminals instead of focusing the browser. Ctrl+Shift+X gathers all tabs into the focused
 pane. The Cairo tab strip uses terminal metrics/colors and the tab order reported by the daemon. Browser file labels
 decode the filename; web tabs retain document titles. D-Bus directory arrays retain original filesystem bytes.
 `docs/window-state.md` defines that read-only public contract. X11 activation uses fresh server timestamps; Wayland

@@ -250,7 +250,7 @@ impl App {
             .clone()
     }
     /// The selected tab of each pane, in reading order.
-    fn visible(&self) -> Vec<u32> {
+    pub(super) fn visible(&self) -> Vec<u32> {
         let leaves = self.panes.layout.borrow().leaves();
         leaves
             .into_iter()
@@ -261,9 +261,15 @@ impl App {
     pub(super) fn is_visible(&self, id: u32) -> bool {
         id == self.active.get() || self.visible().contains(&id)
     }
-    /// Only terminals whose daemon can keep several tabs shown take part in a split.
+    /// Browser tabs always take part in a split; a terminal only if its daemon can keep several tabs shown.
     fn can_split(&self, id: u32) -> bool {
-        self.terminal(id).is_some() && self.features(id) & WIRE_FEATURE_PANES != 0
+        // A browser tab has no PTY and no frames, so the daemon never has to show it beside anything.
+        let browser = self
+            .pages
+            .borrow()
+            .iter()
+            .any(|page| page.id == id && page.browser);
+        browser || (self.terminal(id).is_some() && self.features(id) & WIRE_FEATURE_PANES != 0)
     }
     pub(super) fn focus_pane(&self, pane: &Pane) {
         if self.panes.focused.replace(pane.id) != pane.id {
@@ -550,7 +556,9 @@ impl App {
             return;
         }
         self.panes.presented.replace(shown.clone());
-        if shown.len() < 2 {
+        // One shown terminal is simply the focused one. With a browser active it is a visible terminal beside the
+        // browser, which must stay shown: the browser has no frames to give the daemon.
+        if shown.len() < 2 && self.terminal(active).is_some() {
             shown = vec![active];
         }
         let mut focused = Vec::new();
