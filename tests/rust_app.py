@@ -421,6 +421,77 @@ class RustApplicationTest(unittest.TestCase):
             wait_for(lambda: str(cwd) not in bookmarked(), 'clicking the star again did not remove it')
             self.assertEqual(len(json.loads(api('list'))['tabs']), 1)
 
+    def test_the_side_panel_opens_and_removes_bookmarks_from_the_keyboard(self):
+        from Xlib import X, display, error
+        with isolated_display() as env, ExitStack() as cleanup:
+            root = CHECKS / f'panel-{os.getpid()}'
+            shutil.rmtree(root, ignore_errors=True)
+            start, other = root / 'start', root / 'other dir'
+            start.mkdir(parents=True)
+            other.mkdir()
+            self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+            saved = root / 'config/worminal/bookmarks.yaml'
+            saved.parent.mkdir(parents=True)
+            saved.write_text(f'bookmarks:\n  - directory: "{other}"\n')
+            env.update(GDK_BACKEND='x11', XDG_CONFIG_HOME=str(root / 'config'), SHELL='/bin/sh')
+            env.pop('WAYLAND_DISPLAY', None)
+            app = subprocess.Popen([str(runtime_binary('worminal-rust')), '-T', 'Rust panel', '-o', '-',
+                                    '-e', '/bin/sh', '-c', 'while :; do sleep 1; done'],
+                                   env=env, cwd=start, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.addCleanup(lambda: self.stop(app))
+            wid = window(env, app)
+            xdo = lambda *args: subprocess.run(['xdotool', *args], env=env, check=True)
+            api = lambda *args: subprocess.check_output([str(runtime_binary('worminald')), 'api', *args],
+                                                        env=env, text=True)
+            server = display.Display(env['DISPLAY'])
+            cleanup.callback(server.close)
+            window_object = server.create_resource_object('window', int(wid))
+            xdo('windowfocus', '--sync', wid)
+            xdo('windowsize', wid, '900', '500')
+            time.sleep(1.5)
+
+            def panel_edge():
+                # The panel draws its right edge in a faint gray (about 30% toward the foreground) that this
+                # test's terminals never use; the terminal background is (24, 24, 24).
+                try:
+                    row = window_object.get_image(0, 250, 900, 1, X.ZPixmap, 0xffffffff).data
+                except error.BadMatch:
+                    return False
+                edge = lambda x: len(set(row[x * 4:x * 4 + 3])) == 1 and 70 <= row[x * 4] <= 95
+                return any(edge(x) for x in range(60, 600))
+
+            def wait_for(condition, message):
+                deadline = time.monotonic() + 8
+                while not condition():
+                    self.assertIsNone(app.poll())
+                    self.assertLess(time.monotonic(), deadline, message)
+                    time.sleep(.05)
+            tabs = lambda: json.loads(api('list'))['tabs']
+            wait_for(lambda: tabs()[0].get('directory') == str(start), 'the tab never reported its directory')
+            self.assertFalse(panel_edge(), 'the panel is open before it was asked for')
+            # Ctrl+Shift+P opens the panel; Enter opens the selected bookmark in a new tab and closes it.
+            xdo('key', '--clearmodifiers', 'ctrl+shift+p')
+            wait_for(panel_edge, 'ctrl+shift+p did not open the panel')
+            xdo('key', '--clearmodifiers', 'Return')
+            wait_for(lambda: len(tabs()) == 2 and tabs()[1].get('directory') == str(other),
+                     'Enter did not open the bookmark in a new tab at its directory')
+            wait_for(lambda: not panel_edge(), 'opening a bookmark left the panel open')
+            # The new terminal has the keyboard, and its shell started in the bookmarked directory.
+            xdo('type', '--delay', '30', 'pwd > marker.txt')
+            xdo('key', '--clearmodifiers', 'Return')
+            wait_for(lambda: (other / 'marker.txt').exists() and (other / 'marker.txt').read_text().strip() == str(other),
+                     'the opened tab did not take the keyboard in the bookmarked directory')
+            # Escape closes the panel and gives the keyboard back; Delete removes the selected bookmark.
+            xdo('key', '--clearmodifiers', 'ctrl+shift+p')
+            wait_for(panel_edge, 'ctrl+shift+p did not reopen the panel')
+            xdo('key', '--clearmodifiers', 'Escape')
+            wait_for(lambda: not panel_edge(), 'Escape did not close the panel')
+            xdo('key', '--clearmodifiers', 'ctrl+shift+p')
+            wait_for(panel_edge, 'ctrl+shift+p did not reopen the panel')
+            xdo('key', '--clearmodifiers', 'Delete')
+            wait_for(lambda: str(other) not in saved.read_text(), 'Delete did not remove the bookmark')
+            self.assertEqual(len(tabs()), 2)
+
     @staticmethod
     def stop(process):
         stop_application(process)

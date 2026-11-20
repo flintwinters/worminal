@@ -27,7 +27,11 @@ impl App {
             return true;
         }
         let value = event.keyval().to_lower();
-        if let Some(browser) = self.browser(self.active.get()) {
+        // The panel's own keys (Escape, arrows, Enter) must reach it, not the page behind it.
+        if let Some(browser) = self
+            .browser(self.active.get())
+            .filter(|_| !self.panel.has_focus())
+        {
             if browser.shortcut(event) {
                 return true;
             }
@@ -126,6 +130,10 @@ impl App {
                 }
                 key::x => {
                     self.unsplit();
+                    return true;
+                }
+                key::p => {
+                    self.toggle_panel();
                     return true;
                 }
                 key::d => {

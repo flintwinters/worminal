@@ -5,7 +5,7 @@ use super::App;
 use std::rc::Rc;
 use worminal_workspace::bookmarks::{Bookmark, Bookmarks, Target};
 
-fn store() -> Bookmarks {
+pub(super) fn store() -> Bookmarks {
     Bookmarks::new(worminal_config::bookmarks_path())
 }
 
@@ -62,6 +62,7 @@ impl App {
         if *self.bookmarks.borrow() != list {
             *self.bookmarks.borrow_mut() = list;
             self.refresh_tabs();
+            self.refresh_panel();
         }
     }
     /// Add the tab's bookmark or remove it.
@@ -88,8 +89,7 @@ impl App {
                 } else {
                     "Bookmark removed."
                 }));
-                *self.bookmarks.borrow_mut() = load();
-                self.refresh_tabs();
+                self.reload_bookmarks();
             }
             Err(error) => self.message(Some(&error.to_string())),
         }

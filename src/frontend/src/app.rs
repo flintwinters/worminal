@@ -39,6 +39,8 @@ mod notifications;
 mod open;
 #[path = "app_shortcuts.rs"]
 mod shortcuts;
+#[path = "app_panel.rs"]
+mod side_panel;
 #[path = "app_split.rs"]
 mod split;
 #[path = "app_update_fences.rs"]
@@ -326,6 +328,8 @@ struct App {
     defer_navigation: Cell<bool>,
     geometry_pending: Cell<bool>,
     early_keys: RefCell<VecDeque<gdk::EventKey>>,
+    /// The side panel beside the panes; empty until it is opened.
+    panel: crate::panel::SidePanel,
     /// The saved bookmarks as last read, for the stars on the tab strip.
     bookmarks: RefCell<Vec<worminal_workspace::bookmarks::Bookmark>>,
 }
@@ -382,7 +386,11 @@ impl App {
         status.set_no_show_all(true);
         let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let panes = split::Panes::new();
-        container.pack_start(panes.widget(), true, true, 0);
+        let panel = crate::panel::SidePanel::new();
+        let body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        body.pack_start(panel.widget(), false, false, 0);
+        body.pack_start(panes.widget(), true, true, 0);
+        container.pack_start(&body, true, true, 0);
         container.pack_end(&status, false, false, 0);
         chrome::outline(&window, &container);
         let app = Rc::new(Self {
@@ -409,6 +417,7 @@ impl App {
             defer_navigation: Cell::new(staged),
             geometry_pending: Cell::new(true),
             early_keys: RefCell::new(VecDeque::new()),
+            panel,
             bookmarks: RefCell::new(bookmarks::load()),
         });
         app.start_panes();

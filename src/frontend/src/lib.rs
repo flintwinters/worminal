@@ -10,6 +10,7 @@ pub mod layout;
 mod link;
 mod link_action;
 pub mod paint;
+pub mod panel;
 mod startup;
 pub mod tabs;
 pub mod terminal;
