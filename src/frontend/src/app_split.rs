@@ -5,7 +5,7 @@ use super::{App, LINK_SHIFT};
 use crate::{
     layout::{neighbor, Direction, Layout, PaneRect, Target, Zone},
     paint,
-    tabs::{mix, Actions, Tabs},
+    tabs::{mix, Actions, Ghost, Landing, Tabs},
 };
 use gtk::prelude::*;
 use std::{
@@ -32,6 +32,8 @@ pub(super) struct Panes {
     host: gtk::Box,
     /// Region a hovering tab drag would claim, in `root` coordinates.
     marked: Rc<Cell<Option<Rect>>>,
+    /// The dragged tab's image and its top-left, in `root` coordinates.
+    ghost: Rc<RefCell<Option<(cairo::ImageSurface, f64, f64)>>>,
     list: RefCell<Vec<Rc<Pane>>>,
     layout: RefCell<Layout>,
     focused: Cell<u32>,
@@ -47,10 +49,11 @@ impl Panes {
         // Draw after children instead of using an overlay widget: GTK drag hit testing
         // ignores overlay pointer pass-through and would hide terminal drop targets.
         let marked = Rc::new(Cell::new(None::<Rect>));
+        let ghost = Rc::new(RefCell::new(None::<(cairo::ImageSurface, f64, f64)>));
         root.connect_local(
             "draw",
             true,
-            glib::clone!(@strong marked => move |values| {
+            glib::clone!(@strong marked, @strong ghost => move |values| {
                 let cr = values[1].get::<cairo::Context>().unwrap();
                 if let Some((x, y, width, height)) = marked.get() {
                     cr.rectangle(x, y, width, height);
@@ -64,6 +67,14 @@ impl Panes {
                         eprintln!("worminal: split mark: {error}");
                     }
                 }
+                if let Some((image, x, y)) = ghost.borrow().as_ref() {
+                    if let Err(error) = cr
+                        .set_source_surface(image, *x, *y)
+                        .and_then(|()| cr.paint_with_alpha(0.6))
+                    {
+                        eprintln!("worminal: dragged tab: {error}");
+                    }
+                }
                 Some(false.to_value())
             }),
         );
@@ -71,6 +82,7 @@ impl Panes {
             root,
             host,
             marked,
+            ghost,
             list: RefCell::new(Vec::new()),
             layout: RefCell::new(Layout::Leaf(0)),
             focused: Cell::new(0),
@@ -94,7 +106,7 @@ impl App {
     /// The window's first pane; it holds every tab until one is dragged out.
     pub(super) fn start_panes(self: &Rc<Self>) {
         let pane = self.add_pane();
-        self.panes.focused.set(pane.id);
+        self.focus_pane(&pane);
         *self.panes.layout.borrow_mut() = Layout::Leaf(pane.id);
         // After the children, like the drop highlight: an overlay widget would hide drop targets from GTK.
         self.panes.root.connect_local(
@@ -167,6 +179,7 @@ impl App {
             if let Some(id) = id { app.activate(id); }
             None
         }));
+        let strip_widget = strip.widget().clone();
         strip.connect(Actions {
             select: Box::new(glib::clone!(@weak self as app => move |id| app.select_id(id))),
             close: Box::new(
@@ -177,7 +190,10 @@ impl App {
                 glib::clone!(@weak self as app => @default-return None, move |id, x, y| app.locate(id, x, y)),
             ),
             hover: Box::new(glib::clone!(@weak self as app => move |target| app.mark(target))),
-            split: Box::new(glib::clone!(@weak self as app => move |id, target| app.drop_tab(id, target))),
+            land: Box::new(glib::clone!(@weak self as app => move |id, target| app.drop_tab(id, target))),
+            ghost: Box::new(glib::clone!(@weak self as app, @weak strip_widget => move |ghost| {
+                app.ghost(&strip_widget, ghost)
+            })),
             star: Box::new(glib::clone!(@weak self as app => move |id| app.toggle_bookmark(id))),
         });
         let pane = Rc::new(Pane {
@@ -271,9 +287,13 @@ impl App {
             .any(|page| page.id == id && page.browser);
         browser || (self.terminal(id).is_some() && self.features(id) & WIRE_FEATURE_PANES != 0)
     }
+    /// The one place pane focus changes, so only the focused strip highlights its selected tab.
     pub(super) fn focus_pane(&self, pane: &Pane) {
         if self.panes.focused.replace(pane.id) != pane.id {
             self.panes.root.queue_draw();
+        }
+        for other in self.panes() {
+            other.strip.focus(other.id == pane.id);
         }
     }
     /// Focus the pane holding a tab and select its page there.
@@ -287,7 +307,7 @@ impl App {
     }
     /// Where a drop of `dragged` at this position (in its own pane's strip) would land: another strip or the
     /// middle of another pane moves it there, a pane's edge splits that pane. Its own strip only reorders.
-    pub(super) fn locate(&self, dragged: u32, x: f64, y: f64) -> Option<Target> {
+    pub(super) fn locate(&self, dragged: u32, x: f64, y: f64) -> Option<Landing> {
         if !self.can_split(dragged) {
             return None;
         }
@@ -301,9 +321,10 @@ impl App {
                 if (0..strip.allocated_width()).contains(&sx)
                     && (0..strip.allocated_height()).contains(&sy)
                 {
-                    return (!own).then_some(Target {
-                        anchor: pane.id,
-                        zone: Zone::Center,
+                    let slot = pane.strip.slot(f64::from(sx), f64::from(sy));
+                    return slot.filter(|_| !own).map(|slot| Landing::Strip {
+                        pane: pane.id,
+                        slot,
                     });
                 }
             }
@@ -316,14 +337,24 @@ impl App {
                 f64::from(content.allocated_height()),
             )?;
             // A pane's only tab cannot split itself, and its own middle holds it already.
-            (!(own && (alone || zone == Zone::Center))).then_some(Target {
+            (!(own && (alone || zone == Zone::Center))).then_some(Landing::Content(Target {
                 anchor: pane.id,
                 zone,
-            })
+            }))
         })
     }
-    /// Mark the region a drag would claim until it moves elsewhere.
-    pub(super) fn mark(&self, target: Option<Target>) {
+    /// Mark where a drag would land until it moves elsewhere: a slot in a strip, or a region of content.
+    pub(super) fn mark(&self, landing: Option<Landing>) {
+        for pane in self.panes() {
+            pane.strip.hint(match landing {
+                Some(Landing::Strip { pane: id, slot }) if id == pane.id => Some(slot),
+                _ => None,
+            });
+        }
+        let target = match landing {
+            Some(Landing::Content(target)) => Some(target),
+            _ => None,
+        };
         let rect = target.and_then(|target| {
             let pane = self.pane(target.anchor)?;
             let widget: gtk::Widget = if target.zone == Zone::Center {
@@ -340,6 +371,24 @@ impl App {
         });
         self.panes.marked.set(rect);
         self.panes.root.queue_draw();
+    }
+    /// Draw the dragged tab at its strip position, redrawing only the area it leaves and enters.
+    fn ghost(&self, strip: &gtk::DrawingArea, ghost: Option<Ghost>) {
+        let root = &self.panes.root;
+        let placed = ghost.and_then(|ghost| {
+            let (x, y) = strip.translate_coordinates(root, 0, 0)?;
+            Some((ghost.image, f64::from(x) + ghost.x, f64::from(y) + ghost.y))
+        });
+        let old = self.panes.ghost.replace(placed);
+        for (image, x, y) in old.iter().chain(self.panes.ghost.borrow().iter()) {
+            let scale = f64::from(root.scale_factor());
+            root.queue_draw_area(
+                x.floor() as i32,
+                y.floor() as i32,
+                (f64::from(image.width()) / scale).ceil() as i32 + 1,
+                (f64::from(image.height()) / scale).ceil() as i32 + 1,
+            );
+        }
     }
     /// Move a tab's page into `dest`, leaving the pane that held it.
     fn move_page(&self, id: u32, dest: &Pane) {
@@ -363,8 +412,19 @@ impl App {
         widget.show();
         self.syncing.set(was);
     }
-    /// A tab dropped on a pane joins it, or on a pane edge gets a new pane beside it; it takes focus.
-    pub(super) fn drop_tab(self: &Rc<Self>, id: u32, target: Target) {
+    /// A tab dropped on a pane joins it (at the slot, on its strip), or on a pane edge gets a new pane beside
+    /// it; it takes focus.
+    pub(super) fn drop_tab(self: &Rc<Self>, id: u32, landing: Landing) {
+        let (target, slot) = match landing {
+            Landing::Strip { pane, slot } => (
+                Target {
+                    anchor: pane,
+                    zone: Zone::Center,
+                },
+                Some(slot),
+            ),
+            Landing::Content(target) => (target, None),
+        };
         let Some(anchor) = self.pane(target.anchor) else {
             return;
         };
@@ -380,6 +440,9 @@ impl App {
         self.collapse();
         self.rebuild();
         self.select_id(id);
+        if let Some(slot) = slot {
+            self.move_tab(id, slot);
+        }
     }
     /// The panes' rectangles in the pane area's coordinates.
     fn pane_rects(&self) -> Vec<(u32, PaneRect)> {
@@ -433,7 +496,7 @@ impl App {
             },
             None => return false,
         };
-        self.drop_tab(id, target);
+        self.drop_tab(id, Landing::Content(target));
         true
     }
     /// A terminal asks to become the current tab: it was pressed, or must take control. Panes of a split are all
@@ -485,7 +548,9 @@ impl App {
         }
         if changed && self.pane(self.panes.focused.get()).is_none() {
             let first = self.panes.layout.borrow().leaves()[0];
-            self.panes.focused.set(first);
+            if let Some(pane) = self.pane(first) {
+                self.focus_pane(&pane);
+            }
         }
         changed
     }

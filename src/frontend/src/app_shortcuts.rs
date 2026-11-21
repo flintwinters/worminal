@@ -68,14 +68,32 @@ impl App {
                     self.new_tab();
                 }
             } else {
-                self.send(self.active.get(), CommandKind::Close { receipt: false });
+                let closing = self.active.get();
+                if value == key::q {
+                    // Quitting a browser returns to a shell, as exiting a program does. The shell that ran
+                    // `--new-browser-tab` ended when the browser replaced it, so a fresh one takes its slot:
+                    // the daemon places the new tab after the browser, which then closes beside it.
+                    self.new_tab();
+                }
+                self.send(closing, CommandKind::Close { receipt: false });
             }
             return true;
         }
-        if (state == Mod::CONTROL_MASK || state == control_shift)
+        // Alt+Tab cycles like Ctrl+Tab but only through tabs that have a colored background (alerts, busy
+        // tasks, background jobs).
+        if [
+            Mod::CONTROL_MASK,
+            control_shift,
+            Mod::MOD1_MASK,
+            Mod::MOD1_MASK | Mod::SHIFT_MASK,
+        ]
+        .contains(&state)
             && [key::Tab, key::ISO_Left_Tab].contains(&value)
         {
-            self.cycle_tab(state == control_shift);
+            self.cycle_tab(
+                state.contains(Mod::SHIFT_MASK),
+                state.contains(Mod::MOD1_MASK),
+            );
             return true;
         }
         // Ctrl+Shift+arrow focuses the pane that way; Alt+Shift+arrow moves the tab there like a drag would.
@@ -210,15 +228,31 @@ impl App {
         self.refresh_tabs();
     }
 
-    pub(super) fn cycle_tab(self: &Rc<Self>, previous: bool) {
+    /// Select the next (or previous) tab; `tinted_only` skips tabs without a background fill in their strip.
+    pub(super) fn cycle_tab(self: &Rc<Self>, previous: bool, tinted_only: bool) {
         let count = self.notebook().n_pages();
-        if count != 0 {
-            let current = self.notebook().current_page().unwrap_or(0);
-            self.select_index(if previous {
-                (current + count - 1) % count
+        let current = self.notebook().current_page().unwrap_or(0);
+        let candidates = (1..count).map(|step| {
+            if previous {
+                (current + count - step) % count
             } else {
-                (current + 1) % count
-            });
+                (current + step) % count
+            }
+        });
+        let target = candidates.into_iter().find(|index| {
+            !tinted_only || {
+                let widget = self.notebook().nth_page(Some(*index));
+                let id = self
+                    .pages
+                    .borrow()
+                    .iter()
+                    .find(|page| Some(&page.widget) == widget.as_ref())
+                    .map(|page| page.id);
+                id.is_some_and(|id| self.panes().iter().any(|pane| pane.strip.tinted(id)))
+            }
+        });
+        if let Some(index) = target {
+            self.select_index(index);
         }
     }
 }

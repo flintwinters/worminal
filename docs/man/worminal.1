@@ -275,8 +275,11 @@ and all the remaining arguments are used as a command
 even without it.
 .SH SHORTCUTS
 .TP
-.B Ctrl-d or Ctrl-q (browser)
+.B Ctrl-d (browser)
 Close the selected browser tab. Terminal tabs pass both keys to their applications.
+.TP
+.B Ctrl-q (browser)
+Quit the browser and return to a fresh shell in its place.
 .TP
 .B Ctrl-f (browser)
 Find text in the current page. Enter selects the next match; Shift-Enter selects
@@ -348,6 +351,9 @@ Close the selected tab in all windows.
 .TP
 .B Ctrl-Tab, Ctrl-Shift-Tab
 Cycle tabs in the current window.
+.TP
+.B Alt-Tab, Alt-Shift-Tab
+Cycle like Ctrl-Tab, but only through other tabs with a colored background: alerts, busy tasks and background jobs.
 .TP
 .B Ctrl-1 through Ctrl-8, Ctrl-9
 Select a tab by position, or the last tab with Ctrl-9.

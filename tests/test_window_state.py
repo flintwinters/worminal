@@ -78,6 +78,73 @@ class WindowStateTest(unittest.TestCase):
             time.sleep(.03)
         self.fail(f"Timed out waiting for {description}; last result: {last!r}")
 
+    def test_alt_tab_cycles_only_through_tabs_with_a_colored_background(self):
+        with tempfile.TemporaryDirectory(prefix="window-state-alt-", dir=CHECKS) as temporary, \
+                isolated_display() as display, private_bus(display) as session, profile(session) as env:
+            base = Path(temporary)
+            first, second, third = (base / name for name in ("a", "b", "c"))
+            for path in (first, second, third):
+                path.mkdir()
+            env.update(GDK_BACKEND="x11", SHELL="/bin/sh")
+            with (base / "frontend.log").open("w+") as log:
+                app = subprocess.Popen([str(FRONTEND), "-T", "Alt tab fixture", "-e", "/bin/sh", "-c", "exec cat"],
+                                       cwd=first, env=env, stdout=log, stderr=log)
+                name = f"org.worminal.Instance.p{app.pid}"
+                try:
+                    def current(path):
+                        result = subprocess.run(["busctl", "--user", "--json=short", "call", name, OBJECT,
+                                                 INTERFACE, "GetWindows"], env=env, capture_output=True,
+                                                text=True, timeout=3)
+                        rows = json.loads(result.stdout)["data"][0] if result.returncode == 0 else []
+                        return len(rows) == 1 and bytes(rows[0][3]) == os.fsencode(path)
+
+                    def key(*args):
+                        subprocess.run(["xdotool", *args], env=env, check=True, timeout=3)
+
+                    def type_line(text):
+                        key("type", "--clearmodifiers", "--delay", "0", text)
+                        key("key", "Return")
+
+                    self.wait_for(lambda: current(first), "first tab")
+                    window = subprocess.check_output(["xdotool", "search", "--onlyvisible", "--name",
+                                                      "^Alt tab fixture$"], env=env, text=True).splitlines()[0]
+                    key("windowfocus", "--sync", window)
+                    key("key", "ctrl+t")
+                    self.wait_for(lambda: current(first), "second tab")
+                    type_line(f"cd {shlex.quote(str(second))}")
+                    self.wait_for(lambda: current(second), "second tab directory")
+                    key("key", "ctrl+t")
+                    self.wait_for(lambda: current(second), "third tab")
+                    # OSC 9;4 marks the third tab busy, which colors its tab-bar background; the task must stay in the
+                    # foreground, since the daemon ends progress when the shell returns.
+                    type_line(f"cd {shlex.quote(str(third))}; printf '\\033]9;4;3\\007'; sleep 600")
+                    self.wait_for(lambda: current(third), "third tab directory")
+                    key("key", "ctrl+1")
+                    self.wait_for(lambda: current(first), "back to the first tab")
+                    key("key", "ctrl+Tab")
+                    self.wait_for(lambda: current(second), "ctrl+Tab visits the plain tab")
+                    key("key", "alt+Tab")
+                    self.wait_for(lambda: current(third), "alt+Tab reaches the colored tab")
+                    key("key", "alt+Tab")
+                    self.assertFalse(self.wait_for_not(lambda: not current(third)),
+                                     "alt+Tab left the only colored tab")
+                    key("key", "ctrl+1")
+                    self.wait_for(lambda: current(first), "first tab again")
+                    key("key", "alt+shift+Tab")
+                    self.wait_for(lambda: current(third), "alt+shift+Tab skips the plain tab backwards")
+                finally:
+                    app.terminate(); app.wait(timeout=5)
+                    stop_workspace(env)
+
+    def wait_for_not(self, callback, seconds=.6):
+        """Whether `callback` turned true within `seconds`; for asserting that nothing happens."""
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            if callback():
+                return True
+            time.sleep(.03)
+        return False
+
     def test_directory_selection_focus_unavailability_and_signals(self):
         checks = CHECKS
         checks.mkdir(parents=True, exist_ok=True)
@@ -145,6 +212,13 @@ class WindowStateTest(unittest.TestCase):
                         f"{FRONTEND} --new-browser-tab about:blank")
                     key("key", "Return")
                     self.wait_for(lambda: directory("", False), "browser unavailability")
+                    key("key", "ctrl+q")
+                    # The shell takes the browser's slot; merely closing the browser would leave one tab.
+                    self.wait_for(lambda: (rows := snapshot()) and len(rows) == 1 and rows[0][2],
+                                  "a shell replacing the quit browser")
+                    key("key", "ctrl+2")
+                    self.wait_for(lambda: (rows := snapshot()) and rows[0][2] and bytes(rows[0][3]) != os.fsencode(second),
+                                  "the replacement shell is a tab of its own")
                     key("key", "ctrl+1")
                     self.wait_for(lambda: directory(second), "terminal availability restored")
                     original_id = snapshot()[0][0]

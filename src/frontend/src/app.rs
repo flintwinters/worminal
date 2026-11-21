@@ -551,7 +551,7 @@ impl App {
                 self.send(id, if semantic { kind } else { encoded.command() })
             }
             Action::Claim => self.claim(id),
-            Action::CycleTab(previous) => self.cycle_tab(previous),
+            Action::CycleTab(previous) => self.cycle_tab(previous, false),
             Action::Resized(cols, rows) if !self.syncing.get() && self.is_visible(id) => {
                 if let Some(terminal) = self.terminal(id) {
                     self.fit_geometry(&terminal);
