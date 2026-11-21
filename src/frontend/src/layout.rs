@@ -1,4 +1,5 @@
 //! The window's split layout as a binary tree of tab ids, independent of GTK. A window with no split has no layout.
+use worminal_workspace::layout_state::{Node, RATIO_HALF};
 
 /// Where a dragged tab lands relative to the pane under the pointer: beside it, or in its place.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -108,6 +109,8 @@ pub enum Layout {
     Split {
         /// Children sit left and right; otherwise top and bottom.
         side_by_side: bool,
+        /// The first child's share of the split, in thousandths; kept across rebuilds and saved with the window.
+        ratio: u16,
         first: Box<Layout>,
         second: Box<Layout>,
     },
@@ -133,11 +136,13 @@ impl Layout {
             Self::Leaf(leaf) => (leaf != id).then_some(self),
             Self::Split {
                 side_by_side,
+                ratio,
                 first,
                 second,
             } => match (first.without(id), second.without(id)) {
                 (Some(first), Some(second)) => Some(Self::Split {
                     side_by_side,
+                    ratio,
                     first: Box::new(first),
                     second: Box::new(second),
                 }),
@@ -161,20 +166,76 @@ impl Layout {
             Self::Leaf(_) => self,
             Self::Split {
                 side_by_side,
+                ratio,
                 first,
                 second,
-            } => Self::split(
+            } => Self::Split {
                 side_by_side,
-                Box::new(first.insert(anchor, id, zone)),
-                Box::new(second.insert(anchor, id, zone)),
-            ),
+                ratio,
+                first: Box::new(first.insert(anchor, id, zone)),
+                second: Box::new(second.insert(anchor, id, zone)),
+            },
         }
     }
     fn split(side_by_side: bool, first: Box<Self>, second: Box<Self>) -> Self {
         Self::Split {
             side_by_side,
+            ratio: RATIO_HALF,
             first,
             second,
+        }
+    }
+    /// Record where the divider of the split at `path` sits (`false` is the first child, from the root).
+    /// Returns whether the layout changed.
+    pub fn set_ratio(&mut self, path: &[bool], new: u16) -> bool {
+        match (self, path.split_first()) {
+            (Self::Split { ratio, .. }, None) => {
+                let changed = *ratio != new;
+                *ratio = new;
+                changed
+            }
+            (Self::Split { first, second, .. }, Some((second_child, rest))) => {
+                if *second_child { second } else { first }.set_ratio(rest, new)
+            }
+            (Self::Leaf(_), _) => false,
+        }
+    }
+    /// The saved form of this tree; `pane` describes one leaf.
+    pub fn to_node(&self, pane: &dyn Fn(u32) -> Node) -> Node {
+        match self {
+            Self::Leaf(id) => pane(*id),
+            Self::Split {
+                side_by_side,
+                ratio,
+                first,
+                second,
+            } => Node::Split {
+                side_by_side: *side_by_side,
+                ratio: *ratio,
+                first: Box::new(first.to_node(pane)),
+                second: Box::new(second.to_node(pane)),
+            },
+        }
+    }
+    /// The tree of a saved one; `leaf` makes the pane for each saved pane and returns its id.
+    pub fn from_node(node: &Node, leaf: &mut dyn FnMut(&Node) -> u32) -> Self {
+        match node {
+            Node::Pane { .. } => Self::Leaf(leaf(node)),
+            Node::Split {
+                side_by_side,
+                ratio,
+                first,
+                second,
+            } => {
+                let first = Box::new(Self::from_node(first, leaf));
+                let second = Box::new(Self::from_node(second, leaf));
+                Self::Split {
+                    side_by_side: *side_by_side,
+                    ratio: *ratio,
+                    first,
+                    second,
+                }
+            }
         }
     }
 }
@@ -216,6 +277,49 @@ mod tests {
         let alone = layout.without(1).unwrap().without(3).unwrap();
         assert_eq!(alone, Leaf(2));
         assert_eq!(alone.without(2), None);
+    }
+
+    #[test]
+    fn dividers_keep_their_ratio_through_inserts_and_removals() {
+        let mut layout = Leaf(1).insert(1, 2, Zone::Right).insert(2, 3, Zone::Bottom);
+        // Root splits 1 | (2 / 3): the second child's own split is at path [true].
+        assert!(layout.set_ratio(&[], 300));
+        assert!(layout.set_ratio(&[true], 700));
+        assert!(!layout.set_ratio(&[true], 700));
+        assert!(!layout.set_ratio(&[false], 100), "a pane has no divider");
+        let layout = layout.insert(1, 4, Zone::Top);
+        match &layout {
+            Split { ratio, second, .. } => {
+                assert_eq!(*ratio, 300);
+                assert!(matches!(**second, Split { ratio: 700, .. }));
+            }
+            Leaf(_) => unreachable!(),
+        }
+        // Removing the lone pane of the first side leaves the rest, still at its own ratio.
+        assert!(matches!(
+            layout.without(1).unwrap().without(4).unwrap(),
+            Split { ratio: 700, .. }
+        ));
+    }
+
+    #[test]
+    fn a_layout_converts_to_its_saved_form_and_back() {
+        use worminal_workspace::layout_state::Node;
+        let mut layout = Leaf(10).insert(10, 11, Zone::Right).insert(11, 12, Zone::Bottom);
+        layout.set_ratio(&[true], 250);
+        let node = layout.to_node(&|id| Node::pane(vec![id - 10]));
+        assert_eq!(node.panes().len(), 3);
+        let mut next = 20;
+        let rebuilt = super::Layout::from_node(&node, &mut |_| {
+            next += 1;
+            next - 1
+        });
+        assert_eq!(rebuilt.leaves(), [20, 21, 22]);
+        assert_eq!(
+            rebuilt.to_node(&|id| Node::pane(vec![id - 20])),
+            node,
+            "shape, orientation and ratios survive"
+        );
     }
 
     /// Two columns, each split top and bottom: ids 1/2 on the left (top/bottom), 3/4 on the right.

@@ -31,6 +31,8 @@ mod bookmarks;
 mod browser_views;
 #[path = "app_chrome.rs"]
 mod chrome;
+#[path = "app_layout.rs"]
+mod layout_state;
 #[path = "app_links.rs"]
 mod links;
 #[path = "notifications.rs"]
@@ -423,6 +425,7 @@ impl App {
             bookmarks: RefCell::new(bookmarks::load()),
         });
         app.start_panes();
+        app.begin_restore(staged);
         app.window.connect_key_press_event(
             glib::clone!(@weak app => @default-return glib::Propagation::Proceed,
             move |_, event| app.shortcut(event).into()),
@@ -447,6 +450,7 @@ impl App {
                     app.close_after_update.set(true);
                     return glib::Propagation::Stop;
                 }
+                app.flush_layout();
                 app.release_browsers(); glib::Propagation::Proceed
             }),
         );
@@ -711,6 +715,7 @@ impl App {
             });
         }
         *link.catalog_tabs.borrow_mut() = catalog.tabs.iter().map(|tab| tab.id).collect();
+        let reconnected = link.down();
         link.retry_delay.set(links::RETRY_INITIAL);
         let initial_claim = link.initial_claim.replace(false);
         let mut replaced_active = false;
@@ -908,6 +913,9 @@ impl App {
             self.window.close();
         } else {
             self.message(Some("No tabs. Ctrl+Shift+T opens a terminal."));
+        }
+        if index == 0 {
+            self.restore_layout(reconnected);
         }
         self.present(false);
         if index != 0 && records.is_empty() {

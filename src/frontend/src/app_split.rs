@@ -1,5 +1,5 @@
 //! Split panes: every pane is a tab strip over a notebook of its own tabs, and a window with one pane is an
-//! ordinary window. The split is per window and not persisted; the daemon only learns which tabs this view
+//! ordinary window. The split is per window and remembered between runs (`app_layout.rs`); the daemon only learns which tabs this view
 //! shows (`Pane`), never the geometry.
 use super::{App, LINK_SHIFT};
 use crate::{
@@ -17,11 +17,12 @@ use worminal_protocol::{
     worp::commands::CommandKind,
     WIRE_FEATURE_PANES,
 };
+use worminal_workspace::layout_state::RATIO_FULL;
 
 type Rect = (f64, f64, f64, f64);
 /// One tab strip above the notebook holding just its tabs.
 pub(super) struct Pane {
-    id: u32,
+    pub(super) id: u32,
     widget: gtk::Box,
     pub(super) notebook: gtk::Notebook,
     pub(super) strip: Tabs,
@@ -34,12 +35,14 @@ pub(super) struct Panes {
     marked: Rc<Cell<Option<Rect>>>,
     /// The dragged tab's image and its top-left, in `root` coordinates.
     ghost: Rc<RefCell<Option<(cairo::ImageSurface, f64, f64)>>>,
-    list: RefCell<Vec<Rc<Pane>>>,
-    layout: RefCell<Layout>,
-    focused: Cell<u32>,
+    pub(super) list: RefCell<Vec<Rc<Pane>>>,
+    pub(super) layout: RefCell<Layout>,
+    pub(super) focused: Cell<u32>,
     next: Cell<u32>,
     /// Tabs last sent to the daemons as shown, so unchanged sets generate no traffic.
     presented: RefCell<Vec<u32>>,
+    /// What the window remembers of its layout between runs.
+    pub(super) persist: super::layout_state::Persist,
 }
 impl Panes {
     pub(super) fn new() -> Self {
@@ -88,6 +91,7 @@ impl Panes {
             focused: Cell::new(0),
             next: Cell::new(0),
             presented: RefCell::new(Vec::new()),
+            persist: super::layout_state::Persist::default(),
         }
     }
     pub(super) fn widget(&self) -> &gtk::Overlay {
@@ -162,7 +166,7 @@ impl App {
         }
         Ok(())
     }
-    fn add_pane(self: &Rc<Self>) -> Rc<Pane> {
+    pub(super) fn add_pane(self: &Rc<Self>) -> Rc<Pane> {
         let id = self.panes.next.replace(self.panes.next.get() + 1);
         let notebook = gtk::Notebook::new();
         notebook.set_show_tabs(false);
@@ -205,7 +209,7 @@ impl App {
         self.panes.list.borrow_mut().push(pane.clone());
         pane
     }
-    fn pane(&self, id: u32) -> Option<Rc<Pane>> {
+    pub(super) fn pane(&self, id: u32) -> Option<Rc<Pane>> {
         self.panes
             .list
             .borrow()
@@ -391,7 +395,7 @@ impl App {
         }
     }
     /// Move a tab's page into `dest`, leaving the pane that held it.
-    fn move_page(&self, id: u32, dest: &Pane) {
+    pub(super) fn move_page(&self, id: u32, dest: &Pane) {
         let (Some(widget), Some(source)) = (self.page_widget(id), self.pane_of(id)) else {
             return;
         };
@@ -556,7 +560,7 @@ impl App {
     }
     /// Rebuild the widget tree. Pane widgets leave the old tree first: GTK destroys a container's children
     /// with it, and a pane holds live terminals.
-    pub(super) fn rebuild(&self) {
+    pub(super) fn rebuild(self: &Rc<Self>) {
         for pane in self.panes() {
             detach(pane.widget.upcast_ref());
         }
@@ -566,11 +570,13 @@ impl App {
         let layout = self.panes.layout.borrow().clone();
         self.panes
             .host
-            .pack_start(&self.tree(&layout), true, true, 0);
+            .pack_start(&self.tree(&layout, &mut Vec::new()), true, true, 0);
         self.panes.host.show_all();
         self.panes.root.queue_draw();
     }
-    fn tree(&self, layout: &Layout) -> gtk::Widget {
+    /// The widgets of a layout. `path` addresses the split being built (`false` is a first child), so a moved
+    /// divider can be written back to the layout that remembers it.
+    fn tree(self: &Rc<Self>, layout: &Layout, path: &mut Vec<bool>) -> gtk::Widget {
         match layout {
             Layout::Leaf(id) => self.pane(*id).map_or_else(
                 || gtk::Box::new(gtk::Orientation::Vertical, 0).upcast(),
@@ -578,20 +584,29 @@ impl App {
             ),
             Layout::Split {
                 side_by_side,
+                ratio,
                 first,
                 second,
             } => {
                 let side_by_side = *side_by_side;
+                let ratio = i32::from(*ratio);
                 let paned = gtk::Paned::new(if side_by_side {
                     gtk::Orientation::Horizontal
                 } else {
                     gtk::Orientation::Vertical
                 });
-                paned.pack1(&self.tree(first), true, false);
-                paned.pack2(&self.tree(second), true, false);
-                // The divider starts in the middle; GTK would size it from the panes' tiny minimum requests.
-                let placed = Cell::new(false);
-                paned.connect_size_allocate(move |paned, allocation| {
+                let here = path.clone();
+                path.push(false);
+                paned.pack1(&self.tree(first, path), true, false);
+                path.pop();
+                path.push(true);
+                paned.pack2(&self.tree(second, path), true, false);
+                path.pop();
+                // The divider starts where the layout remembers it (the middle for a new split); GTK would size
+                // it from the panes' tiny minimum requests. Only moves after that are written back.
+                let placed = Rc::new(Cell::new(false));
+                let ready = Rc::new(Cell::new(false));
+                paned.connect_size_allocate(glib::clone!(@strong placed, @strong ready => move |paned, allocation| {
                     let size = if side_by_side {
                         allocation.width()
                     } else {
@@ -599,15 +614,31 @@ impl App {
                     };
                     if size > 1 && !placed.replace(true) {
                         let weak = paned.downgrade();
+                        let ready = ready.clone();
                         glib::idle_add_local_once(move || {
                             if let Some(paned) = weak.upgrade() {
-                                paned.set_position(size / 2);
+                                paned.set_position(size * ratio / i32::from(RATIO_FULL));
+                                ready.set(true);
                             }
                         });
                     }
-                });
+                }));
+                paned.connect_position_notify(glib::clone!(@weak self as app => move |paned| {
+                    let size = if side_by_side { paned.allocated_width() } else { paned.allocated_height() };
+                    if ready.get() && size > 1 {
+                        let ratio = (paned.position() * i32::from(RATIO_FULL) / size).clamp(50, 950);
+                        app.divider_moved(&here, ratio as u16);
+                    }
+                }));
                 paned.upcast()
             }
+        }
+    }
+    /// A divider was dragged: remember where it sits.
+    fn divider_moved(self: &Rc<Self>, path: &[bool], ratio: u16) {
+        let changed = self.panes.layout.borrow_mut().set_ratio(path, ratio);
+        if changed {
+            self.layout_changed();
         }
     }
     /// Tell each daemon which tabs this window shows. `Focus` leaves one tab shown per daemon, so the first
