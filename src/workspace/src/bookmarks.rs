@@ -7,6 +7,7 @@
 //!     title: project                  # optional
 //!   - url: https://example.org        # a web page
 //!   - host: me@build-host             # a server: opens a tab that runs ssh to it
+//!     port: 2222                      # optional: ssh's own default (22, or ~/.ssh/config) when absent
 //! ```
 //!
 //! A bookmark never holds a command: like restart recovery, opening one starts a fresh shell. A `host` is only a
@@ -19,10 +20,11 @@ use std::{io, path::PathBuf};
 use worminal_protocol::worp::devices::validate_endpoint;
 
 pub const MAX_BOOKMARKS: usize = 256;
+const DEFAULT_SSH_PORT: u16 = 22;
 const PATH_BYTES: usize = 4096;
 const TITLE_BYTES: usize = 256;
 const HEADER: &str = "# Worminal bookmarks: `directory: /abs/path` (optional `master: user@host`), `url: ...` or\n\
-# `host: user@host`, each with an optional `title`. Hand edits are fine; the app rewrites this file without comments.\n";
+# `host: user@host` (optional `port`), each with an optional `title`. Hand edits are fine; the app rewrites this file without comments.\n";
 
 /// What a bookmark opens. Two bookmarks with the same target are the same bookmark.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,9 +36,11 @@ pub enum Target {
     Web {
         url: String,
     },
-    /// A server reached with `ssh`: a host or `user@host`.
+    /// A server reached with `ssh`: a host or `user@host`, on `port` (`None` is ssh's default, 22 unless
+    /// `~/.ssh/config` says otherwise). The same host on another port is another bookmark.
     Host {
         endpoint: String,
+        port: Option<u16>,
     },
 }
 
@@ -59,6 +63,35 @@ fn invalid(reason: impl std::fmt::Display) -> io::Error {
 
 fn rejected(reason: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, reason.to_owned())
+}
+
+/// ssh's default port is the same bookmark as no port at all.
+fn normal_port(port: Option<u16>) -> Option<u16> {
+    port.filter(|port| *port != DEFAULT_SSH_PORT)
+}
+
+/// A typed server: `host`, `user@host`, any of them with `:port`, or `[v6]:port`. A bare IPv6 address has several
+/// colons and takes no port. Port 22 is the default, so it reads as no port.
+pub fn parse_server(text: &str) -> io::Result<(String, Option<u16>)> {
+    let text = text.trim();
+    let split = match text.rfind(':') {
+        Some(at) if text[at + 1..].contains(']') => None,
+        Some(at) if text[..at].ends_with(']') || text[..at].matches(':').count() == 0 => Some(at),
+        _ => None,
+    };
+    let (endpoint, port) = match split {
+        Some(at) => {
+            let port = text[at + 1..]
+                .parse::<u16>()
+                .ok()
+                .filter(|port| *port != 0)
+                .ok_or_else(|| rejected("The port after `:` is a number from 1 to 65535."))?;
+            (&text[..at], Some(port))
+        }
+        None => (text, None),
+    };
+    validate_endpoint(endpoint)?;
+    Ok((endpoint.to_owned(), normal_port(port)))
 }
 
 fn plain(text: &str, limit: usize) -> bool {
@@ -87,7 +120,12 @@ impl Bookmark {
                     validate_endpoint(master)?;
                 }
             }
-            Target::Host { endpoint } => validate_endpoint(endpoint)?,
+            Target::Host { endpoint, port } => {
+                validate_endpoint(endpoint)?;
+                if *port == Some(0) {
+                    return Err(rejected("Bookmark port must be 1-65535."));
+                }
+            }
             Target::Web { url } => {
                 if !plain(url, PATH_BYTES) || url.chars().any(char::is_whitespace) {
                     return Err(rejected(
@@ -113,7 +151,8 @@ fn decode_entry(entry: Value) -> io::Result<Bookmark> {
     let Value::Mapping(fields) = entry else {
         return Err(invalid("each bookmark is a mapping"));
     };
-    let (mut directory, mut master, mut url, mut host, mut title) = (None, None, None, None, None);
+    let (mut directory, mut master, mut url, mut host, mut title, mut port) =
+        (None, None, None, None, None, None);
     for (key, value) in fields {
         let key = key
             .as_str()
@@ -125,15 +164,29 @@ fn decode_entry(entry: Value) -> io::Result<Bookmark> {
             "master" => &mut master,
             "url" => &mut url,
             "host" => &mut host,
+            "port" => &mut port,
             "title" => &mut title,
             _ => return Err(invalid(format!("unknown key `{key}`"))),
         };
         *slot = Some(value);
     }
+    let port = match port {
+        None => None,
+        Some(_) if host.is_none() => return Err(invalid("`port` belongs to a `host`")),
+        Some(port) => Some(
+            port.parse::<u16>()
+                .ok()
+                .filter(|port| *port != 0)
+                .ok_or_else(|| invalid("`port` is a number from 1 to 65535"))?,
+        ),
+    };
     let target = match (directory, url, host, master) {
         (Some(directory), None, None, master) => Target::Terminal { directory, master },
         (None, Some(url), None, None) => Target::Web { url },
-        (None, None, Some(endpoint), None) => Target::Host { endpoint },
+        (None, None, Some(endpoint), None) => Target::Host {
+            endpoint,
+            port: normal_port(port),
+        },
         (None, _, _, Some(_)) => return Err(invalid("`master` belongs to a `directory`")),
         _ => {
             return Err(invalid(
@@ -191,8 +244,11 @@ fn encode(bookmarks: &[Bookmark]) -> io::Result<Vec<u8>> {
                 Target::Web { url } => {
                     fields.insert("url".into(), url.clone().into());
                 }
-                Target::Host { endpoint } => {
+                Target::Host { endpoint, port } => {
                     fields.insert("host".into(), endpoint.clone().into());
+                    if let Some(port) = port {
+                        fields.insert("port".into(), u64::from(*port).into());
+                    }
                 }
             }
             if let Some(title) = &bookmark.title {

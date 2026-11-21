@@ -727,6 +727,68 @@ class RustApplicationTest(unittest.TestCase):
             wait_for(lambda: (root / 'back.txt').exists(), 'no shell took over after ssh was interrupted')
             self.assertEqual(len(tabs()), 3)
 
+    def test_a_server_bookmark_with_a_port_runs_ssh_dash_p_and_without_one_leaves_ssh_its_default(self):
+        from Xlib import X, display, error
+        with isolated_display() as env, ExitStack() as cleanup:
+            root = CHECKS / f'server-ports-{os.getpid()}'
+            shutil.rmtree(root, ignore_errors=True)
+            (root / 'bin').mkdir(parents=True)
+            self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+            # A fake ssh records exactly the arguments it was given, then stays connected.
+            arguments = root / 'arguments'
+            fake = root / 'bin/ssh'
+            fake.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > {arguments}\nsleep 30\n')
+            fake.chmod(0o755)
+            saved = root / 'config/worminal/bookmarks.yaml'
+            env.update(GDK_BACKEND='x11', XDG_CONFIG_HOME=str(root / 'config'), SHELL='/bin/sh',
+                       PATH=f"{root / 'bin'}:{env['PATH']}")
+            env.pop('WAYLAND_DISPLAY', None)
+            app = subprocess.Popen([str(runtime_binary('worminal-rust')), '-T', 'Rust ports', '-o', '-',
+                                    '-e', '/bin/sh', '-c', 'while :; do sleep 1; done'],
+                                   env=env, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.addCleanup(lambda: self.stop(app))
+            wid = window(env, app)
+            xdo = lambda *args: subprocess.run(['xdotool', *args], env=env, check=True)
+            key = lambda *names: xdo('key', '--clearmodifiers', *names)
+            type_text = lambda value: xdo('type', '--delay', '40', value)
+            xdo('windowfocus', '--sync', wid)
+            xdo('windowsize', wid, '900', '500')
+            time.sleep(1.5)
+
+            def wait_for(condition, message):
+                deadline = time.monotonic() + 10
+                while not condition():
+                    self.assertIsNone(app.poll())
+                    self.assertLess(time.monotonic(), deadline, message)
+                    time.sleep(.05)
+
+            def add(server, down):
+                key('ctrl+shift+b')
+                time.sleep(.8)
+                key('a')
+                type_text(server)
+                key('Return')
+                time.sleep(.5)
+                key('Return')        # no name
+                time.sleep(.5)
+                for _ in range(down):
+                    key('Down')
+                arguments.unlink(missing_ok=True)
+                key('Return')        # opens the selected row
+                wait_for(arguments.exists, f'ssh never ran for {server}')
+                time.sleep(.3)
+                return arguments.read_text().split()
+
+            self.assertEqual(add('me@build:2222', 0), ['-p', '2222', 'me@build'])
+            self.assertIn('host: me@build', saved.read_text())
+            self.assertIn('port: 2222', saved.read_text())
+            # No port, and the default port, both leave ssh to choose (22, or what ~/.ssh/config says).
+            self.assertEqual(add('plain@host', 1), ['plain@host'])
+            self.assertEqual(add('other:22', 2), ['other'])
+            text = saved.read_text()
+            self.assertEqual(text.count('port:'), 1, text)
+            self.assertNotIn('other:22', text)
+
     def test_a_tab_running_ssh_is_not_bookmarkable_as_a_local_directory(self):
         with isolated_display() as env:
             # The daemon reports an ssh tab's directory as its local shell's, so bookmarking it would save the

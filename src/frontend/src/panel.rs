@@ -857,7 +857,8 @@ mod tests {
         assert_eq!(edit(key::space, plain, false), None);
         assert!(Stage::Name(Bookmark {
             target: Target::Host {
-                endpoint: "h".into()
+                endpoint: "h".into(),
+                port: None
             },
             title: None,
         })
@@ -872,6 +873,7 @@ mod tests {
         let host = Bookmark {
             target: Target::Host {
                 endpoint: "me@build".into(),
+                port: None,
             },
             title: None,
         };
