@@ -1026,7 +1026,7 @@ dependencies = [
 
 [[package]]
 name = "worminal-browser"
-version = "1.0.0"
+version = "1.0.2"
 dependencies = [
  "glib",
  "gtk",
@@ -1040,14 +1040,14 @@ dependencies = [
 
 [[package]]
 name = "worminal-browser-api"
-version = "1.0.0"
+version = "1.0.2"
 dependencies = [
  "bindgen",
 ]
 
 [[package]]
 name = "worminal-config"
-version = "1.0.0"
+version = "1.0.2"
 dependencies = [
  "serde_json",
  "serde_yaml_ng",
@@ -1056,7 +1056,7 @@ dependencies = [
 
 [[package]]
 name = "worminal-daemon"
-version = "1.0.0"
+version = "1.0.2"
 dependencies = [
  "libc",
  "serde_json",
@@ -1068,7 +1068,7 @@ dependencies = [
 
 [[package]]
 name = "worminal-engine"
-version = "1.0.0"
+version = "1.0.2"
 dependencies = [
  "worminal-config",
  "worminal-engine-sys",
@@ -1077,14 +1077,14 @@ dependencies = [
 
 [[package]]
 name = "worminal-engine-sys"
-version = "1.0.0"
+version = "1.0.2"
 dependencies = [
  "bindgen",
 ]
 
 [[package]]
 name = "worminal-frontend"
-version = "1.0.0"
+version = "1.0.2"
 dependencies = [
  "bindgen",
  "cairo-rs",
@@ -1101,7 +1101,7 @@ dependencies = [
 
 [[package]]
 name = "worminal-launcher"
-version = "1.0.0"
+version = "1.0.2"
 dependencies = [
  "bindgen",
  "glib-sys",
@@ -1112,11 +1112,11 @@ dependencies = [
 
 [[package]]
 name = "worminal-protocol"
-version = "1.0.0"
+version = "1.0.2"
 
 [[package]]
 name = "worminal-workspace"
-version = "1.0.0"
+version = "1.0.2"
 dependencies = [
  "libc",
  "serde_json",
