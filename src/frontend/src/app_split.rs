@@ -295,6 +295,7 @@ impl App {
     pub(super) fn focus_pane(&self, pane: &Pane) {
         if self.panes.focused.replace(pane.id) != pane.id {
             self.panes.root.queue_draw();
+            self.layout_changed();
         }
         for other in self.panes() {
             other.strip.focus(other.id == pane.id);
@@ -308,6 +309,7 @@ impl App {
         self.focus_pane(&pane);
         pane.notebook
             .set_current_page(pane.notebook.page_num(&widget));
+        self.layout_changed();
     }
     /// Where a drop of `dragged` at this position (in its own pane's strip) would land: another strip or the
     /// middle of another pane moves it there, a pane's edge splits that pane. Its own strip only reorders.
@@ -573,6 +575,7 @@ impl App {
             .pack_start(&self.tree(&layout, &mut Vec::new()), true, true, 0);
         self.panes.host.show_all();
         self.panes.root.queue_draw();
+        self.layout_changed();
     }
     /// The widgets of a layout. `path` addresses the split being built (`false` is a first child), so a moved
     /// divider can be written back to the layout that remembers it.
@@ -606,23 +609,25 @@ impl App {
                 // it from the panes' tiny minimum requests. Only moves after that are written back.
                 let placed = Rc::new(Cell::new(false));
                 let ready = Rc::new(Cell::new(false));
-                paned.connect_size_allocate(glib::clone!(@strong placed, @strong ready => move |paned, allocation| {
-                    let size = if side_by_side {
-                        allocation.width()
-                    } else {
-                        allocation.height()
-                    };
-                    if size > 1 && !placed.replace(true) {
-                        let weak = paned.downgrade();
-                        let ready = ready.clone();
-                        glib::idle_add_local_once(move || {
-                            if let Some(paned) = weak.upgrade() {
-                                paned.set_position(size * ratio / i32::from(RATIO_FULL));
-                                ready.set(true);
-                            }
-                        });
-                    }
-                }));
+                paned.connect_size_allocate(
+                    glib::clone!(@strong placed, @strong ready => move |paned, allocation| {
+                        let size = if side_by_side {
+                            allocation.width()
+                        } else {
+                            allocation.height()
+                        };
+                        if size > 1 && !placed.replace(true) {
+                            let weak = paned.downgrade();
+                            let ready = ready.clone();
+                            glib::idle_add_local_once(move || {
+                                if let Some(paned) = weak.upgrade() {
+                                    paned.set_position(size * ratio / i32::from(RATIO_FULL));
+                                    ready.set(true);
+                                }
+                            });
+                        }
+                    }),
+                );
                 paned.connect_position_notify(glib::clone!(@weak self as app => move |paned| {
                     let size = if side_by_side { paned.allocated_width() } else { paned.allocated_height() };
                     if ready.get() && size > 1 {

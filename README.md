@@ -25,7 +25,8 @@ and come back without starting over.
   [Agent interface](docs/automation.md)
   	- Know when your agents are working or get notified when they're stuck
 
-- **Split screen.** Control view splitting with both mouse and keyboard.
+- **Split screen.** Control view splitting with both mouse and keyboard. Windows reopen with their splits, dividers,
+  size and position after an accidental close or a crash. [Layout restore](docs/layout-restore.md)
 
 - **Bookmarks.** Star a tab (or press Ctrl+Shift+D) to save a terminal's directory and host, or a web page, then
   reopen it from a keyboard-driven side panel (Ctrl+Shift+B). [Bookmarks](docs/bookmarks.md)

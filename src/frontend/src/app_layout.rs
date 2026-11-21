@@ -29,7 +29,7 @@ pub(super) struct Persist {
     pending: RefCell<Option<Window>>,
     /// The window takes part in saving: restoring is decided and the file is trustworthy.
     enabled: Cell<bool>,
-    scheduled: Cell<bool>,
+    scheduled: Rc<Cell<bool>>,
     /// Closed on purpose with its layout forgotten.
     discarded: Cell<bool>,
     /// Size and position while not maximized.
@@ -64,7 +64,9 @@ impl App {
             let mut store = store.borrow_mut();
             if matches!(*store, Store::Unread) {
                 *store = match layout_path().and_then(|path| layout_state::load(&path)) {
-                    Ok(saved) => Store::Ready(saved.map(|saved| saved.windows).unwrap_or_default().into()),
+                    Ok(saved) => {
+                        Store::Ready(saved.map(|saved| saved.windows).unwrap_or_default().into())
+                    }
                     Err(error) => {
                         eprintln!("worminal: {error}");
                         self.message(Some(&error.to_string()));
@@ -104,8 +106,8 @@ impl App {
     }
 
     fn follow_geometry(self: &Rc<Self>) {
-        self.window
-            .connect_configure_event(glib::clone!(@weak self as app => @default-return false, move |window, _| {
+        self.window.connect_configure_event(
+            glib::clone!(@weak self as app => @default-return false, move |window, _| {
                 if !window.is_maximized() {
                     let (x, y) = window.position();
                     let (width, height) = window.size();
@@ -113,9 +115,11 @@ impl App {
                 }
                 app.layout_changed();
                 false
-            }));
-        self.window
-            .connect_is_maximized_notify(glib::clone!(@weak self as app => move |_| app.layout_changed()));
+            }),
+        );
+        self.window.connect_is_maximized_notify(
+            glib::clone!(@weak self as app => move |_| app.layout_changed()),
+        );
     }
 
     /// Give the window its saved size and position (the window manager has the last word) and maximize it
@@ -158,13 +162,22 @@ impl App {
         if local.is_empty() {
             return None;
         }
-        let position = |id: u32| local.iter().position(|tab| *tab == id).map(|index| index as u32);
+        let position = |id: u32| {
+            local
+                .iter()
+                .position(|tab| *tab == id)
+                .map(|index| index as u32)
+        };
         let tree = self.panes.layout.borrow().to_node(&|id| {
             let Some(pane) = self.pane(id) else {
                 return Node::pane(Vec::new());
             };
             Node::Pane {
-                tabs: self.tabs_of(&pane).into_iter().filter_map(position).collect(),
+                tabs: self
+                    .tabs_of(&pane)
+                    .into_iter()
+                    .filter_map(position)
+                    .collect(),
                 selected: self.active_of(&pane).and_then(position),
             }
         });
@@ -191,18 +204,16 @@ impl App {
     }
 
     /// Something about the layout changed: write it once the changes settle.
-    pub(super) fn layout_changed(self: &Rc<Self>) {
+    pub(super) fn layout_changed(&self) {
         let persist = &self.panes.persist;
         if !persist.enabled.get() || persist.scheduled.replace(true) {
             return;
         }
-        glib::timeout_add_local_once(
-            SETTLE,
-            glib::clone!(@weak self as app => move || {
-                app.panes.persist.scheduled.set(false);
-                save_all();
-            }),
-        );
+        let scheduled = persist.scheduled.clone();
+        glib::timeout_add_local_once(SETTLE, move || {
+            scheduled.set(false);
+            save_all();
+        });
     }
 
     /// Write the layout now, so a window closing within the settle time loses nothing.
@@ -241,12 +252,19 @@ impl App {
         for id in all {
             self.move_page(id, &home);
         }
-        self.panes.list.borrow_mut().retain(|pane| pane.id == home.id);
+        self.panes
+            .list
+            .borrow_mut()
+            .retain(|pane| pane.id == home.id);
         self.focus_pane(&home);
         let mut deal = Vec::new();
         let mut reused = false;
         let layout = Layout::from_node(&tree, &mut |node| {
-            let pane = if reused { self.add_pane() } else { home.clone() };
+            let pane = if reused {
+                self.add_pane()
+            } else {
+                home.clone()
+            };
             reused = true;
             if let Node::Pane { tabs, selected } = node {
                 deal.push((pane.clone(), tabs.clone(), *selected));
@@ -265,7 +283,8 @@ impl App {
         for (pane, _, selected) in &deal {
             let widget = selected.and_then(|tab| self.page_widget(local[tab as usize]));
             if let Some(widget) = widget {
-                pane.notebook.set_current_page(pane.notebook.page_num(&widget));
+                pane.notebook
+                    .set_current_page(pane.notebook.page_num(&widget));
             }
         }
         self.syncing.set(was);
@@ -298,7 +317,10 @@ fn save_all() {
         .iter()
         .filter(|app| !app.closing.get() && !app.panes.persist.discarded.get())
         .collect();
-    if live.iter().any(|app| app.panes.persist.pending.borrow().is_some()) {
+    if live
+        .iter()
+        .any(|app| app.panes.persist.pending.borrow().is_some())
+    {
         return;
     }
     let windows: Vec<Window> = live

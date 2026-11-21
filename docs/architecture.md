@@ -114,8 +114,9 @@ snapshot, and acknowledge commit before the donor retires; see
 
 Painting preserves matching background runs, overlapping glyph/cursor damage, fractional-grid fallback and Unicode
 font fallback. Cache printable ASCII shaping only. Views defer unused buffers/layouts/input methods/timers. Dragging
-a tab onto a pane edge (or Alt+Shift+arrows) splits the window (`layout.rs` tree of pane ids, `app_split.rs` widgets; per window,
-never persisted). Each pane is its own Cairo strip over a notebook holding only its tabs; a one-pane window is the
+a tab onto a pane edge (or Alt+Shift+arrows) splits the window (`layout.rs` tree of pane ids and divider ratios, `app_split.rs` widgets; per window). The layout is
+remembered between runs by tab position in the daemon's order, never by tab id (`app_layout.rs`, `layout_state.rs`,
+`docs/layout-restore.md`). Each pane is its own Cairo strip over a notebook holding only its tabs; a one-pane window is the
 ordinary case. The daemon only learns the shown set (each pane's selected tab): `Focus` shows one tab, `Pane`
 (feature `PANES`) adds one, and `Resize` never hides neighbours. A browser tab has no frames, so it splits freely, but the daemon's `Focus` is exclusive: while terminals are visible beside it, claiming the browser presents those terminals instead of focusing the browser. Ctrl+Shift+X gathers all tabs into the focused
 pane. The Cairo tab strip uses terminal metrics/colors and the tab order reported by the daemon. Browser file labels

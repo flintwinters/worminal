@@ -305,7 +305,9 @@ mod tests {
     #[test]
     fn a_layout_converts_to_its_saved_form_and_back() {
         use worminal_workspace::layout_state::Node;
-        let mut layout = Leaf(10).insert(10, 11, Zone::Right).insert(11, 12, Zone::Bottom);
+        let mut layout = Leaf(10)
+            .insert(10, 11, Zone::Right)
+            .insert(11, 12, Zone::Bottom);
         layout.set_ratio(&[true], 250);
         let node = layout.to_node(&|id| Node::pane(vec![id - 10]));
         assert_eq!(node.panes().len(), 3);

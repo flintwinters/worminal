@@ -111,7 +111,10 @@ fn a_damaged_file_is_reported_and_kept_never_overwritten() {
     ] {
         let fixture = Fixture::new(name);
         fs::write(&fixture.0, &text).unwrap();
-        assert!(layout_state::load(&fixture.0).is_err(), "{name} must not load");
+        assert!(
+            layout_state::load(&fixture.0).is_err(),
+            "{name} must not load"
+        );
         assert!(
             layout_state::store(&fixture.0, &saved()).is_err(),
             "{name} must not be replaced"
@@ -171,7 +174,13 @@ fn fitting_places_each_tab_once_and_gives_new_tabs_to_the_first_pane() {
         split(true, 500, pane(&[1, 2], 1), pane(&[0], 0))
     );
     assert_eq!(Node::pane(vec![]).fit(2), pane(&[0, 1], 0));
-    assert_eq!(Node::pane(vec![]).fit(0), Node::Pane { tabs: vec![], selected: None });
+    assert_eq!(
+        Node::pane(vec![]).fit(0),
+        Node::Pane {
+            tabs: vec![],
+            selected: None
+        }
+    );
 }
 
 #[test]

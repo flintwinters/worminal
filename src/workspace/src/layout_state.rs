@@ -194,7 +194,9 @@ impl Node {
     }
 
     fn decode(value: &Value, depth: usize, panes: &mut usize) -> io::Result<Self> {
-        let fields = value.as_object().ok_or_else(|| invalid("a node is a mapping"))?;
+        let fields = value
+            .as_object()
+            .ok_or_else(|| invalid("a node is a mapping"))?;
         if depth > MAX_DEPTH {
             return Err(invalid("splits nest too deeply"));
         }
@@ -210,7 +212,9 @@ impl Node {
             }
             let mut child = |name: &str| {
                 Self::decode(
-                    fields.get(name).ok_or_else(|| invalid("a split has two parts"))?,
+                    fields
+                        .get(name)
+                        .ok_or_else(|| invalid("a split has two parts"))?,
                     depth + 1,
                     panes,
                 )
@@ -233,7 +237,7 @@ impl Node {
             .and_then(Value::as_array)
             .ok_or_else(|| invalid("a pane lists its tabs"))?
             .iter()
-            .map(|tab| position(tab))
+            .map(position)
             .collect::<io::Result<Vec<u32>>>()?;
         let selected = match fields.get("selected") {
             None | Some(Value::Null) => None,
@@ -296,7 +300,9 @@ impl Saved {
         }
         let mut windows = Vec::new();
         for entry in entries {
-            let entry = entry.as_object().ok_or_else(|| invalid("a window is a mapping"))?;
+            let entry = entry
+                .as_object()
+                .ok_or_else(|| invalid("a window is a mapping"))?;
             let numbers = entry
                 .get("geometry")
                 .and_then(Value::as_array)
@@ -314,13 +320,18 @@ impl Saved {
             }
             let mut panes = 0;
             let tree = Node::decode(
-                entry.get("tree").ok_or_else(|| invalid("a window has a `tree`"))?,
+                entry
+                    .get("tree")
+                    .ok_or_else(|| invalid("a window has a `tree`"))?,
                 0,
                 &mut panes,
             )?;
             windows.push(Window {
                 geometry,
-                maximized: entry.get("maximized").and_then(Value::as_bool).unwrap_or(false),
+                maximized: entry
+                    .get("maximized")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
                 focused: entry
                     .get("focused")
                     .and_then(Value::as_u64)
