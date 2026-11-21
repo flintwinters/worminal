@@ -84,17 +84,19 @@ class MasterDetachTest(unittest.TestCase):
                     self.wait(lambda: windows()[0][4] == 'wheel-test', 'second master selected')
                     cli('--attach', '-c', 'DetachEmpty', '-T', 'DetachEmpty')
                     self.wait(lambda: len(windows()) == 2, 'second window')
-                    empty = subprocess.check_output(['xdotool', 'search', '--onlyvisible', '--name',
-                                                     '^DetachEmpty$'], env=env, text=True).splitlines()[0]
-                    subprocess.run(['xdotool', 'windowfocus', '--sync', empty], env=env, check=True, timeout=3)
-                    cli('--master', 'preview-test', '--attach')
-                    self.wait(lambda: sum(row[4] == 'preview-test' for row in windows()) == 1,
-                              'master attached to second window')
+                    # Launches without a source window (a desktop shortcut running plain worminal) join
+                    # every connected master; this --attach window has no local tab of its own.
+                    self.wait(lambda: all(row[2] and row[4] for row in windows()),
+                              'second window joins the connected masters')
                     cli('--detach-master', 'preview-test')
-                    self.wait(lambda: len(windows()) == 1, 'empty second window closes')
+                    self.wait(lambda: [row[4] for row in windows()] == ['wheel-test'] * 2,
+                              'both windows keep the other host')
+                    self.assertEqual(tabs(), before, 'Detach changed daemon-owned tabs')
+                    from x11 import close_window
+                    close_window(env, wm_class='DetachEmpty')
+                    self.wait(lambda: len(windows()) == 1, 'second window closes')
                     self.assertIsNone(app.poll())
                     self.assertEqual(windows()[0][4], 'wheel-test')
-                    self.assertEqual(tabs(), before, 'Detach changed daemon-owned tabs')
                     # The launcher once printed only "GTK owner rejected launch".
                     self.assertIn(b'exact endpoint of one of: wheel-test',
                                   cli('--detach-master', 'preview-test', success=False).stderr)
@@ -125,7 +127,7 @@ class MasterDetachTest(unittest.TestCase):
                     for scope in scopes.values():
                         stop_workspace({**env, 'WORMINAL_SHARED_SOCKET_SCOPE': scope})
 
-    def test_new_window_joins_the_source_windows_masters(self):
+    def test_new_windows_join_connected_masters(self):
         with isolated_display() as display, private_bus(display) as session, profile(session) as env, \
                 tempfile.TemporaryDirectory(prefix='master-new-window-', dir=CHECKS) as directory:
             base = Path(directory)
@@ -158,16 +160,22 @@ class MasterDetachTest(unittest.TestCase):
                                    env=env, check=True, capture_output=True, timeout=10)
                     self.wait(lambda: [row[4] for row in windows()] == ['joined-master'], 'master joined')
                     shared = self.wait(remote_tabs, 'remote tab')
-                    subprocess.run(['xdotool', 'windowfocus', '--sync', source], env=env, check=True, timeout=3)
-                    subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+shift+n'], env=env, check=True)
-                    new = self.wait(lambda: next((row[0] for row in windows() if row[1] and row[4] == ''
-                                                  and len(windows()) == 2), None), 'new local window')
-                    def cycled_to_master():
-                        subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+Tab'], env=env, check=True)
-                        time.sleep(.1)
-                        return any(row[0] == new and row[4] == 'joined-master' for row in windows())
-                    # Before the fix Ctrl+Shift+N copied only the primary link: the master was unreachable.
-                    self.wait(cycled_to_master, 'new window shows the source window\'s master tabs')
+                    # Ctrl+Shift+N and a desktop shortcut running plain `worminal` (Win+Enter) both
+                    # once opened windows holding only their primary host: the master was unreachable.
+                    openers = (lambda: (subprocess.run(['xdotool', 'windowfocus', '--sync', source], env=env,
+                                                       check=True, timeout=3),
+                                        subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+shift+n'],
+                                                       env=env, check=True)),
+                               lambda: subprocess.Popen([executable], env=env, stdout=log, stderr=log).wait(10))
+                    for count, opener in enumerate(openers, 2):
+                        opener()
+                        new = self.wait(lambda: len(windows()) == count and next(
+                            (row[0] for row in windows() if row[1] and row[4] == ''), None), 'new local window')
+                        def cycled_to_master():
+                            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+Tab'], env=env, check=True)
+                            time.sleep(.1)
+                            return any(row[0] == new and row[4] == 'joined-master' for row in windows())
+                        self.wait(cycled_to_master, f'window {count} shows the connected master tabs')
                     self.assertEqual([tab['shell_pid'] for tab in remote_tabs()],
                                      [tab['shell_pid'] for tab in shared], 'Joining launched remote shells')
                 finally:

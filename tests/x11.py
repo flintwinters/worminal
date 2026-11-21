@@ -15,12 +15,13 @@ import uuid
 from workspace_protocol import stop_workspace
 
 
-def close_window(env, title, timeout=5):
-    """Close one shared-owner window without XKillClient terminating all its peers."""
+def close_window(env, title=None, timeout=5, wm_class=None):
+    """Close one shared-owner window, by exact title or class, without XKillClient terminating its peers."""
     from Xlib import X, display, protocol
 
+    search = ["--class", wm_class] if wm_class else ["--name", f"^{title}$"]
     window = subprocess.check_output(
-        ["xdotool", "search", "--onlyvisible", "--name", f"^{title}$"],
+        ["xdotool", "search", "--onlyvisible", *search],
         env=env, text=True, timeout=timeout).splitlines()[0]
     connection = display.Display(env["DISPLAY"])
     try:

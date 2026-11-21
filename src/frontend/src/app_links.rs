@@ -229,20 +229,35 @@ impl App {
             remote.link.clear();
         }
     }
-    /// A new window shows the masters its source window shows. Their tabs are shared daemon
-    /// state, so join without launching: only the window's own primary gets a fresh shell.
-    pub(super) fn join_masters_of(self: &Rc<Self>, source: &Self) {
-        let configs: Vec<_> = source
-            .remotes
-            .borrow()
+    /// Every new window shows every master connected to this display, whichever window or
+    /// launcher (Ctrl+Shift+N, a desktop shortcut running `worminal`) opened it. Master tabs are
+    /// shared daemon state, so join without launching: only the window's primary gets a fresh shell.
+    pub(super) fn join_connected_masters(self: &Rc<Self>) {
+        let mut configs = std::collections::BTreeMap::new();
+        let apps = super::WINDOWS.with(|windows| windows.borrow().clone());
+        for app in apps
             .iter()
-            .map(|remote| Config {
+            .filter(|app| !app.closing.get() && !Rc::ptr_eq(app, self))
+        {
+            if let Some(master) = app
+                .config
+                .master
+                .clone()
+                .filter(|_| !app.primary_detached.get())
+            {
+                configs.entry(master).or_insert_with(|| app.config.clone());
+            }
+            for remote in app.remotes.borrow().iter() {
+                configs
+                    .entry(remote.master.clone())
+                    .or_insert_with(|| remote.config.clone());
+            }
+        }
+        for config in configs.into_values() {
+            if let Err(error) = self.add_remote(Config {
                 attach: true,
-                ..remote.config.clone()
-            })
-            .collect();
-        for config in configs {
-            if let Err(error) = self.add_remote(config) {
+                ..config
+            }) {
                 self.message(Some(&error.to_string()));
             }
         }

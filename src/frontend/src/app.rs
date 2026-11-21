@@ -355,7 +355,9 @@ impl App {
                 return Ok(target);
             }
         }
-        Self::open(config)
+        let app = Self::open(config)?;
+        app.join_connected_masters();
+        Ok(app)
     }
     fn open(config: Config) -> io::Result<Rc<Self>> {
         Self::open_mode(config, false, false)

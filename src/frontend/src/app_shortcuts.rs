@@ -123,9 +123,8 @@ impl App {
                     config.line.clear();
                     config.browser_url = None;
                     config.zoom = self.fonts.borrow().zoom();
-                    match Self::open(config) {
-                        Ok(window) => window.join_masters_of(self),
-                        Err(error) => self.message(Some(&error.to_string())),
+                    if let Err(error) = Self::launch(config) {
+                        self.message(Some(&error.to_string()));
                     }
                     return true;
                 }
