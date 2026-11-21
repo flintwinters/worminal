@@ -66,6 +66,7 @@ const KEYS: &[(&str, &str, &str)] = &[
     ("worminal.update_notifications", "boolean", "false"),
     ("worminal.group_tabs_by_title", "boolean", "true"),
     ("worminal.wsl_window_frame", "boolean", "true"),
+    ("worminal.restore_layout", "boolean", "true"),
     (
         "general.import",
         "list of file paths (Alacritty import)",
@@ -101,6 +102,7 @@ worminal:
   update_notifications: false
   group_tabs_by_title: true
   wsl_window_frame: true
+  restore_layout: true
 ";
 
 fn matches(pattern: &str, path: &[String]) -> bool {
@@ -190,7 +192,7 @@ To configure for someone:
 Invalid configuration never stops Worminal: it reports to stderr and runs with defaults, so always validate.
 
 When it applies: each process reads configuration once, at start. New windows pick up appearance and
-update_notifications and wsl_window_frame (WSL only: windows draw their own title bar in the terminal
+update_notifications, restore_layout (false starts every window fresh: one pane, default size) and wsl_window_frame (WSL only: windows draw their own title bar in the terminal
 colors; false keeps the WSLg frame). scrolling.history and worminal.group_tabs_by_title are the daemon's:
 they take effect when the daemon next restarts (existing shells are preserved by the normal handoff). Running windows never change.
 Other devices: `worminald config sync` (views also sync after updating on each master connection).

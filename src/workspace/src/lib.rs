@@ -10,6 +10,7 @@ pub mod diagnostics;
 pub mod gui_handoff;
 pub mod handoff;
 pub mod launch;
+pub mod layout_state;
 pub mod masters;
 pub mod recovery;
 pub mod rights;
