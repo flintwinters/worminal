@@ -1,4 +1,4 @@
-//! Plain left-click on an http(s) URL in visible text opens it with xdg-open; the pointer's
+//! Plain left-click on an http(s) or file URL in visible text opens it with xdg-open; the pointer's
 //! link is underlined.
 //! Ported from the retired X11 frontend's url.c; detection reads only the imported viewport.
 use std::ops::RangeInclusive;
@@ -11,9 +11,11 @@ fn url_char(rune: u32) -> bool {
     rune > 32 && rune < 127 && !matches!(rune as u8, b'<' | b'>' | b'"' | b'\'' | b'`')
 }
 fn url_prefix(text: &[u8]) -> bool {
-    [&b"http://"[..], b"https://"].iter().any(|prefix| {
-        text.len() > prefix.len() && text.starts_with(prefix) && text[prefix.len()] != b' '
-    })
+    [&b"http://"[..], b"https://", b"file://"]
+        .iter()
+        .any(|prefix| {
+            text.len() > prefix.len() && text.starts_with(prefix) && text[prefix.len()] != b' '
+        })
 }
 fn unmatched_closer(text: &[u8], open: u8, close: u8) -> bool {
     text.iter().fold(0i32, |balance, byte| {
@@ -188,6 +190,11 @@ mod tests {
             "trailing punctuation is not the link"
         );
         assert_eq!(url(&cells, 32, 2, 1), None);
+        let cells = grid(&["wrote file:///home/u/a.txt."], 27, &[]);
+        assert_eq!(
+            url(&cells, 27, 8, 0).as_deref(),
+            Some("file:///home/u/a.txt")
+        );
         assert_eq!(url(&cells, 32, 31, 0), None, "blank tail is not the link");
         let cells = grid(&["go http://wrap.exa", "mple/path now"], 18, &[0]);
         assert_eq!(

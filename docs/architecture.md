@@ -28,8 +28,8 @@ native Wayland and X11. `src/terminal/engine.h` defines the C API; Rust bindings
 its own C instance. C handles parsing, cells, UTF-8, modes, scrollback/reflow, selection, redraw deadlines and
 serialization. It does not manage processes, descriptors, GUI objects or application policy. OSC 8 links are 16-bit
 cell ids into a bounded per-terminal URI table; ids never leave the daemon: ROW_LINKS packets carry each row's URIs
-inline, and snapshots drop them. Clicks open only http(s) or type `worminal://input` text (newline executes) into
-the same tab. The Rust wrapper manages C handles and screen buffers, and normalizes clipboard paste in place. OSC 99
+inline, and snapshots drop them. Clicks open ordinary links (http(s), file, ...) with xdg-open; only `worminal://`
+links are restricted, to typing `worminal://input` text (newline executes) into the same tab. The Rust wrapper manages C handles and screen buffers, and normalizes clipboard paste in place. OSC 99
 metadata/payload events go only to capable controlling views; those views assemble bounded title/body notifications
 and deliver them asynchronously on their desktop, including for remote tabs. OSC 7501 agent status (working) and OSC
 9;4 progress (normal or indeterminate) set the engine's `MODE_BUSY` bit, carried in the catalog mode word to every

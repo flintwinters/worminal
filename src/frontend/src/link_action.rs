@@ -1,7 +1,8 @@
-//! What a clicked link does. Terminal output is untrusted, so a link may do exactly what typed input to
-//! the same tab can do, and nothing else: it opens http(s) pages, or types text into that tab. The user
-//! chose that a newline in `worminal://input` text executes on a plain click. Every other scheme or
-//! action is ignored; nothing arbitrary reaches xdg-open.
+//! What a clicked link does. Ordinary links (http, https, file, mailto, ...) open with xdg-open like in
+//! any other terminal. Only `worminal://` links are restricted: they act inside Worminal, so terminal
+//! output may use them to do exactly what typed input to the same tab can do, and nothing else. The user
+//! chose that a newline in `worminal://input` text executes on a plain click; other `worminal://`
+//! actions are ignored.
 use crate::{link, viewport::Viewport};
 use std::ops::RangeInclusive;
 
@@ -67,8 +68,17 @@ fn typed_text(encoded: &str) -> Option<Vec<u8>> {
     Some(text.replace('\n', "\r").into_bytes())
 }
 
+/// RFC 3986 scheme: a letter, then letters, digits, `+`, `-` or `.`, ending at the first `:`.
+fn scheme(target: &str) -> Option<&str> {
+    let (scheme, _) = target.split_once(':')?;
+    let mut characters = scheme.chars();
+    (characters.next()?.is_ascii_alphabetic()
+        && characters.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.')))
+    .then_some(scheme)
+}
+
 pub fn resolve(target: &str) -> Option<Action> {
-    if target.starts_with("http://") || target.starts_with("https://") {
+    if !scheme(target)?.eq_ignore_ascii_case("worminal") {
         return Some(Action::Open(target.to_owned()));
     }
     let query = target.strip_prefix("worminal://input?")?;
@@ -91,21 +101,30 @@ mod tests {
     }
 
     #[test]
-    fn web_links_open_and_other_schemes_are_ignored() {
-        assert_eq!(
-            resolve("https://example.org/a?b=c"),
-            Some(Action::Open("https://example.org/a?b=c".into()))
-        );
-        assert_eq!(resolve("http://h"), Some(Action::Open("http://h".into())));
+    fn ordinary_links_open_and_only_worminal_actions_are_restricted() {
         for target in [
-            "file:///etc/passwd",
-            "ssh://host",
-            "javascript:alert(1)",
+            "https://example.org/a?b=c",
+            "http://h",
             "HTTP://upper",
+            "file:///home/user/notes.txt",
+            "file://anvil/home/user/",
+            "mailto:a@example.org",
+        ] {
+            assert_eq!(
+                resolve(target),
+                Some(Action::Open(target.into())),
+                "{target}"
+            );
+        }
+        for target in [
             "worminal://other?text=x",
+            "WORMINAL://input?text=x",
             "worminal://input",
             "worminal://input?other=x",
             "worminal://input?text=",
+            "no scheme",
+            "/plain/path",
+            "1x:y",
             "",
         ] {
             assert_eq!(resolve(target), None, "{target}");
