@@ -149,6 +149,36 @@ impl Request {
         })
     }
 }
+/// The owner's verdict: one status byte, then on failure its bounded UTF-8 error text until EOF.
+/// Owners that predate the text close after the byte, so callers fall back to a generic error.
+const REPLY_TEXT_LIMIT: usize = 4096;
+pub fn reply(result: &io::Result<()>) -> Vec<u8> {
+    let mut bytes = vec![u8::from(result.is_err())];
+    if let Err(error) = result {
+        let text = error.to_string();
+        let mut end = text.len().min(REPLY_TEXT_LIMIT);
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        bytes.extend_from_slice(&text.as_bytes()[..end]);
+    }
+    bytes
+}
+fn verdict(peer: &mut impl Read) -> io::Result<Forward> {
+    let mut result = [0];
+    peer.read_exact(&mut result)?;
+    if result[0] == 0 {
+        return Ok(Forward::Complete);
+    }
+    let mut text = Vec::new();
+    peer.take(REPLY_TEXT_LIMIT as u64).read_to_end(&mut text)?;
+    let text = String::from_utf8_lossy(&text);
+    Err(io::Error::other(if text.is_empty() {
+        "GTK owner rejected launch; see its stderr".into()
+    } else {
+        text.into_owned()
+    }))
+}
 pub enum Forward {
     Owner(UnixListener),
     Complete,
@@ -167,13 +197,7 @@ pub fn forward(address: &SocketAddr, request: &Request) -> io::Result<Forward> {
     peer.set_write_timeout(Some(timeout))?;
     rights::send_descriptor(&peer, request.output.as_fd(), 0)?;
     peer.write_all(&request.encode()?)?;
-    let mut result = [0];
-    peer.read_exact(&mut result)?;
-    if result[0] == 0 {
-        Ok(Forward::Complete)
-    } else {
-        Err(io::Error::other("GTK owner rejected launch"))
-    }
+    verdict(&mut peer)
 }
 /// Incremental state used by GTK readiness sources; no GUI-thread blocking reads.
 #[derive(Default)]
@@ -209,5 +233,28 @@ impl Incoming {
             }
         }
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejected_launches_carry_the_owners_error_text() {
+        let reply = reply(&Err(io::Error::other("Master felix is not connected")));
+        let Err(error) = verdict(&mut reply.as_slice()) else {
+            panic!("failure reply accepted");
+        };
+        assert_eq!(error.to_string(), "Master felix is not connected");
+        assert!(matches!(
+            verdict(&mut [0u8].as_slice()),
+            Ok(Forward::Complete)
+        ));
+        // Owners predating error text send the bare status byte.
+        let Err(error) = verdict(&mut [1u8].as_slice()) else {
+            panic!("legacy failure accepted");
+        };
+        assert!(error.to_string().contains("see its stderr"));
     }
 }

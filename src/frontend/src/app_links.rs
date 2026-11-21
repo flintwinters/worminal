@@ -291,16 +291,52 @@ impl App {
                 .map(|remote| remote.index)
         }
     }
+    /// Master commands match the exact endpoint the view joined; a miss names the live ones.
+    fn unknown_master(master: &std::ffi::OsStr, apps: &[Rc<Self>]) -> io::Error {
+        let mut connected = std::collections::BTreeSet::new();
+        for app in apps.iter().filter(|app| !app.closing.get()) {
+            connected.extend(
+                app.config
+                    .master
+                    .clone()
+                    .filter(|_| !app.primary_detached.get()),
+            );
+            connected.extend(
+                app.remotes
+                    .borrow()
+                    .iter()
+                    .map(|remote| remote.master.clone()),
+            );
+        }
+        let master = master.to_string_lossy();
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            if connected.is_empty() {
+                format!("Master {master} is not connected; this display has no master connections")
+            } else {
+                let names: Vec<_> = connected
+                    .iter()
+                    .map(|name| name.to_string_lossy())
+                    .collect();
+                format!(
+                    "Master {master} is not connected; use the exact endpoint of one of: {}",
+                    names.join(", ")
+                )
+            },
+        )
+    }
     /// Close each catalogued daemon tab once, even when multiple windows mirror the master.
     /// Keep links alive until normal catalog updates acknowledge removal; detaching here
     /// would discard queued closes under SSH backpressure.
     pub(super) fn close_master(master: &std::ffi::OsStr) -> io::Result<()> {
         let apps = super::WINDOWS.with(|windows| windows.borrow().clone());
         let mut targets = std::collections::BTreeMap::new();
-        for app in apps.into_iter().filter(|app| !app.closing.get()) {
+        let mut found = false;
+        for app in apps.iter().filter(|app| !app.closing.get()) {
             let Some(index) = app.master_index(master) else {
                 continue;
             };
+            found = true;
             let link = app.link(index).unwrap();
             if link.initial_claim.get() || link.connection.borrow().is_none() {
                 continue;
@@ -310,6 +346,9 @@ impl App {
                     .entry(id)
                     .or_insert((app.clone(), id | index << LINK_SHIFT));
             }
+        }
+        if !found {
+            return Err(Self::unknown_master(master, &apps));
         }
         if targets.is_empty() {
             return Err(io::Error::new(
@@ -329,12 +368,16 @@ impl App {
     /// Detachment imports an empty view catalog, never a daemon Close command.
     pub(super) fn detach_master(master: &std::ffi::OsStr) -> io::Result<()> {
         let apps = super::WINDOWS.with(|windows| windows.borrow().clone());
-        let mut found = false;
+        if !apps
+            .iter()
+            .any(|app| !app.closing.get() && app.master_index(master).is_some())
+        {
+            return Err(Self::unknown_master(master, &apps));
+        }
         for app in apps.into_iter().filter(|app| !app.closing.get()) {
             let Some(index) = app.master_index(master) else {
                 continue;
             };
-            found = true;
             let link = app.link(index).unwrap();
             // Stop readers, writers and reconnect timers before changing widgets: GTK can reenter.
             link.clear();
@@ -353,14 +396,7 @@ impl App {
             )?;
             app.close_empty_window();
         }
-        if found {
-            Ok(())
-        } else {
-            Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                "Master is not connected",
-            ))
-        }
+        Ok(())
     }
     pub(super) fn close_empty_window(&self) {
         // An empty view may still be waiting for another host's first catalog or new tab.

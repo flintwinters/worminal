@@ -49,6 +49,7 @@ class MasterDetachTest(unittest.TestCase):
                 def cli(*args, success=True):
                     result = subprocess.run([executable, *args], env=env, capture_output=True, timeout=10)
                     self.assertEqual(result.returncode == 0, success, result.stderr)
+                    return result
                 def owner():
                     result = subprocess.run(['xdotool', 'search', '--onlyvisible', '--class', 'DetachFixture'],
                                             env=env, capture_output=True, text=True, timeout=3)
@@ -94,7 +95,9 @@ class MasterDetachTest(unittest.TestCase):
                     self.assertIsNone(app.poll())
                     self.assertEqual(windows()[0][4], 'wheel-test')
                     self.assertEqual(tabs(), before, 'Detach changed daemon-owned tabs')
-                    cli('--detach-master', 'preview-test', success=False)
+                    # The launcher once printed only "GTK owner rejected launch".
+                    self.assertIn(b'exact endpoint of one of: wheel-test',
+                                  cli('--detach-master', 'preview-test', success=False).stderr)
                     previous = owner()
                     module = module_path(RUST_FRONTEND_MODULE, prefix=base)
                     pending = module.with_suffix('.pending')

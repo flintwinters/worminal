@@ -167,6 +167,32 @@ commands! {
     }
 }
 
+/// Names the other executable for a top-level spelling tried on the wrong one, e.g.
+/// `worminald --detach-master`; the two command sets overlap only in help/version/browser.
+pub fn misplaced(value: &str, executable: &str) -> Option<String> {
+    let [here, there] = if executable == Launcher::GROUP.prefix {
+        [Launcher::GROUP, Daemon::GROUP]
+    } else {
+        [Daemon::GROUP, Launcher::GROUP]
+    };
+    let owns = |group: &Group| {
+        group
+            .entries
+            .iter()
+            .find(|entry| entry.names.contains(&value))
+    };
+    if owns(&here).is_some() {
+        return None;
+    }
+    let entry = owns(&there)?;
+    Some(format!(
+        "{value} belongs to {prefix}: {prefix} {value} {arguments}  ({summary})",
+        prefix = there.prefix,
+        arguments = entry.arguments,
+        summary = entry.summary,
+    ))
+}
+
 pub fn documents() -> Vec<(String, String)> {
     GROUPS
         .iter()
@@ -192,6 +218,14 @@ mod tests {
                 }
             }
         }
+        assert!(misplaced("--detach-master", "worminald")
+            .unwrap()
+            .starts_with("--detach-master belongs to worminal: worminal --detach-master HOST"));
+        assert!(misplaced("--list-masters", "worminal")
+            .unwrap()
+            .starts_with("--list-masters belongs to worminald"));
+        assert_eq!(misplaced("--help", "worminald"), None);
+        assert_eq!(misplaced("--bogus", "worminal"), None);
         for command in Launcher::ALL {
             for name in command.entry().names {
                 assert_eq!(Launcher::parse(name), Some(*command));

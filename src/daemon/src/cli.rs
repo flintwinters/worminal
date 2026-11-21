@@ -352,6 +352,14 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
             return result;
         }
     }
+    if let Some(hint) = arguments
+        .get(1)
+        .and_then(|value| value.to_str())
+        .and_then(|value| worminal_workspace::cli_schema::misplaced(value, "worminald"))
+    {
+        eprintln!("{}", cli_output::error(hint));
+        return Ok(2);
+    }
     eprintln!(
         "{}",
         cli_output::error(

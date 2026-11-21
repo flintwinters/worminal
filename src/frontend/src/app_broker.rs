@@ -102,7 +102,7 @@ pub(super) fn serve(listener: UnixListener, candidate: bool) -> io::Result<Rc<Se
                                     }
                                 });
                                 if let Err(error) = &result { eprintln!("worminal-rust: forwarded launch: {error}"); }
-                                let _ = peer.socket.borrow_mut().write_all(&[u8::from(result.is_err())]);
+                                let _ = peer.socket.borrow_mut().write_all(&broker::reply(&result));
                             }
                         }
                         peer.reader.borrow_mut().take();
