@@ -218,6 +218,11 @@ pub(super) fn mix(from: &gdk::RGBA, to: &gdk::RGBA, amount: f64) -> gdk::RGBA {
         1.0,
     )
 }
+/// Whether a tab that is not selected has a background fill: an alert, a background job or a busy task.
+/// Must agree with `colors`.
+fn tinted(entry: &Tab, severity: u32) -> bool {
+    severity > 0 || entry.background_job || entry.busy
+}
 /// Background fill (none for resting tabs) and text color; attention stays solid until input.
 fn colors(
     palette: &Palette,
@@ -649,6 +654,14 @@ impl Tabs {
         if attention.len() != count {
             self.0.widget.queue_draw();
         }
+    }
+    /// Whether this strip lists `id` with a background fill beyond the one selection gives.
+    pub fn tinted(&self, id: u32) -> bool {
+        self.0
+            .entries
+            .borrow()
+            .iter()
+            .any(|entry| entry.id == id && tinted(entry, self.0.severity(id)))
     }
     /// The slot a tab dragged in from another strip at this strip position would take.
     pub fn slot(&self, x: f64, y: f64) -> Option<Slot> {
