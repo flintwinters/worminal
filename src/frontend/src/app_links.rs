@@ -229,6 +229,24 @@ impl App {
             remote.link.clear();
         }
     }
+    /// A new window shows the masters its source window shows. Their tabs are shared daemon
+    /// state, so join without launching: only the window's own primary gets a fresh shell.
+    pub(super) fn join_masters_of(self: &Rc<Self>, source: &Self) {
+        let configs: Vec<_> = source
+            .remotes
+            .borrow()
+            .iter()
+            .map(|remote| Config {
+                attach: true,
+                ..remote.config.clone()
+            })
+            .collect();
+        for config in configs {
+            if let Err(error) = self.add_remote(config) {
+                self.message(Some(&error.to_string()));
+            }
+        }
+    }
     /// Show another daemon's tabs in this window. `--master` hosts already present are only raised.
     pub(super) fn add_remote(self: &Rc<Self>, config: Config) -> io::Result<()> {
         let master = config.master.clone().expect("remote launch has a master");

@@ -125,6 +125,59 @@ class MasterDetachTest(unittest.TestCase):
                     for scope in scopes.values():
                         stop_workspace({**env, 'WORMINAL_SHARED_SOCKET_SCOPE': scope})
 
+    def test_new_window_joins_the_source_windows_masters(self):
+        with isolated_display() as display, private_bus(display) as session, profile(session) as env, \
+                tempfile.TemporaryDirectory(prefix='master-new-window-', dir=CHECKS) as directory:
+            base = Path(directory)
+            executable = str(copy_runtime(base, browser=True))
+            scope = env['WORMINAL_SHARED_SOCKET_SCOPE']+'-joined-master'
+            ssh = base/'ssh'
+            ssh.write_text('#!/usr/bin/python3\nimport os,sys\n'
+                           f'os.environ["WORMINAL_SHARED_SOCKET_SCOPE"]={scope!r}\n'
+                           f'sys.path.insert(0,{str(ROOT/"tests/fixtures")!r})\n'
+                           'from master_ssh import run\n'
+                           f'run({str(runtime_binary("worminald"))!r})\n')
+            ssh.chmod(0o700)
+            env.update(GDK_BACKEND='x11', SHELL='/bin/sh', PATH=str(base)+os.pathsep+env['PATH'])
+            remote_env = {**env, 'WORMINAL_SHARED_SOCKET_SCOPE': scope}
+            def windows():
+                result = subprocess.run(['busctl', '--user', '--json=short', 'call',
+                    f'org.worminal.Instance.p{owner.pid}', OBJECT, INTERFACE, 'GetWindows'],
+                    env=env, capture_output=True, text=True, timeout=3)
+                return json.loads(result.stdout)['data'][0] if result.returncode == 0 else []
+            def remote_tabs():
+                result = subprocess.run([str(runtime_binary('worminald')), 'api', 'list'], env=remote_env,
+                                        capture_output=True, text=True, timeout=5)
+                return json.loads(result.stdout)['tabs'] if result.returncode == 0 else None
+            with (CHECKS/'master-new-window.log').open('wb') as log:
+                owner = subprocess.Popen([executable, '-e', '/bin/cat'], env=env, stdout=log, stderr=log)
+                try:
+                    from runtime import window
+                    source = window(env, owner)
+                    subprocess.run([executable, '--master', 'joined-master', '-e', '/bin/cat'],
+                                   env=env, check=True, capture_output=True, timeout=10)
+                    self.wait(lambda: [row[4] for row in windows()] == ['joined-master'], 'master joined')
+                    shared = self.wait(remote_tabs, 'remote tab')
+                    subprocess.run(['xdotool', 'windowfocus', '--sync', source], env=env, check=True, timeout=3)
+                    subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+shift+n'], env=env, check=True)
+                    new = self.wait(lambda: next((row[0] for row in windows() if row[1] and row[4] == ''
+                                                  and len(windows()) == 2), None), 'new local window')
+                    def cycled_to_master():
+                        subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+Tab'], env=env, check=True)
+                        time.sleep(.1)
+                        return any(row[0] == new and row[4] == 'joined-master' for row in windows())
+                    # Before the fix Ctrl+Shift+N copied only the primary link: the master was unreachable.
+                    self.wait(cycled_to_master, 'new window shows the source window\'s master tabs')
+                    self.assertEqual([tab['shell_pid'] for tab in remote_tabs()],
+                                     [tab['shell_pid'] for tab in shared], 'Joining launched remote shells')
+                finally:
+                    from test_window_replacement import stop_fixture
+                    stop_fixture(env)
+                    owner.terminate()
+                    owner.wait(timeout=5)
+                    stop_workspace(env)
+                    stop_workspace(remote_env)
+
     def test_detach_cancels_pending_reconnect(self):
         executable = str(runtime_binary('worminal'))
         with isolated_display() as display, profile(display) as env, \
