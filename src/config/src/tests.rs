@@ -351,6 +351,8 @@ fn the_reference_lists_every_command_and_setting() {
         "colors.indexed_colors",
         "worminal.group_tabs_by_title",
         "WORMINAL_CONFIG",
+        "bookmarks.yaml",
+        "{directory: /abs/path",
         "restarts",
     ] {
         assert!(text.contains(word), "help omits {word}");

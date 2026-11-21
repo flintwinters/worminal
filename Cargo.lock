@@ -1120,6 +1120,7 @@ version = "1.0.2"
 dependencies = [
  "libc",
  "serde_json",
+ "serde_yaml_ng",
  "worminal-protocol",
 ]
 

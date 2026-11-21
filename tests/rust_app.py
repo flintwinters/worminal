@@ -255,7 +255,10 @@ class RustApplicationTest(unittest.TestCase):
             script = CHECKS / 'split-shell.sh'
             script.write_text(f'#!/bin/sh\n{fill(blue, "blue")}\n')
             script.chmod(0o755)
-            env.update(GDK_BACKEND='x11', SHELL=str(script))
+            # Tabs carry a star in their left padding: drags start on the label, and the config is private.
+            config = CHECKS / f'split-config-{os.getpid()}'
+            self.addCleanup(shutil.rmtree, config, ignore_errors=True)
+            env.update(GDK_BACKEND='x11', SHELL=str(script), XDG_CONFIG_HOME=str(config))
             env.pop('WAYLAND_DISPLAY', None)
             app = subprocess.Popen([str(runtime_binary("worminal-rust")), '-T', 'Rust split', '-o', '-',
                                     '-e', '/bin/sh', '-c', fill(red, 'red')],
@@ -309,9 +312,9 @@ class RustApplicationTest(unittest.TestCase):
             second_label = max(x for x in range(2, 440) if pixel(x / 900, 4 / 500) != background) - 2
             self.assertLess(second_label, 450, 'fixture labels must fit in one half-width strip')
             # Drag the first tab's label onto the right edge of the pane.
-            xdo('mousemove', '--window', wid, '12', '8', 'mousedown', '1')
+            xdo('mousemove', '--window', wid, '40', '8', 'mousedown', '1')
             for step in range(1, 11):
-                xdo('mousemove', '--window', wid, str(12 + 876 * step // 10), str(8 + 250 * step // 10))
+                xdo('mousemove', '--window', wid, str(40 + 848 * step // 10), str(8 + 250 * step // 10))
                 time.sleep(.02)
             deadline = time.monotonic() + 3
             while pixel(.75, .75) == blue:
@@ -357,12 +360,12 @@ class RustApplicationTest(unittest.TestCase):
             self.assertEqual(pixel(second_label / 900, 4 / 500), background, 'the left strip still lists the dropped tab')
             # Dragging the right pane's tab onto the left strip puts it back there and ends the split. Over a strip
             # the drop is marked by the yellow slot line there, never by the pane highlight, which is for content.
-            # The pointer ends near the strip's top, so the tab image it drags leaves the line's lower end clear,
-            # and over the left half of the strip's tab, so the dropped tab goes before it and stays first.
+            # The press stays right of the tab's star, which would bookmark instead of drag. The pointer ends near
+            # the strip's top, so the tab image it drags leaves the line's lower end clear, and over the left half of the strip's tab, so the dropped tab goes before it and stays first.
             content = next(y for y in range(500) if pixel(.25, y / 500) == blue)
-            xdo('mousemove', '--window', wid, '462', '8', 'mousedown', '1')
+            xdo('mousemove', '--window', wid, '490', '8', 'mousedown', '1')
             for step in range(1, 11):
-                xdo('mousemove', '--window', wid, str(462 - 456 * step // 10), str(8 - 5 * step // 10))
+                xdo('mousemove', '--window', wid, str(490 - 484 * step // 10), str(8 - 5 * step // 10))
                 time.sleep(.02)
             yellow = bytes.fromhex(json.loads((ROOT / 'assets/palette.json').read_text())['normal']['yellow'][1:])
             strip = lambda: root.get_image(0, 0, 450, content, X.ZPixmap, 0xffffffff).data
@@ -375,9 +378,9 @@ class RustApplicationTest(unittest.TestCase):
             wait_for(red, red, 'dropping a tab on the other strip did not merge the panes')
             self.assertEqual(pixel(.505, 4 / 500), background, 'the right strip outlived the split')
             # Split again, then Ctrl+Shift+X gathers the tabs.
-            xdo('mousemove', '--window', wid, '12', '8', 'mousedown', '1')
+            xdo('mousemove', '--window', wid, '40', '8', 'mousedown', '1')
             for step in range(1, 11):
-                xdo('mousemove', '--window', wid, str(12 + 876 * step // 10), str(8 + 250 * step // 10))
+                xdo('mousemove', '--window', wid, str(40 + 848 * step // 10), str(8 + 250 * step // 10))
                 time.sleep(.02)
             xdo('mouseup', '1')
             wait_for(blue, red, 'the second split did not happen')
@@ -396,6 +399,419 @@ class RustApplicationTest(unittest.TestCase):
             xdo('key', '--clearmodifiers', 'alt+shift+Right')
             wait_for(blue, blue, 'alt+shift+Right did not move the tab into the right pane')
             self.assertEqual(pixel(.505, 4 / 500), background, 'the emptied pane outlived the move')
+
+    def test_starring_a_tab_bookmarks_its_directory(self):
+        from Xlib import X, display
+        with isolated_display() as env, ExitStack() as cleanup:
+            # Never the real configuration: bookmarks.yaml is the user's own file.
+            root = CHECKS / f'bookmarks-{os.getpid()}'
+            shutil.rmtree(root, ignore_errors=True)
+            cwd = root / 'work dir'
+            cwd.mkdir(parents=True)
+            self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+            saved = root / 'config/worminal/bookmarks.yaml'
+            env.update(GDK_BACKEND='x11', XDG_CONFIG_HOME=str(root / 'config'))
+            env.pop('WAYLAND_DISPLAY', None)
+            sizes = root / 'sizes.txt'
+            record = f"trap 'stty size >> {shlex.quote(str(sizes))}' WINCH; while :; do sleep 0.2; done"
+            app = subprocess.Popen([str(runtime_binary('worminal-rust')), '-T', 'Rust bookmarks', '-o', '-',
+                                    '-e', '/bin/sh', '-c', record],
+                                   env=env, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.addCleanup(lambda: self.stop(app))
+            wid = window(env, app)
+            xdo = lambda *args: subprocess.run(['xdotool', *args], env=env, check=True)
+            api = lambda *args: subprocess.check_output([str(runtime_binary('worminald')), 'api', *args],
+                                                        env=env, text=True)
+            xdo('windowfocus', '--sync', wid)
+
+            def bookmarked():
+                return saved.read_text() if saved.exists() else ''
+
+            def wait_for(condition, message):
+                deadline = time.monotonic() + 8
+                while not condition():
+                    self.assertIsNone(app.poll())
+                    self.assertLess(time.monotonic(), deadline, message)
+                    time.sleep(.05)
+            # The strip stars only tabs whose directory is known; the daemon reports it shortly after start.
+            wait_for(lambda: json.loads(api('list'))['tabs'][0].get('directory') == str(cwd),
+                     'the tab never reported its directory')
+            xdo('windowsize', wid, '900', '500')
+            time.sleep(1.5)
+            server = display.Display(env['DISPLAY'])
+            cleanup.callback(server.close)
+            window_object = server.create_resource_object('window', int(wid))
+
+            # A status line under the panes takes a row from the terminal while it shows, and the shell sees the
+            # screen shrink and grow again: a bounce. The shell records its size on every resize signal.
+            resizes = lambda: sizes.read_text().count('\n') if sizes.exists() else 0
+            quiet = resizes()
+            # Ctrl+Shift+D bookmarks the tab, and again removes it.
+            xdo('key', '--clearmodifiers', 'ctrl+shift+d')
+            wait_for(lambda: f'directory: {cwd}' in bookmarked(), 'ctrl+shift+d did not bookmark the tab')
+            time.sleep(1.5)
+            self.assertEqual(resizes(), quiet, 'bookmarking resized the terminal: a status line bounced the screen')
+            self.assertEqual(saved.stat().st_mode & 0o777, 0o600)
+            xdo('key', '--clearmodifiers', 'ctrl+shift+d')
+            wait_for(lambda: str(cwd) not in bookmarked() and saved.exists(), 'ctrl+shift+d did not remove it')
+            # The star sits in the tab's left padding; a click there toggles without starting a drag or
+            # selecting anything else.
+            xdo('mousemove', '--window', wid, '5', '8', 'click', '1')
+            wait_for(lambda: f'directory: {cwd}' in bookmarked(), 'clicking the star did not bookmark the tab')
+            xdo('mousemove', '--window', wid, '5', '8', 'click', '1')
+            # Quick clicks arrive as a press and a double-click event; only the press may toggle.
+            wait_for(lambda: str(cwd) not in bookmarked(), 'clicking the star again did not remove it')
+            time.sleep(1.5)
+            self.assertEqual(resizes(), quiet, 'clicking the star resized the terminal')
+            self.assertEqual(len(json.loads(api('list'))['tabs']), 1)
+
+    def test_a_browser_tab_moves_into_a_split_keeping_its_page_and_the_terminal_painting(self):
+        from Xlib import X, display, error
+        red, green, white = (200, 30, 30), (30, 160, 30), (255, 255, 255)
+        with isolated_display() as env, ExitStack() as cleanup:
+            root = CHECKS / f'browser-split-{os.getpid()}'
+            shutil.rmtree(root, ignore_errors=True)
+            root.mkdir(parents=True)
+            self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+            # The title is random per load, so a reloaded page (a lost DOM) shows a different one.
+            page = root / 'page.html'
+            page.write_text('<!doctype html><title>t</title><body style="margin:0;background:#fff">'
+                            '<script>document.title="doc-" + Math.floor(Math.random() * 1e9)</script>')
+            # A terminal that changes color every quarter second shows whether its frames still arrive:
+            # a hidden tab would freeze on whichever color it last painted.
+            flip = ("while :; do printf '\\033[48;2;200;30;30m\\033[2J'; sleep .25; "
+                    "printf '\\033[48;2;30;160;30m\\033[2J'; sleep .25; done")
+            env.update(GDK_BACKEND='x11', XDG_CONFIG_HOME=str(root / 'config'))
+            env.pop('WAYLAND_DISPLAY', None)
+            app = subprocess.Popen([str(runtime_binary('worminal-rust')), '-T', 'Rust browser split', '-o', '-',
+                                    '-e', '/bin/sh', '-c', flip],
+                                   env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.addCleanup(lambda: self.stop(app))
+            wid = window(env, app)
+            xdo = lambda *args: subprocess.run(['xdotool', *args], env=env, check=True)
+            api = lambda *args: subprocess.check_output([str(runtime_binary('worminald')), 'api', *args],
+                                                        env=env, text=True)
+            title = lambda: subprocess.check_output(['xdotool', 'getwindowname', wid], env=env, text=True).strip()
+            server = display.Display(env['DISPLAY'])
+            cleanup.callback(server.close)
+            window_object = server.create_resource_object('window', int(wid))
+            xdo('windowfocus', '--sync', wid)
+            xdo('windowsize', wid, '900', '500')
+            time.sleep(1.5)
+
+            def pixel(fx, fy):
+                try:
+                    data = window_object.get_image(int(900 * fx), int(500 * fy), 1, 1, X.ZPixmap, 0xffffffff).data
+                except error.BadMatch:
+                    return None
+                return tuple(data[:3][::-1])
+
+            def wait_for(condition, message):
+                deadline = time.monotonic() + 10
+                while not condition():
+                    self.assertIsNone(app.poll())
+                    self.assertLess(time.monotonic(), deadline, message)
+                    time.sleep(.05)
+            tabs = lambda: json.loads(api('list'))['tabs']
+            api('open', '--browser', page.as_uri())
+            wait_for(lambda: len(tabs()) == 2 and tabs()[1]['kind'] == 'browser', 'no browser tab appeared')
+            xdo('key', '--clearmodifiers', 'alt+2')
+            wait_for(lambda: pixel(.5, .75) == white, 'the browser page was not shown')
+            wait_for(lambda: title().startswith('doc-'), 'the page never reported its title')
+            loaded = title()
+            # Alt+Shift+Right moves the browser tab into a pane of its own, beside the terminal.
+            xdo('key', '--clearmodifiers', 'alt+shift+Right')
+            wait_for(lambda: pixel(.75, .75) == white and pixel(.25, .75) in (red, green),
+                     'the browser tab did not split off beside the terminal')
+            # The page moved with its widget: it was not reloaded.
+            time.sleep(2)
+            self.assertEqual(title(), loaded, 'moving the browser tab reloaded its page')
+            # The terminal beside the browser still paints: both of its colors keep arriving.
+            seen = set()
+            deadline = time.monotonic() + 4
+            while time.monotonic() < deadline and not {red, green} <= seen:
+                seen.add(pixel(.25, .75))
+                time.sleep(.05)
+            self.assertTrue({red, green} <= seen,
+                            f'the terminal beside the browser stopped painting: saw {seen}')
+            self.assertEqual(pixel(.75, .75), white)
+            # Right after the split the terminal's own resize keeps it shown, which hides a fault: selecting the
+            # browser pane again later must not hide the terminal, as an exclusive Focus on the browser would.
+            xdo('key', '--clearmodifiers', 'ctrl+shift+Left')
+            time.sleep(1)
+            xdo('key', '--clearmodifiers', 'ctrl+shift+Right')
+            wait_for(lambda: title() == loaded, 'the browser pane was not selected again')
+            time.sleep(1)
+            seen = set()
+            deadline = time.monotonic() + 4
+            while time.monotonic() < deadline and not {red, green} <= seen:
+                seen.add(pixel(.25, .75))
+                time.sleep(.05)
+            self.assertTrue({red, green} <= seen,
+                            f'selecting the browser pane hid the terminal beside it: saw {seen}')
+
+    def test_a_server_is_typed_into_the_panel_and_opens_a_tab_that_runs_ssh_then_a_shell(self):
+        self.server_flow()
+
+    def test_the_same_server_flow_when_sh_is_bash(self):
+        # Many systems have bash as sh, and a shell exits when its foreground child dies of SIGINT unless it is
+        # interactive and traps the signal: without that, Ctrl+C on a connecting ssh closes the tab under bash.
+        bash = shutil.which('bash')
+        if not bash:
+            self.skipTest('bash is not installed')
+        self.server_flow(interpreter=bash)
+
+    def server_flow(self, interpreter=None):
+        import re
+        from Xlib import X, display, error
+        with isolated_display() as env, ExitStack() as cleanup:
+            root = CHECKS / f'servers-{os.getpid()}-{"bash" if interpreter else "default"}'
+            shutil.rmtree(root, ignore_errors=True)
+            fakes = root / 'bin'
+            fakes.mkdir(parents=True)
+            self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+            # A fake ssh: `ssh 30` sleeps for 30 seconds, `ssh bad` prints sleep's complaint and exits.
+            (fakes / 'ssh').symlink_to('/bin/sleep')
+            if interpreter:
+                # The launcher runs `sh` from PATH, so this decides which shell interprets the ssh script.
+                (fakes / 'sh').symlink_to(interpreter)
+            saved = root / 'config/worminal/bookmarks.yaml'
+            env.update(GDK_BACKEND='x11', XDG_CONFIG_HOME=str(root / 'config'), SHELL='/bin/sh',
+                       PATH=f"{fakes}:{env['PATH']}")
+            env.pop('WAYLAND_DISPLAY', None)
+            app = subprocess.Popen([str(runtime_binary('worminal-rust')), '-T', 'Rust servers', '-o', '-',
+                                    '-e', '/bin/sh', '-c', 'while :; do sleep 1; done'],
+                                   env=env, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.addCleanup(lambda: self.stop(app))
+            wid = window(env, app)
+            xdo = lambda *args: subprocess.run(['xdotool', *args], env=env, check=True)
+            api = lambda *args: subprocess.check_output([str(runtime_binary('worminald')), 'api', *args],
+                                                        env=env, text=True)
+            server = display.Display(env['DISPLAY'])
+            cleanup.callback(server.close)
+            window_object = server.create_resource_object('window', int(wid))
+            xdo('windowfocus', '--sync', wid)
+            xdo('windowsize', wid, '900', '500')
+            time.sleep(1.5)
+
+            def panel_open():
+                try:
+                    row = window_object.get_image(0, 250, 900, 1, X.ZPixmap, 0xffffffff).data
+                except error.BadMatch:
+                    return False
+                return any(len(set(row[x * 4:x * 4 + 3])) == 1 and 70 <= row[x * 4] <= 95 for x in range(60, 600))
+
+            def wait_for(condition, message):
+                deadline = time.monotonic() + 10
+                while not condition():
+                    self.assertIsNone(app.poll())
+                    self.assertLess(time.monotonic(), deadline, message() if callable(message) else message)
+                    time.sleep(.05)
+            text = lambda: saved.read_text() if saved.exists() else ''
+            tabs = lambda: json.loads(api('list'))['tabs']
+            key = lambda *names: xdo('key', '--clearmodifiers', *names)
+            type_text = lambda value: xdo('type', '--delay', '40', value)
+            wait_for(lambda: len(tabs()) == 1, 'no first tab')
+            key('ctrl+shift+b')
+            wait_for(panel_open, 'ctrl+shift+b did not open the panel')
+            # `a` asks for a server. Something that cannot be one is refused and nothing is saved, and the list's
+            # own keys (a, j, x, q) are plain letters while typing.
+            key('a')
+            type_text('x;y')
+            key('Return')
+            time.sleep(.8)
+            self.assertNotIn('host', text(), 'a malformed server was saved')
+            self.assertTrue(panel_open(), 'a refused entry closed the panel')
+            key('Escape')            # cancels the question only ...
+            time.sleep(.5)
+            self.assertTrue(panel_open(), 'Escape while typing closed the whole panel')
+            # ... then a real one. `bad` contains the add key itself.
+            key('a')
+            type_text('bad')
+            key('Return')
+            # The host is accepted, then it asks what to call it; nothing is saved until that is answered, and
+            # names (unlike hosts) may contain spaces and the list's keys (r, a).
+            time.sleep(.8)
+            self.assertNotIn('host', text(), 'the server was saved before it was named')
+            type_text('Bad box')
+            key('Return')
+            wait_for(lambda: re.search(r"host: ['\"]?bad['\"]?", text()), 'the typed server was not saved')
+            self.assertIn('title: Bad box', text(), 'the name was not saved with the server')
+            self.assertNotIn('- directory:', text())   # (the header comment mentions the word)
+            key('Return')            # opens the selected row: a tab that runs ssh bad
+            wait_for(lambda: len(tabs()) == 2, 'opening the server did not create a tab')
+            wait_for(lambda: not panel_open(), 'opening a server left the panel open')
+            bad = tabs()[1]['id']
+            # ssh failed at once, yet the tab stays and shows why: it is a shell now, not a closed tab.
+            # Text a tab prints in its first few milliseconds, before the window has attached and sized it, ends up in
+            # scrollback rather than on the visible screen (any tab the window creates does this), so read retained rows.
+            screen = lambda: ' '.join(json.loads(api('read', str(bad), '--tail', '100'))['results'][0]['lines']).strip()
+            tab_command = lambda tab: Path(f"/proc/{[t for t in tabs() if t['id'] == tab][0]['shell_pid']}/cmdline").read_bytes()
+            wait_for(lambda: 'invalid time interval' in screen(),
+                     lambda: f'no error on screen; it shows {screen()!r}; the tab runs {tab_command(bad)}')
+            time.sleep(2)
+            self.assertEqual(len(tabs()), 2, 'the tab closed when ssh ended')
+            type_text(f"echo up > {root / 'up.txt'}")
+            key('Return')
+            wait_for(lambda: (root / 'up.txt').exists(), 'no shell took over after ssh ended')
+            # A server that stays connected: it is a tab running ssh, so it must not be bookmarkable as a
+            # local directory (the daemon has to see ssh in front, which is what set -m is for).
+            key('ctrl+shift+b')
+            wait_for(panel_open, 'the panel did not reopen')
+            key('a')
+            type_text('30')
+            key('Return')
+            key('Return')            # no name
+            wait_for(lambda: re.search(r"host: ['\"]?30['\"]?", text()), 'the second server was not saved')
+            self.assertEqual(text().count('title:'), 1, 'an unnamed server got a name')
+            # `r` names the selected row, starting from its current name; here from nothing.
+            key('Down')
+            key('r')
+            type_text('Thirty')
+            key('Return')
+            wait_for(lambda: 'title: Thirty' in text(), 'renaming did not save the name')
+            # Renaming again starts from the old name, and a blank answer clears it.
+            key('r')
+            key('ctrl+u')
+            key('Return')
+            wait_for(lambda: 'Thirty' not in text(), 'a blank name did not clear the name')
+            self.assertIn('title: Bad box', text(), 'renaming changed another bookmark')
+            key('Return')
+            wait_for(lambda: len(tabs()) == 3, 'the second server did not open')
+            time.sleep(2.5)          # the daemon notices ssh in front on its next check
+            before = text()
+            key('ctrl+shift+d')
+            time.sleep(1.5)
+            self.assertEqual(text(), before, 'a tab running ssh was bookmarked as a local directory')
+            # Ending ssh leaves the shell, not a closed tab.
+            key('ctrl+c')
+            time.sleep(1)
+            type_text(f"echo back > {root / 'back.txt'}")
+            key('Return')
+            wait_for(lambda: (root / 'back.txt').exists(), 'no shell took over after ssh was interrupted')
+            self.assertEqual(len(tabs()), 3)
+
+    def test_a_tab_running_ssh_is_not_bookmarkable_as_a_local_directory(self):
+        with isolated_display() as env:
+            # The daemon reports an ssh tab's directory as its local shell's, so bookmarking it would save the
+            # wrong place and light up every tab that shares that directory.
+            root = CHECKS / f'ssh-bookmarks-{os.getpid()}'
+            shutil.rmtree(root, ignore_errors=True)
+            work = root / 'work'
+            work.mkdir(parents=True)
+            self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+            # A shell named ssh is a harmless foreground job the daemon takes for an ssh client.
+            fake = root / 'ssh'
+            fake.symlink_to('/bin/sh')
+            saved = root / 'config/worminal/bookmarks.yaml'
+            env.update(GDK_BACKEND='x11', XDG_CONFIG_HOME=str(root / 'config'), SHELL='/bin/sh')
+            env.pop('WAYLAND_DISPLAY', None)
+            app = subprocess.Popen([str(runtime_binary('worminal-rust')), '-T', 'Rust ssh', '-o', '-',
+                                    '-e', str(fake), '-c', 'read line'],
+                                   env=env, cwd=work, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.addCleanup(lambda: self.stop(app))
+            wid = window(env, app)
+            xdo = lambda *args: subprocess.run(['xdotool', *args], env=env, check=True)
+            api = lambda *args: subprocess.check_output([str(runtime_binary('worminald')), 'api', *args],
+                                                        env=env, text=True)
+            xdo('windowfocus', '--sync', wid)
+            bookmarked = lambda: saved.read_text() if saved.exists() else ''
+
+            def wait_for(condition, message):
+                deadline = time.monotonic() + 8
+                while not condition():
+                    self.assertIsNone(app.poll())
+                    self.assertLess(time.monotonic(), deadline, message)
+                    time.sleep(.05)
+            tabs = lambda: json.loads(api('list'))['tabs']
+            wait_for(lambda: tabs()[0].get('directory') == str(work), 'the ssh tab never reported its directory')
+            time.sleep(2.5)  # the daemon notices the foreground ssh client on its next directory check
+            xdo('key', '--clearmodifiers', 'ctrl+shift+d')
+            time.sleep(1.5)
+            self.assertNotIn(str(work), bookmarked(), 'an ssh tab was bookmarked as its local directory')
+            # A second, ordinary tab in the same directory can be bookmarked.
+            xdo('key', '--clearmodifiers', 'ctrl+shift+t')
+            wait_for(lambda: len(tabs()) == 2 and tabs()[1].get('directory') == str(work), 'no second tab')
+            time.sleep(1)
+            xdo('key', '--clearmodifiers', 'ctrl+shift+d')
+            wait_for(lambda: f'directory: {work}' in bookmarked(), 'the ordinary tab was not bookmarked')
+            # Back on the ssh tab the same keys must leave that bookmark alone, not remove it.
+            xdo('key', '--clearmodifiers', 'alt+1')
+            time.sleep(1)
+            xdo('key', '--clearmodifiers', 'ctrl+shift+d')
+            time.sleep(1.5)
+            self.assertIn(f'directory: {work}', bookmarked(), 'the ssh tab removed another tab\'s bookmark')
+
+    def test_the_side_panel_opens_and_removes_bookmarks_from_the_keyboard(self):
+        from Xlib import X, display, error
+        with isolated_display() as env, ExitStack() as cleanup:
+            root = CHECKS / f'panel-{os.getpid()}'
+            shutil.rmtree(root, ignore_errors=True)
+            start, other = root / 'start', root / 'other dir'
+            start.mkdir(parents=True)
+            other.mkdir()
+            self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+            saved = root / 'config/worminal/bookmarks.yaml'
+            saved.parent.mkdir(parents=True)
+            saved.write_text(f'bookmarks:\n  - directory: "{other}"\n')
+            env.update(GDK_BACKEND='x11', XDG_CONFIG_HOME=str(root / 'config'), SHELL='/bin/sh')
+            env.pop('WAYLAND_DISPLAY', None)
+            app = subprocess.Popen([str(runtime_binary('worminal-rust')), '-T', 'Rust panel', '-o', '-',
+                                    '-e', '/bin/sh', '-c', 'while :; do sleep 1; done'],
+                                   env=env, cwd=start, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.addCleanup(lambda: self.stop(app))
+            wid = window(env, app)
+            xdo = lambda *args: subprocess.run(['xdotool', *args], env=env, check=True)
+            api = lambda *args: subprocess.check_output([str(runtime_binary('worminald')), 'api', *args],
+                                                        env=env, text=True)
+            server = display.Display(env['DISPLAY'])
+            cleanup.callback(server.close)
+            window_object = server.create_resource_object('window', int(wid))
+            xdo('windowfocus', '--sync', wid)
+            xdo('windowsize', wid, '900', '500')
+            time.sleep(1.5)
+
+            def panel_edge():
+                # The panel draws its right edge in a faint gray (about 30% toward the foreground) that this
+                # test's terminals never use; the terminal background is (24, 24, 24).
+                try:
+                    row = window_object.get_image(0, 250, 900, 1, X.ZPixmap, 0xffffffff).data
+                except error.BadMatch:
+                    return False
+                edge = lambda x: len(set(row[x * 4:x * 4 + 3])) == 1 and 70 <= row[x * 4] <= 95
+                return any(edge(x) for x in range(60, 600))
+
+            def wait_for(condition, message):
+                deadline = time.monotonic() + 8
+                while not condition():
+                    self.assertIsNone(app.poll())
+                    self.assertLess(time.monotonic(), deadline, message)
+                    time.sleep(.05)
+            tabs = lambda: json.loads(api('list'))['tabs']
+            wait_for(lambda: tabs()[0].get('directory') == str(start), 'the tab never reported its directory')
+            self.assertFalse(panel_edge(), 'the panel is open before it was asked for')
+            # Ctrl+Shift+B opens the panel (P is an alias for keyboards that can send it); Enter opens the selected bookmark in a new tab and closes it.
+            xdo('key', '--clearmodifiers', 'ctrl+shift+b')
+            wait_for(panel_edge, 'ctrl+shift+b did not open the panel')
+            xdo('key', '--clearmodifiers', 'Return')
+            wait_for(lambda: len(tabs()) == 2 and tabs()[1].get('directory') == str(other),
+                     'Enter did not open the bookmark in a new tab at its directory')
+            wait_for(lambda: not panel_edge(), 'opening a bookmark left the panel open')
+            # The new terminal has the keyboard, and its shell started in the bookmarked directory.
+            xdo('type', '--delay', '30', 'pwd > marker.txt')
+            xdo('key', '--clearmodifiers', 'Return')
+            wait_for(lambda: (other / 'marker.txt').exists() and (other / 'marker.txt').read_text().strip() == str(other),
+                     'the opened tab did not take the keyboard in the bookmarked directory')
+            # Escape closes the panel and gives the keyboard back; Delete removes the selected bookmark.
+            xdo('key', '--clearmodifiers', 'ctrl+shift+b')
+            wait_for(panel_edge, 'ctrl+shift+b did not reopen the panel')
+            xdo('key', '--clearmodifiers', 'Escape')
+            wait_for(lambda: not panel_edge(), 'Escape did not close the panel')
+            xdo('key', '--clearmodifiers', 'ctrl+shift+p')
+            wait_for(panel_edge, 'the ctrl+shift+p alias did not open the panel')
+            xdo('key', '--clearmodifiers', 'Delete')
+            wait_for(lambda: str(other) not in saved.read_text(), 'Delete did not remove the bookmark')
+            self.assertEqual(len(tabs()), 2)
 
     def test_tab_strips_rewrap_when_splits_change_their_width(self):
         from Xlib import X, display

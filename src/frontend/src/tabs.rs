@@ -25,6 +25,10 @@ pub struct Tab {
     /// A task in the terminal is reporting progress.
     pub busy: bool,
     pub background_job: bool,
+    /// A bookmark can be made of this tab: a terminal with a known directory, or a web page.
+    pub starrable: bool,
+    /// The tab is bookmarked.
+    pub starred: bool,
 }
 /// What the strip asks of the window. A tab is selected when its button is released, so a drag that
 /// starts on it leaves the panes it is dragged over on screen.
@@ -40,6 +44,8 @@ pub struct Actions {
     pub land: Box<dyn Fn(u32, Landing)>,
     /// The dragged tab to draw under the pointer; `None` when the drag ends.
     pub ghost: Box<dyn Fn(Option<Ghost>)>,
+    /// The star of a tab was pressed: bookmark it, or remove its bookmark.
+    pub star: Box<dyn Fn(u32)>,
 }
 /// A place in a strip beside one of its tabs, marked by a line on that side.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -116,9 +122,23 @@ fn place(widths: &[i32], right: i32) -> Vec<(i32, i32)> {
 const SSH: u32 = 5;
 /// ANSI bright black: dark gray behind tabs whose task is busy.
 const BUSY: u32 = 8;
+/// Cells between a starrable tab's left padding and its label: the star and a gap.
+const STAR_CELLS: i32 = 2;
+fn star_width(entry: &Tab, metrics: Metrics) -> i32 {
+    if entry.starrable {
+        STAR_CELLS * metrics.width
+    } else {
+        0
+    }
+}
+/// Whether a press `offset` pixels into a tab lands on its star; the padding before it counts, so the target
+/// is not one thin glyph. Drawing and hit testing both place the label by `star_width`.
+fn on_star(starrable: bool, offset: i32, cell: i32) -> bool {
+    starrable && offset < (1 + STAR_CELLS) * cell
+}
 fn width(layout: &pango::Layout, entry: &Tab, metrics: Metrics) -> i32 {
     layout.set_text(&entry.label);
-    layout.pixel_size().0 + 2 * metrics.width
+    layout.pixel_size().0 + 2 * metrics.width + star_width(entry, metrics)
 }
 /// Each tab's `(x, top, width)` in strip coordinates; drawing, hit testing and drag images share it.
 fn placed(
@@ -143,13 +163,13 @@ fn paint_tab(
     cr: &cairo::Context,
     layout: &pango::Layout,
     metrics: Metrics,
-    label: &str,
+    entry: &Tab,
     (fill, text): (Option<gdk::RGBA>, gdk::RGBA),
     (x, top, width): (i32, i32, i32),
     right: i32,
     selected: bool,
 ) -> Result<(), cairo::Error> {
-    layout.set_text(label);
+    layout.set_text(&entry.label);
     let baseline = top + (metrics.height - metrics.ink_height) / 2 + metrics.ascent;
     if let Some(fill) = fill {
         paint::source(cr, &fill);
@@ -162,17 +182,27 @@ fn paint_tab(
         cr.fill()?;
     }
     paint::source(cr, &text);
+    if entry.starrable {
+        layout.set_text(if entry.starred { "★" } else { "☆" });
+        cr.move_to(
+            f64::from(x + metrics.width),
+            f64::from(baseline) - f64::from(layout.baseline()) / f64::from(pango::SCALE),
+        );
+        graphics_ffi::show_layout(cr, layout);
+        layout.set_text(&entry.label);
+    }
+    let label = x + metrics.width + star_width(entry, metrics);
     cr.move_to(
-        f64::from(x + metrics.width),
+        f64::from(label),
         f64::from(baseline) - f64::from(layout.baseline()) / f64::from(pango::SCALE),
     );
     graphics_ffi::show_layout(cr, layout);
     // The underline marks each pane's selected tab, focused or not.
     if selected {
         cr.rectangle(
-            f64::from(x + metrics.width),
+            f64::from(label),
             f64::from((baseline + 2).min(top - 2 + metrics.height)),
-            f64::from((width - 2 * metrics.width).max(0)),
+            f64::from((width - 2 * metrics.width - star_width(entry, metrics)).max(0)),
             1.0,
         );
         cr.fill()?;
@@ -276,7 +306,7 @@ impl State {
                 cr,
                 layout,
                 metrics,
-                &entry.label,
+                entry,
                 colors,
                 (x, top, width),
                 right,
@@ -297,7 +327,8 @@ impl State {
         }
         Ok(())
     }
-    fn hit(&self, x: f64, y: f64) -> Option<u32> {
+    /// The tab under the pointer and whether the pointer is on its star.
+    fn hit(&self, x: f64, y: f64) -> Option<(u32, bool)> {
         let metrics = self.metrics.get()?;
         let layout = self.layout.borrow();
         let layout = layout.as_ref()?;
@@ -312,7 +343,10 @@ impl State {
                     && x >= f64::from(*left)
                     && x < f64::from((left + width).min(right))
             })
-            .map(|(entry, _)| entry.id)
+            .map(|(entry, (left, _, _))| {
+                let offset = (x - f64::from(left)) as i32;
+                (entry.id, on_star(entry.starrable, offset, metrics.width))
+            })
     }
     /// The slot a tab arriving at `(x, y)` takes: beside the nearer half of the tab there, or at the end of
     /// the row (or of the last row) it is past.
@@ -379,7 +413,7 @@ impl State {
             &cr,
             layout,
             metrics,
-            &entry.label,
+            entry,
             colors,
             (left, top, width),
             left + width,
@@ -390,7 +424,7 @@ impl State {
         Some((image, x - f64::from(left), y - f64::from(top)))
     }
     fn drag_to(&self, x: f64, y: f64) {
-        let over = self.hit(x, y);
+        let over = self.hit(x, y).map(|(id, _)| id);
         let Some((id, started)) = self.drag.borrow().as_ref().map(|drag| {
             (
                 drag.id,
@@ -536,8 +570,16 @@ impl Tabs {
         self.0.widget.connect_button_press_event(glib::clone!(@weak state
             => @default-return glib::Propagation::Proceed, move |_, event| {
                 let (x, y) = event.position();
-                let Some(id) = state.hit(x, y) else { return glib::Propagation::Proceed };
+                let Some((id, star)) = state.hit(x, y) else { return glib::Propagation::Proceed };
                 match event.button() {
+                    // A quick second press is delivered as a press and then a separate double-click event.
+                    // Only the press counts: reacting to both made a double click toggle three times.
+                    1 if star => {
+                        let actions = state.actions.borrow().clone();
+                        if let Some(actions) = actions.filter(|_| event.event_type() == gdk::EventType::ButtonPress) {
+                            (actions.star)(id);
+                        }
+                    }
                     1 => *state.drag.borrow_mut() = Some(Drag { id, x, y, active: false, over: None, target: None, ghost: None }),
                     2 => {
                         let actions = state.actions.borrow().clone();
@@ -648,8 +690,10 @@ impl Tabs {
 
 #[cfg(test)]
 mod tests {
-    use super::{colors, place, severity_color, Tab, ATTENTION_HELP, BUSY, FG};
-    use crate::paint::Palette;
+    use super::{
+        colors, on_star, place, severity_color, star_width, Tab, ATTENTION_HELP, BUSY, FG,
+    };
+    use crate::paint::{Metrics, Palette};
     fn tab(busy: bool) -> Tab {
         Tab {
             id: 1,
@@ -659,7 +703,27 @@ mod tests {
             ssh: false,
             busy,
             background_job: false,
+            starrable: false,
+            starred: false,
         }
+    }
+    #[test]
+    fn the_star_is_the_padding_and_its_own_cells_before_the_label() {
+        // 8 px cells: padding 0-8, star 8-16, gap 16-24; the label starts at 24.
+        assert!(on_star(true, 0, 8));
+        assert!(on_star(true, 23, 8));
+        assert!(!on_star(true, 24, 8));
+        assert!(!on_star(false, 0, 8));
+        let metrics = Metrics {
+            width: 8,
+            height: 16,
+            ink_height: 12,
+            ascent: 12,
+        };
+        let mut entry = tab(false);
+        assert_eq!(star_width(&entry, metrics), 0);
+        entry.starrable = true;
+        assert_eq!(star_width(&entry, metrics), 16);
     }
     #[test]
     fn a_busy_tab_is_gray_unless_selected_or_alerting() {

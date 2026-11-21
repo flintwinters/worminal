@@ -27,6 +27,9 @@ and come back without starting over.
 
 - **Split screen.** Control view splitting with both mouse and keyboard.
 
+- **Bookmarks.** Star a tab (or press Ctrl+Shift+D) to save a terminal's directory and host, or a web page, then
+  reopen it from a keyboard-driven side panel (Ctrl+Shift+B). [Bookmarks](docs/bookmarks.md)
+
 Built with Rust, GTK and WebKitGTK, with a terminal engine derived from [st](https://st.suckless.org/).
 [License](LICENSE).
 
