@@ -57,7 +57,12 @@ fn layout_path() -> std::io::Result<PathBuf> {
 impl App {
     /// Take this window's saved layout, if any, and start following its geometry. Called once the panes exist.
     pub(super) fn begin_restore(self: &Rc<Self>, staged: bool) {
-        if staged || !worminal_config::get().restore_layout {
+        if !worminal_config::get().restore_layout {
+            return;
+        }
+        if staged {
+            // A window replacement's new windows get their layout from `adopt_layout`, not from the startup queue.
+            self.follow_geometry();
             return;
         }
         let Some((window, extra)) = STORE.with(|store| {
@@ -148,7 +153,11 @@ impl App {
 
     /// This window as it is now, or `None` before it has tabs or while its daemon is lost.
     fn layout_snapshot(&self) -> Option<Window> {
-        if self.primary.down() || self.panes.persist.pending.borrow().is_some() {
+        // A window still being handed over is not the owner yet: the donor keeps the file current until commit.
+        if self.primary.down()
+            || self.replacing.get()
+            || self.panes.persist.pending.borrow().is_some()
+        {
             return None;
         }
         // A tab's position is its place among this machine's tabs, in daemon order.
@@ -194,6 +203,7 @@ impl App {
             geometry = [x, y, width, height];
         }
         let window = Window {
+            id: self.state_id,
             geometry,
             maximized,
             tree,
@@ -297,8 +307,27 @@ impl App {
         if let Some(tab) = tab {
             self.select_id(tab);
         }
-        self.present(true);
+        if !self.replacing.get() {
+            self.present(true);
+        }
         self.panes.persist.enabled.set(true);
+    }
+
+    /// A window replacement opened this window for the donor window `donor`: take that window's layout from the
+    /// file the donor just flushed. Without one (or with restoring off or a damaged file) it stays a single pane.
+    pub(super) fn adopt_layout(self: &Rc<Self>, donor: u32) {
+        if !worminal_config::get().restore_layout {
+            return;
+        }
+        let saved = layout_path()
+            .and_then(|path| layout_state::load(&path))
+            .ok()
+            .flatten()
+            .and_then(|saved| saved.windows.into_iter().find(|window| window.id == donor));
+        match saved {
+            Some(saved) => *self.panes.persist.pending.borrow_mut() = Some(saved),
+            None => self.panes.persist.enabled.set(true),
+        }
     }
 
     /// Close this window and forget its layout, so the next start does not bring it back.

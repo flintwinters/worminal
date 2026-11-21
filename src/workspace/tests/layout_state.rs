@@ -40,6 +40,7 @@ fn grid() -> Node {
 fn saved() -> Saved {
     Saved {
         windows: vec![Window {
+            id: 7,
             geometry: [10, 20, 1000, 600],
             maximized: false,
             tree: grid(),

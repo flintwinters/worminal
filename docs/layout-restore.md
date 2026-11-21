@@ -12,6 +12,10 @@ works after a window is closed by accident, a frontend crash, a daemon restart a
   [architecture](architecture.md)); this only places them. Running commands and scrollback are not restored.
 - **Several windows:** each window comes back with its own layout, in the order they were opened. A running frontend
   that loses its daemon and reconnects rebuilds the last layout it had, because the recovered tabs have new ids.
+- **GUI update:** the update swaps each window for one in a new process. The donor flushes the layout file, and each
+  new window takes the layout recorded under its donor window's id, so splits survive the swap. The new windows save
+  nothing until the update commits, so a failed update never writes over the file. The first update *from* a build
+  that predates this feature cannot carry splits: that build never wrote a layout.
 - **Remote (SSH) tabs** are not part of the saved layout; their panes collapse.
 
 ## How it is stored

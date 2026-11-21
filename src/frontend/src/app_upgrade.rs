@@ -152,6 +152,10 @@ fn barriers_complete(barriers: &[UpdateBarrier]) -> bool {
     })
 }
 fn snapshot() -> io::Result<Vec<Window>> {
+    // The replacement reads each window's layout from the file: make it current first.
+    if let Some(app) = windows().first() {
+        app.flush_layout();
+    }
     windows()
         .into_iter()
         .map(|app| {

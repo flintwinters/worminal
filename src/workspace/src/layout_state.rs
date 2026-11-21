@@ -48,6 +48,9 @@ pub enum Node {
 /// One window: where it was and what its panes held.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Window {
+    /// The writing process's id for the window (`0` when unknown). A window replacement carries the layout
+    /// through this file: the new process finds the donor window's layout by this id.
+    pub id: u32,
     /// `[x, y, width, height]`; the position is the window manager's to honor.
     pub geometry: [i32; 4],
     pub maximized: bool,
@@ -270,6 +273,7 @@ impl Saved {
             .iter()
             .map(|window| {
                 json!({
+                    "id": window.id,
                     "geometry": window.geometry,
                     "maximized": window.maximized,
                     "focused": window.focused,
@@ -327,6 +331,11 @@ impl Saved {
                 &mut panes,
             )?;
             windows.push(Window {
+                id: entry
+                    .get("id")
+                    .and_then(Value::as_u64)
+                    .and_then(|value| u32::try_from(value).ok())
+                    .unwrap_or(0),
                 geometry,
                 maximized: entry
                     .get("maximized")

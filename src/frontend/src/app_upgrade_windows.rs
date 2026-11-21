@@ -134,6 +134,7 @@ fn open(state: &Window, candidate: bool) -> io::Result<Rc<App>> {
         true,
         state.flags & gui_handoff::PRIMARY_DETACHED != 0,
     )?;
+    app.adopt_layout(state.id);
     for link in &state.links {
         let Some(mut config) = Config::parse(&link.request, candidate)? else {
             return Err(io::Error::other("Invalid remote update launch"));

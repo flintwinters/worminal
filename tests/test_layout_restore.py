@@ -1,5 +1,7 @@
 """A window reopens with the split layout, divider, size and position it last had (docs/layout-restore.md)."""
-from runtime import CHECKS, runtime_binary, window, stop_application
+from runtime import (CHECKS, runtime_binary, window, stop_application, copy_runtime, module_path,
+                     RUST_FRONTEND_MODULE)
+from preview import profile, service
 from workspace_protocol import send, wait_kind, service_pid
 from x11 import isolated_display
 
@@ -10,7 +12,9 @@ import shutil
 import signal
 import socket
 import subprocess
+import tempfile
 import time
+from pathlib import Path
 import unittest
 import uuid
 
@@ -274,3 +278,75 @@ class LayoutRestoreTest(unittest.TestCase):
             self.assertNotEqual(pixel(.15), pixel(.65), 'the split did not happen')
             time.sleep(1)
             self.assertIsNone(self.saved(state), 'a layout was saved although restore_layout is false')
+
+    def test_a_window_update_keeps_the_split_and_the_new_windows_keep_saving(self):
+        """The update swaps each window for one in a new process; the split must survive the swap."""
+        from Xlib import X, display
+        with (isolated_display() as shown, profile(shown) as env, service(env),
+              tempfile.TemporaryDirectory(prefix='layout-update-', dir=CHECKS) as directory,
+              ExitStack() as stack):
+            self.exit = stack
+            base = Path(directory)
+            executable = copy_runtime(base, browser=True)
+            script = base / 'blue-shell.sh'
+            script.write_text(f'#!/bin/sh\n{fill(BLUE, "blue")}\n')
+            script.chmod(0o755)
+            env = {**env, 'GDK_BACKEND': 'x11', 'GIO_USE_VFS': 'local', 'SHELL': str(script)}
+            env.pop('DBUS_SESSION_BUS_ADDRESS', None)
+            env.pop('WAYLAND_DISPLAY', None)
+            state = Path(env['XDG_STATE_HOME']) / 'worminal'
+            xdo = lambda *args: subprocess.run(['xdotool', *args], env=env, check=True)
+            log = stack.enter_context((base / 'owner.log').open('wb'))
+            owner = subprocess.Popen([str(executable), '-c', 'LayoutFixture', '-T', 'Layout update', '-e', '/bin/sh', '-c', fill(RED, 'red')],
+                                     env=env, stdout=log, stderr=log)
+            stack.callback(lambda: owner.poll() is None and owner.terminate())
+            server = display.Display(env['DISPLAY'])
+            stack.callback(server.close)
+
+            def windows():
+                found = subprocess.run(['xdotool', 'search', '--onlyvisible', '--class', 'LayoutFixture'],
+                                       env=env, capture_output=True, text=True)
+                return found.stdout.split() if found.returncode == 0 else []
+
+            def pid(wid):
+                return subprocess.run(['xdotool', 'getwindowpid', wid], env=env, capture_output=True,
+                                      text=True).stdout.strip()
+
+            def colors(wid):
+                root = server.create_resource_object('window', int(wid))
+                geometry = root.get_geometry()
+                get = lambda fx: tuple(root.get_image(int(geometry.width * fx), int(geometry.height * .75), 1, 1,
+                                                      X.ZPixmap, 0xffffffff).data[:3][::-1])
+                return get(.15), get(.65)
+
+            def wait(check, message):
+                deadline = time.monotonic() + 15
+                while not check():
+                    self.assertLess(time.monotonic(), deadline, message + (base / 'owner.log').read_text(errors='replace'))
+                    time.sleep(.1)
+
+            wait(windows, 'no window: ')
+            wid = windows()[0]
+            donor = pid(wid)
+            xdo('windowfocus', '--sync', wid)
+            time.sleep(1)
+            xdo('key', '--clearmodifiers', 'ctrl+shift+t')
+            time.sleep(1)
+            xdo('key', '--clearmodifiers', 'alt+shift+Right')
+            wait(lambda: colors(wid) == (RED, BLUE), 'the split did not happen: ')
+            wait(lambda: (self.saved(state) or {}).get('windows', [{}])[0].get('tree', {}).get('split'),
+                 'the split was not saved: ')
+
+            # Replace the frontend module, as an installed update does.
+            module = module_path(RUST_FRONTEND_MODULE, prefix=base)
+            pending = module.with_suffix('.pending')
+            shutil.copy2(module, pending)
+            pending.replace(module)
+            wait(lambda: windows() and pid(windows()[0]) != donor, 'the owner did not replace itself: ')
+            wid = windows()[0]
+            wait(lambda: colors(wid) == (RED, BLUE), 'the split did not survive the window update: ')
+            # The new process owns the window now, and it saves what it shows: a change the donor is no longer there to write.
+            xdo('windowsize', wid, '810', '470')
+            wait(lambda: self.saved(state)['windows'][0]['geometry'][2:] == [810, 470],
+                 'the replacement window does not save its layout: ')
+            self.assertTrue(self.saved(state)['windows'][0]['tree'].get('split'))
