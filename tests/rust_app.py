@@ -373,6 +373,41 @@ class RustApplicationTest(unittest.TestCase):
             wait_for(blue, blue, 'alt+shift+Right did not move the tab into the right pane')
             self.assertEqual(pixel(.505, 4 / 500), background, 'the emptied pane outlived the move')
 
+    def test_a_worminal_input_link_types_its_text_once(self):
+        for connection in ([], ['--master', 'key-test']):
+            with self.subTest(connection=connection), isolated_display() as env:
+                root = CHECKS / f'input-link-{os.getpid()}'
+                shutil.rmtree(root, ignore_errors=True)
+                root.mkdir(parents=True)
+                self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+                typed = root / 'typed.txt'
+                env.update(GDK_BACKEND='x11')
+                env.pop('WAYLAND_DISPLAY', None)
+                if connection:
+                    env['PATH'] = str(ROOT / 'tests/fixtures/preview-master') + os.pathsep + env['PATH']
+                    env['WORMINAL_TEST_DAEMON'] = str(runtime_binary('worminald'))
+                link = r'\033]8;;worminal://input?text=echo%%20once%%0A\033\\RUN-ONCE-LINK\033]8;;\033\\\n'
+                # After the window settles, fill the screen with the link so a click in the terminal lands on one.
+                script = (f"sleep 1; i=0; while [ $i -lt 80 ]; do printf '{link}'; i=$((i+1)); done; "
+                          f"exec cat > {shlex.quote(str(typed))}")
+                app = subprocess.Popen([str(runtime_binary('worminal-rust')), *connection, '-T', 'Rust input link',
+                                        '-e', '/bin/sh', '-c', script],
+                                       env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                try:
+                    wid = window(env, app)
+                    subprocess.run(['xdotool', 'windowfocus', '--sync', wid], env=env, check=True)
+                    time.sleep(2)
+                    subprocess.run(['xdotool', 'mousemove', '--window', wid, '30', '250', 'click', '1'],
+                                   env=env, check=True)
+                    deadline = time.monotonic() + 5
+                    while 'echo once' not in (typed.read_text() if typed.exists() else ''):
+                        self.assertLess(time.monotonic(), deadline, 'clicking the link typed nothing')
+                        time.sleep(.05)
+                    time.sleep(1)
+                    self.assertEqual(typed.read_text(), 'echo once\n', 'one click typed the link text twice')
+                finally:
+                    self.stop(app)
+
     def test_starring_a_tab_bookmarks_its_directory(self):
         from Xlib import X, display
         with isolated_display() as env, ExitStack() as cleanup:
