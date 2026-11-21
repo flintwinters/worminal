@@ -96,25 +96,27 @@ impl App {
     /// - a non-interactive shell exits when its foreground child dies of SIGINT, which would close the tab on
     ///   Ctrl+C during the connection. Bash does so even under `set -m` and a trap; an interactive one survives
     ///   with `trap : INT`. A trap, unlike ignoring the signal, is reset in ssh, so Ctrl+C still aborts it.
-    pub(super) fn open_bookmarked_host(self: &Rc<Self>, endpoint: String) {
+    pub(super) fn open_bookmarked_host(self: &Rc<Self>, endpoint: String, port: Option<u16>) {
         if self.config.master.is_some() {
             self.message(Some(
                 "This window shows another host; open a server bookmark from a local window.",
             ));
             return;
         }
-        self.open_terminal_on(0, None, ssh_command(&endpoint));
+        self.open_terminal_on(0, None, ssh_command(&endpoint, port));
     }
 }
 
-/// `sh -ic 'trap : INT; ssh "$1"; exec "$SHELL"' sh ENDPOINT`.
-fn ssh_command(endpoint: &str) -> Vec<OsString> {
+/// `sh -ic 'trap : INT; ssh ${2:+-p "$2"} "$1"; exec "$SHELL"' sh ENDPOINT PORT`. The port is the second
+/// argument, empty when the bookmark has none, so ssh keeps its own default (22 or `~/.ssh/config`).
+fn ssh_command(endpoint: &str, port: Option<u16>) -> Vec<OsString> {
     [
         "sh",
         "-ic",
-        "trap : INT; ssh \"$1\"; exec \"${SHELL:-/bin/sh}\"",
+        "trap : INT; ssh ${2:+-p \"$2\"} \"$1\"; exec \"${SHELL:-/bin/sh}\"",
         "sh",
         endpoint,
+        &port.map(|port| port.to_string()).unwrap_or_default(),
     ]
     .into_iter()
     .map(OsString::from)
@@ -127,12 +129,17 @@ mod tests {
 
     #[test]
     fn the_endpoint_is_an_argument_of_the_script_never_part_of_it() {
-        let command = ssh_command("me@build; reboot");
-        assert_eq!(command.len(), 5);
+        let command = ssh_command("me@build; reboot", Some(2222));
+        assert_eq!(command.len(), 6);
         assert_eq!(command[4], "me@build; reboot");
+        assert_eq!(command[5], "2222");
         let script = command[2].to_str().unwrap();
-        assert!(!script.contains("build") && !script.contains("reboot"));
-        assert!(script.contains("ssh \"$1\""));
+        assert!(
+            !script.contains("build") && !script.contains("reboot") && !script.contains("2222")
+        );
+        assert!(script.contains("ssh ${2:+-p \"$2\"} \"$1\""));
         assert!(script.contains("trap : INT"));
+        // No port leaves the second argument empty, so ssh gets no -p and keeps its own default.
+        assert_eq!(ssh_command("h", None)[5], "");
     }
 }

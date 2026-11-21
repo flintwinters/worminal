@@ -17,7 +17,7 @@ only an SSH host or `user@host`, for quick access to a machine.
 - In the panel: **Up/Down** (or `k`/`j`) move, **Enter** (or a click) opens the bookmark in a new tab and closes the
   panel, **Delete** removes it, **Left/Right** (or `h`/`l`, Tab) switch panel tabs, **Escape** closes the panel. The
   new tab takes the keyboard. Home/End and Page Up/Down jump.
-- **a** asks for a server. Type `host` or `user@host` and press Enter, then give it a name (optional: a blank
+- **a** asks for a server. Type `host` or `user@host`, with `:port` for a port other than 22 (`user@host:2222`, `[::1]:2222`), and press Enter, then give it a name (optional: a blank
   answer keeps none; names may contain spaces) and press Enter again to save it. Escape cancels, Ctrl+Shift+V
   pastes. The panel's own letters (`a`, `j`, `x`, `q`...) are ordinary text while you type, and an entry that
   cannot be an SSH endpoint is refused with the reason, nothing saved. Press Ctrl+U to clear what you typed.
@@ -49,8 +49,13 @@ bookmarks:
   - url: https://example.org        # a web page
     title: Example
   - host: me@build-host              # a server: opens a tab that runs ssh to it
+    port: 2222                      # optional; without it ssh uses its default (22, or what ~/.ssh/config says)
     title: Build box                # any entry may have a name; the panel lists it instead of the address
 ```
+
+A `port` (1-65535) belongs to a `host` and opens as `ssh -p PORT host`; the same host on another port is another
+bookmark. Port 22 is the default, so typing `:22` (or writing `port: 22`) is the same as no port. A typed `host:abc`
+or `host:99999` is refused instead of becoming a host name.
 
 Each entry has exactly one of `directory` (an absolute path), `url` or `host`. `master` belongs to a `directory`;
 both it and `host` are an SSH host or `user@host`, checked like a device endpoint (no leading `-`, no spaces or
