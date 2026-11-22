@@ -1,4 +1,5 @@
 """Check automatic owner replacement on a private X server with a copied installation."""
+import errno
 import os
 from pathlib import Path
 import shutil
@@ -14,7 +15,7 @@ import sys
 from contextlib import contextmanager, ExitStack
 from preview import profile, service, fixture, Fixture
 from runtime import ROOT, CHECKS, copy_runtime, module_path, runtime_binary, RUST_FRONTEND_MODULE, RUST_BROWSER_MODULE
-from x11 import isolated_display, close_window, normal_windows
+from x11 import isolated_display, close_window, normal_windows, window_manager
 
 
 def wait(check, message):
@@ -27,6 +28,18 @@ def wait(check, message):
     raise AssertionError(message() if callable(message) else message)
 
 
+def open_process(pid):
+    """A pidfd for `pid`, waiting out a dying process whose leader exited before its other threads."""
+    deadline = time.monotonic() + 5
+    while True:
+        try:
+            return os.pidfd_open(pid)
+        except OSError as failure:
+            # pidfd_open reports EINVAL for a thread group without its leader; it ends as ESRCH shortly.
+            if failure.errno != errno.EINVAL or time.monotonic() > deadline: raise
+            time.sleep(.02)
+
+
 def stop_fixture(env):
     """Wait for this private scope's owners and browser workers before deleting mapped files."""
     identities = []
@@ -35,7 +48,7 @@ def stop_fixture(env):
         if not process.name.isdecimal() or int(process.name) == os.getpid(): continue
         identity = None
         try:
-            identity = os.pidfd_open(int(process.name))
+            identity = open_process(int(process.name))
             if scope not in (process/'environ').read_bytes().split(b'\0'):
                 continue
             signal.pidfd_send_signal(identity, signal.SIGTERM)
@@ -271,12 +284,7 @@ class ReplacementTest(unittest.TestCase):
                         wait(lambda: windows() and pid(windows()[0]) not in (previous, None),
                              f'Replacement {attempt + 1} did not take over')
                         wait(sized, 'The replaced window did not resize')
-                        def shot():
-                            from PIL import Image
-                            resource = server.create_resource_object('window', int(windows()[0]))
-                            Image.frombuffer('RGB', (900, 500), image_bytes(resource.get_image(0, 0, 900, 500, X.ZPixmap, 0xffffffff)), 'raw', 'BGRX', 0, 1).save(CHECKS / 'split-replace.png')
-                            return ''
-                        wait(split_shown, lambda: shot() + f'Replacement {attempt + 1} lost the split browser: '
+                        wait(split_shown, lambda: f'Replacement {attempt + 1} lost the split browser: '
                              + log_path.read_text(errors='replace'))
                 finally:
                     for window in windows():
@@ -284,6 +292,49 @@ class ReplacementTest(unittest.TestCase):
                         if identity: os.kill(int(identity), 15)
                     if owner.poll() is None: owner.terminate()
                     owner.wait(timeout=5)
+                    stop_fixture(env)
+
+    def test_replacement_keeps_the_window_on_its_virtual_desktop(self):
+        # A replacement window maps on the current desktop unless the donor's desktop is applied to it.
+        with isolated_display() as display, profile(display) as env, service(env), ExitStack() as cleanup, \
+                tempfile.TemporaryDirectory(prefix='replacement-desktop-', dir=CHECKS) as directory:
+            manager = cleanup.enter_context(window_manager(display))
+            if manager is None: self.skipTest('Install xfwm4 to check virtual desktops')
+            executable = copy_runtime(directory)
+            env = {**env, 'GDK_BACKEND': 'x11'}
+            env.pop('DBUS_SESSION_BUS_ADDRESS', None)
+            xdo = lambda *args: subprocess.run(['xdotool', *args], env=env, capture_output=True, text=True).stdout
+            def client():
+                # The managed window with its owner's pid, as (pid, desktop).
+                for window in xdo('search', '--class', 'DesktopFixture').split():
+                    desktop = xdo('get_desktop_for_window', window).strip()
+                    if desktop.isdigit():
+                        return xdo('getwindowpid', window).strip(), desktop
+                return None
+            log_path = Path(directory) / 'owner.log'
+            with log_path.open('wb') as log:
+                owner = subprocess.Popen([str(executable), '-c', 'DesktopFixture', '-o', '-'], env=env,
+                                         stdout=log, stderr=log)
+                try:
+                    window = wait(lambda: xdo('search', '--onlyvisible', '--class', 'DesktopFixture').split(),
+                                  'The window did not open')[0]
+                    xdo('set_desktop_for_window', window, '2')
+                    wait(lambda: client() and client()[1] == '2', 'The window manager did not move the window')
+                    previous = client()[0]
+                    module = module_path(RUST_FRONTEND_MODULE, prefix=Path(directory))
+                    pending = module.with_suffix('.pending')
+                    shutil.copy2(module, pending)
+                    pending.replace(module)
+                    wait(lambda: client() and client()[0] not in (previous, ''), 'The replacement did not take over')
+                    time.sleep(.5)
+                    self.assertEqual(client()[1], '2', log_path.read_text(errors='replace'))
+                    self.assertEqual(xdo('get_desktop').strip(), '0')
+                finally:
+                    if owner.poll() is None: owner.terminate()
+                    owner.wait(timeout=5)
+                    for found in xdo('search', '--class', 'DesktopFixture').split():
+                        identity = xdo('getwindowpid', found).strip()
+                        if identity.isdigit(): os.kill(int(identity), 15)
                     stop_fixture(env)
 
     def test_close_and_geometry_edits_during_commit_reach_the_new_owner(self):

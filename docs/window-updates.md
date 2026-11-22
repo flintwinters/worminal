@@ -1,8 +1,9 @@
 # Automatic window updates
 
 Owners built with window replacement watch the executable, frontend and browser module files. An atomic file
-replacement opens the updated owner with the same windows, selected tabs, font zoom and window state, then closes
-the old windows after the replacement is ready. On X11 it restores window position and size. On Wayland the
+replacement opens the updated owner with the same windows, selected tabs, splits, font zoom and window state, then
+closes the old windows after the replacement is ready. On X11 it restores window position, size and virtual desktop;
+owners before 1.0.4 send neither splits nor desktops. On Wayland the
 compositor controls placement; size and selected tabs are restored, but coordinates cannot be guaranteed.
 
 Preparation is provisional: windows remain usable while the candidate warms up. Window creation, closure,
@@ -74,7 +75,8 @@ python3 manage.py check-window-updates
 Use `--match PATTERN` to select a regression. These checks modify copied binaries on private displays under
 `build/checks`, never the installed application or desktop session. They include deterministic edits during warm-up,
 a browser first opened during preparation, close/geometry edits and queued launches during profile commit,
-accepted input behind remote backpressure, and failed-candidate rollback.
+accepted input behind remote backpressure, split browsers, virtual desktops under a private xfwm4 (skipped when
+xfwm4 is not installed), and failed-candidate rollback.
 GUI transaction phases and failures are recorded in syslog without window content or cookie payloads.
 Timeouts identify the transaction phase. Drain timeouts also record each window/link’s connection, catalog,
 pending-tab, queued-byte and fence state, without terminal contents or host credentials.
