@@ -237,69 +237,40 @@ impl App {
             remote.link.clear();
         }
     }
-    /// A forwarded `--master` launch opens its tab in the active window instead of opening another; every
-    /// window views the master (`add_remote`).
-    pub(super) fn launch(config: Config) -> io::Result<Rc<Self>> {
-        if config.master.is_some() {
-            let target = super::WINDOWS.with(|windows| {
-                let windows = windows.borrow();
-                windows
-                    .iter()
-                    .find(|app| !app.closing.get() && app.window.is_active())
-                    .or_else(|| windows.iter().rev().find(|app| !app.closing.get()))
-                    .cloned()
-            });
-            if let Some(target) = target {
-                target.add_remote(config)?;
-                return Ok(target);
+    /// Every new window shows every master connected to this display, whichever window or
+    /// launcher (Ctrl+Shift+N, a desktop shortcut running `worminal`) opened it. Master tabs are
+    /// shared daemon state, so join without launching: only the window's primary gets a fresh shell.
+    pub(super) fn join_connected_masters(self: &Rc<Self>) {
+        let mut configs = std::collections::BTreeMap::new();
+        let apps = super::WINDOWS.with(|windows| windows.borrow().clone());
+        for app in apps
+            .iter()
+            .filter(|app| !app.closing.get() && !Rc::ptr_eq(app, self))
+        {
+            if let Some(master) = app
+                .config
+                .master
+                .clone()
+                .filter(|_| !app.primary_detached.get())
+            {
+                configs.entry(master).or_insert_with(|| app.config.clone());
+            }
+            for remote in app.remotes.borrow().iter() {
+                configs
+                    .entry(remote.master.clone())
+                    .or_insert_with(|| remote.config.clone());
             }
         }
-        Self::open(config)
-    }
-    /// A new window views every master the frontend already views, besides its own daemon.
-    pub(super) fn open(config: Config) -> io::Result<Rc<Self>> {
-        let own = config.master.clone();
-        let viewed = Self::viewed_masters()
-            .into_iter()
-            .filter(|viewed| viewed.master != own);
-        let app = Self::open_mode(config, false, false)?;
-        for master in viewed {
-            if let Err(error) = app.join_remote(master, false) {
-                app.message(Some(&error.to_string()));
+        for config in configs.into_values() {
+            if let Err(error) = self.add_remote(Config {
+                attach: true,
+                ..config
+            }) {
+                self.message(Some(&error.to_string()));
             }
         }
-        Ok(app)
     }
-    /// Masters are the frontend's, not a window's: like local tabs, a master's tabs appear in every window.
-    /// Each window holds its own link, so the viewed set is the union of the live windows' links; there is
-    /// no second registry to drift from them. Detaching and emptied catalogs already reach every window.
-    pub(super) fn viewed_masters() -> Vec<Config> {
-        let mut viewed: Vec<Config> = Vec::new();
-        for app in super::WINDOWS.with(|windows| windows.borrow().clone()) {
-            if app.closing.get() {
-                continue;
-            }
-            let own = (!app.primary_detached.get() && app.config.master.is_some())
-                .then(|| app.config.clone());
-            let remotes = app
-                .remotes
-                .borrow()
-                .iter()
-                .map(|remote| remote.config.clone())
-                .collect::<Vec<_>>();
-            for config in own.into_iter().chain(remotes) {
-                if !viewed.iter().any(|known| known.master == config.master) {
-                    viewed.push(Config {
-                        attach: true,
-                        ..config
-                    });
-                }
-            }
-        }
-        viewed
-    }
-    /// Show another daemon's tabs in this window and every other one; `--master` hosts already present are
-    /// only raised. Only this window acts on the launch; the others subscribe.
+    /// Show another daemon's tabs in this window. `--master` hosts already present are only raised.
     pub(super) fn add_remote(self: &Rc<Self>, config: Config) -> io::Result<()> {
         let others = super::WINDOWS.with(|windows| windows.borrow().clone());
         for app in others
@@ -372,7 +343,7 @@ impl App {
         }
         Ok(())
     }
-    fn master_index(&self, master: &std::ffi::OsStr) -> Option<u32> {
+    pub(super) fn master_index(&self, master: &std::ffi::OsStr) -> Option<u32> {
         if self.config.master.as_deref() == Some(master) && !self.primary_detached.get() {
             Some(0)
         } else {
@@ -383,16 +354,52 @@ impl App {
                 .map(|remote| remote.index)
         }
     }
+    /// Master commands match the exact endpoint the view joined; a miss names the live ones.
+    fn unknown_master(master: &std::ffi::OsStr, apps: &[Rc<Self>]) -> io::Error {
+        let mut connected = std::collections::BTreeSet::new();
+        for app in apps.iter().filter(|app| !app.closing.get()) {
+            connected.extend(
+                app.config
+                    .master
+                    .clone()
+                    .filter(|_| !app.primary_detached.get()),
+            );
+            connected.extend(
+                app.remotes
+                    .borrow()
+                    .iter()
+                    .map(|remote| remote.master.clone()),
+            );
+        }
+        let master = master.to_string_lossy();
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            if connected.is_empty() {
+                format!("Master {master} is not connected; this display has no master connections")
+            } else {
+                let names: Vec<_> = connected
+                    .iter()
+                    .map(|name| name.to_string_lossy())
+                    .collect();
+                format!(
+                    "Master {master} is not connected; use the exact endpoint of one of: {}",
+                    names.join(", ")
+                )
+            },
+        )
+    }
     /// Close each catalogued daemon tab once, even when multiple windows mirror the master.
     /// Keep links alive until normal catalog updates acknowledge removal; detaching here
     /// would discard queued closes under SSH backpressure.
     pub(super) fn close_master(master: &std::ffi::OsStr) -> io::Result<()> {
         let apps = super::WINDOWS.with(|windows| windows.borrow().clone());
         let mut targets = std::collections::BTreeMap::new();
-        for app in apps.into_iter().filter(|app| !app.closing.get()) {
+        let mut found = false;
+        for app in apps.iter().filter(|app| !app.closing.get()) {
             let Some(index) = app.master_index(master) else {
                 continue;
             };
+            found = true;
             let link = app.link(index).unwrap();
             if link.initial_claim.get() || link.connection.borrow().is_none() {
                 continue;
@@ -402,6 +409,9 @@ impl App {
                     .entry(id)
                     .or_insert((app.clone(), id | index << LINK_SHIFT));
             }
+        }
+        if !found {
+            return Err(Self::unknown_master(master, &apps));
         }
         if targets.is_empty() {
             return Err(io::Error::new(
@@ -421,12 +431,16 @@ impl App {
     /// Detachment imports an empty view catalog, never a daemon Close command.
     pub(super) fn detach_master(master: &std::ffi::OsStr) -> io::Result<()> {
         let apps = super::WINDOWS.with(|windows| windows.borrow().clone());
-        let mut found = false;
+        if !apps
+            .iter()
+            .any(|app| !app.closing.get() && app.master_index(master).is_some())
+        {
+            return Err(Self::unknown_master(master, &apps));
+        }
         for app in apps.into_iter().filter(|app| !app.closing.get()) {
             let Some(index) = app.master_index(master) else {
                 continue;
             };
-            found = true;
             let link = app.link(index).unwrap();
             // Stop readers, writers and reconnect timers before changing widgets: GTK can reenter.
             link.clear();
@@ -445,14 +459,7 @@ impl App {
             )?;
             app.close_empty_window();
         }
-        if found {
-            Ok(())
-        } else {
-            Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                "Master is not connected",
-            ))
-        }
+        Ok(())
     }
     pub(super) fn close_empty_window(&self) {
         // An empty view may still be waiting for another host's first catalog or new tab.

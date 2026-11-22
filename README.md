@@ -4,46 +4,33 @@
 
 # Worminal
 
-Your shells, web tools and remote machines, together in a small Linux terminal.
-
-[Visit the website](https://flintwinters.github.io/worminal/).
+All your remote machines together in one terminal.
 
 Worminal keeps your workspace alive independently of its windows. Use it yourself, let an agent work alongside you,
 and come back without starting over.
 
-- **Work that stays running.** Close every window and return to the same tabs, shells and running programs.
-  Local and remote sessions live in a background service.
-
-- **Multiple machines, one interface.** Keep local and SSH-backed tabs in the same window. Work with headless
+- **Keep local and remote tabs in the same window.** Work with headless
   hosts, enroll devices in a shared registry, and check their availability when you need them.
   [Remote connections](docs/remote-install.md) · [Devices](docs/devices.md)
 
-- **Web tools belong beside your shell.** A shell command can turn its tab into a web page or local HTML tool.
-  Build a file explorer, report or project dashboard as an ordinary web document. Local tools can use a limited,
-  read-only file and directory API; edit and reload them without rebuilding the terminal.
-
-- **Agents can work with your actual sessions.** A discoverable native API lets agents find tabs, read screens
-  and retained output, wait for changes, and send guarded input locally or over SSH. Inspection leaves your focus,
-  scroll position and terminal size alone. Optional shell integration adds command completion and exit status.
-  [Agent interface](docs/automation.md)
-
-- **Updates keep your shells alive.** Daemons transfer live sessions and windows replace themselves automatically.
-  Browser pages reload with their profile and cookies retained. Failed handoffs keep the existing owner running.
-  [Live updates](docs/window-updates.md)
-
-- **Arrange work as you go.** Drag tabs onto pane edges to split a window, move them between panes, and cycle
-  through them with the keyboard or Ctrl+scroll. Shells and browser tools share the same workspace.
-
-- **See what needs attention.** Tab colors distinguish busy tasks, SSH sessions and background shell jobs.
-  Applications can send desktop notifications from local or remote tabs; clicking one takes you to its tab.
-  [Notifications](docs/notifications.md)
-
-- **Bring your settings across machines.** Reuse supported font, color and scrollback settings from an Alacritty
-  config. Worminal settings sync when connecting to peers, merging independent edits and reporting conflicts.
+- **Use Alacritty configs.** Reuse settings from an Alacritty config. Worminal settings sync when connecting to peers, merging independent edits and reporting conflicts.
   Compatible peers also sync daemon versions automatically. [Configuration](docs/config.md)
 
-- **Keep the terminal small.** Native Wayland and X11 support, a lightweight launcher, and a shared terminal engine.
-  Hidden busy tabs avoid streaming terminal frames. CPU and network limits are checked as part of the test suite.
+- **Keep the terminal small.** Native Wayland and X11, with Windows support through WSL.
 
-Built with Rust, GTK and WebKitGTK, with a terminal engine derived from [st](https://git.suckless.org/st/).
+- **Built-in browser** worminal is also a WebKit based browser forked from [surf](https://surf.suckless.org/).  Which means you can *actually* browse the web in your terminal.
+
+- **Agents can work with your actual sessions.** A highly discoverable API lets agents find tabs, read screens
+  and retained output, wait for changes, and send guarded input locally or over SSH.
+  [Agent interface](docs/automation.md)
+  	- Know when your agents are working or get notified when they're stuck
+
+- **Split screen.** Control view splitting with both mouse and keyboard.
+
+- **Bookmarks.** Star a tab (or press Ctrl+Shift+D) to save a terminal's directory and host, or a web page, then
+  reopen it from a keyboard-driven side panel (Ctrl+Shift+B). [Bookmarks](docs/bookmarks.md)
+
+Built with Rust, GTK and WebKitGTK, with a terminal engine derived from [st](https://st.suckless.org/).
 [License](LICENSE).
+
+[Visit the github pages site](https://flintwinters.github.io/worminal/).

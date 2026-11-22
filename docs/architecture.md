@@ -8,7 +8,8 @@ Worminal is a deliberately small terminal. Its long-term direction is a distribu
 present everywhere at once: machines are appendages and resources of one trusted system, not places the user goes.
 Tailscale provides host identity and reachability for now; resources may keep their own protocols. Favor low memory
 use over interface features; measure before adding complexity. Preserve established terminal behavior and
-application shortcuts. Plain Ctrl+N belongs to terminal applications; Ctrl+Shift+N opens a window. Ctrl+Shift+A
+application shortcuts. Plain Ctrl+N belongs to terminal applications; Ctrl+Shift+N opens a window. Every new
+window, including plain `worminal` launches, joins each master connected to the display without launching its shells. Ctrl+Shift+A
 selects screen and retained scrollback for Ctrl+Shift+C; Ctrl+A sends Control-A to applications. Plain middle click
 toggles browser-style autoscroll (pointer distance from the click sets speed; any press, key or focus loss ends it)
 through the same dispatch as the wheel, so mouse-reporting and alternate-screen applications scroll too;
@@ -27,8 +28,8 @@ native Wayland and X11. `src/terminal/engine.h` defines the C API; Rust bindings
 its own C instance. C handles parsing, cells, UTF-8, modes, scrollback/reflow, selection, redraw deadlines and
 serialization. It does not manage processes, descriptors, GUI objects or application policy. OSC 8 links are 16-bit
 cell ids into a bounded per-terminal URI table; ids never leave the daemon: ROW_LINKS packets carry each row's URIs
-inline, and snapshots drop them. Clicks open only http(s) or type `worminal://input` text (newline executes) into
-the same tab. The Rust wrapper manages C handles and screen buffers, and normalizes clipboard paste in place. OSC 99
+inline, and snapshots drop them. Clicks open ordinary links (http(s), file, ...) with xdg-open; only `worminal://`
+links are restricted, to typing `worminal://input` text (newline executes) into the same tab. The Rust wrapper manages C handles and screen buffers, and normalizes clipboard paste in place. OSC 99
 metadata/payload events go only to capable controlling views; those views assemble bounded title/body notifications
 and deliver them asynchronously on their desktop, including for remote tabs. OSC 7501 agent status (working) and OSC
 9;4 progress (normal or indeterminate) set the engine's `MODE_BUSY` bit, carried in the catalog mode word to every
@@ -120,14 +121,29 @@ snapshot, and acknowledge commit before the donor retires; see
 
 Painting preserves matching background runs, overlapping glyph/cursor damage, fractional-grid fallback and Unicode
 font fallback. Cache printable ASCII shaping only. Views defer unused buffers/layouts/input methods/timers. Dragging
-a terminal tab onto a pane edge splits the window (`layout.rs` tree of pane ids, `app_split.rs` widgets; per window,
+a tab onto a pane edge (or Alt+Shift+arrows) splits the window (`layout.rs` tree of pane ids, `app_split.rs` widgets; per window,
 never persisted). Each pane is its own Cairo strip over a notebook holding only its tabs; a one-pane window is the
 ordinary case. The daemon only learns the shown set (each pane's selected tab): `Focus` shows one tab, `Pane`
-(feature `PANES`) adds one, and `Resize` never hides neighbours. Ctrl+Shift+X gathers all tabs into the focused
+(feature `PANES`) adds one, and `Resize` never hides neighbours. A browser tab has no frames, so it splits freely, but the daemon's `Focus` is exclusive: while terminals are visible beside it, claiming the browser presents those terminals instead of focusing the browser. Ctrl+Shift+X gathers all tabs into the focused
 pane. The Cairo tab strip uses terminal metrics/colors and the tab order reported by the daemon. Browser file labels
 decode the filename; web tabs retain document titles. D-Bus directory arrays retain original filesystem bytes.
 `docs/window-state.md` defines that read-only public contract. X11 activation uses fresh server timestamps; Wayland
 activation remains compositor policy.
+
+## Side panel and bookmarks
+
+Ctrl+Shift+B (or P) opens a collapsible side panel beside the panes (`panel.rs`, glue in `app_panel.rs`). It is a Cairo list
+in the terminal's font and palette with its own tabs; a tab implements `PanelTab` (`panel_tabs.rs`: title, rows, press,
+and optionally an add prompt), and Bookmarks is the first, so further lists add an implementation. The panel is a sibling of the pane area, never an overlay
+child (GTK drag hit testing would hide drop targets), and its widget exists only while open. Bookmarks are the
+user's `$XDG_CONFIG_HOME/worminal/bookmarks.yaml` (`workspace/src/bookmarks.rs`; `docs/bookmarks.md`): terminal
+directories with an optional SSH master, URLs, and servers (`host:`, validated SSH endpoints), never commands. Opening a
+server starts `sh -ic 'trap : INT; ssh "$1"; exec "$SHELL"'` in a new local tab with the endpoint as `$1`: ssh gets
+its own foreground process group (so the daemon labels the tab and does not bookmark it as a local directory), and an
+interrupted or failed ssh leaves the user's shell and its error, not a closed tab. It follows the `devices.yaml` rules through the
+shared `yamlfile.rs`: bounded no-follow reads, a non-blocking lock around read-modify-publish, atomic replacement,
+and a damaged file reported and kept. Windows re-read it on focus; there is no watching or polling. The tab strip's
+star and Ctrl+Shift+D toggle through `app_bookmarks.rs`.
 
 ## Browser capabilities
 
@@ -136,7 +152,5 @@ Browser URL resolution preserves explicit URLs, prefers existing paths and other
 documents have bounded, read-only file/directory APIs through a private per-view credential held by a top-frame-only
 script. Subframes and other navigated documents have no capability. Native error/find chrome is Rust; its shared
 scripts/templates remain under `src/gtk`. Renderer recovery retains the last valid URI because WebKit can clear it
-after termination. Release Rust borrows before entering reentrant GTK/WebKit operations. The independent TypeScript
-`file-explorer` workspace opens its HTML artifact through the native browser CLI. Its changes take effect only on
-explicit reload/reopen; do not add live updates. Native builds do not embed it. Parent explorer build commands
-supply palette/font inputs; standalone builds retain their own defaults.
+after termination. Release Rust borrows before entering reentrant GTK/WebKit operations. Local HTML tools open through the native
+browser CLI; their changes take effect only on explicit reload/reopen, and native builds embed none of them.

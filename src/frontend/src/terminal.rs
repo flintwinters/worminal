@@ -715,7 +715,8 @@ impl Inner {
         let release = event.event_type() == gdk::EventType::ButtonRelease;
         let was_scrolling = !release && self.stop_autoscroll();
         let shift = event.state().contains(gdk::ModifierType::SHIFT_MASK);
-        if !release && !self.state.borrow().viewport.live() {
+        // `grab_focus` below moves typing here; the app decides whether that makes this tab the current one.
+        if !release {
             self.emit(Action::Claim);
         }
         self.widget.grab_focus();

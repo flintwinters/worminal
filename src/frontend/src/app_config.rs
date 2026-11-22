@@ -156,10 +156,13 @@ impl Config {
                     }
                 }
                 _ if arg.to_str().is_some_and(|value| value.starts_with('-')) => {
-                    return Err(argument(format!(
-                        "unsupported option {}; see --help",
-                        arg.to_string_lossy()
-                    )))
+                    let text = arg.to_string_lossy();
+                    return Err(argument(
+                        worminal_workspace::cli_schema::misplaced(&text, "worminal")
+                            .unwrap_or_else(|| {
+                                format!("unsupported option {text}; see worminal --help")
+                            }),
+                    ));
                 }
                 _ => {
                     config.command.push(arg);

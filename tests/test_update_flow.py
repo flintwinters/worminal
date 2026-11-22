@@ -4,11 +4,10 @@ import subprocess
 import sys
 from pathlib import Path
 import tempfile
-import time
 import unittest
 from unittest.mock import patch
 
-from tools import auto_update, explorer
+from tools import auto_update
 from tools.paths import CHECKS, ROOT, socket_directory
 from tools.update_storage import release_stale
 

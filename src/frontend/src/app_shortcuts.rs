@@ -1,4 +1,5 @@
 use super::App;
+use crate::layout::Direction;
 use gtk::{
     gdk::{self, keys::constants as key, ModifierType as Mod},
     prelude::*,
@@ -26,7 +27,11 @@ impl App {
             return true;
         }
         let value = event.keyval().to_lower();
-        if let Some(browser) = self.browser(self.active.get()) {
+        // The panel's own keys (Escape, arrows, Enter) must reach it, not the page behind it.
+        if let Some(browser) = self
+            .browser(self.active.get())
+            .filter(|_| !self.panel.has_focus())
+        {
             if browser.shortcut(event) {
                 return true;
             }
@@ -63,18 +68,60 @@ impl App {
                     self.new_tab();
                 }
             } else {
-                self.send(self.active.get(), CommandKind::Close { receipt: false });
+                let closing = self.active.get();
+                if value == key::q {
+                    // Quitting a browser returns to a shell, as exiting a program does. The shell that ran
+                    // `--new-browser-tab` ended when the browser replaced it, so a fresh one takes its slot:
+                    // the daemon places the new tab after the browser, which then closes beside it.
+                    self.new_tab();
+                }
+                self.send(closing, CommandKind::Close { receipt: false });
             }
             return true;
         }
-        if (state == Mod::CONTROL_MASK || state == control_shift)
+        // Alt+Tab cycles like Ctrl+Tab but only through tabs that have a colored background (alerts, busy
+        // tasks, background jobs).
+        if [
+            Mod::CONTROL_MASK,
+            control_shift,
+            Mod::MOD1_MASK,
+            Mod::MOD1_MASK | Mod::SHIFT_MASK,
+        ]
+        .contains(&state)
             && [key::Tab, key::ISO_Left_Tab].contains(&value)
         {
-            self.cycle_tab(state == control_shift);
+            self.cycle_tab(
+                state.contains(Mod::SHIFT_MASK),
+                state.contains(Mod::MOD1_MASK),
+            );
             return true;
+        }
+        // Ctrl+Shift+arrow focuses the pane that way; Alt+Shift+arrow moves the tab there like a drag would.
+        // Each leaves the keystroke to the application when it has nothing to do (no split, nothing to move).
+        // Ctrl+Shift+Alt+arrow is not used: GNOME owns it and some keyboards cannot send it.
+        let move_tab = state == Mod::MOD1_MASK | Mod::SHIFT_MASK;
+        if state == control_shift || move_tab {
+            let direction = match value {
+                key::Left => Some(Direction::Left),
+                key::Right => Some(Direction::Right),
+                key::Up => Some(Direction::Up),
+                key::Down => Some(Direction::Down),
+                _ => None,
+            };
+            if let Some(direction) = direction {
+                return if move_tab {
+                    self.move_toward(direction)
+                } else {
+                    self.focus_toward(direction)
+                };
+            }
         }
         let mut zoom = self.fonts.borrow().zoom();
         if state == control_shift {
+            // A paste while the panel is asking for a host goes to that question, not to the terminal beside it.
+            if value == key::v && self.panel.paste() {
+                return true;
+            }
             match value {
                 key::t => {
                     self.new_tab();
@@ -94,7 +141,7 @@ impl App {
                     config.line.clear();
                     config.browser_url = None;
                     config.zoom = self.fonts.borrow().zoom();
-                    if let Err(error) = Self::open(config) {
+                    if let Err(error) = Self::launch(config) {
                         self.message(Some(&error.to_string()));
                     }
                     return true;
@@ -105,6 +152,15 @@ impl App {
                 }
                 key::x => {
                     self.unsplit();
+                    return true;
+                }
+                // B for bookmarks; P also works for keyboards that can send it (a membrane keyboard may not).
+                key::b | key::p => {
+                    self.toggle_panel();
+                    return true;
+                }
+                key::d => {
+                    self.toggle_bookmark(self.active.get());
                     return true;
                 }
                 key::c | key::v | key::y => {
@@ -172,15 +228,31 @@ impl App {
         self.refresh_tabs();
     }
 
-    pub(super) fn cycle_tab(self: &Rc<Self>, previous: bool) {
+    /// Select the next (or previous) tab; `tinted_only` skips tabs without a background fill in their strip.
+    pub(super) fn cycle_tab(self: &Rc<Self>, previous: bool, tinted_only: bool) {
         let count = self.notebook().n_pages();
-        if count != 0 {
-            let current = self.notebook().current_page().unwrap_or(0);
-            self.select_index(if previous {
-                (current + count - 1) % count
+        let current = self.notebook().current_page().unwrap_or(0);
+        let candidates = (1..count).map(|step| {
+            if previous {
+                (current + count - step) % count
             } else {
-                (current + 1) % count
-            });
+                (current + step) % count
+            }
+        });
+        let target = candidates.into_iter().find(|index| {
+            !tinted_only || {
+                let widget = self.notebook().nth_page(Some(*index));
+                let id = self
+                    .pages
+                    .borrow()
+                    .iter()
+                    .find(|page| Some(&page.widget) == widget.as_ref())
+                    .map(|page| page.id);
+                id.is_some_and(|id| self.panes().iter().any(|pane| pane.strip.tinted(id)))
+            }
+        });
+        if let Some(index) = target {
+            self.select_index(index);
         }
     }
 }

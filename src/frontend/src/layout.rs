@@ -9,6 +9,53 @@ pub enum Zone {
     Bottom,
     Center,
 }
+/// A keyboard direction across the pane tree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Direction {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+impl Direction {
+    /// The edge of a pane that a tab moved this way would split off when no pane lies that way.
+    pub fn zone(self) -> Zone {
+        match self {
+            Self::Left => Zone::Left,
+            Self::Right => Zone::Right,
+            Self::Up => Zone::Top,
+            Self::Down => Zone::Bottom,
+        }
+    }
+}
+/// A pane's on-screen rectangle: `(x, y, width, height)` in one shared coordinate space.
+pub type PaneRect = (i32, i32, i32, i32);
+/// The pane to reach from `from` toward `direction`, among panes laid out as `panes` (id and rectangle). It lies
+/// wholly beyond the near edge of `from`; panes sharing a stretch of that edge win over ones that only lie that
+/// way, then the closest, then the longest shared stretch. Geometry, not the tree, decides: entering a split
+/// subtree must land beside the pane being left, not on its first leaf, and dragged dividers count.
+pub fn neighbor(panes: &[(u32, PaneRect)], from: u32, direction: Direction) -> Option<u32> {
+    let (_, (x, y, width, height)) = *panes.iter().find(|(id, _)| *id == from)?;
+    panes
+        .iter()
+        .filter(|(id, _)| *id != from)
+        .filter_map(|&(id, (px, py, pw, ph))| {
+            // Distance beyond the near edge, then the overlap of the two spans along that edge.
+            let (gap, from_span, span) = match direction {
+                Direction::Right => (px - (x + width), (y, y + height), (py, py + ph)),
+                Direction::Left => (x - (px + pw), (y, y + height), (py, py + ph)),
+                Direction::Down => (py - (y + height), (x, x + width), (px, px + pw)),
+                Direction::Up => (y - (py + ph), (x, x + width), (px, px + pw)),
+            };
+            // Panes touching or overlapping the edge by a pixel or two still count as beyond it.
+            (gap >= -2).then(|| {
+                let shared = from_span.1.min(span.1) - from_span.0.max(span.0);
+                ((shared <= 0, gap.max(0), -shared), id)
+            })
+        })
+        .min_by_key(|(rank, _)| *rank)
+        .map(|(_, id)| id)
+}
 /// Share of a pane's width or height that each edge zone covers.
 const EDGE: f64 = 0.25;
 impl Zone {
@@ -134,7 +181,7 @@ impl Layout {
 
 #[cfg(test)]
 mod tests {
-    use super::{Layout::*, Zone};
+    use super::{neighbor, Direction::*, Layout::*, PaneRect, Zone};
 
     #[test]
     fn zones_split_a_pane_into_edges_and_a_center() {
@@ -169,5 +216,48 @@ mod tests {
         let alone = layout.without(1).unwrap().without(3).unwrap();
         assert_eq!(alone, Leaf(2));
         assert_eq!(alone.without(2), None);
+    }
+
+    /// Two columns, each split top and bottom: ids 1/2 on the left (top/bottom), 3/4 on the right.
+    fn grid() -> Vec<(u32, PaneRect)> {
+        vec![
+            (1, (0, 0, 100, 50)),
+            (2, (0, 50, 100, 50)),
+            (3, (100, 0, 100, 50)),
+            (4, (100, 50, 100, 50)),
+        ]
+    }
+
+    #[test]
+    fn neighbor_stays_on_the_row_or_column_being_left() {
+        let grid = grid();
+        // Leaving the bottom-left tile to the right lands on the bottom-right one, not the first leaf.
+        assert_eq!(neighbor(&grid, 2, Right), Some(4));
+        assert_eq!(neighbor(&grid, 1, Right), Some(3));
+        assert_eq!(neighbor(&grid, 4, Left), Some(2));
+        assert_eq!(neighbor(&grid, 3, Left), Some(1));
+        assert_eq!(neighbor(&grid, 1, Down), Some(2));
+        assert_eq!(neighbor(&grid, 4, Up), Some(3));
+        assert_eq!(neighbor(&grid, 1, Left), None);
+        assert_eq!(neighbor(&grid, 1, Up), None);
+        assert_eq!(neighbor(&grid, 4, Right), None);
+        assert_eq!(neighbor(&grid, 4, Down), None);
+        assert_eq!(neighbor(&grid, 9, Right), None);
+    }
+
+    #[test]
+    fn neighbor_follows_dragged_dividers_and_uneven_splits() {
+        // One tall pane left of a column whose divider sits low: the tall pane reaches the larger share.
+        let uneven = vec![
+            (1, (0, 0, 100, 100)),
+            (2, (100, 0, 100, 20)),
+            (3, (100, 20, 100, 80)),
+        ];
+        assert_eq!(neighbor(&uneven, 1, Right), Some(3));
+        assert_eq!(neighbor(&uneven, 2, Left), Some(1));
+        assert_eq!(neighbor(&uneven, 3, Left), Some(1));
+        // With no pane sharing the edge, the nearest one in that direction still answers.
+        let stair = vec![(1, (0, 0, 100, 50)), (2, (100, 60, 100, 40))];
+        assert_eq!(neighbor(&stair, 1, Right), Some(2));
     }
 }

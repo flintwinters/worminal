@@ -19,13 +19,14 @@ use std::{
 use worminal_engine::input::Encoded;
 use worminal_protocol::cell::MODE_BUSY;
 use worminal_protocol::worp::{
-    commands::{CommandKind, OpenMode},
+    commands::CommandKind,
     events::{Catalog, Event, EventKind, TabKind},
-    launch::Launch,
 };
 use worminal_protocol::*;
 use worminal_workspace::socket;
 
+#[path = "app_bookmarks.rs"]
+mod bookmarks;
 #[path = "app_browser.rs"]
 mod browser_views;
 #[path = "app_chrome.rs"]
@@ -34,8 +35,12 @@ mod chrome;
 mod links;
 #[path = "notifications.rs"]
 mod notifications;
+#[path = "app_open.rs"]
+mod open;
 #[path = "app_shortcuts.rs"]
 mod shortcuts;
+#[path = "app_panel.rs"]
+mod side_panel;
 #[path = "app_split.rs"]
 mod split;
 #[path = "app_update_fences.rs"]
@@ -325,12 +330,39 @@ struct App {
     defer_navigation: Cell<bool>,
     geometry_pending: Cell<bool>,
     early_keys: RefCell<VecDeque<gdk::EventKey>>,
+    /// The side panel beside the panes; empty until it is opened.
+    panel: crate::panel::SidePanel,
+    /// The saved bookmarks as last read, for the stars on the tab strip.
+    bookmarks: RefCell<Vec<worminal_workspace::bookmarks::Bookmark>>,
 }
 impl App {
     fn print(&self, bytes: &[u8]) -> io::Result<()> {
         let mut output = &*self.config.stream;
         output.write_all(bytes)?;
         output.flush()
+    }
+    /// A forwarded `--master` launch joins the active window instead of opening another.
+    fn launch(config: Config) -> io::Result<Rc<Self>> {
+        if config.master.is_some() {
+            let target = WINDOWS.with(|windows| {
+                let windows = windows.borrow();
+                windows
+                    .iter()
+                    .find(|app| !app.closing.get() && app.window.is_active())
+                    .or_else(|| windows.iter().rev().find(|app| !app.closing.get()))
+                    .cloned()
+            });
+            if let Some(target) = target {
+                target.add_remote(config)?;
+                return Ok(target);
+            }
+        }
+        let app = Self::open(config)?;
+        app.join_connected_masters();
+        Ok(app)
+    }
+    fn open(config: Config) -> io::Result<Rc<Self>> {
+        Self::open_mode(config, false, false)
     }
     fn replacement_window(config: &Config) -> gtk::Window {
         if let Some(class) = &config.class {
@@ -362,7 +394,11 @@ impl App {
         status.set_no_show_all(true);
         let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let panes = split::Panes::new();
-        container.pack_start(panes.widget(), true, true, 0);
+        let panel = crate::panel::SidePanel::new();
+        let body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        body.pack_start(panel.widget(), false, false, 0);
+        body.pack_start(panes.widget(), true, true, 0);
+        container.pack_start(&body, true, true, 0);
         container.pack_end(&status, false, false, 0);
         chrome::outline(&window, &container);
         let app = Rc::new(Self {
@@ -389,6 +425,8 @@ impl App {
             defer_navigation: Cell::new(staged),
             geometry_pending: Cell::new(true),
             early_keys: RefCell::new(VecDeque::new()),
+            panel,
+            bookmarks: RefCell::new(bookmarks::load()),
         });
         app.start_panes();
         app.window.connect_key_press_event(
@@ -400,6 +438,7 @@ impl App {
                 if !app.replacing.get() && app.pages.borrow().iter().any(|page| page.id == app.active.get() && page.browser) {
                     app.claim_browser(app.active.get());
                 }
+                app.reload_bookmarks();
                 glib::Propagation::Proceed
             }));
         app.window.connect_is_active_notify(|window| {
@@ -517,8 +556,8 @@ impl App {
                 let semantic = self.features(id) & WIRE_FEATURE_INPUT != 0;
                 self.send(id, if semantic { kind } else { encoded.command() })
             }
-            Action::Claim => self.activate(id),
-            Action::CycleTab(previous) => self.cycle_tab(previous),
+            Action::Claim => self.claim(id),
+            Action::CycleTab(previous) => self.cycle_tab(previous, false),
             Action::Resized(cols, rows) if !self.syncing.get() && self.is_visible(id) => {
                 if let Some(terminal) = self.terminal(id) {
                     self.fit_geometry(&terminal);
@@ -907,43 +946,6 @@ impl App {
         }
         Ok(())
     }
-    fn new_tab(self: &Rc<Self>) {
-        // A new tab opens on the host of the tab being viewed.
-        let index = self.active.get() >> LINK_SHIFT;
-        let mut config = self.config_for(index);
-        config.command.clear();
-        config.title = "Worminal".into();
-        config.output.clear();
-        config.line.clear();
-        config.browser_url = None;
-        if let Some(page) = self
-            .pages
-            .borrow()
-            .iter()
-            .find(|page| page.id == self.active.get())
-        {
-            if !page.directory.as_os_str().is_empty() {
-                config.cwd = page.directory.clone();
-            }
-        }
-        match config.launch().and_then(|bytes| Launch::decode(&bytes)) {
-            Ok(launch) => {
-                if let Some(link) = self.link(index) {
-                    link.pending_tabs
-                        .set(link.pending_tabs.get().saturating_add(1));
-                }
-                self.send_link(
-                    index,
-                    0,
-                    CommandKind::Open {
-                        launch,
-                        mode: OpenMode::Subscribe,
-                    },
-                );
-            }
-            Err(error) => self.message(Some(&error.to_string())),
-        }
-    }
 }
 pub fn run() -> io::Result<()> {
     let arguments: Vec<_> = std::env::args_os().collect();
@@ -962,7 +964,7 @@ pub(crate) fn run_with_listener(
     }
     worminal_workspace::browser_target::command(&arguments)?;
     let request = worminal_workspace::broker::Request::capture(arguments)?;
-    if worminal_workspace::broker::master_action(&request.args)?.is_some() {
+    if worminal_workspace::broker::owner_action(&request.args)?.is_some() {
         return match broker::forward(&request)? {
             None => Ok(()),
             Some(_) => Err(io::Error::new(

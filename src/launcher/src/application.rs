@@ -31,7 +31,7 @@ fn run(candidate: bool) -> io::Result<()> {
     native::timing("main");
     let args: Vec<_> = std::env::args_os().collect();
     worminal_workspace::browser_target::command(&args)?;
-    let master_action = worminal_workspace::broker::master_action(&args)?.is_some();
+    let owner_action = worminal_workspace::broker::owner_action(&args)?.is_some();
     let option = args
         .get(1)
         .and_then(|value| value.to_str())
@@ -45,7 +45,7 @@ fn run(candidate: bool) -> io::Result<()> {
         native::timing("broker");
         match outcome? {
             Forward::Complete => return Ok(()),
-            Forward::Owner(_) if master_action => {
+            Forward::Owner(_) if owner_action => {
                 return Err(io::Error::new(
                     io::ErrorKind::NotFound,
                     "No connected GUI owner",

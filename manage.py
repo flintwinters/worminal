@@ -135,9 +135,19 @@ def run_headless_checks():
     return 0
 
 
+PORTABLE = typer.Option(False, help="Link the daemon statically against musl, as releases need; otherwise it links "
+                        "this host's glibc (also WORMINAL_PORTABLE=1).")
+
+
+def choose_daemon_linkage(portable):
+    if portable:
+        os.environ["WORMINAL_PORTABLE"] = "1"
+
+
 @app.command()
-def build():
+def build(portable: bool = PORTABLE):
     """Compile Worminal; appearance is read at runtime from worminal.yaml or Alacritty config."""
+    choose_daemon_linkage(portable)
     native_build.build_targets()
 
 
@@ -394,11 +404,9 @@ def setup_audio():
 
 @app.command("setup-check-runtime")
 def setup_check_runtime():
-    """Prepare explorer, audio and private Weston/Muffin runtimes; idempotent."""
+    """Prepare audio and private Weston/Muffin runtimes; idempotent."""
     if native_build.headless():
         return
-    from tools import explorer
-    explorer.prepare()
     from tools.audio import setup as setup_audio
     from tools import weston
     setup_audio()
@@ -640,29 +648,12 @@ def check_browser_target():
                          "-p", "test_preview_workspace.py", "-k", "browser_command", "-q"]))
 
 
-@app.command("explorer-build")
-def explorer_build():
-    """Build file-explorer/dist/index.html (run npm ci in the submodule first)."""
-    explorer_command("build")
-
-
-@app.command("explorer-check")
-def explorer_check():
-    """Check explorer types, directory behavior, DOM interactions, and standalone output."""
-    check_file_limits()
-    explorer_command("check")
-
-
-@app.command("explorer-lint")
-def explorer_lint():
-    """Run the explorer's pinned Hyperlinter architecture and style audit."""
-    explorer_command("lint")
-
-
 @app.command()
 def install(prefix: Path = typer.Option(None, help="Installation prefix (default: PREFIX or ~/.local)."),
-            skip_build: bool = typer.Option(False, help="Publish an existing user build without rebuilding.")):
+            skip_build: bool = typer.Option(False, help="Publish an existing user build without rebuilding."),
+            portable: bool = PORTABLE):
     """Build and install binaries, manual, desktop launcher, and icon; supports DESTDIR staging."""
+    choose_daemon_linkage(portable)
     native_build.install(prefix, skip_build=skip_build)
 
 
@@ -743,7 +734,7 @@ def browser_perf(trials: int = typer.Option(5, min=1),
                  trace_startup: bool = typer.Option(False, help="Log startup milestones; timings include log I/O."),
                  profile_cpu: bool = typer.Option(
                      False, help="Diagnostically sample startup CPU without perf privileges."),
-                 kind: str = typer.Option("all", help="Target: all, http, file, or explorer.")):
+                 kind: str = typer.Option("all", help="Target: all, http or file.")):
     """Measure browser presentation, including direct cold launches, on private Xvfb."""
     native_build.build_targets("worminal", "worminald", "build/latency_echo")
     options = (["--snapshot", str(snapshot)] if snapshot else []) + (["--compare", str(compare)] if compare else [])

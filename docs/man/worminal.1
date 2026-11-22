@@ -116,7 +116,7 @@ lists membership without probes.
 .B worminald api forget NAME
 removes enrollment only. All registry operations accept --master to use a shared authority.
 Names label SSH routes, not physical machines. Availability is a timestamped observation, not persistent online state.
-There are no heartbeats or automatic enrollment. Membership is saved under XDG_STATE_HOME/worminal/devices-v1.
+There are no heartbeats or automatic enrollment. Membership is saved in the hand-editable XDG_CONFIG_HOME/worminal/devices.yaml.
 .SH REMOTE INSTALLATION
 .B worminald install-on-remote user@host
 installs this headless daemon and its manual into /usr/local on a new compatible Linux node over SSH.
@@ -275,8 +275,11 @@ and all the remaining arguments are used as a command
 even without it.
 .SH SHORTCUTS
 .TP
-.B Ctrl-d or Ctrl-q (browser)
+.B Ctrl-d (browser)
 Close the selected browser tab. Terminal tabs pass both keys to their applications.
+.TP
+.B Ctrl-q (browser)
+Quit the browser and return to a fresh shell in its place.
 .TP
 .B Ctrl-f (browser)
 Find text in the current page. Enter selects the next match; Shift-Enter selects
@@ -348,6 +351,9 @@ Close the selected tab in all windows.
 .TP
 .B Ctrl-Tab, Ctrl-Shift-Tab
 Cycle tabs in the current window.
+.TP
+.B Alt-Tab, Alt-Shift-Tab
+Cycle like Ctrl-Tab, but only through other tabs with a colored background: alerts, busy tasks and background jobs.
 .TP
 .B Ctrl-1 through Ctrl-8, Ctrl-9
 Select a tab by position, or the last tab with Ctrl-9.

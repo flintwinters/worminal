@@ -73,13 +73,23 @@ impl App {
             return;
         };
         view.focus();
-        self.send(
-            id,
-            CommandKind::Focus {
-                columns: self.config.columns,
-                rows: self.config.rows,
-            },
-        );
+        // `Focus` is exclusive: it would hide the terminals a split shows beside this browser and stop their frames.
+        // The visible terminals are presented instead; with none visible the browser's tab is focused as before.
+        if self
+            .visible()
+            .iter()
+            .any(|shown| self.terminal(*shown).is_some())
+        {
+            self.present(true);
+        } else {
+            self.send(
+                id,
+                CommandKind::Focus {
+                    columns: self.config.columns,
+                    rows: self.config.rows,
+                },
+            );
+        }
     }
     /// A split pane's selected browser shows its page without being the active tab. Views another window hosts
     /// stay there: only claiming moves a live DOM between windows.

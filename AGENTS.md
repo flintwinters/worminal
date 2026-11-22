@@ -44,8 +44,9 @@ once for parsers, help and search.
 `manage.py` is internal development tooling only.
 Master views finish version sync immediately after SSH authentication, before workspace access.
 Remote version sync compares Cargo versions: bump the version when remote daemons need a runtime change; equal
-versions never upgrade. The daemon links musl statically so sync works across distributions; failures notify the
-desktop. Tests target the current Rust app and C engine, without historical application builds.
+versions never upgrade. Release daemons build `--portable`, linking musl statically so sync works across
+distributions; default native builds link glibc. Sync failures notify the desktop. Tests target the current Rust app
+and C engine, without historical application builds.
 Full checks enforce reviewed daemon CPU and network performance ceilings; never raise them automatically.
 
 Read [development.md](docs/development.md) for build/test/install workflows and [testing.md](docs/testing.md) for
@@ -61,7 +62,7 @@ the canonical URL and embeds the shared logo, styles and interactions.
 
 Public contracts and subsystem details:
 
-- [Agent interface](docs/automation.md), [Worp](docs/worp.md), [devices](docs/devices.md).
+- [Agent interface](docs/automation.md), [Worp](docs/worp.md), [devices](docs/devices.md), [bookmarks](docs/bookmarks.md).
 - [Configuration](docs/config.md), [notifications](docs/notifications.md), [window state](docs/window-state.md).
 - [Remote installation and master history](docs/remote-install.md), [upgrades](docs/remote-upgrade.md),
   [window replacement](docs/window-updates.md).

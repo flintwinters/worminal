@@ -44,14 +44,6 @@ class Canvas(BaseHTTPRequestHandler):
         pass
 
 
-def local_app_target():
-    from urllib.parse import urlencode
-    page = ROOT / "file-explorer/dist/index.html"
-    if not page.is_file():
-        raise RuntimeError("Build the independent local app first: python3 manage.py explorer-build")
-    return page.as_uri() + "?" + urlencode({"path": str(ROOT)})
-
-
 @contextmanager
 def canvas():
     server = ThreadingHTTPServer(("127.0.0.1", 0), Canvas)
@@ -108,9 +100,9 @@ def sample(executable, target, log, cold_open=False, trace_startup=False, stored
             for index, phase in enumerate(("cold",) if cold_open else ("first", "additional")):
                 title = f"Browser perf terminal {index}"
                 command = [str(ROOT / "build/latency_echo"), "--exec", str(executable), "--new-browser-tab",
-                           target or local_app_target()]
+                           target]
                 launch = ([str(executable), "-T", title, "--surf",
-                           target or local_app_target()] if cold_open else
+                           target] if cold_open else
                           [str(executable), "-T", title, "-e", *command])
                 started = time.monotonic_ns()
                 process = subprocess.Popen(launch,
@@ -186,7 +178,7 @@ def main():
     parser.add_argument("--established-profile", action="store_true")
     parser.add_argument("--trace-startup", action="store_true")
     parser.add_argument("--profile-cpu", action="store_true")
-    parser.add_argument("--kind", choices=("all", "http", "file", "explorer"), default="all")
+    parser.add_argument("--kind", choices=("all", "http", "file"), default="all")
     args = parser.parse_args()
     if args.trials < 1:
         parser.error("--trials must be positive")
@@ -202,7 +194,7 @@ def main():
     checks = CHECKS
     checks.mkdir(parents=True, exist_ok=True)
     with canvas() as url, file_canvas(checks) as file_url, ExitStack() as profiles:
-        targets = [(kind, target) for kind, target in (("http", url), ("file", file_url), ("explorer", None))
+        targets = [(kind, target) for kind, target in (("http", url), ("file", file_url))
                    if args.kind == "all" or args.kind == kind]
         stored_profiles = {}
         if args.established_profile:
@@ -240,7 +232,7 @@ def main():
                         "Each target and trial uses a fresh profile. ") +
                        "Visible waits for expected page pixels; HTTP and file URLs verify "
                        "real-key JavaScript response. "
-                       "Explorer loads its independently compiled local HTML document. Warm filesystem caches. "
+                       "Warm filesystem caches. "
                        "Memory includes frontend/helpers and the private workspace service/shells. "
                        "Excludes desktop compositing and physical display latency."}
     if args.compare:

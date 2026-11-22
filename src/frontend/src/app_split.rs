@@ -3,15 +3,20 @@
 //! shows (`Pane`), never the geometry.
 use super::{App, LINK_SHIFT};
 use crate::{
-    layout::{Layout, Target, Zone},
-    tabs::{Actions, Tabs},
+    layout::{neighbor, Direction, Layout, PaneRect, Target, Zone},
+    paint,
+    tabs::{mix, Actions, Ghost, Landing, Tabs},
 };
 use gtk::prelude::*;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
-use worminal_protocol::{worp::commands::CommandKind, WIRE_FEATURE_PANES};
+use worminal_protocol::{
+    cell::{COLOR_DEFAULT_BACKGROUND as BG, COLOR_DEFAULT_FOREGROUND as FG},
+    worp::commands::CommandKind,
+    WIRE_FEATURE_PANES,
+};
 
 type Rect = (f64, f64, f64, f64);
 /// One tab strip above the notebook holding just its tabs.
@@ -38,6 +43,8 @@ pub(super) struct Panes {
     host: gtk::Box,
     /// Region a hovering tab drag would claim, in `root` coordinates.
     marked: Rc<Cell<Option<Rect>>>,
+    /// The dragged tab's image and its top-left, in `root` coordinates.
+    ghost: Rc<RefCell<Option<(cairo::ImageSurface, f64, f64)>>>,
     list: RefCell<Vec<Rc<Pane>>>,
     layout: RefCell<Layout>,
     focused: Cell<u32>,
@@ -53,10 +60,11 @@ impl Panes {
         // Draw after children instead of using an overlay widget: GTK drag hit testing
         // ignores overlay pointer pass-through and would hide terminal drop targets.
         let marked = Rc::new(Cell::new(None::<Rect>));
+        let ghost = Rc::new(RefCell::new(None::<(cairo::ImageSurface, f64, f64)>));
         root.connect_local(
             "draw",
             true,
-            glib::clone!(@strong marked => move |values| {
+            glib::clone!(@strong marked, @strong ghost => move |values| {
                 let cr = values[1].get::<cairo::Context>().unwrap();
                 if let Some((x, y, width, height)) = marked.get() {
                     cr.rectangle(x, y, width, height);
@@ -70,6 +78,14 @@ impl Panes {
                         eprintln!("worminal: split mark: {error}");
                     }
                 }
+                if let Some((image, x, y)) = ghost.borrow().as_ref() {
+                    if let Err(error) = cr
+                        .set_source_surface(image, *x, *y)
+                        .and_then(|()| cr.paint_with_alpha(0.6))
+                    {
+                        eprintln!("worminal: dragged tab: {error}");
+                    }
+                }
                 Some(false.to_value())
             }),
         );
@@ -77,6 +93,7 @@ impl Panes {
             root,
             host,
             marked,
+            ghost,
             list: RefCell::new(Vec::new()),
             layout: RefCell::new(Layout::Leaf(0)),
             focused: Cell::new(0),
@@ -109,9 +126,61 @@ impl App {
     /// The window's first pane; it holds every tab until one is dragged out.
     pub(super) fn start_panes(self: &Rc<Self>) {
         let pane = self.add_pane();
-        self.panes.focused.set(pane.id);
+        self.focus_pane(&pane);
         *self.panes.layout.borrow_mut() = Layout::Leaf(pane.id);
+        // After the children, like the drop highlight: an overlay widget would hide drop targets from GTK.
+        self.panes.root.connect_local(
+            "draw",
+            true,
+            glib::clone!(@weak self as app => @default-return None, move |values| {
+                let cr = values[1].get::<gtk::cairo::Context>().ok()?;
+                if let Err(error) = app.draw_borders(&cr) {
+                    eprintln!("worminal: pane borders: {error}");
+                }
+                Some(false.to_value())
+            }),
+        );
         self.rebuild();
+    }
+    /// Outline every pane of a split in the terminal's colors, the focused one brighter on top, so the panes
+    /// read as separate terminals and the one taking keystrokes is plain. A window with one pane has none.
+    fn draw_borders(&self, cr: &gtk::cairo::Context) -> Result<(), gtk::cairo::Error> {
+        let panes = self.panes();
+        if panes.len() < 2 {
+            return Ok(());
+        }
+        let palette = self
+            .pages
+            .borrow()
+            .iter()
+            .find(|page| page.id == self.active.get())
+            .map(|page| page.palette.clone());
+        let Some(palette) = palette else {
+            return Ok(());
+        };
+        let (background, foreground) = {
+            let palette = palette.borrow();
+            (palette.color(BG), palette.color(FG))
+        };
+        let focused = self.panes.focused.get();
+        let rects = self.pane_rects();
+        cr.set_line_width(1.0);
+        // Unfocused outlines first: the focused one covers the edges it shares.
+        for (focus, amount) in [(false, 0.3), (true, 0.75)] {
+            paint::source(cr, &mix(&background, &foreground, amount));
+            for &(id, (x, y, width, height)) in &rects {
+                if (id == focused) == focus {
+                    cr.rectangle(
+                        f64::from(x) + 0.5,
+                        f64::from(y) + 0.5,
+                        f64::from(width - 1),
+                        f64::from(height - 1),
+                    );
+                    cr.stroke()?;
+                }
+            }
+        }
+        Ok(())
     }
     fn add_pane(self: &Rc<Self>) -> Rc<Pane> {
         let id = self.panes.next.replace(self.panes.next.get() + 1);
@@ -141,6 +210,7 @@ impl App {
             if let Some(id) = app.active_of(&pane).filter(|id| *id != app.active.get()) { app.activate(id); }
             None
         }));
+        let strip_widget = strip.widget().clone();
         strip.connect(Actions {
             select: Box::new(glib::clone!(@weak self as app => move |id| app.select_id(id))),
             close: Box::new(
@@ -151,7 +221,11 @@ impl App {
                 glib::clone!(@weak self as app => @default-return None, move |id, x, y| app.locate(id, x, y)),
             ),
             hover: Box::new(glib::clone!(@weak self as app => move |target| app.mark(target))),
-            split: Box::new(glib::clone!(@weak self as app => move |id, target| app.drop_tab(id, target))),
+            land: Box::new(glib::clone!(@weak self as app => move |id, target| app.drop_tab(id, target))),
+            ghost: Box::new(glib::clone!(@weak self as app, @weak strip_widget => move |ghost| {
+                app.ghost(&strip_widget, ghost)
+            })),
+            star: Box::new(glib::clone!(@weak self as app => move |id| app.toggle_bookmark(id))),
         });
         let pane = Rc::new(Pane {
             id,
@@ -234,12 +308,24 @@ impl App {
     pub(super) fn is_visible(&self, id: u32) -> bool {
         id == self.active.get() || self.visible().contains(&id)
     }
-    /// Only terminals whose daemon can keep several tabs shown take part in a split.
+    /// Browser tabs always take part in a split; a terminal only if its daemon can keep several tabs shown.
     fn can_split(&self, id: u32) -> bool {
-        self.terminal(id).is_some() && self.features(id) & WIRE_FEATURE_PANES != 0
+        // A browser tab has no PTY and no frames, so the daemon never has to show it beside anything.
+        let browser = self
+            .pages
+            .borrow()
+            .iter()
+            .any(|page| page.id == id && page.browser);
+        browser || (self.terminal(id).is_some() && self.features(id) & WIRE_FEATURE_PANES != 0)
     }
+    /// The one place pane focus changes, so only the focused strip highlights its selected tab.
     pub(super) fn focus_pane(&self, pane: &Pane) {
-        self.panes.focused.set(pane.id);
+        if self.panes.focused.replace(pane.id) != pane.id {
+            self.panes.root.queue_draw();
+        }
+        for other in self.panes() {
+            other.strip.focus(other.id == pane.id);
+        }
     }
     /// Focus the pane holding a tab and select its page there.
     pub(super) fn show_page(&self, id: u32) {
@@ -252,7 +338,7 @@ impl App {
     }
     /// Where a drop of `dragged` at this position (in its own pane's strip) would land: another strip or the
     /// middle of another pane moves it there, a pane's edge splits that pane. Its own strip only reorders.
-    pub(super) fn locate(&self, dragged: u32, x: f64, y: f64) -> Option<Target> {
+    pub(super) fn locate(&self, dragged: u32, x: f64, y: f64) -> Option<Landing> {
         if !self.can_split(dragged) {
             return None;
         }
@@ -266,9 +352,10 @@ impl App {
                 if (0..strip.allocated_width()).contains(&sx)
                     && (0..strip.allocated_height()).contains(&sy)
                 {
-                    return (!own).then_some(Target {
-                        anchor: pane.id,
-                        zone: Zone::Center,
+                    let slot = pane.strip.slot(f64::from(sx), f64::from(sy));
+                    return slot.filter(|_| !own).map(|slot| Landing::Strip {
+                        pane: pane.id,
+                        slot,
                     });
                 }
             }
@@ -281,10 +368,10 @@ impl App {
                 f64::from(content.allocated_height()),
             )?;
             // A pane's only tab cannot split itself, and its own middle holds it already.
-            (!(own && (alone || zone == Zone::Center))).then_some(Target {
+            (!(own && (alone || zone == Zone::Center))).then_some(Landing::Content(Target {
                 anchor: pane.id,
                 zone,
-            })
+            }))
         })
     }
     /// The pane of each page a catalog removes, recorded before removal can empty and collapse it.
@@ -302,8 +389,18 @@ impl App {
         // A pane emptied by the close has collapsed and yields nothing.
         successor(&self.tabs_of(&home), self.active_of(&home), fallback)
     }
-    /// Mark the region a drag would claim until it moves elsewhere.
-    pub(super) fn mark(&self, target: Option<Target>) {
+    /// Mark where a drag would land until it moves elsewhere: a slot in a strip, or a region of content.
+    pub(super) fn mark(&self, landing: Option<Landing>) {
+        for pane in self.panes() {
+            pane.strip.hint(match landing {
+                Some(Landing::Strip { pane: id, slot }) if id == pane.id => Some(slot),
+                _ => None,
+            });
+        }
+        let target = match landing {
+            Some(Landing::Content(target)) => Some(target),
+            _ => None,
+        };
         let rect = target.and_then(|target| {
             let pane = self.pane(target.anchor)?;
             let widget: gtk::Widget = if target.zone == Zone::Center {
@@ -320,6 +417,24 @@ impl App {
         });
         self.panes.marked.set(rect);
         self.panes.root.queue_draw();
+    }
+    /// Draw the dragged tab at its strip position, redrawing only the area it leaves and enters.
+    fn ghost(&self, strip: &gtk::DrawingArea, ghost: Option<Ghost>) {
+        let root = &self.panes.root;
+        let placed = ghost.and_then(|ghost| {
+            let (x, y) = strip.translate_coordinates(root, 0, 0)?;
+            Some((ghost.image, f64::from(x) + ghost.x, f64::from(y) + ghost.y))
+        });
+        let old = self.panes.ghost.replace(placed);
+        for (image, x, y) in old.iter().chain(self.panes.ghost.borrow().iter()) {
+            let scale = f64::from(root.scale_factor());
+            root.queue_draw_area(
+                x.floor() as i32,
+                y.floor() as i32,
+                (f64::from(image.width()) / scale).ceil() as i32 + 1,
+                (f64::from(image.height()) / scale).ceil() as i32 + 1,
+            );
+        }
     }
     /// Move a tab's page into `dest`, leaving the pane that held it.
     fn move_page(&self, id: u32, dest: &Pane) {
@@ -343,8 +458,19 @@ impl App {
         widget.show();
         self.syncing.set(was);
     }
-    /// A tab dropped on a pane joins it, or on a pane edge gets a new pane beside it; it takes focus.
-    pub(super) fn drop_tab(self: &Rc<Self>, id: u32, target: Target) {
+    /// A tab dropped on a pane joins it (at the slot, on its strip), or on a pane edge gets a new pane beside
+    /// it; it takes focus.
+    pub(super) fn drop_tab(self: &Rc<Self>, id: u32, landing: Landing) {
+        let (target, slot) = match landing {
+            Landing::Strip { pane, slot } => (
+                Target {
+                    anchor: pane,
+                    zone: Zone::Center,
+                },
+                Some(slot),
+            ),
+            Landing::Content(target) => (target, None),
+        };
         let Some(anchor) = self.pane(target.anchor) else {
             return;
         };
@@ -360,6 +486,73 @@ impl App {
         self.collapse();
         self.rebuild();
         self.select_id(id);
+        if let Some(slot) = slot {
+            self.move_tab(id, slot);
+        }
+    }
+    /// The panes' rectangles in the pane area's coordinates.
+    fn pane_rects(&self) -> Vec<(u32, PaneRect)> {
+        self.panes()
+            .iter()
+            .filter_map(|pane| {
+                let (x, y) = pane
+                    .widget
+                    .translate_coordinates(self.panes.widget(), 0, 0)?;
+                Some((
+                    pane.id,
+                    (
+                        x,
+                        y,
+                        pane.widget.allocated_width(),
+                        pane.widget.allocated_height(),
+                    ),
+                ))
+            })
+            .collect()
+    }
+    /// Select the tab shown by the pane lying `direction` of the focused one. False when there is none, so
+    /// a window without a split leaves the keystroke to the application.
+    pub(super) fn focus_toward(self: &Rc<Self>, direction: Direction) -> bool {
+        let from = self.focused_pane().id;
+        let Some(pane) = neighbor(&self.pane_rects(), from, direction).and_then(|id| self.pane(id))
+        else {
+            return false;
+        };
+        if let Some(tab) = self.active_of(&pane) {
+            self.select_id(tab);
+        }
+        true
+    }
+    /// Move the current tab as a drag would: into the pane lying `direction` of its own, or, at the window's
+    /// edge, into a new pane split off that side (never emptying its own pane). False when the tab cannot
+    /// move, so the keystroke stays the application's.
+    pub(super) fn move_toward(self: &Rc<Self>, direction: Direction) -> bool {
+        let id = self.active.get();
+        let Some(home) = self.pane_of(id).filter(|_| self.can_split(id)) else {
+            return false;
+        };
+        let target = match neighbor(&self.pane_rects(), home.id, direction) {
+            Some(anchor) => Target {
+                anchor,
+                zone: Zone::Center,
+            },
+            None if self.tabs_of(&home).len() > 1 => Target {
+                anchor: home.id,
+                zone: direction.zone(),
+            },
+            None => return false,
+        };
+        self.drop_tab(id, Landing::Content(target));
+        true
+    }
+    /// A terminal asks to become the current tab: it was pressed, or must take control. Panes of a split are all
+    /// live, so liveness alone cannot tell whether the press changed the current tab. It must: typing follows
+    /// the focused widget, but copy, paste, new tabs and pane focus follow the active tab, and a click on the
+    /// other pane once typed there while Ctrl+Shift+C/V still used the previous tab.
+    pub(super) fn claim(self: &Rc<Self>, id: u32) {
+        if self.active.get() != id || !self.terminal(id).is_some_and(|terminal| terminal.live()) {
+            self.activate(id);
+        }
     }
     /// Gather every tab into the focused pane again.
     pub(super) fn unsplit(self: &Rc<Self>) {
@@ -401,7 +594,9 @@ impl App {
         }
         if changed && self.pane(self.panes.focused.get()).is_none() {
             let first = self.panes.layout.borrow().leaves()[0];
-            self.panes.focused.set(first);
+            if let Some(pane) = self.pane(first) {
+                self.focus_pane(&pane);
+            }
         }
         changed
     }
@@ -472,7 +667,9 @@ impl App {
             return;
         }
         self.panes.presented.replace(shown.clone());
-        if shown.len() < 2 {
+        // One shown terminal is simply the focused one. With a browser active it is a visible terminal beside the
+        // browser, which must stay shown: the browser has no frames to give the daemon.
+        if shown.len() < 2 && self.terminal(active).is_some() {
             shown = vec![active];
         }
         let mut focused = Vec::new();

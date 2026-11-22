@@ -649,7 +649,7 @@ fn create(scope: &[u8], listener: UnixListener) -> io::Result<(Service, io::Resu
         handin: None,
         next_handin: 1,
         recovery,
-        devices: Registry::new(root.join("worminal/devices-v1")),
+        devices: Registry::new(worminal_config::devices_path()),
         published: None,
         closed: 0,
         fallback: 0,

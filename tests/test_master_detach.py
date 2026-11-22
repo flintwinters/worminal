@@ -49,6 +49,7 @@ class MasterDetachTest(unittest.TestCase):
                 def cli(*args, success=True):
                     result = subprocess.run([executable, *args], env=env, capture_output=True, timeout=10)
                     self.assertEqual(result.returncode == 0, success, result.stderr)
+                    return result
                 def owner():
                     result = subprocess.run(['xdotool', 'search', '--onlyvisible', '--class', 'DetachFixture'],
                                             env=env, capture_output=True, text=True, timeout=3)
@@ -83,28 +84,23 @@ class MasterDetachTest(unittest.TestCase):
                     self.wait(lambda: windows()[0][4] == 'wheel-test', 'second master selected')
                     # Masters belong to the frontend, not a window: a local window opened later views both.
                     cli('--attach', '-c', 'DetachEmpty', '-T', 'DetachEmpty')
-                    self.wait(lambda: len(windows()) == 2 and all(row[4] for row in windows()),
-                              'new window shows master tabs')
-                    second = subprocess.check_output(['xdotool', 'search', '--onlyvisible', '--class',
-                                                      'DetachEmpty'], env=env, text=True).splitlines()[0]
-                    cli('--detach-master', 'wheel-test')
-                    self.wait(lambda: [row[4] for row in windows()] == ['preview-test'] * 2,
-                              'new window viewed the primary master')
-                    # A launch into the focused window reaches every window, without moving their selection.
-                    subprocess.run(['xdotool', 'windowfocus', '--sync', second], env=env, check=True, timeout=3)
-                    cli('--master', 'wheel-test', '--attach')
-                    self.wait(lambda: sorted(row[4] for row in windows()) == ['preview-test', 'wheel-test'],
-                              'reattached master selected only where launched')
+                    self.wait(lambda: len(windows()) == 2, 'second window')
+                    # Launches without a source window (a desktop shortcut running plain worminal) join
+                    # every connected master; this --attach window has no local tab of its own.
+                    self.wait(lambda: all(row[2] and row[4] for row in windows()),
+                              'second window joins the connected masters')
                     cli('--detach-master', 'preview-test')
                     self.wait(lambda: [row[4] for row in windows()] == ['wheel-test'] * 2,
-                              'reattached master reached the other window')
+                              'both windows keep the other host')
+                    self.assertEqual(tabs(), before, 'Detach changed daemon-owned tabs')
                     from x11 import close_window
-                    close_window(env, window=second)
+                    close_window(env, wm_class='DetachEmpty')
                     self.wait(lambda: len(windows()) == 1, 'second window closes')
                     self.assertIsNone(app.poll())
                     self.assertEqual(windows()[0][4], 'wheel-test')
-                    self.assertEqual(tabs(), before, 'Detach changed daemon-owned tabs')
-                    cli('--detach-master', 'preview-test', success=False)
+                    # The launcher once printed only "GTK owner rejected launch".
+                    self.assertIn(b'exact endpoint of one of: wheel-test',
+                                  cli('--detach-master', 'preview-test', success=False).stderr)
                     previous = owner()
                     module = module_path(RUST_FRONTEND_MODULE, prefix=base)
                     pending = module.with_suffix('.pending')
@@ -131,6 +127,65 @@ class MasterDetachTest(unittest.TestCase):
                     stop_workspace(env)
                     for scope in scopes.values():
                         stop_workspace({**env, 'WORMINAL_SHARED_SOCKET_SCOPE': scope})
+
+    def test_new_windows_join_connected_masters(self):
+        with isolated_display() as display, private_bus(display) as session, profile(session) as env, \
+                tempfile.TemporaryDirectory(prefix='master-new-window-', dir=CHECKS) as directory:
+            base = Path(directory)
+            executable = str(copy_runtime(base, browser=True))
+            scope = env['WORMINAL_SHARED_SOCKET_SCOPE']+'-joined-master'
+            ssh = base/'ssh'
+            ssh.write_text('#!/usr/bin/python3\nimport os,sys\n'
+                           f'os.environ["WORMINAL_SHARED_SOCKET_SCOPE"]={scope!r}\n'
+                           f'sys.path.insert(0,{str(ROOT/"tests/fixtures")!r})\n'
+                           'from master_ssh import run\n'
+                           f'run({str(runtime_binary("worminald"))!r})\n')
+            ssh.chmod(0o700)
+            env.update(GDK_BACKEND='x11', SHELL='/bin/sh', PATH=str(base)+os.pathsep+env['PATH'])
+            remote_env = {**env, 'WORMINAL_SHARED_SOCKET_SCOPE': scope}
+            def windows():
+                result = subprocess.run(['busctl', '--user', '--json=short', 'call',
+                    f'org.worminal.Instance.p{owner.pid}', OBJECT, INTERFACE, 'GetWindows'],
+                    env=env, capture_output=True, text=True, timeout=3)
+                return json.loads(result.stdout)['data'][0] if result.returncode == 0 else []
+            def remote_tabs():
+                result = subprocess.run([str(runtime_binary('worminald')), 'api', 'list'], env=remote_env,
+                                        capture_output=True, text=True, timeout=5)
+                return json.loads(result.stdout)['tabs'] if result.returncode == 0 else None
+            with (CHECKS/'master-new-window.log').open('wb') as log:
+                owner = subprocess.Popen([executable, '-e', '/bin/cat'], env=env, stdout=log, stderr=log)
+                try:
+                    from runtime import window
+                    source = window(env, owner)
+                    subprocess.run([executable, '--master', 'joined-master', '-e', '/bin/cat'],
+                                   env=env, check=True, capture_output=True, timeout=10)
+                    self.wait(lambda: [row[4] for row in windows()] == ['joined-master'], 'master joined')
+                    shared = self.wait(remote_tabs, 'remote tab')
+                    # Ctrl+Shift+N and a desktop shortcut running plain `worminal` (Win+Enter) both
+                    # once opened windows holding only their primary host: the master was unreachable.
+                    openers = (lambda: (subprocess.run(['xdotool', 'windowfocus', '--sync', source], env=env,
+                                                       check=True, timeout=3),
+                                        subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+shift+n'],
+                                                       env=env, check=True)),
+                               lambda: subprocess.Popen([executable], env=env, stdout=log, stderr=log).wait(10))
+                    for count, opener in enumerate(openers, 2):
+                        opener()
+                        new = self.wait(lambda: len(windows()) == count and next(
+                            (row[0] for row in windows() if row[1] and row[4] == ''), None), 'new local window')
+                        def cycled_to_master():
+                            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+Tab'], env=env, check=True)
+                            time.sleep(.1)
+                            return any(row[0] == new and row[4] == 'joined-master' for row in windows())
+                        self.wait(cycled_to_master, f'window {count} shows the connected master tabs')
+                    self.assertEqual([tab['shell_pid'] for tab in remote_tabs()],
+                                     [tab['shell_pid'] for tab in shared], 'Joining launched remote shells')
+                finally:
+                    from test_window_replacement import stop_fixture
+                    stop_fixture(env)
+                    owner.terminate()
+                    owner.wait(timeout=5)
+                    stop_workspace(env)
+                    stop_workspace(remote_env)
 
     def test_detach_cancels_pending_reconnect(self):
         executable = str(runtime_binary('worminal'))
