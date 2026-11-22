@@ -23,6 +23,7 @@ os.environ['WORMINAL_FRONTEND'] = 'worminal-rust'
 from test_keys import NavigationKeysTest, read_bytes, read_through, wait_title
 from workspace_protocol import send, wait_kind, catalog_records, service_pid
 from x11 import isolated_display, close_window
+from visible_latency import image_bytes
 from preview import profile, service, wayland_display
 from test_window_state import private_bus, WindowStateTest
 from test_window_activation import WindowActivationTests
@@ -224,77 +225,101 @@ class RustApplicationTest(unittest.TestCase):
                 self.assertEqual(read_bytes(attached.stdout, 8), b'survives')
                 self.assertEqual(os.readlink(f'/proc/{shell}/fd/0'), tty)
 
-    def test_dragging_a_tab_onto_a_pane_edge_splits_the_window(self):
+    RED, BLUE = (200, 30, 30), (20, 40, 210)
+
+    def colored_split_window(self, env, cleanup, then=None):
+        """A 900x500 window whose two terminal tabs repaint red and blue, the blue one selected; probes for its
+        pixels and for dragging a label. With `then`, the first blue tab runs that command once `trigger()` is called."""
+        from types import SimpleNamespace
         from Xlib import X, display, error
         from PIL import Image
-        red, blue = (200, 30, 30), (20, 40, 210)
+        red, blue = self.RED, self.BLUE
         # Each terminal repaints its whole screen continuously: resizing keeps text but not erased background.
         # Typing through the agent API would take the window's control of the tab, so no tab is typed into.
         fill = lambda color: "while :; do printf '\\033[48;2;%d;%d;%dm\\033[2J'; sleep .2; done" % color
-        with isolated_display() as env, ExitStack() as cleanup:
-            script = CHECKS / 'split-shell.sh'
-            script.write_text(f'#!/bin/sh\n{fill(blue)}\n')
-            script.chmod(0o755)
-            env.update(GDK_BACKEND='x11', SHELL=str(script))
-            env.pop('WAYLAND_DISPLAY', None)
-            app = subprocess.Popen([str(runtime_binary("worminal-rust")), '-T', 'Rust split', '-o', '-',
-                                    '-e', '/bin/sh', '-c', fill(red)],
-                                   env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            self.addCleanup(lambda: self.stop(app))
-            wid = window(env, app)
-            xdo = lambda *args: subprocess.run(['xdotool', *args], env=env, check=True)
-            api = lambda *args: subprocess.check_output([str(runtime_binary('worminald')), 'api', *args],
-                                                        env=env, text=True)
-            server = display.Display(env['DISPLAY'])
-            cleanup.callback(server.close)
-            root = server.create_resource_object('window', int(wid))
+        script, trigger = CHECKS / 'split-shell.sh', CHECKS / 'split-shell.trigger'
+        trigger.unlink(missing_ok=True)
+        blue_shell = fill(blue) if then is None else \
+            fill(blue).replace('while :', f'until [ -e {shlex.quote(str(trigger))} ]') + f'; rm {shlex.quote(str(trigger))}; exec {then}'
+        script.write_text(f'#!/bin/sh\n{blue_shell}\n')
+        script.chmod(0o755)
+        env.update(GDK_BACKEND='x11', SHELL=str(script))
+        env.pop('WAYLAND_DISPLAY', None)
+        app = subprocess.Popen([str(runtime_binary("worminal-rust")), '-T', 'Rust split', '-o', '-',
+                                '-e', '/bin/sh', '-c', fill(red)],
+                               env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.addCleanup(lambda: self.stop(app))
+        wid = window(env, app)
+        xdo = lambda *args: subprocess.run(['xdotool', *args], env=env, check=True)
+        api = lambda *args: subprocess.check_output([str(runtime_binary('worminald')), 'api', *args],
+                                                    env=env, text=True)
+        server = display.Display(env['DISPLAY'])
+        cleanup.callback(server.close)
+        root = server.create_resource_object('window', int(wid))
 
-            def size():
-                geometry = root.get_geometry()
-                return geometry.width, geometry.height
+        def size():
+            geometry = root.get_geometry()
+            return geometry.width, geometry.height
 
-            def settle():
-                # The first terminal fits the window to its character grid, then the test fixes the size.
-                last, since = None, time.monotonic()
-                while time.monotonic() - since < .5:
-                    if size() != last:
-                        last, since = size(), time.monotonic()
-                    time.sleep(.02)
-                return last
-            settle()
-            xdo('windowsize', wid, '900', '500')
-            self.assertEqual(settle(), (900, 500))
+        def settle():
+            # The first terminal fits the window to its character grid, then the test fixes the size.
+            last, since = None, time.monotonic()
+            while time.monotonic() - since < .5:
+                if size() != last:
+                    last, since = size(), time.monotonic()
+                time.sleep(.02)
+            return last
+        settle()
+        xdo('windowsize', wid, '900', '500')
+        self.assertEqual(settle(), (900, 500))
 
-            def pixel(fx, fy):
-                try:
-                    data = root.get_image(int(size()[0] * fx), int(size()[1] * fy), 1, 1,
-                                          X.ZPixmap, 0xffffffff).data
-                except error.BadMatch:  # not mapped yet
-                    return None
-                return tuple(data[:3][::-1])
+        def pixel(fx, fy):
+            try:
+                data = image_bytes(root.get_image(int(size()[0] * fx), int(size()[1] * fy), 1, 1,
+                                                  X.ZPixmap, 0xffffffff))
+            except error.BadMatch:  # not mapped yet
+                return None
+            return tuple(data[:3][::-1])
 
-            def wait_for(left, right, message):
-                deadline = time.monotonic() + 8
-                while (pixel(.25, .75), pixel(.75, .75)) != (left, right):
-                    self.assertIsNone(app.poll())
-                    if time.monotonic() >= deadline:
-                        width, height = size()
-                        data = root.get_image(0, 0, width, height, X.ZPixmap, 0xffffffff).data
-                        Image.frombuffer('RGB', (width, height), data, 'raw', 'BGRX', 0, 1).save(
-                            CHECKS / 'rust-app-split.png')
-                        self.fail(f'{message}: {pixel(.25, .75)} {pixel(.75, .75)}')
-                    time.sleep(.05)
-
-            wait_for(red, red, 'first tab did not fill the window')
-            xdo('windowfocus', '--sync', wid)
-            xdo('key', '--clearmodifiers', 'ctrl+shift+t')
-            deadline = time.monotonic() + 5
-            while len(json.loads(api('list'))['tabs']) != 2:
-                self.assertLess(time.monotonic(), deadline, 'second tab did not open')
+        def wait_for(left, right, message):
+            deadline = time.monotonic() + 8
+            while (pixel(.25, .75), pixel(.75, .75)) != (left, right):
+                self.assertIsNone(app.poll())
+                if time.monotonic() >= deadline:
+                    width, height = size()
+                    data = image_bytes(root.get_image(0, 0, width, height, X.ZPixmap, 0xffffffff))
+                    Image.frombuffer('RGB', (width, height), data, 'raw', 'BGRX', 0, 1).save(
+                        CHECKS / 'rust-app-split.png')
+                    self.fail(f'{message}: {pixel(.25, .75)} {pixel(.75, .75)}')
                 time.sleep(.05)
-            # The new tab is selected and fills the window.
-            wait_for(blue, blue, 'second tab did not fill the window')
-            data = root.get_image(0, 0, 900, 500, X.ZPixmap, 0xffffffff).data
+
+        wait_for(red, red, 'first tab did not fill the window')
+        xdo('windowfocus', '--sync', wid)
+        xdo('key', '--clearmodifiers', 'ctrl+shift+t')
+        deadline = time.monotonic() + 5
+        while len(json.loads(api('list'))['tabs']) != 2:
+            self.assertLess(time.monotonic(), deadline, 'second tab did not open')
+            time.sleep(.05)
+        # The new tab is selected and fills the window.
+        wait_for(blue, blue, 'second tab did not fill the window')
+        def drag(start, end):
+            xdo('mousemove', '--window', wid, *map(str, start), 'mousedown', '1')
+            for step in range(1, 11):
+                xdo('mousemove', '--window', wid, *(str(a + (b - a) * step // 10) for a, b in zip(start, end)))
+                time.sleep(.02)
+            xdo('mouseup', '1')
+        return SimpleNamespace(app=app, wid=wid, xdo=xdo, api=api, root=root, size=size, pixel=pixel,
+                               wait_for=wait_for, drag=drag, trigger=trigger.touch)
+
+    def test_dragging_a_tab_onto_a_pane_edge_splits_the_window(self):
+        from Xlib import X
+        from PIL import Image
+        red, blue = self.RED, self.BLUE
+        with isolated_display() as env, ExitStack() as cleanup:
+            window = self.colored_split_window(env, cleanup)
+            app, wid, xdo, root, size = window.app, window.wid, window.xdo, window.root, window.size
+            pixel, wait_for = window.pixel, window.wait_for
+            data = image_bytes(root.get_image(0, 0, 900, 500, X.ZPixmap, 0xffffffff))
             Image.frombuffer('RGB', (900, 500), data, 'raw', 'BGRX', 0, 1).save(CHECKS / 'split-before.png')
             # Locate the selected second label rather than assuming a particular font
             # size or directory basename width. Its right edge must clear the first label.
@@ -319,23 +344,36 @@ class RustApplicationTest(unittest.TestCase):
             self.assertNotEqual(pixel(.505, 4 / 500), background, 'the right pane has no tab strip of its own')
             self.assertEqual(pixel(second_label / 900, 4 / 500), background, 'the left strip still lists the dropped tab')
             # Dragging the right pane's tab onto the left strip puts it back there and ends the split.
-            xdo('mousemove', '--window', wid, '462', '8', 'mousedown', '1')
-            for step in range(1, 11):
-                xdo('mousemove', '--window', wid, str(462 - 400 * step // 10), '8')
-                time.sleep(.02)
-            xdo('mouseup', '1')
+            window.drag((462, 8), (62, 8))
             wait_for(red, red, 'dropping a tab on the other strip did not merge the panes')
             self.assertEqual(pixel(.505, 4 / 500), background, 'the right strip outlived the split')
             # Split again, then Ctrl+Shift+X gathers the tabs.
-            xdo('mousemove', '--window', wid, '12', '8', 'mousedown', '1')
-            for step in range(1, 11):
-                xdo('mousemove', '--window', wid, str(12 + 876 * step // 10), str(8 + 250 * step // 10))
-                time.sleep(.02)
-            xdo('mouseup', '1')
+            window.drag((12, 8), (888, 258))
             wait_for(blue, red, 'the second split did not happen')
             xdo('key', '--clearmodifiers', 'ctrl+shift+x')
             wait_for(red, red, 'ctrl+shift+x did not leave only the focused pane')
             self.assertEqual(pixel(.505, 4 / 500), background, 'the right strip outlived the unsplit')
+
+    def test_a_split_browser_keeps_its_pane_and_takes_new_tabs_when_clicked(self):
+        red, blue, green = self.RED, self.BLUE, (20, 160, 60)
+        page = CHECKS / 'split-browser.html'
+        page.write_text('<!doctype html><body style="background:#14a03c"></body>')
+        replace = f"{shlex.quote(str(runtime_binary('worminald')))} --new-browser-tab {shlex.quote(page.as_uri())}"
+        with isolated_display() as env, profile(env) as env, ExitStack() as cleanup:
+            window = self.colored_split_window(env, cleanup, then=replace)
+            xdo, wid, pixel, wait_for = window.xdo, window.wid, window.pixel, window.wait_for
+            window.drag((12, 8), (888, 258))
+            wait_for(blue, red, 'dropping a tab on the right edge did not split the window')
+            # The unfocused left terminal replaces itself with a browser, as `worminal --new-browser-tab`. The
+            # browser keeps that pane rather than joining the focused one, which would collapse the split.
+            window.trigger()
+            wait_for(green, red, 'the left terminal did not become a browser in its own pane')
+            xdo('mousemove', '--window', wid, '675', '375', 'click', '1')
+            # A browser view consumes its click and only takes keyboard focus; the pane must still follow.
+            xdo('mousemove', '--window', wid, '225', '375', 'click', '1')
+            time.sleep(.3)
+            xdo('key', '--clearmodifiers', 'ctrl+shift+t')
+            wait_for(blue, red, 'Ctrl+Shift+T after clicking the browser pane opened the tab elsewhere')
 
     @staticmethod
     def stop(process):

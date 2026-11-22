@@ -694,7 +694,8 @@ impl App {
             })
             .cloned()
             .collect();
-        let home = self.home_of_active(&obsolete);
+        let homes = self.homes(&obsolete);
+        let home = homes.of(self.active.get());
         for page in obsolete {
             replaced_active |= page.id == self.active.get();
             if let Some(pane) = self.pane_of(page.id) {
@@ -763,7 +764,10 @@ impl App {
                     view: Rc::new(RefCell::new(None)),
                 };
                 self.pages.borrow_mut().push(page.clone());
-                self.notebook().append_page(&page.widget, Some(&page.label));
+                homes
+                    .of(page.id)
+                    .map_or_else(|| self.notebook(), |pane| pane.notebook.clone())
+                    .append_page(&page.widget, Some(&page.label));
                 page.widget.show_all();
                 page.label.show();
                 page
@@ -881,6 +885,7 @@ impl App {
             self.message(Some("No tabs. Ctrl+Shift+T opens a terminal."));
         }
         self.present(false);
+        self.show_visible_browsers();
         if index != 0 && records.is_empty() {
             self.drop_remote(index);
         }

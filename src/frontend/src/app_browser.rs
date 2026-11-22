@@ -67,16 +67,52 @@ impl App {
             },
         );
     }
+    /// Move the tab's view into this window, or create it, and focus it.
     pub(super) fn claim_browser(self: &Rc<Self>, id: u32) {
-        let Some(page) = self
+        let Some(view) = self.host_browser(id) else {
+            return;
+        };
+        view.focus();
+        self.send(
+            id,
+            CommandKind::Focus {
+                columns: self.config.columns,
+                rows: self.config.rows,
+            },
+        );
+    }
+    /// A split pane's selected browser shows its page without being the active tab. Views another window hosts
+    /// stay there: only claiming moves a live DOM between windows.
+    pub(super) fn show_visible_browsers(self: &Rc<Self>) {
+        if self.replacing.get() {
+            return;
+        }
+        for id in self.visible() {
+            let hosted = WINDOWS.with(|windows| {
+                windows.borrow().iter().any(|app| {
+                    app.pages
+                        .borrow()
+                        .iter()
+                        .any(|page| page.id == id && page.view.borrow().is_some())
+                })
+            });
+            let browser = self
+                .pages
+                .borrow()
+                .iter()
+                .any(|page| page.id == id && page.browser);
+            if browser && !hosted {
+                self.host_browser(id);
+            }
+        }
+    }
+    fn host_browser(self: &Rc<Self>, id: u32) -> Option<Browser> {
+        let page = self
             .pages
             .borrow()
             .iter()
             .find(|page| page.id == id && page.browser)
-            .cloned()
-        else {
-            return;
-        };
+            .cloned()?;
         let container = page
             .widget
             .clone()
@@ -137,20 +173,12 @@ impl App {
                 }
                 Err(error) => {
                     self.message(Some(&error.to_string()));
-                    return;
+                    return None;
                 }
             }
         }
-        if let Some(view) = page.view.borrow().clone() {
-            view.focus();
-        }
-        self.send(
-            id,
-            CommandKind::Focus {
-                columns: self.config.columns,
-                rows: self.config.rows,
-            },
-        );
+        let view = page.view.borrow().clone();
+        view
     }
     pub(super) fn browser_metadata(self: &Rc<Self>, record: &Record) {
         let changed = {

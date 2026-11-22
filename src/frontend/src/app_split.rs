@@ -22,6 +22,17 @@ pub(super) struct Pane {
     pub(super) strip: Tabs,
 }
 /// The content area: the pane tree, whose leaves are pane ids.
+/// Where removed pages lived: the closed active tab's pane keeps focus, and a tab whose kind changes (a terminal
+/// replaced by a browser) returns to its own pane instead of the focused one, which would collapse its split.
+pub(super) struct Homes(Vec<(u32, Rc<Pane>)>);
+impl Homes {
+    pub(super) fn of(&self, id: u32) -> Option<Rc<Pane>> {
+        self.0
+            .iter()
+            .find(|(home, _)| *home == id)
+            .map(|(_, pane)| pane.clone())
+    }
+}
 pub(super) struct Panes {
     root: gtk::Overlay,
     host: gtk::Box,
@@ -119,6 +130,17 @@ impl App {
             if let Some(id) = id { app.activate(id); }
             None
         }));
+        // The pane follows keyboard focus. Terminal clicks also select their tab, but a browser view consumes
+        // its clicks and only takes focus; without this, Ctrl+T after clicking a browser opened in another pane.
+        // GTK emits a NULL child when focus leaves, which the typed binding cannot represent.
+        notebook.connect_local("set-focus-child", false, glib::clone!(@weak self as app => @default-return None, move |values| {
+            let notebook = values[0].get::<gtk::Notebook>().ok()?;
+            values[1].get::<Option<gtk::Widget>>().ok()??;
+            if app.syncing.get() || app.replacing.get() { return None; }
+            let pane = app.panes().into_iter().find(|pane| pane.notebook == notebook)?;
+            if let Some(id) = app.active_of(&pane).filter(|id| *id != app.active.get()) { app.activate(id); }
+            None
+        }));
         strip.connect(Actions {
             select: Box::new(glib::clone!(@weak self as app => move |id| app.select_id(id))),
             close: Box::new(
@@ -201,7 +223,7 @@ impl App {
             .clone()
     }
     /// The selected tab of each pane, in reading order.
-    fn visible(&self) -> Vec<u32> {
+    pub(super) fn visible(&self) -> Vec<u32> {
         let leaves = self.panes.layout.borrow().leaves();
         leaves
             .into_iter()
@@ -265,14 +287,14 @@ impl App {
             })
         })
     }
-    /// The pane that keeps focus when the active tab is among the `closing` pages.
-    pub(super) fn home_of_active(&self, closing: &[super::Page]) -> Option<Rc<Pane>> {
-        let active = self.active.get();
-        closing
-            .iter()
-            .any(|page| page.id == active)
-            .then(|| self.pane_of(active))
-            .flatten()
+    /// The pane of each page a catalog removes, recorded before removal can empty and collapse it.
+    pub(super) fn homes(&self, closing: &[super::Page]) -> Homes {
+        Homes(
+            closing
+                .iter()
+                .filter_map(|page| Some((page.id, self.pane_of(page.id)?)))
+                .collect(),
+        )
     }
     /// The successor of the closed active tab within its surviving `home` pane.
     pub(super) fn successor(&self, home: Option<Rc<Pane>>, fallback: u32) -> Option<u32> {
