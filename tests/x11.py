@@ -126,3 +126,30 @@ def isolated_display():
                     server.kill()
                     server.communicate()
             errors.close()
+
+
+def window_for_pid(root, atom, pid, *, mapped=False):
+    """The first descendant of `root` whose `_NET_WM_PID` (`atom`) is `pid`."""
+    from Xlib import X
+
+    for window in root.query_tree().children:
+        value = window.get_full_property(atom, X.AnyPropertyType)
+        if (value and len(value.value) == 1 and value.value[0] == pid and
+                (not mapped or window.get_attributes().map_state == X.IsViewable)):
+            return window
+        found = window_for_pid(window, atom, pid, mapped=mapped)
+        if found:
+            return found
+    return None
+
+
+def keypress(connection, *symbols):
+    """Press a chord of keysyms through XTEST and release it in reverse."""
+    from Xlib import X
+    from Xlib.ext import xtest
+
+    for symbol in symbols:
+        xtest.fake_input(connection, X.KeyPress, connection.keysym_to_keycode(symbol))
+    for symbol in reversed(symbols):
+        xtest.fake_input(connection, X.KeyRelease, connection.keysym_to_keycode(symbol))
+    connection.sync()

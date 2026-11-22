@@ -63,9 +63,18 @@ def image_bytes(image):
 
 
 def pixels(window):
+    """The central quarter of the window's on-screen part, or None while a resize races the capture."""
     size = window.get_geometry()
-    return image_bytes(window.get_image(size.width // 4, size.height // 4,
-                                        size.width // 2, size.height // 2, X.ZPixmap, 0xffffffff))
+    screen = window.display.info.roots[window.display.default_screen]
+    origin = window.translate_coords(screen.root, 0, 0)  # The root origin in window coordinates.
+    # X refuses images of off-screen areas, and windows sized from font metrics can exceed the private screen.
+    width = min(size.width, screen.width_in_pixels + origin.x)
+    height = min(size.height, screen.height_in_pixels + origin.y)
+    try:
+        return image_bytes(window.get_image(width // 4, height // 4, width // 2, height // 2,
+                                            X.ZPixmap, 0xffffffff))
+    except error.BadMatch:
+        return None
 
 
 def ready(window, color=0x112233):
@@ -140,11 +149,11 @@ def typing(connection, window, count):
     expected = {}
     time.sleep(.05)
     for symbol in (XK.XK_m, XK.XK_W):
-        before = pixels(window)
+        before = wait_for(lambda: pixels(window))
         press(symbol)
         def changed():
             current = pixels(window)
-            return current if current != before else None
+            return current if current not in (None, before) else None
         expected[symbol] = wait_for(changed)
     if expected[XK.XK_m] == expected[XK.XK_W]:
         capture_failure(window)

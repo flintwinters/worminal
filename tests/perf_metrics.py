@@ -28,10 +28,12 @@ def descendants(pid):
 
 
 def memory(pids):
-    values = {"rss_kib": 0, "pss_kib": 0, "processes": 0}
+    """Summed RSS/PSS, plus PSS per process name to show which process owns a change."""
+    values = {"rss_kib": 0, "pss_kib": 0, "processes": 0, "pss_kib_by_name": {}}
     for pid in sorted(pids):
         try:
             lines = Path(f"/proc/{pid}/smaps_rollup").read_text().splitlines()
+            name = Path(f"/proc/{pid}/comm").read_text().strip()
         except (FileNotFoundError, ProcessLookupError):
             continue
         values["processes"] += 1
@@ -41,6 +43,8 @@ def memory(pids):
                 values["rss_kib"] += int(parts[0])
             elif key == "Pss:":
                 values["pss_kib"] += int(parts[0])
+                by_name = values["pss_kib_by_name"]
+                by_name[name] = by_name.get(name, 0) + int(parts[0])
     return values
 
 

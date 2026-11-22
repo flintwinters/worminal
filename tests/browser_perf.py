@@ -22,7 +22,7 @@ from http_fixture import serving
 from preview import profile
 from visible_latency import (image_bytes, capture_failure, find_window, ready, snapshot, snapshot_revision,
                              stop, summarize, wait_for)
-from window_perf import keypress, window_for_pid
+from x11 import keypress, window_for_pid
 from x11 import isolated_display
 
 ROOT = Path(__file__).resolve().parent.parent
