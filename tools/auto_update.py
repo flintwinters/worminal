@@ -125,7 +125,14 @@ def update(remote=None, branch=BRANCH, clone=CLONE, stamp=STAMP, prefix=PREFIX, 
                   f"{installed.read_text().strip()[:7]}; push or merge that work to {branch}.")
             return 0
         git("reset", "-q", "--hard", tip, cwd=clone)
-        if code := delegate(clone, prefix):
+        try:
+            code = delegate(clone, prefix)
+        finally:
+            # The update has finished using Cargo outputs. Keep diagnostics and staged binaries.
+            cargo_cache = clone / "build" / "cargo"
+            if cargo_cache.is_dir():
+                shutil.rmtree(cargo_cache)
+        if code:
             print(f"Update to {tip[:7]} did not finish; the installed stamp was not advanced.")
             notify_failure(f"{tip[:7]} did not pass its checks; see journalctl --user -u {UNIT}.")
             return code

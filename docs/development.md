@@ -19,6 +19,7 @@ Scrollback capacity is fixed by a process's first engine; other settings apply t
 Builds and installs auto-detect a headless host (no GTK/WebKit/Pango via pkg-config, or `WORMINAL_HEADLESS=1`; `0` forces
 graphics) and then build/install only `worminald` and the manual. Cargo output and generated files belong in
 `build/`; native executables use `build/bin` and modules use `build/lib/worminal`, matching installed prefixes.
+The Cargo dev profile keeps source locations for backtraces with compact line-table debug information.
 By default `worminald` links this host's glibc, so version sync only reaches peers with at least this glibc.
 Releases use `build`/`install --portable` (or `WORMINAL_PORTABLE=1`): a daemon linked statically against musl that
 sync can copy between distributions. It needs `musl-gcc` (Debian/Ubuntu `musl-tools`) and `rustup target add
@@ -51,8 +52,9 @@ update` builds the current checkout, installs to /usr/local, then verifies the i
 displays; it does not run the test suite (`update --check` does, as auto-update does). Installation and any private
 tmpfs mounts use sudo; checks run as the user. `manage.py auto-update --timer install` schedules a daily 03:00
 systemd user timer: it builds and checks the tip of `origin/main` in a private clone under `build/auto-update`,
-installs to /usr/local only if everything passes, and skips unchanged tips. It shares the checkout update pipeline
-and needs passwordless sudo for the install step.
+installs to /usr/local only if everything passes, and skips unchanged tips. After each attempt it drops the
+private clone's Cargo artifacts and retains diagnostics, so the next attempted update starts with a cold build
+cache. It shares the checkout update pipeline and needs passwordless sudo for the install step.
 
 ## Installation and live processes
 

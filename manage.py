@@ -611,7 +611,7 @@ def clean():
 @app.command("check-build")
 def check_build():
     """Check build freshness, installation, runtime configuration and cleanup."""
-    for pattern in ("test_build.py", "test_theme.py"):
+    for pattern in ("test_build.py", "test_theme.py", "test_auto_update.py"):
         code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", pattern, "-q"])
         if code:
             raise typer.Exit(code)

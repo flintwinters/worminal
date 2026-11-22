@@ -38,6 +38,8 @@ class UpdateTests(unittest.TestCase):
     def update(self, failing=None):
         def delegate(cwd, prefix):
             self.steps.append((Path(cwd), prefix))
+            for relative in ("build/cargo/debug", "build/checks"):
+                (cwd / relative).mkdir(parents=True, exist_ok=True)
             return 1 if failing else 0
         with patch.object(auto_update, "delegate", delegate), patch.object(
                 auto_update, "notify_failure") as notify:
@@ -47,6 +49,8 @@ class UpdateTests(unittest.TestCase):
     def test_installs_each_new_tip_once_by_running_the_clones_own_update(self):
         self.assertEqual(self.update(), 0)
         self.assertEqual(self.steps, [(self.clone, "/prefix")])
+        self.assertFalse((self.clone / "build/cargo").exists())
+        self.assertTrue((self.clone / "build/checks").is_dir())
         self.update()
         self.assertEqual(len(self.steps), 1)
         self.commit("two")
@@ -57,6 +61,8 @@ class UpdateTests(unittest.TestCase):
     def test_failing_update_never_advances_stamp_notifies_and_is_retried_next_night(self):
         self.assertEqual(self.update(failing=True), 1)
         self.assertFalse(self.stamp.exists())
+        self.assertFalse((self.clone / "build/cargo").exists())
+        self.assertTrue((self.clone / "build/checks").is_dir())
         self.notified.assert_called_once()
         self.assertEqual(self.update(), 0)
         self.assertTrue(self.stamp.exists())
