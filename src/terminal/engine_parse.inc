@@ -5,9 +5,10 @@ te_csiparse(TermEngine *session)
 {
 	char *p = csiescseq.buf, *np;
 	long int v;
-	int sep = ';'; /* colon or semi-colon, but not both */
+	int colon = 0;
 
 	csiescseq.narg = 0;
+	csiescseq.sub = 0;
 	if (*p == '?') {
 		csiescseq.priv = 1;
 		p++;
@@ -21,13 +22,14 @@ te_csiparse(TermEngine *session)
 			v = 0;
 		if (v == LONG_MAX || v == LONG_MIN)
 			v = -1;
+		if (colon)
+			csiescseq.sub |= 1u << csiescseq.narg;
 		csiescseq.arg[csiescseq.narg++] = v;
 		p = np;
-		if (sep == ';' && *p == ':')
-			sep = ':'; /* allow override to colon once */
-		if (*p != sep || csiescseq.narg == ESC_ARG_SIZ)
+		/* Colons separate subparameters and may mix with semicolons: 1;38:2::r:g:b;48;5;n */
+		if ((*p != ';' && *p != ':') || csiescseq.narg == ESC_ARG_SIZ)
 			break;
-		p++;
+		colon = *p++ == ':';
 	}
 	csiescseq.mode[0] = *p++;
 	csiescseq.mode[1] = (p < csiescseq.buf+csiescseq.len) ? *p : '\0';
@@ -222,13 +224,42 @@ te_tdefcolor(TermEngine *session, const int *attr, int *npar, int l)
 	return idx;
 }
 
-static void
-te_tsetattr(TermEngine *session, const int *attr, int l)
+/* A colon-form color: `2:[colorspace:]r:g:b` or `5:index`, `n` subparameters after the 38/48/58. */
+static int32_t
+te_tsubcolor(const int *attr, int n)
 {
-	int i;
+	if (n >= 2 && attr[0] == 5 && BETWEEN(attr[1], 0, 255))
+		return attr[1];
+	if ((n == 4 || n == 5) && attr[0] == 2) {
+		const int *rgb = attr + n - 3; /* The optional color-space slot precedes r:g:b. */
+		if (BETWEEN(rgb[0], 0, 255) && BETWEEN(rgb[1], 0, 255) && BETWEEN(rgb[2], 0, 255))
+			return TRUECOLOR(rgb[0], rgb[1], rgb[2]);
+	}
+	return -1;
+}
+
+static void
+te_tsetattr(TermEngine *session, const int *attr, uint32_t sub, int l)
+{
+	int i, n;
 	int32_t idx;
 
 	for (i = 0; i < l; i++) {
+		/* A colon group belongs to its leading parameter; it never spills into the following attributes. */
+		for (n = 0; i + n + 1 < l && sub >> (i + n + 1) & 1; n++)
+			;
+		if (n) {
+			idx = te_tsubcolor(attr + i + 1, n);
+			if (attr[i] == 38 && idx >= 0)
+				term.c.attr.fg = idx;
+			else if (attr[i] == 48 && idx >= 0)
+				term.c.attr.bg = idx;
+			else if (attr[i] == 4) /* 4:0 removes the underline; styles 4:1..4:5 draw a plain one. */
+				term.c.attr.mode = attr[i + 1] ? term.c.attr.mode | ATTR_UNDERLINE
+				                               : term.c.attr.mode & ~ATTR_UNDERLINE;
+			i += n;
+			continue;
+		}
 		switch (attr[i]) {
 		case 0:
 			term.c.attr.mode &= ~(
@@ -672,7 +703,7 @@ te_csihandle(TermEngine *session)
 		te_tsetmode(session, csiescseq.priv, 1, csiescseq.arg, csiescseq.narg);
 		break;
 	case 'm': /* SGR -- Terminal attribute (color) */
-		te_tsetattr(session, csiescseq.arg, csiescseq.narg);
+		te_tsetattr(session, csiescseq.arg, csiescseq.sub, csiescseq.narg);
 		break;
 	case 'n': /* DSR -- Device Status Report */
 		switch (csiescseq.arg[0]) {

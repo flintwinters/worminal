@@ -7,7 +7,8 @@
 extern int te_history_size, te_scroll_multiplier;
 #define UTF_SIZ 4
 #define ESC_BUF_SIZ (128 * UTF_SIZ)
-#define ESC_ARG_SIZ 16
+/* SGR combines several attributes with 5-parameter direct colors; 16 truncated real sequences. */
+#define ESC_ARG_SIZ 32
 #define STR_BUF_SIZ ESC_BUF_SIZ
 #define STR_ARG_SIZ ESC_ARG_SIZ
 
@@ -52,6 +53,7 @@ typedef struct {
 	size_t len;
 	char priv;
 	int arg[ESC_ARG_SIZ], narg;
+	uint32_t sub; /* bit i: arg[i] followed a colon (an ITU T.416 subparameter) */
 	char mode[2];
 } CSIEscape;
 

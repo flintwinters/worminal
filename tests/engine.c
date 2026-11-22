@@ -395,9 +395,42 @@ progress(void)
 	worminal_engine_destroy(engine);
 }
 
+static void
+direct_colors(void)
+{
+	/* SGR colors in every form applications emit: semicolons, ITU colons with and without the color-space
+	 * slot, colons mixed with later semicolon parameters, and sequences longer than a few attributes. */
+	static const char *const forms[] = {
+		"\033[38;2;10;20;30;48;2;1;2;3m",
+		"\033[38:2::10:20:30;48:2::1:2:3m",
+		"\033[38:2:10:20:30;48:2:1:2:3m",
+		"\033[1;38:2:10:20:30;48;2;1;2;3m",
+		"\033[58;2;7;8;9;1;3;4;9;38;2;10;20;30;48;2;1;2;3m",
+	};
+	const uint32_t fg = WORMINAL_TRUECOLOR_FLAG | 10u << 16 | 20u << 8 | 30u;
+	const uint32_t bg = WORMINAL_TRUECOLOR_FLAG | 1u << 16 | 2u << 8 | 3u;
+	for (size_t form = 0; form < sizeof(forms) / sizeof(*forms); form++) {
+		WorminalEngine *engine;
+		assert(worminal_engine_create(8, 2, &engine) == WORMINAL_OK);
+		feed(engine, forms[form], 1);
+		feed(engine, "X\033[38:5:100mY", 1);
+		WorminalCell cells[8];
+		size_t used;
+		int32_t dirty;
+		assert(worminal_engine_row(engine, 0, cells, 8, &used, &dirty) == WORMINAL_OK);
+		if (cells[0].foreground != fg || cells[0].background != bg || cells[1].foreground != 100) {
+			fprintf(stderr, "direct color form %zu: fg %x bg %x indexed %u\n", form,
+				cells[0].foreground, cells[0].background, cells[1].foreground);
+			abort();
+		}
+		worminal_engine_destroy(engine);
+	}
+}
+
 int
 main(void)
 {
+	direct_colors();
 	progress();
 	notifications();
 	events_and_isolation();
