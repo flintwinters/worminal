@@ -10,6 +10,7 @@ import unittest
 from runtime import ROOT, CHECKS, runtime_binary, window, stop_application
 from test_keys import read_bytes, wait_title
 from x11 import isolated_display
+from preview import profile
 
 
 class FileDropTest(unittest.TestCase):
@@ -57,3 +58,43 @@ class FileDropTest(unittest.TestCase):
                 output, error = source.communicate(timeout=5)
                 self.assertEqual(actual, expected, (output, error))
                 self.assertFalse(select.select([app.stdout], [], [], .1)[0], 'drop submitted extra input')
+
+    def test_explorer_entries_drag_into_the_terminal(self):
+        # The explorer page puts the entry's file URI on WebKit's drag; the terminal pastes it as a quoted path.
+        with (isolated_display() as env, profile(env) as browser_env,
+              tempfile.TemporaryDirectory(prefix='explorer-drop-', dir=CHECKS) as directory, ExitStack() as cleanup):
+            # Its own scope keeps the explorer from forwarding into the terminal's owner as another tab.
+            browser_env['WORMINAL_SHARED_SOCKET_SCOPE'] += '-explorer'
+            for environment in (env, browser_env):
+                environment.update(GDK_BACKEND='x11')
+                environment.pop('WAYLAND_DISPLAY', None)
+            title = 'Explorer drop terminal'
+            app = subprocess.Popen([str(runtime_binary('worminal-rust')), '-T', title, '-o', '-',
+                                    '-e', '/bin/sh', '-c', f"stty raw -echo; printf '\\033]2;{title} ready\\aR'; exec cat"],
+                                   env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            cleanup.callback(stop_application, app)
+            target = window(env, app)
+            wait_title(env, target, title + ' ready')
+            read_bytes(app.stdout, len(f'\033]2;{title} ready\aR'))
+            path = Path(directory) / "it's here.txt"
+            path.touch()
+            explorer = (ROOT / 'file-explorer/dist/index.html').as_uri() + '?path=' + directory
+            source = subprocess.Popen([str(runtime_binary('worminal-rust')), '--browser', explorer], env=browser_env,
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            cleanup.callback(stop_application, source)
+            origin = window(browser_env, source)
+            wait_title(browser_env, origin, directory)
+            xdo = lambda *args: subprocess.run(['xdotool', *args], env=env, check=True)
+            xdo('windowsize', origin, '700', '300')  # wide enough that the path stays on one line
+            xdo('windowmove', origin, '0', '0')
+            xdo('windowmove', target, '720', '100')
+            time.sleep(.5)
+            # The single entry's name starts the drag; the pointer then travels into the terminal.
+            xdo('mousemove', '--window', origin, '30', '94', 'mousedown', '1')
+            for x in range(40, 801, 20):
+                xdo('mousemove', str(x), '200')
+                time.sleep(.03)
+            time.sleep(.2)
+            xdo('mouseup', '1')
+            expected = ("'" + str(path).replace("'", "'\\''") + "'").encode()
+            self.assertEqual(read_bytes(app.stdout, len(expected)), expected)
