@@ -186,6 +186,9 @@ fn snapshot() -> io::Result<Vec<Window>> {
                 geometry: [x, y, width, height],
                 flags,
                 zoom,
+                arrangement: app.arrangement()?,
+                desktop: crate::graphics_ffi::desktop(&app.window)
+                    .unwrap_or(gui_handoff::NO_DESKTOP),
             })
         })
         .collect()
@@ -215,6 +218,7 @@ fn restore_views() {
         if app.active.get() != 0 {
             app.activate(app.active.get());
         }
+        app.show_visible_browsers();
     }
     if let Some(app) = apps.iter().find(|app| app.window.is_active()) {
         app.window.present();

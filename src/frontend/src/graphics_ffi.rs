@@ -8,6 +8,8 @@ extern "C" {
     fn gdk_x11_display_get_type() -> glib::ffi::GType;
     fn gdk_x11_get_server_time(window: *mut gtk::gdk::ffi::GdkWindow) -> u32;
     fn gdk_x11_window_set_user_time(window: *mut gtk::gdk::ffi::GdkWindow, time: u32);
+    fn gdk_x11_window_get_desktop(window: *mut gtk::gdk::ffi::GdkWindow) -> u32;
+    fn gdk_x11_window_move_to_desktop(window: *mut gtk::gdk::ffi::GdkWindow, desktop: u32);
 }
 
 pub(crate) fn show_window(window: &gtk::Window) {
@@ -149,4 +151,27 @@ pub(crate) fn x11(window: &gtk::Window) -> bool {
         let _ = window;
         false
     }
+}
+
+/// The X11 virtual desktop (`_NET_WM_DESKTOP`) showing `window`; `None` on Wayland or before mapping.
+pub(crate) fn desktop(window: &gtk::Window) -> Option<u32> {
+    use gtk::prelude::*;
+    #[cfg(worminal_gdk_x11)]
+    if x11(window) {
+        let surface = window.window()?;
+        return Some(unsafe { gdk_x11_window_get_desktop(surface.to_glib_none().0) });
+    }
+    let _ = window;
+    None
+}
+/// Ask the X11 window manager to show a mapped `window` on `desktop`; nothing elsewhere.
+pub(crate) fn move_to_desktop(window: &gtk::Window, desktop: u32) {
+    use gtk::prelude::*;
+    #[cfg(worminal_gdk_x11)]
+    if x11(window) {
+        if let Some(surface) = window.window() {
+            unsafe { gdk_x11_window_move_to_desktop(surface.to_glib_none().0, desktop) };
+        }
+    }
+    let _ = (window, desktop);
 }

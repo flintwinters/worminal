@@ -355,13 +355,20 @@ pub(crate) fn pin_for_update() {
 pub(crate) fn preflight() -> io::Result<()> {
     module().map(|_| ())
 }
+/// The profile lock this owner holds: its open profile's, or an adopted lease no browser has used yet. An owner
+/// replaced while showing no browser still holds the adopted lease; reporting none made its successor open the
+/// profile against that held lock and fail with "already open in another owner".
 pub(crate) fn lease() -> io::Result<Option<File>> {
-    PROFILE.with(|slot| {
+    let held = PROFILE.with(|slot| {
         slot.borrow()
             .as_ref()
             .map(|profile| profile._lock.try_clone())
             .transpose()
-    })
+    })?;
+    match held {
+        Some(lock) => Ok(Some(lock)),
+        None => LEASE.with(|slot| slot.borrow().as_ref().map(File::try_clone).transpose()),
+    }
 }
 pub(crate) fn adopt(lock: File) -> io::Result<()> {
     if PROFILE.with(|slot| slot.borrow().is_some()) {

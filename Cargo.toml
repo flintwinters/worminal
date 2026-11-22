@@ -5,7 +5,7 @@ members = ["src/engine-sys", "src/engine", "src/protocol", "src/workspace",
 
 [workspace.package]
 # Product version for every executable and module.
-version = "1.0.3"
+version = "1.0.4"
 edition = "2021"
 publish = false
 

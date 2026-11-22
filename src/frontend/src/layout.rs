@@ -1,4 +1,6 @@
 //! The window's split layout as a binary tree of tab ids, independent of GTK. A window with no split has no layout.
+use std::io;
+use worminal_protocol::{Buffer, Payload};
 
 /// Where a dragged tab lands relative to the pane under the pointer: beside it, or in its place.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -177,11 +179,97 @@ impl Layout {
             second,
         }
     }
+    /// The split as window replacement carries it: each pane leaf is written as its `tabs`, selected first.
+    pub fn encode(&self, tabs: &dyn Fn(u32) -> Vec<u32>, body: &mut Buffer) -> io::Result<()> {
+        match self {
+            Self::Leaf(pane) => {
+                let tabs = tabs(*pane);
+                body.put_u32(0)?;
+                body.put_u32(tabs.len() as u32)?;
+                tabs.iter().try_for_each(|tab| body.put_u32(*tab))
+            }
+            Self::Split {
+                side_by_side,
+                first,
+                second,
+            } => {
+                body.put_u32(if *side_by_side { 1 } else { 2 })?;
+                first.encode(tabs, body)?;
+                second.encode(tabs, body)
+            }
+        }
+    }
+    /// Read an encoded split: a layout whose leaves index the returned tab groups.
+    pub fn decode(bytes: &[u8]) -> io::Result<(Self, Vec<Vec<u32>>)> {
+        fn read(
+            body: &mut Payload<'_>,
+            groups: &mut Vec<Vec<u32>>,
+            depth: u32,
+        ) -> io::Result<Layout> {
+            let invalid = || io::Error::new(io::ErrorKind::InvalidData, "Invalid window split");
+            if depth > MAX_DEPTH {
+                return Err(invalid());
+            }
+            match body.u32()? {
+                0 => {
+                    let count = body.u32()? as usize;
+                    if count > MAX_TABS {
+                        return Err(invalid());
+                    }
+                    let tabs = (0..count).map(|_| body.u32()).collect::<io::Result<_>>()?;
+                    groups.push(tabs);
+                    Ok(Layout::Leaf(groups.len() as u32 - 1))
+                }
+                kind @ (1 | 2) => Ok(Layout::split(
+                    kind == 1,
+                    Box::new(read(body, groups, depth + 1)?),
+                    Box::new(read(body, groups, depth + 1)?),
+                )),
+                _ => Err(invalid()),
+            }
+        }
+        let mut body = Payload::new(bytes);
+        let mut groups = Vec::new();
+        let layout = read(&mut body, &mut groups, 0)?;
+        body.finish()?;
+        Ok((layout, groups))
+    }
 }
+/// Bounds on a received split, far beyond any window a person arranges.
+const MAX_DEPTH: u32 = 32;
+const MAX_TABS: usize = 4096;
 
 #[cfg(test)]
 mod tests {
     use super::{neighbor, Direction::*, Layout::*, PaneRect, Zone};
+
+    #[test]
+    fn a_split_round_trips_with_its_tabs() {
+        let layout = Split {
+            side_by_side: true,
+            first: Box::new(Leaf(7)),
+            second: Box::new(Split {
+                side_by_side: false,
+                first: Box::new(Leaf(8)),
+                second: Box::new(Leaf(9)),
+            }),
+        };
+        let mut body = worminal_protocol::Buffer::default();
+        layout
+            .encode(&|pane| vec![pane * 10, pane * 10 + 1], &mut body)
+            .unwrap();
+        let (decoded, groups) = super::Layout::decode(&body.into_bytes()).unwrap();
+        assert_eq!(decoded.leaves(), vec![0, 1, 2]);
+        assert_eq!(groups, vec![vec![70, 71], vec![80, 81], vec![90, 91]]);
+        assert!(matches!(
+            decoded,
+            Split {
+                side_by_side: true,
+                ..
+            }
+        ));
+        assert!(super::Layout::decode(&[0, 0, 0, 3]).is_err());
+    }
 
     #[test]
     fn zones_split_a_pane_into_edges_and_a_center() {

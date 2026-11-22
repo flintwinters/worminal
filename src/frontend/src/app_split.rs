@@ -1,6 +1,6 @@
 //! Split panes: every pane is a tab strip over a notebook of its own tabs, and a window with one pane is an
-//! ordinary window. The split is per window and not persisted; the daemon only learns which tabs this view
-//! shows (`Pane`), never the geometry.
+//! ordinary window. The split is per window: window replacement carries it, but it is not persisted; the daemon
+//! only learns which tabs this view shows (`Pane`), never the geometry.
 use super::{App, LINK_SHIFT};
 use crate::{
     layout::{neighbor, Direction, Layout, PaneRect, Target, Zone},
@@ -553,6 +553,73 @@ impl App {
         if self.active.get() != id || !self.terminal(id).is_some_and(|terminal| terminal.live()) {
             self.activate(id);
         }
+    }
+    /// The split window replacement carries, each pane's selected tab first; empty for a single pane.
+    pub(super) fn arrangement(&self) -> std::io::Result<Vec<u8>> {
+        if self.panes().len() < 2 {
+            return Ok(Vec::new());
+        }
+        let tabs = |id| {
+            let Some(pane) = self.pane(id) else {
+                return Vec::new();
+            };
+            let selected = self.active_of(&pane);
+            selected
+                .into_iter()
+                .chain(
+                    self.tabs_of(&pane)
+                        .into_iter()
+                        .filter(|tab| Some(*tab) != selected),
+                )
+                .collect()
+        };
+        let mut body = worminal_protocol::Buffer::default();
+        self.panes.layout.borrow().encode(&tabs, &mut body)?;
+        Ok(body.into_bytes())
+    }
+    /// Rebuild a carried split over this window's tabs, as drops onto pane edges would. Tabs that closed meanwhile
+    /// leave their panes empty, and those collapse; tabs opened meanwhile stay in the first pane.
+    pub(super) fn arrange(self: &Rc<Self>, bytes: &[u8]) -> std::io::Result<()> {
+        if bytes.is_empty() || self.panes().len() > 1 {
+            return Ok(());
+        }
+        let (layout, groups) = Layout::decode(bytes)?;
+        self.split_off(&layout, &groups, &self.focused_pane());
+        self.reorder_panes();
+        self.collapse();
+        self.rebuild();
+        for group in &groups {
+            if let Some(&selected) = group.first() {
+                self.show_page(selected);
+            }
+        }
+        Ok(())
+    }
+    /// `pane` holds every tab of `layout`: split its second half off beside it, then arrange each half.
+    fn split_off(self: &Rc<Self>, layout: &Layout, groups: &[Vec<u32>], pane: &Rc<Pane>) {
+        let Layout::Split {
+            side_by_side,
+            first,
+            second,
+        } = layout
+        else {
+            return;
+        };
+        let beside = self.add_pane();
+        for leaf in second.leaves() {
+            for &tab in &groups[leaf as usize] {
+                self.move_page(tab, &beside);
+            }
+        }
+        let zone = if *side_by_side {
+            Zone::Right
+        } else {
+            Zone::Bottom
+        };
+        let current = self.panes.layout.borrow().clone();
+        *self.panes.layout.borrow_mut() = current.insert(pane.id, beside.id, zone);
+        self.split_off(first, groups, pane);
+        self.split_off(second, groups, &beside);
     }
     /// Gather every tab into the focused pane again.
     pub(super) fn unsplit(self: &Rc<Self>) {

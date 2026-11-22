@@ -60,7 +60,7 @@ te_export_compat(TermEngine *s, const WorminalTransportState *transport, EngineS
 		.magic = 0x57545331, .version = 1, .bytes = sizeof(EngineCompatSnapshot),
 		.glyph_bytes = sizeof(Glyph), .history = te_history_size,
 		.row = t->row, .col = t->col, .histlen = t->histlen, .scr = t->scr,
-		.c = t->c, .selection = s->sel, .csi = s->csiescseq,
+		.c = t->c, .selection = s->sel,
 		.ocx = t->ocx, .ocy = t->ocy, .top = t->top, .bot = t->bot,
 		.mode = t->mode, .esc = t->esc, .charset = t->charset, .icharset = t->icharset,
 		.lastc = t->lastc, .altscreen_allowed = s->altscreen_allowed,
@@ -68,6 +68,8 @@ te_export_compat(TermEngine *s, const WorminalTransportState *transport, EngineS
 		.output_kind = transport->output_kind,
 		.str_type = s->strescseq.type, .str_len = s->strescseq.len,
 	};
+	memcpy(h.csi.buf, s->csiescseq.buf, sizeof(h.csi.buf));
+	h.csi.len = s->csiescseq.len;
 	memcpy(h.saved, s->saved, sizeof(h.saved));
 	memcpy(h.trantbl, t->trantbl, sizeof(h.trantbl));
 	memcpy(h.ttybuf, transport->pending, sizeof(h.ttybuf));
@@ -96,14 +98,16 @@ te_import_compat(EngineSnapshotIO *fd, WorminalTransportState *transport)
 	    h.c.x < 0 || h.c.x >= h.col || h.c.y < 0 || h.c.y >= h.row ||
 	    h.charset < 0 || h.charset > 3 || h.icharset < 0 || h.icharset > 3 ||
 	    h.ttybuflen < 0 || h.ttybuflen > WORMINAL_PENDING_BYTES || h.str_len > 1024 * 1024 ||
-	    (h.output_kind < -1 || h.output_kind > 1) || h.csi.len > ESC_BUF_SIZ || h.csi.narg < 0 || h.csi.narg > ESC_ARG_SIZ)
+	    (h.output_kind < -1 || h.output_kind > 1) || h.csi.len > ESC_BUF_SIZ)
 		return NULL;
 	/* A pending CSI writes one more byte before testing its limit. Complete CSI buffers may be
 	 * full, but no parser-produced pending buffer can reach that state. Selection reads index rows. */
 	if (((h.esc & ESC_CSI) && h.csi.len >= ESC_BUF_SIZ - 1) || !valid_selection(&h)) return NULL;
 	if (worminal_engine_create(h.col, h.row, &s) != WORMINAL_OK) return NULL;
 	Term *t = &s->term;
-	t->c = h.c; s->sel = h.selection; s->csiescseq = h.csi;
+	t->c = h.c; s->sel = h.selection;
+	memcpy(s->csiescseq.buf, h.csi.buf, sizeof(h.csi.buf));
+	s->csiescseq.len = h.csi.len;
 	t->ocx = h.ocx; t->ocy = h.ocy; t->top = h.top; t->bot = h.bot;
 	t->mode = h.mode; t->esc = h.esc; t->charset = h.charset; t->icharset = h.icharset;
 	t->lastc = h.lastc; s->altscreen_allowed = h.altscreen_allowed;

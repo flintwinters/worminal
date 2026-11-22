@@ -106,6 +106,8 @@ pub(crate) fn receive(token: &OsStr, candidate: bool) -> io::Result<()> {
                                     }
                                 }
                                 app.window.set_sensitive(true);
+                                // Activation hosts only the active tab; a split's other browsers follow here.
+                                app.show_visible_browsers();
                                 if Some(app.state_id) == focus {
                                     app.activate(app.active.get());
                                     app.window.present();

@@ -18,6 +18,8 @@ fn window(selected: u32) -> Window {
         geometry: [-40, 60, 800, 500],
         flags: 4,
         zoom: 1.5,
+        arrangement: Vec::new(),
+        desktop: gui_handoff::NO_DESKTOP,
     }
 }
 
@@ -36,6 +38,8 @@ fn transfers_multiple_windows_and_descriptor_ownership() {
         index: 3,
         request: window(0).request,
     });
+    first.arrangement = vec![0, 0, 0, 1, 0, 0, 0, 0];
+    first.desktop = 2;
     let state = [first, window(11)];
     let expected = gui_handoff::encode(&state).unwrap();
     gui_handoff::send(&mut sender, &listener, &lease, &state).unwrap();
@@ -77,10 +81,13 @@ fn accepts_previous_single_link_handoff_version() {
         UnixListener::bind_addr(&SocketAddr::from_abstract_name(name.as_bytes()).unwrap()).unwrap();
     let lease = File::open("/dev/null").unwrap();
     let state = [window(7)];
-    for version in [1u32, 2] {
+    for version in [1u32, 2, 3] {
         let mut body = gui_handoff::encode(&state).unwrap();
+        body.truncate(body.len() - 8); // before v4: no split or desktop.
         body[..4].copy_from_slice(&version.to_be_bytes());
-        body.drain(8..12); // v1/v2 did not carry stable window identities.
+        if version < 3 {
+            body.drain(8..12); // v1/v2 did not carry stable window identities.
+        }
         if version == 1 {
             body.truncate(body.len() - 4);
         }
@@ -101,8 +108,10 @@ fn accepts_previous_single_link_handoff_version() {
         sender.write_all(&body).unwrap();
         let (_, _, received) = gui_handoff::receive(&mut receiver).unwrap();
         assert_eq!(received[0].selected, 7);
-        assert_eq!(received[0].id, 1);
+        assert_eq!(received[0].id, if version < 3 { 1 } else { 7 });
         assert!(received[0].links.is_empty());
+        assert!(received[0].arrangement.is_empty());
+        assert_eq!(received[0].desktop, gui_handoff::NO_DESKTOP);
     }
 }
 
@@ -114,6 +123,8 @@ fn configuration_identity_excludes_presentation_and_keeps_owner_membership() {
     state.geometry = [123, -456, 900, 700];
     state.flags = gui_handoff::CLOSE_REQUESTED | 3;
     state.zoom = 3.0;
+    state.arrangement = vec![0, 0, 0, 1, 0, 0, 0, 0];
+    state.desktop = 1;
     assert_eq!(
         gui_handoff::configuration(std::slice::from_ref(&state)).unwrap(),
         configuration

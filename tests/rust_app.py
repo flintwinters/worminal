@@ -43,6 +43,18 @@ def window_size(root):
     return geometry.width, geometry.height
 
 
+def panel_shown(window):
+    """Whether a 900px-wide window shows the side panel. Its right edge is one faint column between equal
+    backgrounds, colored by the palette; rows through empty terminal and panel space carry no other such column."""
+    from Xlib import X, error
+    try:
+        row = image_bytes(window.get_image(0, 250, 900, 1, X.ZPixmap, 0xffffffff))
+    except error.BadMatch:
+        return False
+    color = lambda x: row[x * 4:x * 4 + 3]
+    return any(color(x - 1) == color(x + 1) != color(x) for x in range(60, 600))
+
+
 def fix_size(root, xdo, wid, width, height):
     """Resize once the first terminal has fitted the window to its character grid; returns the settled size."""
     def settle():
@@ -683,12 +695,7 @@ class RustApplicationTest(unittest.TestCase):
             xdo('windowsize', wid, '900', '500')
             time.sleep(1.5)
 
-            def panel_open():
-                try:
-                    row = image_bytes(window_object.get_image(0, 250, 900, 1, X.ZPixmap, 0xffffffff))
-                except error.BadMatch:
-                    return False
-                return any(len(set(row[x * 4:x * 4 + 3])) == 1 and 70 <= row[x * 4] <= 95 for x in range(60, 600))
+            panel_open = lambda: panel_shown(window_object)
 
             def wait_for(condition, message):
                 deadline = time.monotonic() + 10
@@ -860,15 +867,7 @@ class RustApplicationTest(unittest.TestCase):
             xdo('windowsize', wid, '900', '500')
             time.sleep(1.5)
 
-            def panel_edge():
-                # The panel draws its right edge in a faint gray (about 30% toward the foreground) that this
-                # test's terminals never use; the terminal background is (24, 24, 24).
-                try:
-                    row = image_bytes(window_object.get_image(0, 250, 900, 1, X.ZPixmap, 0xffffffff))
-                except error.BadMatch:
-                    return False
-                edge = lambda x: len(set(row[x * 4:x * 4 + 3])) == 1 and 70 <= row[x * 4] <= 95
-                return any(edge(x) for x in range(60, 600))
+            panel_edge = lambda: panel_shown(window_object)
 
             def wait_for(condition, message):
                 deadline = time.monotonic() + 8

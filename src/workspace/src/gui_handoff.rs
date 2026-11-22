@@ -12,9 +12,13 @@ use worminal_protocol::{Buffer, Decoder, Payload};
 
 pub const MAX_WINDOWS: usize = 32;
 pub const TIMEOUT_SECONDS: u64 = 15;
-const VERSION: u32 = 3;
+/// Version 4 adds each window's split and X11 desktop; older donors send neither.
+const VERSION: u32 = 4;
 const MAX_DESCRIPTORS: usize = 128;
 pub const MAX_LINKS: usize = 16;
+/// No X11 desktop recorded (Wayland, or a window on all desktops).
+pub const NO_DESKTOP: u32 = u32::MAX;
+const MAX_ARRANGEMENT: usize = 64 * 1024;
 /// Keep the original host available for explicit reattachment, without reconnecting on replacement.
 pub const PRIMARY_DETACHED: u32 = 8;
 
@@ -35,6 +39,9 @@ pub struct Window {
     pub geometry: [i32; 4],
     pub flags: u32,
     pub zoom: f64,
+    /// The window's split as the frontend encodes it; empty for a single pane.
+    pub arrangement: Vec<u8>,
+    pub desktop: u32,
 }
 
 impl Window {
@@ -106,6 +113,17 @@ fn encode_with(windows: &[Window], configuration: bool) -> io::Result<Vec<u8>> {
             }
             body.put_u32(link.index)?;
             body.put_string(&link.request.encode()?)?;
+        }
+        if window.arrangement.len() > MAX_ARRANGEMENT {
+            return Err(invalid());
+        }
+        // Like the rest of the presentation, the split and desktop are never a reason to reject reuse.
+        if configuration {
+            body.put_string(&[])?;
+            body.put_u32(NO_DESKTOP)?;
+        } else {
+            body.put_string(&window.arrangement)?;
+            body.put_u32(window.desktop)?;
         }
     }
     Ok(body.into_bytes())
@@ -189,9 +207,16 @@ pub fn receive(peer: &mut UnixStream) -> io::Result<(UnixListener, File, Vec<Win
                 });
             }
         }
+        let (arrangement, desktop) = if version >= 4 {
+            (body.string()?.to_vec(), body.u32()?)
+        } else {
+            (Vec::new(), NO_DESKTOP)
+        };
         windows.push(Window {
             request,
             links,
+            arrangement,
+            desktop,
             id: presentation.id,
             selected: presentation.selected,
             geometry: presentation.geometry,

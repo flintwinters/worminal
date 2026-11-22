@@ -6,6 +6,8 @@ struct Prepared {
     configuration: Vec<u8>,
     app: Rc<App>,
     view: gui_handoff::Presentation,
+    arrangement: Vec<u8>,
+    desktop: u32,
 }
 pub(super) struct Candidate {
     windows: Vec<Prepared>,
@@ -39,6 +41,8 @@ impl Candidate {
                 configuration,
                 app,
                 view: state.presentation(),
+                arrangement: state.arrangement,
+                desktop: state.desktop,
             });
         }
         // Create all replacements before retiring provisional windows, including when every
@@ -66,6 +70,14 @@ impl Candidate {
     }
     pub(super) fn select(&self) {
         for window in &self.windows {
+            // Both need the mapped window and its tabs, which exist by now. Each is presentation only: a
+            // failure leaves an unsplit window on the current desktop rather than rejecting the update.
+            if window.desktop != gui_handoff::NO_DESKTOP {
+                crate::graphics_ffi::move_to_desktop(&window.app.window, window.desktop);
+            }
+            if let Err(error) = window.app.arrange(&window.arrangement) {
+                eprintln!("worminal: window split not restored: {error}");
+            }
             // A shell may exit independently while committing. Use the daemon's existing
             // fallback rather than rejecting the GUI transaction or resurrecting that shell.
             if window

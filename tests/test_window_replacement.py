@@ -200,6 +200,92 @@ class ReplacementTest(unittest.TestCase):
                     owner.wait(timeout=5)
                     stop_fixture(env)
 
+    def test_a_split_browser_beside_the_focused_terminal_survives_repeated_replacement(self):
+        # Activation hosts only the active tab, so a split's other browser stayed a "Show browser here"
+        # placeholder after replacement, and that owner kept its adopted profile lease unused. It then reported
+        # no lease to the next candidate, whose own profile open met the lease still held by the donor:
+        # "Rust browser profile is already open in another owner".
+        from Xlib import X, display as xdisplay, error
+        sys.path.insert(0, str(ROOT / 'tests'))
+        from visible_latency import image_bytes
+        white = (255, 255, 255)
+        with isolated_display() as display, profile(display) as env, service(env), ExitStack() as cleanup, \
+                tempfile.TemporaryDirectory(prefix='replacement-split-', dir=CHECKS) as directory:
+            executable = copy_runtime(directory, browser=True)
+            env = {**env, 'GDK_BACKEND': 'x11', 'GIO_USE_VFS': 'local'}
+            env.pop('DBUS_SESSION_BUS_ADDRESS', None)
+            page = Path(directory) / 'page.html'
+            page.write_text('<!doctype html><title>page</title><body style="margin:0;background:#fff">')
+            server = xdisplay.Display(env['DISPLAY'])
+            cleanup.callback(server.close)
+            def windows():
+                result = subprocess.run(['xdotool', 'search', '--onlyvisible', '--class', 'SplitFixture'],
+                                        env=env, capture_output=True, text=True)
+                return result.stdout.splitlines() if result.returncode == 0 else []
+            def pid(window):
+                result = subprocess.run(['xdotool', 'getwindowpid', window], env=env, capture_output=True, text=True)
+                return result.stdout.strip() if result.returncode == 0 else None
+            def pixel(fx):
+                window = windows()
+                if not window: return None
+                try:
+                    resource = server.create_resource_object('window', int(window[0]))
+                    geometry = resource.get_geometry()
+                    data = image_bytes(resource.get_image(int(geometry.width * fx), geometry.height * 3 // 4,
+                                                          1, 1, X.ZPixmap, 0xffffffff))
+                except error.BadMatch:
+                    return None
+                return tuple(data[:3][::-1])
+            def sized():
+                # Pixels are read on screen: the default window is wider than the private display.
+                xdo('windowsize', windows()[0], '900', '500')
+                return server.create_resource_object('window', int(windows()[0])).get_geometry().width == 900
+            def split_shown():
+                return pixel(.75) == white and pixel(.25) not in (white, None)
+            xdo = lambda *args: subprocess.run(['xdotool', *args], env=env, check=True)
+            api = lambda *args: subprocess.check_output([str(runtime_binary('worminald')), 'api', *args],
+                                                        env=env, text=True)
+            log_path = Path(directory) / 'owner.log'
+            with log_path.open('wb') as log:
+                owner = subprocess.Popen([str(executable), '-c', 'SplitFixture', '-o', '-'], env=env,
+                                         stdout=log, stderr=log)
+                try:
+                    wait(windows, 'The window did not open')
+                    wait(sized, 'The window did not resize')
+                    xdo('windowfocus', '--sync', windows()[0])
+                    api('open', '--browser', page.as_uri())
+                    wait(lambda: len(json.loads(api('list'))['tabs']) == 2, 'No browser tab opened')
+                    xdo('key', '--clearmodifiers', 'alt+2')
+                    wait(lambda: pixel(.5) == white, 'The browser page was not shown')
+                    # The browser moves into its own pane; the terminal pane then takes focus.
+                    xdo('key', '--clearmodifiers', 'alt+shift+Right')
+                    wait(split_shown, 'The browser did not split off beside the terminal')
+                    xdo('key', '--clearmodifiers', 'ctrl+shift+Left')
+                    time.sleep(.5)
+                    module = module_path(RUST_FRONTEND_MODULE, prefix=Path(directory))
+                    for attempt in range(2):
+                        previous = pid(windows()[0])
+                        pending = module.with_suffix('.pending')
+                        shutil.copy2(module, pending)
+                        pending.replace(module)
+                        wait(lambda: windows() and pid(windows()[0]) not in (previous, None),
+                             f'Replacement {attempt + 1} did not take over')
+                        wait(sized, 'The replaced window did not resize')
+                        def shot():
+                            from PIL import Image
+                            resource = server.create_resource_object('window', int(windows()[0]))
+                            Image.frombuffer('RGB', (900, 500), image_bytes(resource.get_image(0, 0, 900, 500, X.ZPixmap, 0xffffffff)), 'raw', 'BGRX', 0, 1).save(CHECKS / 'split-replace.png')
+                            return ''
+                        wait(split_shown, lambda: shot() + f'Replacement {attempt + 1} lost the split browser: '
+                             + log_path.read_text(errors='replace'))
+                finally:
+                    for window in windows():
+                        identity = pid(window)
+                        if identity: os.kill(int(identity), 15)
+                    if owner.poll() is None: owner.terminate()
+                    owner.wait(timeout=5)
+                    stop_fixture(env)
+
     def test_close_and_geometry_edits_during_commit_reach_the_new_owner(self):
         class ClosePage(Fixture):
             def do_GET(self):
