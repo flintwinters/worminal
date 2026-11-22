@@ -22,6 +22,7 @@ from unittest.mock import patch
 
 os.environ['WORMINAL_FRONTEND'] = 'worminal-rust'
 from test_keys import NavigationKeysTest, read_bytes, read_through, wait_title
+from visible_latency import image_bytes
 from workspace_protocol import send, wait_kind, catalog_records, service_pid
 from x11 import isolated_display, close_window
 from preview import profile, service, wayland_display
@@ -102,7 +103,7 @@ class RustApplicationTest(unittest.TestCase):
                 def glyph():
                     geometry = root.get_geometry()
                     # Private Xvfb returns BGRX pixels. Sample the terminal body, away from chrome/cursor.
-                    data = root.get_image(geometry.width // 2, geometry.height // 2, 1, 1, X.ZPixmap, 0xffffffff).data
+                    data = image_bytes(root.get_image(geometry.width // 2, geometry.height // 2, 1, 1, X.ZPixmap, 0xffffffff))
                     return tuple(data[:3][::-1])
                 before = glyph()
                 self.assertNotEqual(before, (17,99,201))
@@ -285,8 +286,8 @@ class RustApplicationTest(unittest.TestCase):
 
         def pixel(fx, fy):
             try:
-                data = root.get_image(int(size()[0] * fx), int(size()[1] * fy), 1, 1,
-                                      X.ZPixmap, 0xffffffff).data
+                data = image_bytes(root.get_image(int(size()[0] * fx), int(size()[1] * fy), 1, 1,
+                                                  X.ZPixmap, 0xffffffff))
             except error.BadMatch:  # not mapped yet
                 return None
             return tuple(data[:3][::-1])
@@ -297,7 +298,7 @@ class RustApplicationTest(unittest.TestCase):
                 self.assertIsNone(app.poll())
                 if time.monotonic() >= deadline:
                     width, height = size()
-                    data = root.get_image(0, 0, width, height, X.ZPixmap, 0xffffffff).data
+                    data = image_bytes(root.get_image(0, 0, width, height, X.ZPixmap, 0xffffffff))
                     Image.frombuffer('RGB', (width, height), data, 'raw', 'BGRX', 0, 1).save(
                         CHECKS / 'rust-app-split.png')
                     self.fail(f'{message}: {pixel(.25, .75)} {pixel(.75, .75)}')
@@ -323,7 +324,7 @@ class RustApplicationTest(unittest.TestCase):
             window = self.colored_split_window(env, cleanup)
             app, wid, xdo, api, root = window.app, window.wid, window.xdo, window.api, window.root
             size, pixel, wait_for = window.size, window.pixel, window.wait_for
-            data = root.get_image(0, 0, 900, 500, X.ZPixmap, 0xffffffff).data
+            data = image_bytes(root.get_image(0, 0, 900, 500, X.ZPixmap, 0xffffffff))
             Image.frombuffer('RGB', (900, 500), data, 'raw', 'BGRX', 0, 1).save(CHECKS / 'split-before.png')
             # Locate the selected second label rather than assuming a particular font
             # size or directory basename width. Its right edge must clear the first label.
@@ -387,7 +388,7 @@ class RustApplicationTest(unittest.TestCase):
                 xdo('mousemove', '--window', wid, str(490 - 484 * step // 10), str(8 - 5 * step // 10))
                 time.sleep(.02)
             yellow = bytes.fromhex(json.loads((ROOT / 'assets/palette.json').read_text())['normal']['yellow'][1:])
-            strip = lambda: root.get_image(0, 0, 450, content, X.ZPixmap, 0xffffffff).data
+            strip = lambda: image_bytes(root.get_image(0, 0, 450, content, X.ZPixmap, 0xffffffff))
             deadline = time.monotonic() + 3
             while not any(bytes(data[i:i + 3][::-1]) == yellow for data in [strip()] for i in range(0, len(data), 4)):
                 self.assertLess(time.monotonic(), deadline, 'no slot marker in the strip the tab is over')
@@ -589,7 +590,7 @@ class RustApplicationTest(unittest.TestCase):
 
             def pixel(fx, fy):
                 try:
-                    data = window_object.get_image(int(900 * fx), int(500 * fy), 1, 1, X.ZPixmap, 0xffffffff).data
+                    data = image_bytes(window_object.get_image(int(900 * fx), int(500 * fy), 1, 1, X.ZPixmap, 0xffffffff))
                 except error.BadMatch:
                     return None
                 return tuple(data[:3][::-1])
@@ -684,7 +685,7 @@ class RustApplicationTest(unittest.TestCase):
 
             def panel_open():
                 try:
-                    row = window_object.get_image(0, 250, 900, 1, X.ZPixmap, 0xffffffff).data
+                    row = image_bytes(window_object.get_image(0, 250, 900, 1, X.ZPixmap, 0xffffffff))
                 except error.BadMatch:
                     return False
                 return any(len(set(row[x * 4:x * 4 + 3])) == 1 and 70 <= row[x * 4] <= 95 for x in range(60, 600))
@@ -863,7 +864,7 @@ class RustApplicationTest(unittest.TestCase):
                 # The panel draws its right edge in a faint gray (about 30% toward the foreground) that this
                 # test's terminals never use; the terminal background is (24, 24, 24).
                 try:
-                    row = window_object.get_image(0, 250, 900, 1, X.ZPixmap, 0xffffffff).data
+                    row = image_bytes(window_object.get_image(0, 250, 900, 1, X.ZPixmap, 0xffffffff))
                 except error.BadMatch:
                     return False
                 edge = lambda x: len(set(row[x * 4:x * 4 + 3])) == 1 and 70 <= row[x * 4] <= 95
@@ -905,8 +906,9 @@ class RustApplicationTest(unittest.TestCase):
         from Xlib import X, display
         red, blue = (200, 30, 30), (20, 40, 210)
         fill = lambda color: ("while :; do printf '\\033[48;2;%d;%d;%dm\\033[2J'; sleep .2; done" % color)
-        # Labels are the directory basename; at 40 cells two fit a 900px row but only one fits half of it.
-        directory = CHECKS / ('w' * 40)
+        # Labels are the directory basename; at 30 cells two fit a 900px row (one of them bold),
+        # but only one fits half of it.
+        directory = CHECKS / ('w' * 30)
         directory.mkdir(exist_ok=True)
         with isolated_display() as env, ExitStack() as cleanup:
             script = CHECKS / 'rewrap-shell.sh'
@@ -929,13 +931,13 @@ class RustApplicationTest(unittest.TestCase):
 
             def strip_height(x):
                 # The strip ends where the terminal's own fill begins.
-                data = root.get_image(x, 0, 1, 500, X.ZPixmap, 0xffffffff).data
+                data = image_bytes(root.get_image(x, 0, 1, 500, X.ZPixmap, 0xffffffff))
                 column = [tuple(data[4 * y:4 * y + 3][::-1]) for y in range(500)]
                 return next((y for y, color in enumerate(column) if color in (red, blue)), None)
 
             def fail(message):
                 from PIL import Image
-                data = root.get_image(0, 0, 900, 500, X.ZPixmap, 0xffffffff).data
+                data = image_bytes(root.get_image(0, 0, 900, 500, X.ZPixmap, 0xffffffff))
                 Image.frombuffer('RGB', (900, 500), data, 'raw', 'BGRX', 0, 1).save(CHECKS / 'rust-app-rewrap.png')
                 self.fail(message)
 
