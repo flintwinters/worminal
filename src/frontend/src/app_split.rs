@@ -77,6 +77,15 @@ impl Panes {
         &self.root
     }
 }
+/// The tab a pane selects after losing its active tab: the daemon's choice when the pane holds it, otherwise the
+/// pane's own current page. The daemon picks from all its tabs, so following it alone would switch panes.
+pub(super) fn successor(tabs: &[u32], current: Option<u32>, fallback: u32) -> Option<u32> {
+    if tabs.contains(&fallback) {
+        Some(fallback)
+    } else {
+        current.filter(|id| tabs.contains(id))
+    }
+}
 /// Take a widget out of whatever holds it.
 fn detach(widget: &gtk::Widget) {
     if let Some(parent) = widget.parent() {
@@ -255,6 +264,21 @@ impl App {
                 zone,
             })
         })
+    }
+    /// The pane that keeps focus when the active tab is among the `closing` pages.
+    pub(super) fn home_of_active(&self, closing: &[super::Page]) -> Option<Rc<Pane>> {
+        let active = self.active.get();
+        closing
+            .iter()
+            .any(|page| page.id == active)
+            .then(|| self.pane_of(active))
+            .flatten()
+    }
+    /// The successor of the closed active tab within its surviving `home` pane.
+    pub(super) fn successor(&self, home: Option<Rc<Pane>>, fallback: u32) -> Option<u32> {
+        let home = home?;
+        // A pane emptied by the close has collapsed and yields nothing.
+        successor(&self.tabs_of(&home), self.active_of(&home), fallback)
     }
     /// Mark the region a drag would claim until it moves elsewhere.
     pub(super) fn mark(&self, target: Option<Target>) {
@@ -447,5 +471,18 @@ impl App {
                 },
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::successor;
+
+    #[test]
+    fn a_closed_tab_is_succeeded_within_its_pane() {
+        assert_eq!(successor(&[3, 4], Some(4), 3), Some(3));
+        // The daemon's neighbor sits in another pane.
+        assert_eq!(successor(&[3, 4], Some(4), 7), Some(4));
+        assert_eq!(successor(&[], None, 7), None);
     }
 }

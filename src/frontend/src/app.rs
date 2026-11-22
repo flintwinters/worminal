@@ -709,6 +709,7 @@ impl App {
             })
             .cloned()
             .collect();
+        let home = self.home_of_active(&obsolete);
         for page in obsolete {
             replaced_active |= page.id == self.active.get();
             if let Some(pane) = self.pane_of(page.id) {
@@ -846,6 +847,8 @@ impl App {
             requested
         } else if records.iter().any(|record| record.id == active) {
             active
+        } else if let Some(successor) = self.successor(home, fallback) {
+            successor
         } else if active >> LINK_SHIFT == index || active == 0 || (initial_claim && index != 0) {
             // Only this link's own tab losing focus, or a newly opened host, moves the selection.
             if records.iter().any(|record| record.id == fallback) {
