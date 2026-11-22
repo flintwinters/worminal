@@ -107,6 +107,43 @@ class RustBrowserTest(unittest.TestCase):
                 subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+d'], env=env, check=True)
                 title(env, 'Selected:Popup', app)
 
+    def test_alt_arrows_move_through_history(self):
+        class HistoryFixture(Fixture):
+            def do_GET(self):
+                if self.path == '/second': return self.html(b'<!doctype html><title>Second</title>')
+                self.html(b'<!doctype html><title>First</title><a href="/second">Next</a>')
+        with isolated_display() as private, profile(private) as env, fixture(handler=HistoryFixture) as url:
+            env.update(GDK_BACKEND='x11'); env.pop('WAYLAND_DISPLAY', None)
+            with application(env, '--browser', url) as app:
+                wid = title(env, 'First', app)
+                key = lambda *keys: subprocess.run(['xdotool', 'windowfocus', '--sync', wid, 'key',
+                                                    '--clearmodifiers', *keys], env=env, check=True)
+                key('ctrl+f'); subprocess.run(['xdotool', 'type', 'Next'], env=env, check=True)
+                key('Escape', 'Return')
+                title(env, 'Second', app)
+                key('alt+Left')
+                title(env, 'First', app)
+                key('alt+Right')
+                title(env, 'Second', app)
+
+    def test_alt_arrows_move_through_file_explorer_directories(self):
+        root = CHECKS / 'explorer-history'
+        (root / 'inner').mkdir(parents=True, exist_ok=True)
+        explorer = (ROOT / 'file-explorer/dist/index.html').as_uri() + '?path=' + str(root)
+        with isolated_display() as private, profile(private) as env:
+            env.update(GDK_BACKEND='x11'); env.pop('WAYLAND_DISPLAY', None)
+            with application(env, '--browser', explorer) as app:
+                wid = title(env, str(root), app)
+                key = lambda *keys: subprocess.run(['xdotool', 'windowfocus', '--sync', wid, 'key',
+                                                    '--clearmodifiers', *keys], env=env, check=True)
+                key('ctrl+f'); subprocess.run(['xdotool', 'type', 'inner'], env=env, check=True)
+                key('Escape', 'Return')
+                title(env, str(root / 'inner'), app)
+                key('alt+Left')
+                title(env, str(root), app)
+                key('alt+Right')
+                title(env, str(root / 'inner'), app)
+
     def test_notification_permission_requires_an_explicit_native_answer(self):
         class PermissionFixture(Fixture):
             def do_GET(self):
