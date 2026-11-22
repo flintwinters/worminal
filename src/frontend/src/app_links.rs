@@ -240,8 +240,13 @@ impl App {
     /// Every new window shows every master connected to this display, whichever window or
     /// launcher (Ctrl+Shift+N, a desktop shortcut running `worminal`) opened it. Master tabs are
     /// shared daemon state, so join without launching: only the window's primary gets a fresh shell.
+    ///
+    /// The join is a mirror, not a launch: its first catalog must never take the selection or keyboard
+    /// focus from the tab the user is already typing in. Its own SSH link needs about a second, so the
+    /// tabs another window already shows are placed at once, as pages its catalog later fills in;
+    /// a split copied from that window can then hold them before the link is up.
     pub(super) fn join_connected_masters(self: &Rc<Self>) {
-        let mut configs = std::collections::BTreeMap::new();
+        let mut sources = std::collections::BTreeMap::new();
         let apps = super::WINDOWS.with(|windows| windows.borrow().clone());
         for app in apps
             .iter()
@@ -253,22 +258,77 @@ impl App {
                 .clone()
                 .filter(|_| !app.primary_detached.get())
             {
-                configs.entry(master).or_insert_with(|| app.config.clone());
+                sources
+                    .entry(master)
+                    .or_insert_with(|| (app.config.clone(), app.clone(), 0));
             }
             for remote in app.remotes.borrow().iter() {
-                configs
+                sources
                     .entry(remote.master.clone())
-                    .or_insert_with(|| remote.config.clone());
+                    .or_insert_with(|| (remote.config.clone(), app.clone(), remote.index));
             }
         }
-        for config in configs.into_values() {
-            if let Err(error) = self.add_remote(Config {
-                attach: true,
-                ..config
-            }) {
+        for (master, (config, source, source_index)) in sources {
+            let joined = self.join_remote(
+                Config {
+                    attach: true,
+                    ..config
+                },
+                false,
+            );
+            if let Err(error) = joined {
                 self.message(Some(&error.to_string()));
+                continue;
+            }
+            if let Some(index) = self.master_index(&master) {
+                self.seed_pages(index, &source, source_index);
             }
         }
+    }
+    /// Give link `index` the pages `source` shows for the same daemon through its link `source_index`,
+    /// in order, unselected. Only a source whose catalog has arrived is copied.
+    fn seed_pages(self: &Rc<Self>, index: u32, source: &Rc<Self>, source_index: u32) {
+        let live = source
+            .link(source_index)
+            .is_some_and(|link| link.connection.borrow().is_some() && !link.initial_claim.get());
+        if !live
+            || self
+                .pages
+                .borrow()
+                .iter()
+                .any(|page| page.id >> LINK_SHIFT == index)
+        {
+            return;
+        }
+        let seeds: Vec<(u32, String)> = source
+            .pages
+            .borrow()
+            .iter()
+            .filter(|page| page.id >> LINK_SHIFT == source_index && !page.browser)
+            .map(|page| {
+                let wire = page.id & ((1 << LINK_SHIFT) - 1);
+                (wire | index << LINK_SHIFT, page.title.clone())
+            })
+            .collect();
+        let notebook = self.notebook();
+        // As in a catalog: adding pages must not run the selection handlers, which re-enter each other.
+        let was = self.syncing.replace(true);
+        for (id, title) in seeds {
+            match self.new_page(id, false, "", &notebook) {
+                Ok(page) => {
+                    if let Some(page) = self.pages.borrow_mut().iter_mut().find(|p| p.id == page.id)
+                    {
+                        page.title = title;
+                    }
+                }
+                Err(error) => {
+                    self.message(Some(&error.to_string()));
+                    break;
+                }
+            }
+        }
+        self.syncing.set(was);
+        self.refresh_tabs();
     }
     /// Show another daemon's tabs in this window. `--master` hosts already present are only raised.
     pub(super) fn add_remote(self: &Rc<Self>, config: Config) -> io::Result<()> {
@@ -342,6 +402,24 @@ impl App {
             }
         }
         Ok(())
+    }
+    /// The daemon behind link `index`: `None` is this machine's, otherwise the master endpoint.
+    pub(super) fn host_of(&self, index: u32) -> Option<Option<std::ffi::OsString>> {
+        if index == 0 {
+            return (!self.primary_detached.get()).then(|| self.config.master.clone());
+        }
+        self.remotes
+            .borrow()
+            .iter()
+            .find(|remote| remote.index == index)
+            .map(|remote| Some(remote.master.clone()))
+    }
+    /// The link showing `host` (as `host_of` names it) in this window.
+    pub(super) fn link_of_host(&self, host: &Option<std::ffi::OsString>) -> Option<u32> {
+        match host {
+            None => (self.config.master.is_none() && !self.primary_detached.get()).then_some(0),
+            Some(master) => self.master_index(master),
+        }
     }
     pub(super) fn master_index(&self, master: &std::ffi::OsStr) -> Option<u32> {
         if self.config.master.as_deref() == Some(master) && !self.primary_detached.get() {

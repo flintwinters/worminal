@@ -16,7 +16,10 @@ works after a window is closed by accident, a frontend crash, a daemon restart a
   tabs travel in the window handoff ([window updates](window-updates.md)), not through this file, so they survive even
   with `restore_layout: false`. The new windows save nothing until the update commits, so a failed update never
   writes over the file.
-- **Remote (SSH) tabs** are not part of the saved layout; their panes collapse.
+- **A window opened beside others** (Ctrl+Shift+N, a launcher running `worminal`) starts with the split of the
+  window it opened from, master tabs included; the file is only for the first window of a process. Its new shell
+  joins the first pane and keeps the selection.
+- **Remote (SSH) tabs** are not part of the saved file; their panes collapse.
 
 ## How it is stored
 

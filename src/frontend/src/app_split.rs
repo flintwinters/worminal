@@ -565,6 +565,13 @@ impl App {
     }
     /// The split window replacement carries, each pane's selected tab first; empty for a single pane.
     pub(super) fn arrangement(&self) -> std::io::Result<Vec<u8>> {
+        self.arrangement_as(&Some)
+    }
+    /// The split with each tab id translated for another window (`None` leaves the tab out).
+    pub(super) fn arrangement_as(
+        &self,
+        translate: &dyn Fn(u32) -> Option<u32>,
+    ) -> std::io::Result<Vec<u8>> {
         if self.panes().len() < 2 {
             return Ok(Vec::new());
         }
@@ -580,6 +587,7 @@ impl App {
                         .into_iter()
                         .filter(|tab| Some(*tab) != selected),
                 )
+                .filter_map(translate)
                 .collect()
         };
         let mut body = worminal_protocol::Buffer::default();

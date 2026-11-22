@@ -361,6 +361,7 @@ impl App {
         }
         let app = Self::open(config)?;
         app.join_connected_masters();
+        app.copy_split();
         Ok(app)
     }
     fn open(config: Config) -> io::Result<Rc<Self>> {
@@ -668,6 +669,63 @@ impl App {
         }
         Ok(())
     }
+    /// A tab's page, appended to `notebook`; the catalog fills in its title, palette and modes.
+    fn new_page(
+        self: &Rc<Self>,
+        id: u32,
+        browser: bool,
+        url: &str,
+        notebook: &gtk::Notebook,
+    ) -> io::Result<Page> {
+        let palette = Rc::new(RefCell::new(Palette::default()));
+        let terminal = if browser {
+            None
+        } else {
+            let weak = Rc::downgrade(self);
+            Some(Terminal::new(
+                self.config.columns,
+                self.config.rows,
+                self.fonts.clone(),
+                palette.clone(),
+                move |action| {
+                    if let Some(app) = weak.upgrade() {
+                        app.action(id, action);
+                    }
+                },
+            )?)
+        };
+        let widget: gtk::Widget = if let Some(terminal) = &terminal {
+            // A split moves the terminal out of its page and back, so the page owns a wrapper.
+            let wrapper = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            wrapper.pack_start(terminal.widget(), true, true, 0);
+            wrapper.upcast()
+        } else {
+            browser_views::placeholder(
+                glib::clone!(@weak self as app => move || app.claim_browser(id)),
+            )
+            .upcast()
+        };
+        let page = Page {
+            id,
+            widget,
+            label: gtk::Label::new(None),
+            terminal,
+            palette,
+            title: String::new(),
+            directory: PathBuf::new(),
+            ssh_user: None,
+            busy: false,
+            background_job: false,
+            browser,
+            url: url.to_owned(),
+            view: Rc::new(RefCell::new(None)),
+        };
+        self.pages.borrow_mut().push(page.clone());
+        notebook.append_page(&page.widget, Some(&page.label));
+        page.widget.show_all();
+        page.label.show();
+        Ok(page)
+    }
     #[expect(
         clippy::too_many_lines,
         reason = "catalog import applies tab, focus and title changes in one pass"
@@ -745,59 +803,10 @@ impl App {
             let page = if let Some(page) = existing {
                 page
             } else {
-                let palette = Rc::new(RefCell::new(Palette::default()));
-                let terminal = if record.browser {
-                    None
-                } else {
-                    let weak = Rc::downgrade(self);
-                    let id = record.id;
-                    Some(Terminal::new(
-                        self.config.columns,
-                        self.config.rows,
-                        self.fonts.clone(),
-                        palette.clone(),
-                        move |action| {
-                            if let Some(app) = weak.upgrade() {
-                                app.action(id, action);
-                            }
-                        },
-                    )?)
-                };
-                let widget: gtk::Widget = if let Some(terminal) = &terminal {
-                    // A split moves the terminal out of its page and back, so the page owns a wrapper.
-                    let wrapper = gtk::Box::new(gtk::Orientation::Vertical, 0);
-                    wrapper.pack_start(terminal.widget(), true, true, 0);
-                    wrapper.upcast()
-                } else {
-                    let id = record.id;
-                    browser_views::placeholder(
-                        glib::clone!(@weak self as app => move || app.claim_browser(id)),
-                    )
-                    .upcast()
-                };
-                let page = Page {
-                    id: record.id,
-                    widget,
-                    label: gtk::Label::new(None),
-                    terminal,
-                    palette,
-                    title: String::new(),
-                    directory: PathBuf::new(),
-                    ssh_user: None,
-                    busy: false,
-                    background_job: false,
-                    browser: record.browser,
-                    url: record.url.clone(),
-                    view: Rc::new(RefCell::new(None)),
-                };
-                self.pages.borrow_mut().push(page.clone());
-                homes
-                    .of(page.id)
-                    .map_or_else(|| self.notebook(), |pane| pane.notebook.clone())
-                    .append_page(&page.widget, Some(&page.label));
-                page.widget.show_all();
-                page.label.show();
-                page
+                let notebook = homes
+                    .of(record.id)
+                    .map_or_else(|| self.notebook(), |pane| pane.notebook.clone());
+                self.new_page(record.id, record.browser, &record.url, &notebook)?
             };
             let mut palette_changed = false;
             // The catalog lists overrides only through the last one; later entries are defaults.
@@ -918,6 +927,8 @@ impl App {
         self.show_visible_browsers();
         if index != 0 && records.is_empty() {
             self.drop_remote(index);
+            // A master's last tabs can outlive the window's own: closing that daemon's tabs closes the window.
+            self.close_empty_window();
         }
         let early: Vec<_> = self.early_keys.borrow_mut().drain(..).collect();
         for event in early {

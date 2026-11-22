@@ -183,6 +183,49 @@ class LayoutRestoreTest(unittest.TestCase):
                 time.sleep(.1)
             self.assertEqual(size(root), (900, 500))
 
+    def test_a_new_window_opens_with_the_split_of_the_window_it_opened_from(self):
+        """Windows are views of one set of tabs: Ctrl+Shift+N once opened a single pane beside a split window,
+        because only the first window of a process takes a layout from the file."""
+        from Xlib import X, display
+        with isolated_display() as env, ExitStack() as stack:
+            self.exit = stack
+            self.private(env)
+            xdo = lambda *args: subprocess.run(['xdotool', *args], env=env, check=True)
+            server = display.Display(env['DISPLAY'])
+            self.exit.callback(server.close)
+            app = self.launch(env, '-T', 'Split source', '-e', '/bin/sh', '-c', fill(RED, 'red'))
+            wid = window(env, app)
+            xdo('windowfocus', '--sync', wid)
+            time.sleep(1)
+            xdo('key', '--clearmodifiers', 'ctrl+shift+t')
+            time.sleep(.5)
+            xdo('key', '--clearmodifiers', 'alt+shift+Right')
+            time.sleep(.5)
+            xdo('key', '--clearmodifiers', 'ctrl+shift+n')
+            deadline = time.monotonic() + 8
+            while True:
+                found = subprocess.run(['xdotool', 'search', '--onlyvisible', '--pid', str(app.pid)],
+                                       env=env, capture_output=True, text=True).stdout.split()
+                if len(found) == 2:
+                    break
+                self.assertLess(time.monotonic(), deadline, 'the second window did not open')
+                time.sleep(.05)
+            root = server.create_resource_object('window', int(next(w for w in found if w != wid)))
+            # The new shell joins the first pane, so both panes are blue; pane borders mark the split.
+            deadline = time.monotonic() + 8
+            while True:
+                geometry = root.get_geometry()
+                row = root.get_image(0, int(geometry.height * .75), geometry.width, 1, X.ZPixmap,
+                                     0xffffffff).data
+                color = lambda x: tuple(row[x * 4:x * 4 + 3][::-1])
+                columns = [x for x in range(int(geometry.width * .3), int(geometry.width * .7))
+                           if color(x) != BLUE]
+                # Both sides painted blue first: an unpainted window has no blue at all.
+                if columns and color(int(geometry.width * .2)) == color(int(geometry.width * .8)) == BLUE:
+                    break
+                self.assertLess(time.monotonic(), deadline, 'the new window opened without the split')
+                time.sleep(.1)
+
     def test_restoring_can_be_turned_off_and_a_window_can_be_closed_without_its_layout(self):
         from Xlib import X, display, error
         with isolated_display() as env, ExitStack() as stack:

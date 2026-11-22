@@ -135,7 +135,9 @@ class MasterDetachTest(unittest.TestCase):
             executable = str(copy_runtime(base, browser=True))
             scope = env['WORMINAL_SHARED_SOCKET_SCOPE']+'-joined-master'
             ssh = base/'ssh'
-            ssh.write_text('#!/usr/bin/python3\nimport os,sys\n'
+            ssh.write_text('#!/usr/bin/python3\nimport os,sys,time\n'
+                           # A real master answers about a second after the local daemon.
+                           'time.sleep(1)\n'
                            f'os.environ["WORMINAL_SHARED_SOCKET_SCOPE"]={scope!r}\n'
                            f'sys.path.insert(0,{str(ROOT/"tests/fixtures")!r})\n'
                            'from master_ssh import run\n'
@@ -172,6 +174,11 @@ class MasterDetachTest(unittest.TestCase):
                         opener()
                         new = self.wait(lambda: len(windows()) == count and next(
                             (row[0] for row in windows() if row[1] and row[4] == ''), None), 'new local window')
+                        # The new window's own master link lands after its local tab is shown and typed in.
+                        # Its catalog once took the selection, so keys went to a master tab.
+                        time.sleep(2.5)
+                        self.assertTrue(any(row[0] == new and row[1] and row[4] == '' for row in windows()),
+                                        f'window {count}: the master link took the selection: {windows()}')
                         def cycled_to_master():
                             subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+Tab'], env=env, check=True)
                             time.sleep(.1)

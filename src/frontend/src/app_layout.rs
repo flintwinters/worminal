@@ -36,6 +36,8 @@ pub(super) struct Persist {
     normal: Cell<[i32; 4]>,
     /// The last layout seen while the link was up, to rebuild after a lost daemon comes back.
     last_good: RefCell<Option<Window>>,
+    /// The split of the window this one opened beside (`App::arrangement` bytes), for its first catalog.
+    copied: RefCell<Vec<u8>>,
 }
 
 enum Store {
@@ -109,6 +111,38 @@ impl App {
                     }
                 }
             });
+        }
+    }
+
+    /// A window opened beside others (Ctrl+Shift+N, a launcher) starts with the split of the window it opened
+    /// from, holding the same tabs: windows are views of one set of tabs. The saved file is only for the
+    /// first window of a process. Call after the masters are joined, so their tabs can be translated.
+    pub(super) fn copy_split(self: &Rc<Self>) {
+        if !worminal_config::get().restore_layout || self.panes.persist.pending.borrow().is_some() {
+            return;
+        }
+        let source = WINDOWS.with(|windows| {
+            let windows = windows.borrow();
+            let others = || {
+                windows
+                    .iter()
+                    .filter(|app| !app.closing.get() && !Rc::ptr_eq(app, self))
+            };
+            others()
+                .find(|app| app.window.is_active())
+                .or_else(|| others().next_back())
+                .cloned()
+        });
+        let Some(source) = source else { return };
+        // The same daemon can sit behind different link numbers in the two windows.
+        let translate = |id: u32| {
+            let host = source.host_of(id >> LINK_SHIFT)?;
+            let index = self.link_of_host(&host)?;
+            Some(id & ((1 << LINK_SHIFT) - 1) | index << LINK_SHIFT)
+        };
+        match source.arrangement_as(&translate) {
+            Ok(bytes) => *self.panes.persist.copied.borrow_mut() = bytes,
+            Err(error) => eprintln!("worminal: cannot copy the split: {error}"),
         }
     }
 
@@ -238,6 +272,19 @@ impl App {
     /// Rebuild the saved layout over the tabs that exist, once this window's first catalog has arrived (or a
     /// lost daemon is back).
     pub(super) fn restore_layout(self: &Rc<Self>, reconnected: bool, requested: u32) {
+        let copied = std::mem::take(&mut *self.panes.persist.copied.borrow_mut());
+        if !copied.is_empty() {
+            if let Err(error) = self.arrange(&copied) {
+                eprintln!("worminal: cannot copy the split: {error}");
+            }
+            // The tab this window was opened to show keeps the selection and keyboard focus.
+            let tab = if requested != 0 {
+                requested
+            } else {
+                self.active.get()
+            };
+            self.select_id(tab);
+        }
         let pending = self.panes.persist.pending.borrow_mut().take();
         let Some(saved) = pending.or_else(|| {
             reconnected

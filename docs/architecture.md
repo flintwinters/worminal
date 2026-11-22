@@ -49,7 +49,9 @@ The per-user v2 daemon owns ordered tabs, PTYs and bounded scrollback. Views con
 `--master user@host`. A terminal has one live painting view and can outlive every window. The set of attached
 masters belongs to the frontend, not a window: each window holds its own link to every master the live windows
 view (the union is derived from them, never stored separately), a `--master` launch reaches every window and
-selects its tab only where launched, and a new window joins every viewed master. A window launched with
+selects its tab only where launched, and a new window joins every viewed master without taking the selection.
+Until its own link is up, a new window shows the master tabs another window already has, so they never pop in,
+and it starts with the split of the window it opened from. A window launched with
 `--master` as its own primary does not view the local daemon. Frontend replicas import
 one viewport; they never parse terminal output or recompute history/reflow. Browser records have no PTY. `worminald
 api` is the headless agent interface over Worp; see `docs/automation.md` and `docs/worp.md`. The executable alone
