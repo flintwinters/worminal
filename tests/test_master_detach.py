@@ -81,16 +81,26 @@ class MasterDetachTest(unittest.TestCase):
                     before = tabs()
                     cli('--master', 'wheel-test', '-e', '/bin/cat')
                     self.wait(lambda: windows()[0][4] == 'wheel-test', 'second master selected')
+                    # Masters belong to the frontend, not a window: a local window opened later views both.
                     cli('--attach', '-c', 'DetachEmpty', '-T', 'DetachEmpty')
-                    self.wait(lambda: len(windows()) == 2, 'second window')
-                    empty = subprocess.check_output(['xdotool', 'search', '--onlyvisible', '--name',
-                                                     '^DetachEmpty$'], env=env, text=True).splitlines()[0]
-                    subprocess.run(['xdotool', 'windowfocus', '--sync', empty], env=env, check=True, timeout=3)
-                    cli('--master', 'preview-test', '--attach')
-                    self.wait(lambda: sum(row[4] == 'preview-test' for row in windows()) == 1,
-                              'master attached to second window')
+                    self.wait(lambda: len(windows()) == 2 and all(row[4] for row in windows()),
+                              'new window shows master tabs')
+                    second = subprocess.check_output(['xdotool', 'search', '--onlyvisible', '--class',
+                                                      'DetachEmpty'], env=env, text=True).splitlines()[0]
+                    cli('--detach-master', 'wheel-test')
+                    self.wait(lambda: [row[4] for row in windows()] == ['preview-test'] * 2,
+                              'new window viewed the primary master')
+                    # A launch into the focused window reaches every window, without moving their selection.
+                    subprocess.run(['xdotool', 'windowfocus', '--sync', second], env=env, check=True, timeout=3)
+                    cli('--master', 'wheel-test', '--attach')
+                    self.wait(lambda: sorted(row[4] for row in windows()) == ['preview-test', 'wheel-test'],
+                              'reattached master selected only where launched')
                     cli('--detach-master', 'preview-test')
-                    self.wait(lambda: len(windows()) == 1, 'empty second window closes')
+                    self.wait(lambda: [row[4] for row in windows()] == ['wheel-test'] * 2,
+                              'reattached master reached the other window')
+                    from x11 import close_window
+                    close_window(env, window=second)
+                    self.wait(lambda: len(windows()) == 1, 'second window closes')
                     self.assertIsNone(app.poll())
                     self.assertEqual(windows()[0][4], 'wheel-test')
                     self.assertEqual(tabs(), before, 'Detach changed daemon-owned tabs')

@@ -356,3 +356,28 @@ fn the_reference_lists_every_command_and_setting() {
         assert!(text.contains(word), "help omits {word}");
     }
 }
+
+#[test]
+fn concurrent_sync_writes_to_one_peer_all_succeed() {
+    // Every window links to every master, so several connections exchange with one peer at once.
+    let directory =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../build/checks/config-sync-writes");
+    let _ = std::fs::remove_dir_all(&directory);
+    let path = directory.join("peer.yaml");
+    let writers: Vec<_> = (0..4)
+        .map(|writer| {
+            let path = path.clone();
+            std::thread::spawn(move || {
+                (0..200).try_for_each(|round| {
+                    crate::sync::write_atomic(&path, &format!("{writer}:{round}\n"))
+                })
+            })
+        })
+        .collect();
+    for writer in writers {
+        writer.join().unwrap().expect("a concurrent write failed");
+    }
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.ends_with(":199\n"), "torn or stale write: {text:?}");
+    std::fs::remove_dir_all(&directory).unwrap();
+}

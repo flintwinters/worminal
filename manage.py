@@ -168,12 +168,13 @@ def check_engine():
 
 
 def run_rust_workspace_checks():
-    return run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-protocol", "-p", "worminal-workspace"])
+    return run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-protocol", "-p", "worminal-workspace",
+                "-p", "worminal-config"])
 
 
 @app.command("check-rust-workspace")
 def check_rust_workspace():
-    """Check Rust framing, launch requests, recovery recipes and local transport."""
+    """Check Rust framing, launch requests, recovery recipes, config sync and local transport."""
     raise typer.Exit(run_rust_workspace_checks())
 
 

@@ -62,8 +62,16 @@ impl App {
             master,
             config,
             link: Link::new(),
+            follow: true,
         }));
         self.establish(index, false)
+    }
+    /// Whether a link's first catalog selects its tab; see `Remote::follow`.
+    pub(super) fn follows(&self, index: u32) -> bool {
+        self.remotes
+            .borrow()
+            .iter()
+            .any(|remote| remote.index == index && remote.follow)
     }
     pub(super) fn config_for(&self, index: u32) -> Config {
         self.remotes
@@ -229,8 +237,91 @@ impl App {
             remote.link.clear();
         }
     }
-    /// Show another daemon's tabs in this window. `--master` hosts already present are only raised.
+    /// A forwarded `--master` launch opens its tab in the active window instead of opening another; every
+    /// window views the master (`add_remote`).
+    pub(super) fn launch(config: Config) -> io::Result<Rc<Self>> {
+        if config.master.is_some() {
+            let target = super::WINDOWS.with(|windows| {
+                let windows = windows.borrow();
+                windows
+                    .iter()
+                    .find(|app| !app.closing.get() && app.window.is_active())
+                    .or_else(|| windows.iter().rev().find(|app| !app.closing.get()))
+                    .cloned()
+            });
+            if let Some(target) = target {
+                target.add_remote(config)?;
+                return Ok(target);
+            }
+        }
+        Self::open(config)
+    }
+    /// A new window views every master the frontend already views, besides its own daemon.
+    pub(super) fn open(config: Config) -> io::Result<Rc<Self>> {
+        let own = config.master.clone();
+        let viewed = Self::viewed_masters()
+            .into_iter()
+            .filter(|viewed| viewed.master != own);
+        let app = Self::open_mode(config, false, false)?;
+        for master in viewed {
+            if let Err(error) = app.join_remote(master, false) {
+                app.message(Some(&error.to_string()));
+            }
+        }
+        Ok(app)
+    }
+    /// Masters are the frontend's, not a window's: like local tabs, a master's tabs appear in every window.
+    /// Each window holds its own link, so the viewed set is the union of the live windows' links; there is
+    /// no second registry to drift from them. Detaching and emptied catalogs already reach every window.
+    pub(super) fn viewed_masters() -> Vec<Config> {
+        let mut viewed: Vec<Config> = Vec::new();
+        for app in super::WINDOWS.with(|windows| windows.borrow().clone()) {
+            if app.closing.get() {
+                continue;
+            }
+            let own = (!app.primary_detached.get() && app.config.master.is_some())
+                .then(|| app.config.clone());
+            let remotes = app
+                .remotes
+                .borrow()
+                .iter()
+                .map(|remote| remote.config.clone())
+                .collect::<Vec<_>>();
+            for config in own.into_iter().chain(remotes) {
+                if !viewed.iter().any(|known| known.master == config.master) {
+                    viewed.push(Config {
+                        attach: true,
+                        ..config
+                    });
+                }
+            }
+        }
+        viewed
+    }
+    /// Show another daemon's tabs in this window and every other one; `--master` hosts already present are
+    /// only raised. Only this window acts on the launch; the others subscribe.
     pub(super) fn add_remote(self: &Rc<Self>, config: Config) -> io::Result<()> {
+        let others = super::WINDOWS.with(|windows| windows.borrow().clone());
+        for app in others
+            .iter()
+            .filter(|app| !Rc::ptr_eq(app, self) && !app.closing.get())
+        {
+            if let Err(error) = app.join_remote(
+                Config {
+                    attach: true,
+                    ..config.clone()
+                },
+                false,
+            ) {
+                app.message(Some(&error.to_string()));
+            }
+        }
+        self.join_remote(config, true)?;
+        self.window.present();
+        Ok(())
+    }
+    /// Show another daemon's tabs in this window.
+    pub(super) fn join_remote(self: &Rc<Self>, config: Config, follow: bool) -> io::Result<()> {
         let master = config.master.clone().expect("remote launch has a master");
         let known = if self.config.master.as_ref() == Some(&master) {
             Some(0)
@@ -243,7 +334,8 @@ impl App {
         };
         if let Some(index) = known {
             let link = self.link(index).unwrap();
-            if !link.settled() {
+            // A mirror leaves an existing link to its own reconnects.
+            if follow && !link.settled() {
                 // An explicit launch retries authentication; background retries never prompt.
                 link.clear();
                 let launch = !config.attach
@@ -271,13 +363,13 @@ impl App {
                 master,
                 config,
                 link: Link::new(),
+                follow,
             }));
             if let Err(error) = self.establish(index, launch) {
                 self.drop_remote(index);
                 return Err(error);
             }
         }
-        self.window.present();
         Ok(())
     }
     fn master_index(&self, master: &std::ffi::OsStr) -> Option<u32> {

@@ -266,6 +266,8 @@ struct Remote {
     master: OsString,
     config: Config,
     link: Rc<Link>,
+    /// The first catalog selects this host's tab: an explicit launch, never a mirror of another window's.
+    follow: bool,
 }
 #[derive(Clone)]
 struct Page {
@@ -330,27 +332,6 @@ impl App {
         output.write_all(bytes)?;
         output.flush()
     }
-    /// A forwarded `--master` launch joins the active window instead of opening another.
-    fn launch(config: Config) -> io::Result<Rc<Self>> {
-        if config.master.is_some() {
-            let target = WINDOWS.with(|windows| {
-                let windows = windows.borrow();
-                windows
-                    .iter()
-                    .find(|app| !app.closing.get() && app.window.is_active())
-                    .or_else(|| windows.iter().rev().find(|app| !app.closing.get()))
-                    .cloned()
-            });
-            if let Some(target) = target {
-                target.add_remote(config)?;
-                return Ok(target);
-            }
-        }
-        Self::open(config)
-    }
-    fn open(config: Config) -> io::Result<Rc<Self>> {
-        Self::open_mode(config, false, false)
-    }
     fn replacement_window(config: &Config) -> gtk::Window {
         if let Some(class) = &config.class {
             gdk::set_program_class(class);
@@ -364,7 +345,11 @@ impl App {
         window.set_resizable(!config.fixed);
         crate::wsl_frame::style(window)
     }
-    fn open_mode(config: Config, staged: bool, primary_detached: bool) -> io::Result<Rc<Self>> {
+    pub(super) fn open_mode(
+        config: Config,
+        staged: bool,
+        primary_detached: bool,
+    ) -> io::Result<Rc<Self>> {
         // New launches may arrive in an existing GTK owner after service loss. The shared
         // posix_spawn boundary can recover the service here without GUI-process fork hooks.
         if config.master.is_none() && !staged {
@@ -849,7 +834,10 @@ impl App {
             active
         } else if let Some(successor) = self.successor(home, fallback) {
             successor
-        } else if active >> LINK_SHIFT == index || active == 0 || (initial_claim && index != 0) {
+        } else if active >> LINK_SHIFT == index
+            || active == 0
+            || (initial_claim && self.follows(index))
+        {
             // Only this link's own tab losing focus, or a newly opened host, moves the selection.
             if records.iter().any(|record| record.id == fallback) {
                 fallback

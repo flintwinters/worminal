@@ -161,9 +161,13 @@ pub fn read_text(path: &Path) -> Result<String, String> {
 
 /// Replace a file atomically so a reader never sees half a configuration.
 pub fn write_atomic(path: &Path, text: &str) -> Result<(), String> {
+    // Each writer stages its own file: connections to one peer sync concurrently (every window links to
+    // every master), and a shared staging name let one writer's rename take another's file away (ENOENT).
+    static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let fail = |error: std::io::Error| format!("{}: {error}", path.display());
     fs::create_dir_all(path.parent().unwrap_or(Path::new("."))).map_err(fail)?;
-    let temporary = path.with_extension("yaml.pending");
+    let write = WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let temporary = path.with_extension(format!("yaml.{}.{write}.pending", std::process::id()));
     let mut file = fs::File::create(&temporary).map_err(fail)?;
     file.write_all(text.as_bytes())
         .and_then(|()| file.sync_all())
