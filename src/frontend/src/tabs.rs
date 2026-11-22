@@ -89,17 +89,33 @@ fn place(widths: &[i32], right: i32) -> Vec<(i32, i32)> {
 const SSH: u32 = 5;
 /// ANSI bright black: dark gray behind tabs whose task is busy.
 const BUSY: u32 = 8;
-fn width(layout: &pango::Layout, entry: &Tab, metrics: Metrics) -> i32 {
+/// Load the tab's label; the selected tab's is bold, which widens it.
+fn label(layout: &pango::Layout, entry: &Tab, selected: bool) {
+    let attributes = pango::AttrList::new();
+    if selected {
+        attributes.insert(pango::AttrInt::new_weight(pango::Weight::Bold));
+    }
+    layout.set_attributes(Some(&attributes));
     layout.set_text(&entry.label);
+}
+fn width(layout: &pango::Layout, entry: &Tab, selected: bool, metrics: Metrics) -> i32 {
+    label(layout, entry, selected);
     layout.pixel_size().0 + 2 * metrics.width
 }
-/// Background fill (none for resting tabs) and text color; attention stays solid until input.
+/// Background fill (none for resting tabs) and text color; attention stays solid until input. The selected tab
+/// is always the foreground color, its text magenta for SSH: any other fill would hide which tab is selected.
 fn colors(
     palette: &Palette,
     entry: &Tab,
     selected: bool,
     severity: u32,
 ) -> (Option<gdk::RGBA>, gdk::RGBA) {
+    if selected {
+        return (
+            Some(palette.color(FG)),
+            palette.color(if entry.ssh { SSH } else { BG }),
+        );
+    }
     if severity > 0 {
         return (
             Some(palette.color(severity_color(severity))),
@@ -108,12 +124,10 @@ fn colors(
     }
     let fill = if entry.background_job {
         Some(palette.color(6))
-    } else if selected {
-        Some(palette.color(if entry.ssh { SSH } else { FG }))
     } else {
         entry.busy.then(|| palette.color(BUSY))
     };
-    let text = palette.color(if selected || entry.background_job {
+    let text = palette.color(if entry.background_job {
         BG
     } else if entry.ssh {
         SSH
@@ -137,6 +151,13 @@ fn severity_color(severity: u32) -> u32 {
 /// Bells closer together than this belong to one burst, whose length is the alert's severity.
 const BELL_BURST: std::time::Duration = std::time::Duration::from_millis(1500);
 impl State {
+    fn widths(&self, layout: &pango::Layout, entries: &[Tab], metrics: Metrics) -> Vec<i32> {
+        let active = self.active.get();
+        entries
+            .iter()
+            .map(|entry| width(layout, entry, entry.id == active, metrics))
+            .collect()
+    }
     fn draw(&self, cr: &cairo::Context, right: i32) -> Result<(), cairo::Error> {
         let Some(metrics) = self.metrics.get() else {
             return Ok(());
@@ -151,10 +172,7 @@ impl State {
         };
         let palette = palette.borrow();
         let entries = self.entries.borrow();
-        let widths: Vec<i32> = entries
-            .iter()
-            .map(|entry| width(layout, entry, metrics))
-            .collect();
+        let widths = self.widths(layout, &entries, metrics);
         paint::source(cr, &palette.color(BG));
         cr.paint()?;
         // The marker sits on the side the dragged tab approaches from.
@@ -176,10 +194,10 @@ impl State {
                 f64::from(metrics.height),
             );
             cr.clip();
-            // Measuring left the layout holding the last label.
-            layout.set_text(&entry.label);
-            let baseline = top + (metrics.height - metrics.ink_height) / 2 + metrics.ascent;
             let selected = entry.id == self.active.get();
+            // Measuring left the layout holding the last label.
+            label(layout, entry, selected);
+            let baseline = top + (metrics.height - metrics.ink_height) / 2 + metrics.ascent;
             let severity = self
                 .attention
                 .borrow()
@@ -203,13 +221,16 @@ impl State {
                 f64::from(baseline) - f64::from(layout.baseline()) / f64::from(pango::SCALE),
             );
             graphics_ffi::show_layout(cr, layout);
-            cr.rectangle(
-                f64::from(x + metrics.width),
-                f64::from((baseline + 2).min(top - 2 + metrics.height)),
-                f64::from((width - 2 * metrics.width).max(0)),
-                1.0,
-            );
-            cr.fill()?;
+            // Resting tabs are underlined; the selected one is marked by its fill and bold label instead.
+            if !selected {
+                cr.rectangle(
+                    f64::from(x + metrics.width),
+                    f64::from((baseline + 2).min(top - 2 + metrics.height)),
+                    f64::from((width - 2 * metrics.width).max(0)),
+                    1.0,
+                );
+                cr.fill()?;
+            }
             if let Some((_, after)) = drop.filter(|(to, _)| *to == i) {
                 paint::source(cr, &palette.color(3));
                 let edge = if after { x + width - 2 } else { x };
@@ -231,10 +252,7 @@ impl State {
         let layout = layout.as_ref()?;
         let entries = self.entries.borrow();
         let right = self.widget.allocated_width() - 2;
-        let widths: Vec<i32> = entries
-            .iter()
-            .map(|entry| width(layout, entry, metrics))
-            .collect();
+        let widths = self.widths(layout, &entries, metrics);
         entries
             .iter()
             .zip(place(&widths, right))
@@ -295,12 +313,7 @@ impl State {
         else {
             return;
         };
-        let widths: Vec<i32> = self
-            .entries
-            .borrow()
-            .iter()
-            .map(|entry| width(&layout, entry, metrics))
-            .collect();
+        let widths = self.widths(&layout, &self.entries.borrow(), metrics);
         let rows = place(&widths, self.widget.allocated_width() - 2)
             .last()
             .map_or(1, |(row, _)| row + 1);
@@ -457,7 +470,7 @@ impl Tabs {
 
 #[cfg(test)]
 mod tests {
-    use super::{colors, place, severity_color, Tab, ATTENTION_HELP, BUSY, FG};
+    use super::{colors, place, severity_color, Tab, ATTENTION_DONE, ATTENTION_HELP, BUSY, FG};
     use crate::paint::Palette;
     fn tab(busy: bool) -> Tab {
         Tab {
@@ -488,19 +501,35 @@ mod tests {
         );
     }
     #[test]
-    fn background_jobs_are_cyan_including_selected_and_busy_tabs() {
+    fn background_jobs_are_cyan_including_busy_tabs() {
         let palette = Palette::default();
         let mut entry = tab(true);
         entry.background_job = true;
-        for selected in [false, true] {
-            let (fill, text) = colors(&palette, &entry, selected, 0);
-            assert_eq!(fill, Some(palette.color(6)));
-            assert_eq!(text, palette.color(super::BG));
-            assert_eq!(
-                colors(&palette, &entry, selected, ATTENTION_HELP).0,
-                Some(palette.color(severity_color(ATTENTION_HELP)))
-            );
+        let (fill, text) = colors(&palette, &entry, false, 0);
+        assert_eq!(fill, Some(palette.color(6)));
+        assert_eq!(text, palette.color(super::BG));
+        assert_eq!(
+            colors(&palette, &entry, false, ATTENTION_HELP).0,
+            Some(palette.color(severity_color(ATTENTION_HELP)))
+        );
+    }
+    #[test]
+    fn the_selection_highlight_overrides_alerts_and_background_jobs() {
+        let palette = Palette::default();
+        let mut entry = tab(true);
+        for background_job in [false, true] {
+            entry.background_job = background_job;
+            for severity in [0, ATTENTION_DONE, ATTENTION_HELP] {
+                let (fill, text) = colors(&palette, &entry, true, severity);
+                assert_eq!(fill, Some(palette.color(FG)));
+                assert_eq!(text, palette.color(super::BG));
+            }
         }
+        entry.ssh = true;
+        assert_eq!(
+            colors(&palette, &entry, true, ATTENTION_DONE),
+            (Some(palette.color(FG)), palette.color(super::SSH))
+        );
     }
     #[test]
     fn tabs_wrap_in_order_and_oversized_tab_sits_alone() {
