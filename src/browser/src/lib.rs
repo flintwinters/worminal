@@ -16,6 +16,8 @@ thread_local! {
     static CONTEXT: RefCell<Option<WebContext>> = const { RefCell::new(None) };
     static VIEWS: RefCell<Vec<Weak<Browser>>> = const { RefCell::new(Vec::new()) };
     static RETIRED: Cell<bool> = const { Cell::new(false) };
+    /// Downloads in flight. They live in the network process and outlive their views.
+    static DOWNLOADS: Cell<usize> = const { Cell::new(0) };
 }
 
 pub(crate) struct Browser {
@@ -155,13 +157,24 @@ fn retire(value: u32) {
     RETIRED.with(|retired| retired.set(value != 0));
     release_context();
 }
+/// Drop the shared context once no view uses it, which ends its network process. That process otherwise keeps
+/// its heap (over 100 MB after browsing) for the frontend's lifetime; the next view starts a fresh one on the
+/// same profile. Pending downloads keep it alive unless retirement surrenders the profile to a new generation.
 fn release_context() {
     let empty = VIEWS.with(|views| {
         let mut views = views.borrow_mut();
         views.retain(|view| view.strong_count() != 0);
         views.is_empty()
     });
-    if empty && RETIRED.with(Cell::get) {
+    if empty && (RETIRED.with(Cell::get) || DOWNLOADS.with(Cell::get) == 0) {
         CONTEXT.with(|context| context.borrow_mut().take());
     }
+}
+fn download_started() {
+    DOWNLOADS.with(|count| count.set(count.get() + 1));
+}
+fn download_finished() {
+    DOWNLOADS.with(|count| count.set(count.get() - 1));
+    // Release outside WebKit's signal emission, which still references the download's context.
+    glib::idle_add_local_once(release_context);
 }

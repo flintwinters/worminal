@@ -106,8 +106,11 @@ processes must never be stopped or migrated implicitly.
 
 The lightweight launcher links GLib only and forwards before loading graphics. Frontend and browser use distinct,
 versioned C module ABIs with opaque handles and explicit callbacks; no Rust containers cross modules. Each browser
-view pins its creating generation; generations share a persistent profile manager. Keep code resident for async
-callbacks and release unused contexts. Never let concurrent owners write the same browser profile. Candidate
+view pins its creating generation; generations share one profile manager per owner, held only while the owner has
+browser tabs: its network process keeps its heap until the manager finalizes, so closing the last browser tab
+ends it (with session cookies, like quitting a browser) once views and downloads release it. The owner keeps the
+profile lock throughout. Keep code resident for async callbacks and release unused contexts. Never let concurrent
+owners write the same browser profile. Candidate
 owners/profiles are isolated from the stable installation. Browser moves preserve live DOM within the local owner;
 remote workspaces share saved URLs only. Updated owners warm a provisional GUI, refresh a frozen descriptor-backed
 snapshot, and acknowledge commit before the donor retires; see

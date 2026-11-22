@@ -285,7 +285,8 @@ class RustBrowserTest(unittest.TestCase):
                 subprocess.run(['xdotool', 'type', '--clearmodifiers', str(destination)], env=env, check=True)
                 subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Return'], env=env, check=True)
                 deadline = time.monotonic() + 5
-                while not destination.exists():
+                # WebKit creates the destination before writing it; wait for the bytes, not the file.
+                while not destination.exists() or destination.read_bytes() != b'Worminal download fixture\n':
                     if time.monotonic() >= deadline:
                         from Xlib import display as xdisplay
                         from visible_latency import capture_failure
@@ -295,6 +296,35 @@ class RustBrowserTest(unittest.TestCase):
                     self.assertLess(time.monotonic(), deadline, 'native download did not complete')
                     time.sleep(.02)
                 self.assertEqual(destination.read_bytes(), b'Worminal download fixture\n')
+
+    def test_closing_the_last_browser_tab_ends_the_network_process(self):
+        from perf_metrics import descendants
+        def network(app):
+            return [pid for pid in descendants(app.pid) if pid != app.pid and
+                    Path(f'/proc/{pid}/comm').read_text().startswith('WebKitNetwork')]
+        def wait(condition, message):
+            deadline = time.monotonic() + 10
+            while not condition():
+                self.assertLess(time.monotonic(), deadline, message); time.sleep(.05)
+        def api(*arguments):
+            return json.loads(subprocess.check_output([str(runtime_binary('worminald')), 'api', *arguments],
+                                                      env=env, text=True, timeout=5))
+        with isolated_display() as display, profile(display) as env, fixture() as url:
+            env.update(GDK_BACKEND='x11'); env.pop('WAYLAND_DISPLAY', None)
+            with application(env, '--browser', url) as app:
+                title(env, 'Fixture', app)
+                wait(lambda: network(app), 'the browser view never started a network process')
+                browser, = api('list')['tabs']
+                api('open')  # A terminal tab keeps the window open.
+                api('close', str(browser['id']))
+                # The process otherwise keeps its heap for the frontend's lifetime.
+                wait(lambda: not network(app), 'the network process outlived every browser tab')
+                self.assertIsNone(app.poll(), 'closing the browser tab closed the terminal window')
+                # The retained owner lock reopens the profile with a fresh network process.
+                subprocess.run([APP, '--browser', url], env=env, check=True, timeout=10,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                title(env, 'Fixture', app)
+                wait(lambda: network(app), 'a reopened browser tab never restarted the network process')
 
     def test_native_wayland_browser_presents_document_frames(self):
         ready = threading.Event()

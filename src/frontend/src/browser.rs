@@ -30,9 +30,14 @@ impl Drop for UnpublishedLibrary {
         }
     }
 }
+/// The owner keeps the profile lock for its lifetime, but holds the WebsiteDataManager only while it has browser
+/// tabs: the manager's network process keeps its heap (over 100 MB after browsing) until the manager finalizes.
+/// Views and in-flight downloads keep the manager alive through the module's context, so the weak reference
+/// reuses it rather than opening a second manager on the same directories.
 struct Profile {
     module: Rc<Module>,
-    object: glib::Object,
+    object: glib::WeakRef<glib::Object>,
+    hold: Option<glib::Object>,
     _lock: File,
 }
 // Stable product data predates the Rust port. Candidate owners remain isolated until cutover.
@@ -174,19 +179,22 @@ fn module() -> io::Result<Rc<Module>> {
 }
 fn profile(module: &Rc<Module>) -> io::Result<glib::Object> {
     PROFILE.with(|slot| {
-        if let Some(profile) = slot.borrow().as_ref() {
-            return Ok(profile.object.clone());
+        let mut slot = slot.borrow_mut();
+        if let Some(profile) = slot.as_mut() {
+            let object = match profile.object.upgrade() {
+                Some(object) => object,
+                None => {
+                    let object = open_profile(module)?;
+                    profile.module = module.clone();
+                    profile.object = object.downgrade();
+                    object
+                }
+            };
+            profile.hold = Some(object.clone());
+            return Ok(object);
         }
         // Launch policy fixes the profile once per owner; forwarded callers cannot change it.
-        let name = PROFILE_NAME.with(|slot| *slot.borrow());
-        let data = glib::user_data_dir().join(name);
-        let cache = glib::user_cache_dir().join(name);
-        for directory in [&data, &cache] {
-            std::fs::DirBuilder::new()
-                .recursive(true)
-                .mode(0o700)
-                .create(directory)?;
-        }
+        let data = profile_directories()?.0;
         let lock = if let Some(lock) = LEASE.with(|slot| slot.borrow_mut().take()) {
             let expected = std::fs::metadata(data.join(WORMINAL_BROWSER_PROFILE_LOCK))?;
             let actual = lock.metadata()?;
@@ -208,22 +216,48 @@ fn profile(module: &Rc<Module>) -> io::Result<glib::Object> {
                 "Rust browser profile is already open in another owner",
             ));
         }
-        let data = CString::new(data.as_os_str().as_bytes())?;
-        let cache = CString::new(cache.as_os_str().as_bytes())?;
-        let pointer = unsafe { module.api.profile.unwrap()(data.as_ptr(), cache.as_ptr()) };
-        if pointer.is_null() {
-            return Err(io::Error::other(
-                "could not initialize Rust browser profile",
-            ));
-        }
-        let object: glib::Object = unsafe { from_glib_full(pointer.cast()) };
-        *slot.borrow_mut() = Some(Profile {
+        let object = open_profile(module)?;
+        *slot = Some(Profile {
             module: module.clone(),
-            object: object.clone(),
+            object: object.downgrade(),
+            hold: Some(object.clone()),
             _lock: lock,
         });
         Ok(object)
     })
+}
+fn profile_directories() -> io::Result<(PathBuf, PathBuf)> {
+    let name = PROFILE_NAME.with(|slot| *slot.borrow());
+    let data = glib::user_data_dir().join(name);
+    let cache = glib::user_cache_dir().join(name);
+    for directory in [&data, &cache] {
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(directory)?;
+    }
+    Ok((data, cache))
+}
+fn open_profile(module: &Rc<Module>) -> io::Result<glib::Object> {
+    let (data, cache) = profile_directories()?;
+    let data = CString::new(data.as_os_str().as_bytes())?;
+    let cache = CString::new(cache.as_os_str().as_bytes())?;
+    let pointer = unsafe { module.api.profile.unwrap()(data.as_ptr(), cache.as_ptr()) };
+    if pointer.is_null() {
+        return Err(io::Error::other(
+            "could not initialize Rust browser profile",
+        ));
+    }
+    Ok(unsafe { from_glib_full(pointer.cast()) })
+}
+/// The owner has no browser tab left: let the network process exit once views and downloads release it.
+/// Session cookies end with it, as when a conventional browser quits.
+pub(crate) fn release_profile() {
+    PROFILE.with(|slot| {
+        if let Some(profile) = slot.borrow_mut().as_mut() {
+            profile.hold = None;
+        }
+    });
 }
 unsafe extern "C" fn event(context: *mut c_void, kind: u32, value: *const libc::c_char) {
     let _ = catch_unwind(AssertUnwindSafe(|| {
@@ -380,8 +414,11 @@ pub(crate) fn cookies(
 ) -> io::Result<()> {
     let module = module()?;
     let profile = if input.is_none() {
-        let profile =
-            PROFILE.with(|slot| slot.borrow().as_ref().map(|profile| profile.object.clone()));
+        let profile = PROFILE.with(|slot| {
+            slot.borrow()
+                .as_ref()
+                .and_then(|profile| profile.object.upgrade())
+        });
         let Some(profile) = profile else {
             callback(Ok(Vec::new()));
             return Ok(());

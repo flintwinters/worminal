@@ -706,6 +706,7 @@ impl App {
                 .borrow_mut()
                 .retain(|current| current.id != page.id);
         }
+        browser_views::release_unused_profile();
         for record in &records {
             let existing = self
                 .pages

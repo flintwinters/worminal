@@ -75,7 +75,10 @@ pub(crate) fn connect(browser: &Rc<Browser>) {
 }
 pub(crate) fn downloads(context: &WebContext) {
     context.connect_download_started(|_, download| {
+        crate::download_started();
+        // WebKit emits `finished` once per download, after `failed` when it fails.
         download.connect_finished(|download| {
+            crate::download_finished();
             if std::env::var_os("WORMINAL_TRACE_TIMING").is_some() {
                 eprintln!("worminal-download finished {:?}", download.destination());
             }

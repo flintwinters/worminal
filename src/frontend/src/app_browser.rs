@@ -6,6 +6,18 @@ use std::{ffi::OsString, rc::Rc};
 use worminal_browser_api::*;
 use worminal_protocol::worp::commands::CommandKind;
 
+/// Browser tabs are the only reason to keep the profile's network process.
+pub(super) fn release_unused_profile() {
+    let browsing = WINDOWS.with(|windows| {
+        windows
+            .borrow()
+            .iter()
+            .any(|app| app.pages.borrow().iter().any(|page| page.browser))
+    });
+    if !browsing {
+        crate::browser::release_profile();
+    }
+}
 impl App {
     pub(super) fn release_browsers(self: &Rc<Self>) {
         let ids: Vec<_> = self
