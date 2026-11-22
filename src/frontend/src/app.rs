@@ -754,14 +754,11 @@ impl App {
                     wrapper.pack_start(terminal.widget(), true, true, 0);
                     wrapper.upcast()
                 } else {
-                    let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
-                    let claim = gtk::Button::with_label("Show browser here");
                     let id = record.id;
-                    claim.connect_clicked(
-                        glib::clone!(@weak self as app => move |_| app.claim_browser(id)),
-                    );
-                    container.pack_start(&claim, true, true, 0);
-                    container.upcast()
+                    browser_views::placeholder(
+                        glib::clone!(@weak self as app => move || app.claim_browser(id)),
+                    )
+                    .upcast()
                 };
                 let page = Page {
                     id: record.id,

@@ -223,7 +223,11 @@ def build_rust_daemon():
 
 
 def run_rust_frontend_tests():
-    return run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-frontend", "--lib", "--tests"])
+    # GTK widget tests need a display; never the desktop's, and never silently skipped.
+    sys.path.insert(0, str(Path(__file__).parent / "tests"))
+    from x11 import isolated_display
+    with isolated_display() as env:
+        return run(["cargo", "test", "--locked", "--quiet", "-p", "worminal-frontend", "--lib", "--tests"], env=env)
 
 
 @app.command("check-rust-frontend")

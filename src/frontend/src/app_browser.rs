@@ -113,10 +113,7 @@ impl App {
             };
             match view {
                 Ok(view) => {
-                    for child in container.children() {
-                        child.hide();
-                    }
-                    container.pack_start(view.widget(), true, true, 0);
+                    host(&container, view.widget());
                     *page.view.borrow_mut() = Some(view.clone());
                     view.widget().show_all();
                     view.zoom(self.fonts.borrow().zoom());
@@ -159,6 +156,25 @@ impl App {
             }
         }
     }
+}
+/// A browser page's container: a button that claims the live view for this window until it does.
+pub(super) fn placeholder(claim: impl Fn() + 'static) -> gtk::Box {
+    let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let button = gtk::Button::with_label("Show browser here");
+    button.connect_clicked(move |_| claim());
+    // Split changes `show_all` the pane tree; an ancestor must not reveal the button beside a hosted view,
+    // where it takes an equal share of the page. Only `host` and a peer's release change its visibility.
+    button.set_no_show_all(true);
+    button.show();
+    container.pack_start(&button, true, true, 0);
+    container
+}
+/// Replace the placeholder with the live view.
+fn host(container: &gtk::Box, view: &gtk::Widget) {
+    for child in container.children() {
+        child.hide();
+    }
+    container.pack_start(view, true, true, 0);
 }
 fn event(master: &Option<OsString>, id: u32, kind: u32, value: &str) {
     let owners: Vec<_> = WINDOWS.with(|windows| {
@@ -210,5 +226,26 @@ fn event(master: &Option<OsString>, id: u32, kind: u32, value: &str) {
                 app.send(id, CommandKind::Navigate(value.as_bytes().to_vec()));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_hosted_view_keeps_the_whole_page_after_show_all() {
+        crate::with_gtk(|| {
+            let container = placeholder(|| {});
+            let view = gtk::Label::new(None);
+            host(&container, view.upcast_ref());
+            container.show_all();
+            let visible: Vec<_> = container
+                .children()
+                .into_iter()
+                .filter(|child| child.is_visible())
+                .collect();
+            assert_eq!(visible, [view.upcast::<gtk::Widget>()]);
+        });
     }
 }

@@ -86,11 +86,10 @@ mod tests {
     }
     #[test]
     fn the_frame_css_parses_with_terminal_colors() {
-        gtk::init().ok();
-        if gtk::is_initialized() {
+        crate::with_gtk(|| {
             gtk::CssProvider::new()
                 .load_from_data(css("#181818", "#d8d8d8").as_bytes())
                 .expect("frame CSS parses");
-        }
+        });
     }
 }
