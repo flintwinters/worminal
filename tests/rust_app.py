@@ -638,9 +638,11 @@ class RustApplicationTest(unittest.TestCase):
             self.assertEqual(pixel(.75, .75), white)
             # Right after the split the terminal's own resize keeps it shown, which hides a fault: selecting the
             # browser pane again later must not hide the terminal, as an exclusive Focus on the browser would.
-            xdo('key', '--clearmodifiers', 'ctrl+shift+Left')
+            # Ctrl+Alt+arrows select panes like Ctrl+Shift+arrows.
+            xdo('key', '--clearmodifiers', 'ctrl+alt+Left')
+            wait_for(lambda: title() != loaded, 'ctrl+alt+Left did not select the terminal pane')
             time.sleep(1)
-            xdo('key', '--clearmodifiers', 'ctrl+shift+Right')
+            xdo('key', '--clearmodifiers', 'ctrl+alt+Right')
             wait_for(lambda: title() == loaded, 'the browser pane was not selected again')
             time.sleep(1)
             seen = set()

@@ -96,11 +96,13 @@ impl App {
             );
             return true;
         }
-        // Ctrl+Shift+arrow focuses the pane that way; Alt+Shift+arrow moves the tab there like a drag would.
-        // Each leaves the keystroke to the application when it has nothing to do (no split, nothing to move).
+        // Ctrl+Alt+arrow or Ctrl+Shift+arrow focuses the pane that way; Alt+Shift+arrow moves the tab there like
+        // a drag would. Each leaves the keystroke to the application when it has nothing to do (no split, nothing
+        // to move). Window managers often claim Ctrl+Alt+arrow for workspaces, so Ctrl+Shift+arrow remains.
         // Ctrl+Shift+Alt+arrow is not used: GNOME owns it and some keyboards cannot send it.
         let move_tab = state == Mod::MOD1_MASK | Mod::SHIFT_MASK;
-        if state == control_shift || move_tab {
+        let focus_pane = state == control_shift || state == Mod::CONTROL_MASK | Mod::MOD1_MASK;
+        if focus_pane || move_tab {
             let direction = match value {
                 key::Left => Some(Direction::Left),
                 key::Right => Some(Direction::Right),
