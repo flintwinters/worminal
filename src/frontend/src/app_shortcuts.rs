@@ -156,6 +156,11 @@ impl App {
                     self.unsplit();
                     return true;
                 }
+                // Close the window and forget its layout, so the next start is fresh.
+                key::q => {
+                    self.close_without_layout();
+                    return true;
+                }
                 // B for bookmarks; P also works for keyboards that can send it (a membrane keyboard may not).
                 key::b | key::p => {
                     self.toggle_panel();

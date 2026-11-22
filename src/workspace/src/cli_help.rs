@@ -11,6 +11,7 @@ pub fn launcher(product: &str, version: &str) -> String {
         Ctrl+= / Ctrl+-: zoom in/out  Ctrl+Shift+Home: reset zoom\n\
         Drag a tab to a pane edge: split  Ctrl+Shift+X: gather panes\n\
         Ctrl+Alt/Ctrl+Shift+Arrows: focus pane  Alt+Shift+Arrows: move tab to pane\n\
+        Windows reopen with their layout after a crash or close; Ctrl+Shift+Q: close and forget it\n\
         Ctrl+Shift+D: bookmark tab (or its star)  Ctrl+Shift+B: side panel (`a` adds a server, `r` names)\n\
         Middle click: autoscroll  Shift+middle click: paste selection\n\n\
         Automation and agents: run `worminald --help`, then `worminald api help`\n\n{}",

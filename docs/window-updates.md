@@ -3,7 +3,7 @@
 Owners built with window replacement watch the executable, frontend and browser module files. An atomic file
 replacement opens the updated owner with the same windows, selected tabs, splits, font zoom and window state, then
 closes the old windows after the replacement is ready. On X11 it restores window position, size and virtual desktop;
-owners before 1.0.4 send neither splits nor desktops. On Wayland the
+owners before 1.0.4 send neither splits nor desktops, and 1.0.4 sends splits without divider positions. On Wayland the
 compositor controls placement; size and selected tabs are restored, but coordinates cannot be guaranteed.
 
 Preparation is provisional: windows remain usable while the candidate warms up. Window creation, closure,

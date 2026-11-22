@@ -18,6 +18,30 @@ fn browser_label(url: &str, title: &str) -> String {
     title.to_string()
 }
 impl App {
+    /// Size a new window so its terminal shows the configured columns and rows, once they are measurable.
+    pub(super) fn fit_geometry(&self, terminal: &crate::terminal::Terminal) {
+        // The fit adds the chrome around the terminal (window size less the terminal's allocation), so an
+        // unallocated terminal would count the whole window as chrome and nearly double it. Its first real
+        // allocation reports `Resized` and fits then.
+        if !self.geometry_pending.get()
+            || !self.window.is_mapped()
+            || terminal.widget().allocated_width() <= 1
+        {
+            return;
+        }
+        if let Some(metrics) = terminal.metrics() {
+            self.geometry_pending.set(false);
+            let (width, height) = self.window.size();
+            self.window.resize(
+                self.config.columns as i32 * metrics.width + width
+                    - terminal.widget().allocated_width()
+                    + 4,
+                self.config.rows as i32 * metrics.height + height
+                    - terminal.widget().allocated_height()
+                    + 4,
+            );
+        }
+    }
     pub(super) fn refresh_tabs(&self) {
         if self.syncing.get() {
             return;

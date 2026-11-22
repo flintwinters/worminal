@@ -7,7 +7,7 @@ use std::{
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
 };
-use worminal_workspace::bookmarks::{Bookmark, Bookmarks, Target, MAX_BOOKMARKS};
+use worminal_workspace::bookmarks::{parse_server, Bookmark, Bookmarks, Target, MAX_BOOKMARKS};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 struct Fixture(PathBuf);
@@ -45,9 +45,13 @@ fn terminal(directory: &str, master: Option<&str>) -> Bookmark {
     }
 }
 fn host(endpoint: &str) -> Bookmark {
+    host_on(endpoint, None)
+}
+fn host_on(endpoint: &str, port: Option<u16>) -> Bookmark {
     Bookmark {
         target: Target::Host {
             endpoint: endpoint.into(),
+            port,
         },
         title: None,
     }
@@ -337,4 +341,106 @@ fn a_bookmark_is_named_renamed_and_unnamed_by_its_target() {
         std::io::ErrorKind::NotFound
     );
     assert_eq!(store.list().unwrap().len(), 1);
+}
+
+#[test]
+fn a_server_port_is_part_of_its_identity_and_survives_the_file() {
+    let fixture = Fixture::new();
+    let store = fixture.store();
+    assert!(store.add(host_on("me@build", Some(2222))).unwrap());
+    // The same host on another port, and on ssh's default, are other bookmarks.
+    assert!(store.add(host_on("me@build", Some(2200))).unwrap());
+    assert!(store.add(host("me@build")).unwrap());
+    assert!(!store.add(host_on("me@build", Some(2222))).unwrap());
+    let listed: Vec<_> = store
+        .list()
+        .unwrap()
+        .into_iter()
+        .map(|b| b.target)
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            host_on("me@build", Some(2222)).target,
+            host_on("me@build", Some(2200)).target,
+            host("me@build").target,
+        ]
+    );
+    let text = fs::read_to_string(fixture.path()).unwrap();
+    assert!(
+        text.contains("port: 2222") && text.contains("port: 2200"),
+        "{text}"
+    );
+    assert!(store
+        .remove(&host_on("me@build", Some(2200)).target)
+        .unwrap());
+    assert_eq!(store.list().unwrap().len(), 2);
+}
+
+#[test]
+fn a_hand_written_port_is_read_and_port_22_is_the_default() {
+    let fixture = Fixture::new();
+    fs::write(
+        fixture.path(),
+        "bookmarks:\n  - host: me@build\n    port: 2222\n  - host: other\n    port: 22\n",
+    )
+    .unwrap();
+    let listed: Vec<_> = fixture
+        .store()
+        .list()
+        .unwrap()
+        .into_iter()
+        .map(|b| b.target)
+        .collect();
+    assert_eq!(
+        listed,
+        [host_on("me@build", Some(2222)).target, host("other").target]
+    );
+    for bad in [
+        "bookmarks:\n  - host: h\n    port: 0\n",
+        "bookmarks:\n  - host: h\n    port: 70000\n",
+        "bookmarks:\n  - host: h\n    port: ssh\n",
+        "bookmarks:\n  - directory: /a\n    port: 22\n",
+        "bookmarks:\n  - url: https://example.org\n    port: 22\n",
+    ] {
+        fs::write(fixture.path(), bad).unwrap();
+        assert!(fixture.store().list().is_err(), "{bad:?} was accepted");
+    }
+    assert!(host_on("h", Some(0)).validate().is_err());
+}
+
+#[test]
+fn typed_servers_split_the_port_off_without_breaking_ipv6() {
+    for (typed, endpoint, port) in [
+        ("build", "build", None),
+        ("me@build", "me@build", None),
+        ("me@build:2222", "me@build", Some(2222)),
+        (" build:2222 ", "build", Some(2222)),
+        ("build:22", "build", None),
+        ("[::1]", "[::1]", None),
+        ("[::1]:2222", "[::1]", Some(2222)),
+        ("me@[fe80::1]:2200", "me@[fe80::1]", Some(2200)),
+        ("::1", "::1", None),
+        ("10.0.0.7:65535", "10.0.0.7", Some(65535)),
+    ] {
+        assert_eq!(
+            parse_server(typed).unwrap(),
+            (endpoint.to_owned(), port),
+            "{typed:?}"
+        );
+    }
+    for bad in [
+        "",
+        "build:",
+        "build:0",
+        "build:65536",
+        "build:ssh",
+        "me@build:22x",
+        "-o:2222",
+        "a b:22",
+        "host;reboot:22",
+        "me@:22",
+    ] {
+        assert!(parse_server(bad).is_err(), "{bad:?} was accepted");
+    }
 }

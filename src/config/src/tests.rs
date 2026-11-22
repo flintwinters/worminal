@@ -52,6 +52,7 @@ fn defaults_match_alacritty_palette_and_shared_font() {
     );
     assert!(!settings.bold_bright && !settings.update_notifications);
     assert!(settings.group_tabs_by_title, "grouping is on by default");
+    assert!(settings.restore_layout, "layouts are restored by default");
     assert!(
         !settings.unbookmarked_stars,
         "only bookmarked tabs show a star by default"
@@ -355,6 +356,7 @@ fn the_reference_lists_every_command_and_setting() {
         "colors.indexed_colors",
         "worminal.group_tabs_by_title",
         "worminal.unbookmarked_stars",
+        "worminal.restore_layout",
         "WORMINAL_CONFIG",
         "bookmarks.yaml",
         "{directory: /abs/path",

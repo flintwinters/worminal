@@ -1,6 +1,6 @@
 //! What the side panel lists: its tabs, their rows and what pressing a row asks the window to do. Nothing here
 //! touches GTK, so every rule is unit-tested; `panel.rs` draws and drives whatever implements `PanelTab`.
-use worminal_workspace::bookmarks::{Bookmark, Target};
+use worminal_workspace::bookmarks::{parse_server, Bookmark, Target};
 
 /// What a panel tab asks the window to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -10,8 +10,8 @@ pub enum PanelAction {
         master: Option<String>,
     },
     OpenUrl(String),
-    /// A new tab that runs ssh to this endpoint.
-    OpenHost(String),
+    /// A new tab that runs ssh to this endpoint, on this port when there is one.
+    OpenHost(String, Option<u16>),
     AddBookmark(Bookmark),
     /// Give the bookmark this name, or clear its name.
     RenameBookmark {
@@ -86,7 +86,14 @@ fn row_label(bookmark: &Bookmark, home: Option<&str>) -> String {
         } => format!("{master}:{directory}"),
         Target::Terminal { directory, .. } => tilde(directory, home),
         Target::Web { url } => url.clone(),
-        Target::Host { endpoint } => format!("ssh {endpoint}"),
+        Target::Host {
+            endpoint,
+            port: None,
+        } => format!("ssh {endpoint}"),
+        Target::Host {
+            endpoint,
+            port: Some(port),
+        } => format!("ssh {endpoint}:{port}"),
     }
 }
 impl PanelTab for BookmarksTab {
@@ -103,18 +110,18 @@ impl PanelTab for BookmarksTab {
         "No bookmarks yet. Ctrl+Shift+D bookmarks the current tab; a adds a server."
     }
     fn add_prompt(&self) -> Option<&str> {
-        Some("Add server (user@host)")
+        Some("Add server (user@host or user@host:port; 22 is the default)")
     }
     fn add(&self, text: &str) -> Result<PanelAction, String> {
+        let (endpoint, port) = parse_server(text)
+            .map_err(|_| "Not a server: use host, user@host or user@host:port.".to_owned())?;
         let bookmark = Bookmark {
-            target: Target::Host {
-                endpoint: text.trim().to_owned(),
-            },
+            target: Target::Host { endpoint, port },
             title: None,
         };
         bookmark
             .validate()
-            .map_err(|_| "Not a server: use host or user@host.".to_owned())?;
+            .map_err(|_| "Not a server: use host, user@host or user@host:port.".to_owned())?;
         Ok(PanelAction::AddBookmark(bookmark))
     }
     fn name_of(&self, row: usize) -> Option<String> {
@@ -147,7 +154,9 @@ impl PanelTab for BookmarksTab {
                 master: master.clone(),
             },
             (PanelKey::Open, Target::Web { url }) => PanelAction::OpenUrl(url.clone()),
-            (PanelKey::Open, Target::Host { endpoint }) => PanelAction::OpenHost(endpoint.clone()),
+            (PanelKey::Open, Target::Host { endpoint, port }) => {
+                PanelAction::OpenHost(endpoint.clone(), *port)
+            }
         })
     }
 }
@@ -229,6 +238,7 @@ mod tests {
         Bookmark {
             target: Target::Host {
                 endpoint: endpoint.into(),
+                port: None,
             },
             title: title.map(Into::into),
         }
@@ -246,12 +256,13 @@ mod tests {
         assert_eq!(tab.rows(), ["ssh digitize@Luna", "Build box"]);
         assert_eq!(
             tab.press(PanelKey::Open, 1),
-            Some(PanelAction::OpenHost("10.0.0.7".into()))
+            Some(PanelAction::OpenHost("10.0.0.7".into(), None))
         );
         assert_eq!(
             tab.press(PanelKey::Remove, 0),
             Some(PanelAction::RemoveBookmark(Target::Host {
-                endpoint: "digitize@Luna".into()
+                endpoint: "digitize@Luna".into(),
+                port: None
             }))
         );
     }

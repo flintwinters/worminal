@@ -31,6 +31,8 @@ mod bookmarks;
 mod browser_views;
 #[path = "app_chrome.rs"]
 mod chrome;
+#[path = "app_layout.rs"]
+mod layout_state;
 #[path = "app_links.rs"]
 mod links;
 #[path = "notifications.rs"]
@@ -429,6 +431,7 @@ impl App {
             bookmarks: RefCell::new(bookmarks::load()),
         });
         app.start_panes();
+        app.begin_restore(staged);
         app.window.connect_key_press_event(
             glib::clone!(@weak app => @default-return glib::Propagation::Proceed,
             move |_, event| app.shortcut(event).into()),
@@ -453,6 +456,7 @@ impl App {
                     app.close_after_update.set(true);
                     return glib::Propagation::Stop;
                 }
+                app.flush_layout();
                 app.release_browsers(); glib::Propagation::Proceed
             }),
         );
@@ -516,23 +520,6 @@ impl App {
         }
         self.refresh_tabs();
         window_state::changed();
-    }
-    fn fit_geometry(&self, terminal: &Terminal) {
-        if !self.geometry_pending.get() || !self.window.is_mapped() {
-            return;
-        }
-        if let Some(metrics) = terminal.metrics() {
-            self.geometry_pending.set(false);
-            let (width, height) = self.window.size();
-            self.window.resize(
-                self.config.columns as i32 * metrics.width + width
-                    - terminal.widget().allocated_width()
-                    + 4,
-                self.config.rows as i32 * metrics.height + height
-                    - terminal.widget().allocated_height()
-                    + 4,
-            );
-        }
     }
     /// Fade the tab here and, as it rises, in the daemon's other views until input answers it.
     fn alert(self: &Rc<Self>, id: u32, severity: u32) {
@@ -717,6 +704,7 @@ impl App {
             });
         }
         *link.catalog_tabs.borrow_mut() = catalog.tabs.iter().map(|tab| tab.id).collect();
+        let reconnected = link.down();
         link.retry_delay.set(links::RETRY_INITIAL);
         let initial_claim = link.initial_claim.replace(false);
         let mut replaced_active = false;
@@ -922,6 +910,9 @@ impl App {
             self.window.close();
         } else {
             self.message(Some("No tabs. Ctrl+Shift+T opens a terminal."));
+        }
+        if index == 0 {
+            self.restore_layout(reconnected, requested);
         }
         self.present(false);
         self.show_visible_browsers();

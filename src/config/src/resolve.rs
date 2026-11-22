@@ -29,6 +29,8 @@ pub struct Settings {
     pub unbookmarked_stars: bool,
     /// Under WSLg the Windows side draws each window's frame; the frontend restyles it to match the terminal.
     pub wsl_window_frame: bool,
+    /// Windows reopen with the split layout, size and position they last had (`docs/layout-restore.md`).
+    pub restore_layout: bool,
     /// `#rrggbb` per palette slot. Unset indexed slots stay `None`: renderers synthesize them.
     pub colors: Vec<Option<String>>,
 }
@@ -269,6 +271,11 @@ impl Settings {
                 true,
                 "worminal.wsl_window_frame",
             )?,
+            restore_layout: boolean(
+                worminal.get("restore_layout"),
+                true,
+                "worminal.restore_layout",
+            )?,
             colors: palette(config)?,
         })
     }
@@ -287,6 +294,7 @@ impl Settings {
             "group_tabs_by_title": self.group_tabs_by_title,
             "unbookmarked_stars": self.unbookmarked_stars,
             "wsl_window_frame": self.wsl_window_frame,
+            "restore_layout": self.restore_layout,
             "colors": self.colors,
         })
     }

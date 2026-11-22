@@ -80,9 +80,9 @@ impl App {
                 Ok(_) => self.reload_bookmarks(),
                 Err(error) => self.message(Some(&error.to_string())),
             },
-            PanelAction::OpenHost(endpoint) => {
+            PanelAction::OpenHost(endpoint, port) => {
                 self.close_panel();
-                self.open_bookmarked_host(endpoint);
+                self.open_bookmarked_host(endpoint, port);
             }
             PanelAction::OpenUrl(url) => {
                 self.close_panel();
