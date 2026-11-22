@@ -44,21 +44,33 @@ class UpdateFlowTests(unittest.TestCase):
         with auto_update.exclusive(self.root):
             pass
 
-    def test_explorer_dist_older_than_sources_is_stale(self):
+    def test_explorer_dist_is_stale_unless_built_from_current_sources_and_host_inputs(self):
         source = self.root / "apps/explorer/src/main.ts"
         source.parent.mkdir(parents=True)
         source.write_text("x")
         dist = self.root / "dist/index.html"
         dist.parent.mkdir()
-        with patch.object(explorer, "EXPLORER", self.root), patch.object(explorer, "DIST", dist):
-            self.assertTrue(explorer.dist_stale())  # missing
+        palette = self.root / "palette.json"
+        palette.write_text("{}")
+        inputs = {"WORMINAL_PALETTE": str(palette), "WORMINAL_FONT_JSON": '{"family": "Mono", "size": 14}'}
+        with patch.object(explorer, "EXPLORER", self.root), patch.object(explorer, "DIST", dist), \
+                patch.object(explorer, "STAMP", self.root / "stamp.json"):
+            self.assertTrue(explorer.dist_stale(inputs))  # missing
             dist.write_text("y")
             now = time.time()
             os.utime(source, (now - 10, now - 10))
             os.utime(dist, (now, now))
-            self.assertFalse(explorer.dist_stale())
+            self.assertTrue(explorer.dist_stale(inputs))  # never built by the parent with host inputs
+            explorer.record(inputs)
+            self.assertFalse(explorer.dist_stale(inputs))
+            # A changed terminal font must reach the explorer.
+            self.assertTrue(explorer.dist_stale({**inputs, "WORMINAL_FONT_JSON": '{"family": "Other", "size": 14}'}))
+            # The submodule's standalone build rewrites dist without the host font.
+            os.utime(dist, (now + 1, now + 1))
+            self.assertTrue(explorer.dist_stale(inputs))
+            explorer.record(inputs)
             os.utime(source, (now + 10, now + 10))
-            self.assertTrue(explorer.dist_stale())
+            self.assertTrue(explorer.dist_stale(inputs))
 
     def test_only_mounts_of_aborted_updates_are_released(self):
         checks = (self.root / "build/checks").resolve()

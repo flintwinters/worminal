@@ -20,7 +20,6 @@ except ModuleNotFoundError as error:
 from tools import timing
 from tools.paths import CHECKS, runtime_binary
 from tools import build as native_build
-from tools.theme import explorer_font
 from tools.git_index import tracked_files
 
 
@@ -624,9 +623,12 @@ def explorer_command(command):
     if not script.exists():
         typer.echo("Initialize the file-explorer submodule first: git submodule update --init", err=True)
         raise typer.Exit(1)
-    raise typer.Exit(run([sys.executable, str(script), command],
-                         env={**os.environ, "WORMINAL_PALETTE": str(ROOT / "assets/palette.json"),
-                              "WORMINAL_FONT_JSON": json.dumps(explorer_font())}))
+    from tools import explorer
+    inputs = explorer.environment()
+    status = run([sys.executable, str(script), command], env={**os.environ, **inputs})
+    if not status and command in ("build", "check"):  # Both rebuild dist/index.html.
+        explorer.record(inputs)
+    raise typer.Exit(status)
 
 
 @app.command("check-browser-target")
