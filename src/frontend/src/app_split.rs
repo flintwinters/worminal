@@ -46,7 +46,10 @@ pub(super) struct Panes {
     /// The dragged tab's image and its top-left, in `root` coordinates.
     ghost: Rc<RefCell<Option<(cairo::ImageSurface, f64, f64)>>>,
     list: RefCell<Vec<Rc<Pane>>>,
-    layout: RefCell<Layout>,
+    /// Shared with the dividers, which record where they are dragged.
+    layout: Rc<RefCell<Layout>>,
+    /// Bumped by each rebuild, so dividers being taken down never record into the tree that replaced theirs.
+    generation: Rc<Cell<u64>>,
     focused: Cell<u32>,
     next: Cell<u32>,
     /// Tabs last sent to the daemons as shown, so unchanged sets generate no traffic.
@@ -95,7 +98,8 @@ impl Panes {
             marked,
             ghost,
             list: RefCell::new(Vec::new()),
-            layout: RefCell::new(Layout::Leaf(0)),
+            layout: Rc::new(RefCell::new(Layout::Leaf(0))),
+            generation: Rc::new(Cell::new(0)),
             focused: Cell::new(0),
             next: Cell::new(0),
             presented: RefCell::new(Vec::new()),
@@ -585,6 +589,7 @@ impl App {
         }
         let (layout, groups) = Layout::decode(bytes)?;
         self.split_off(&layout, &groups, &self.focused_pane());
+        self.panes.layout.borrow_mut().adopt_ratios(&layout);
         self.reorder_panes();
         self.collapse();
         self.rebuild();
@@ -601,6 +606,7 @@ impl App {
             side_by_side,
             first,
             second,
+            ..
         } = layout
         else {
             return;
@@ -670,6 +676,7 @@ impl App {
     /// Rebuild the widget tree. Pane widgets leave the old tree first: GTK destroys a container's children
     /// with it, and a pane holds live terminals.
     pub(super) fn rebuild(&self) {
+        self.panes.generation.set(self.panes.generation.get() + 1);
         for pane in self.panes() {
             detach(pane.widget.upcast_ref());
         }
@@ -679,11 +686,12 @@ impl App {
         let layout = self.panes.layout.borrow().clone();
         self.panes
             .host
-            .pack_start(&self.tree(&layout), true, true, 0);
+            .pack_start(&self.tree(&layout, &mut Vec::new()), true, true, 0);
         self.panes.host.show_all();
         self.panes.root.queue_draw();
     }
-    fn tree(&self, layout: &Layout) -> gtk::Widget {
+    /// Widgets for `layout`, found at `path` from the root (see `Layout::set_ratio`).
+    fn tree(&self, layout: &Layout, path: &mut Vec<bool>) -> gtk::Widget {
         match layout {
             Layout::Leaf(id) => self.pane(*id).map_or_else(
                 || gtk::Box::new(gtk::Orientation::Vertical, 0).upcast(),
@@ -691,32 +699,63 @@ impl App {
             ),
             Layout::Split {
                 side_by_side,
+                ratio,
                 first,
                 second,
             } => {
-                let side_by_side = *side_by_side;
+                let (side_by_side, ratio) = (*side_by_side, i32::from(*ratio));
                 let paned = gtk::Paned::new(if side_by_side {
                     gtk::Orientation::Horizontal
                 } else {
                     gtk::Orientation::Vertical
                 });
-                paned.pack1(&self.tree(first), true, false);
-                paned.pack2(&self.tree(second), true, false);
-                // The divider starts in the middle; GTK would size it from the panes' tiny minimum requests.
-                let placed = Cell::new(false);
-                paned.connect_size_allocate(move |paned, allocation| {
-                    let size = if side_by_side {
-                        allocation.width()
+                path.push(false);
+                paned.pack1(&self.tree(first, path), true, false);
+                *path.last_mut().unwrap() = true;
+                paned.pack2(&self.tree(second, path), true, false);
+                path.pop();
+                let size = move |paned: &gtk::Paned| {
+                    if side_by_side {
+                        paned.allocated_width()
                     } else {
-                        allocation.height()
-                    };
-                    if size > 1 && !placed.replace(true) {
+                        paned.allocated_height()
+                    }
+                };
+                // Rebuilding after a tab moves or a pane closes must keep every divider where it was dragged
+                // (the tree carries it); left to GTK, it would size from the panes' tiny minimum requests.
+                // Once placed, each divider records its moves; allocations too small to show a split do not.
+                let placed = Rc::new(Cell::new(false));
+                paned.connect_size_allocate(glib::clone!(@strong placed => move |paned, _| {
+                    let total = size(paned);
+                    if total > 1 && !placed.get() {
                         let weak = paned.downgrade();
-                        glib::idle_add_local_once(move || {
+                        glib::idle_add_local_once(glib::clone!(@strong placed => move || {
                             if let Some(paned) = weak.upgrade() {
-                                paned.set_position(size / 2);
+                                paned.set_position(total * ratio / 10_000);
+                                placed.set(true);
                             }
-                        });
+                        }));
+                    }
+                }));
+                let (layout, generation, built) = (
+                    Rc::downgrade(&self.panes.layout),
+                    Rc::downgrade(&self.panes.generation),
+                    self.panes.generation.get(),
+                );
+                let path = path.clone();
+                paned.connect_position_notify(move |paned| {
+                    let total = size(paned);
+                    let current = generation
+                        .upgrade()
+                        .is_some_and(|value| value.get() == built);
+                    if !placed.get() || !current || total < 50 {
+                        return;
+                    }
+                    if let Some(layout) = layout.upgrade() {
+                        if let Ok(mut layout) = layout.try_borrow_mut() {
+                            let share = i64::from(paned.position()) * 10_000 / i64::from(total);
+                            layout.set_ratio(&path, share.clamp(1, 9_999) as u16);
+                        }
                     }
                 });
                 paned.upcast()

@@ -110,10 +110,15 @@ pub enum Layout {
     Split {
         /// Children sit left and right; otherwise top and bottom.
         side_by_side: bool,
+        /// The first child's share of the split, in ten-thousandths: the divider as last placed.
+        ratio: u16,
         first: Box<Layout>,
         second: Box<Layout>,
     },
 }
+/// A new split's ratio: the divider in the middle.
+pub const EVEN: u16 = 5000;
+const WHOLE: u16 = 10000;
 impl Layout {
     /// Tab ids in reading order.
     pub fn leaves(&self) -> Vec<u32> {
@@ -135,11 +140,13 @@ impl Layout {
             Self::Leaf(leaf) => (leaf != id).then_some(self),
             Self::Split {
                 side_by_side,
+                ratio,
                 first,
                 second,
             } => match (first.without(id), second.without(id)) {
                 (Some(first), Some(second)) => Some(Self::Split {
                     side_by_side,
+                    ratio,
                     first: Box::new(first),
                     second: Box::new(second),
                 }),
@@ -154,32 +161,74 @@ impl Layout {
                 let (new, old) = (Box::new(Self::Leaf(id)), Box::new(Self::Leaf(leaf)));
                 match zone {
                     Zone::Center => Self::Leaf(leaf),
-                    Zone::Left => Self::split(true, new, old),
-                    Zone::Right => Self::split(true, old, new),
-                    Zone::Top => Self::split(false, new, old),
-                    Zone::Bottom => Self::split(false, old, new),
+                    Zone::Left => Self::split(true, EVEN, new, old),
+                    Zone::Right => Self::split(true, EVEN, old, new),
+                    Zone::Top => Self::split(false, EVEN, new, old),
+                    Zone::Bottom => Self::split(false, EVEN, old, new),
                 }
             }
             Self::Leaf(_) => self,
             Self::Split {
                 side_by_side,
+                ratio,
                 first,
                 second,
             } => Self::split(
                 side_by_side,
+                ratio,
                 Box::new(first.insert(anchor, id, zone)),
                 Box::new(second.insert(anchor, id, zone)),
             ),
         }
     }
-    fn split(side_by_side: bool, first: Box<Self>, second: Box<Self>) -> Self {
+    fn split(side_by_side: bool, ratio: u16, first: Box<Self>, second: Box<Self>) -> Self {
         Self::Split {
             side_by_side,
+            ratio,
             first,
             second,
         }
     }
+    /// Record a divider: `path` leads from the root to its split, `true` meaning the second child.
+    pub fn set_ratio(&mut self, path: &[bool], value: u16) {
+        if let Self::Split {
+            ratio,
+            first,
+            second,
+            ..
+        } = self
+        {
+            match path.split_first() {
+                None => *ratio = value.clamp(1, WHOLE - 1),
+                Some((false, rest)) => first.set_ratio(rest, value),
+                Some((true, rest)) => second.set_ratio(rest, value),
+            }
+        }
+    }
+    /// Take the dividers of `from` wherever both trees split in the same place.
+    pub fn adopt_ratios(&mut self, from: &Self) {
+        if let (
+            Self::Split {
+                ratio,
+                first,
+                second,
+                ..
+            },
+            Self::Split {
+                ratio: theirs,
+                first: their_first,
+                second: their_second,
+                ..
+            },
+        ) = (self, from)
+        {
+            *ratio = *theirs;
+            first.adopt_ratios(their_first);
+            second.adopt_ratios(their_second);
+        }
+    }
     /// The split as window replacement carries it: each pane leaf is written as its `tabs`, selected first.
+    /// Splits are kinds 3 and 4 with their ratio; 1.0.4 wrote kinds 1 and 2 without one.
     pub fn encode(&self, tabs: &dyn Fn(u32) -> Vec<u32>, body: &mut Buffer) -> io::Result<()> {
         match self {
             Self::Leaf(pane) => {
@@ -190,10 +239,12 @@ impl Layout {
             }
             Self::Split {
                 side_by_side,
+                ratio,
                 first,
                 second,
             } => {
-                body.put_u32(if *side_by_side { 1 } else { 2 })?;
+                body.put_u32(if *side_by_side { 3 } else { 4 })?;
+                body.put_u32(u32::from(*ratio))?;
                 first.encode(tabs, body)?;
                 second.encode(tabs, body)
             }
@@ -220,11 +271,22 @@ impl Layout {
                     groups.push(tabs);
                     Ok(Layout::Leaf(groups.len() as u32 - 1))
                 }
-                kind @ (1 | 2) => Ok(Layout::split(
-                    kind == 1,
-                    Box::new(read(body, groups, depth + 1)?),
-                    Box::new(read(body, groups, depth + 1)?),
-                )),
+                kind @ 1..=4 => {
+                    let ratio = if kind > 2 {
+                        body.u32()?
+                    } else {
+                        u32::from(EVEN)
+                    };
+                    if !(1..u32::from(WHOLE)).contains(&ratio) {
+                        return Err(invalid());
+                    }
+                    Ok(Layout::split(
+                        kind % 2 == 1,
+                        ratio as u16,
+                        Box::new(read(body, groups, depth + 1)?),
+                        Box::new(read(body, groups, depth + 1)?),
+                    ))
+                }
                 _ => Err(invalid()),
             }
         }
@@ -247,9 +309,11 @@ mod tests {
     fn a_split_round_trips_with_its_tabs() {
         let layout = Split {
             side_by_side: true,
+            ratio: 3000,
             first: Box::new(Leaf(7)),
             second: Box::new(Split {
                 side_by_side: false,
+                ratio: super::EVEN,
                 first: Box::new(Leaf(8)),
                 second: Box::new(Leaf(9)),
             }),
@@ -261,14 +325,65 @@ mod tests {
         let (decoded, groups) = super::Layout::decode(&body.into_bytes()).unwrap();
         assert_eq!(decoded.leaves(), vec![0, 1, 2]);
         assert_eq!(groups, vec![vec![70, 71], vec![80, 81], vec![90, 91]]);
+        assert_eq!(
+            decoded.clone().without(0).unwrap().without(1),
+            Some(Leaf(2))
+        );
         assert!(matches!(
             decoded,
             Split {
                 side_by_side: true,
+                ratio: 3000,
                 ..
             }
         ));
-        assert!(super::Layout::decode(&[0, 0, 0, 3]).is_err());
+        assert!(super::Layout::decode(&[0, 0, 0, 5]).is_err());
+        // A zero ratio would hide a pane entirely.
+        assert!(super::Layout::decode(&[
+            0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+        ])
+        .is_err());
+        // 1.0.4 donors write splits without ratios: they start even.
+        let old = [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let (layout, _) = super::Layout::decode(&old).unwrap();
+        assert!(matches!(
+            layout,
+            Split {
+                side_by_side: true,
+                ratio: super::EVEN,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn dividers_survive_tab_moves_and_removals() {
+        let mut layout = Leaf(1).insert(1, 2, Zone::Right).insert(2, 3, Zone::Bottom);
+        layout.set_ratio(&[], 2500);
+        layout.set_ratio(&[true], 7000);
+        layout.set_ratio(&[true], 0);
+        let ratios = |layout: &super::Layout| match layout {
+            Split { ratio, second, .. } => (
+                *ratio,
+                match &**second {
+                    Split { ratio, .. } => Some(*ratio),
+                    Leaf(_) => None,
+                },
+            ),
+            Leaf(_) => panic!("unsplit"),
+        };
+        assert_eq!(ratios(&layout), (2500, Some(1)));
+        layout.set_ratio(&[true], 7000);
+        // A new pane elsewhere and the loss of another keep every remaining divider.
+        let grown = layout.clone().insert(1, 4, Zone::Bottom);
+        assert_eq!(
+            ratios(&grown.clone().without(4).unwrap()),
+            (2500, Some(7000))
+        );
+        assert_eq!(ratios(&layout.clone().without(3).unwrap()), (2500, None));
+        let mut fresh = Leaf(5).insert(5, 6, Zone::Right).insert(6, 7, Zone::Bottom);
+        fresh.adopt_ratios(&layout);
+        assert_eq!(ratios(&fresh), (2500, Some(7000)));
     }
 
     #[test]
