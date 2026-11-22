@@ -154,3 +154,34 @@ def keypress(connection, *symbols):
     for symbol in reversed(symbols):
         xtest.fake_input(connection, X.KeyRelease, connection.keysym_to_keycode(symbol))
     connection.sync()
+
+
+@contextmanager
+def window_manager(env, desktops=3):
+    """Run xfwm4 on a private display with `desktops` virtual desktops; None when it is not installed."""
+    if not (shutil.which("xfwm4") and shutil.which("dbus-run-session")):
+        yield None
+        return
+    # xfwm4 reads its settings through xfconf, which would persist them: a private session bus and private
+    # configuration directories keep the user's desktop settings out of reach.
+    home = CHECKS / "xfwm4"
+    environment = {key: value for key, value in env.items() if key != "DBUS_SESSION_BUS_ADDRESS"}
+    environment.update({name: str(home / name.lower()) for name in ("XDG_CONFIG_HOME", "XDG_CACHE_HOME",
+                                                                     "XDG_DATA_HOME", "XDG_RUNTIME_DIR")})
+    for name in ("XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR"):
+        Path(environment[name]).mkdir(parents=True, mode=0o700, exist_ok=True)
+    with (CHECKS / "xfwm4.log").open("ab") as log:
+        manager = subprocess.Popen(["dbus-run-session", "--", "xfwm4", "--compositor=off", "--sm-client-disable"],
+                                   env=environment, stdout=log, stderr=log)
+    try:
+        deadline = time.monotonic() + 10
+        while subprocess.run(["xdotool", "set_num_desktops", str(desktops)], env=env,
+                             stderr=subprocess.DEVNULL).returncode != 0 or subprocess.run(
+                ["xdotool", "get_num_desktops"], env=env, capture_output=True, text=True).stdout.strip() != str(desktops):
+            if time.monotonic() > deadline or manager.poll() is not None:
+                raise RuntimeError("xfwm4 did not manage the private display")
+            time.sleep(.05)
+        yield manager
+    finally:
+        manager.terminate()
+        manager.wait(timeout=5)
