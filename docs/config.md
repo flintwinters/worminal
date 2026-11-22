@@ -20,6 +20,7 @@ including headless remote daemons.
 worminal:
   update_notifications: true   # desktop notification when a window update is postponed, pending or failed
   group_tabs_by_title: true    # when a tab's name changes, the daemon moves it beside a tab with the same name
+  unbookmarked_stars: false    # also show a hollow star on tabs that could be bookmarked; click it to bookmark
   wsl_window_frame: true       # under WSL, draw a title bar in the terminal colors instead of WSLg's
 ```
 

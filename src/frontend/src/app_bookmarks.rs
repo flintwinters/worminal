@@ -68,7 +68,8 @@ impl App {
             master,
         )
     }
-    /// Whether the tab can be bookmarked, and whether it is.
+    /// Whether the tab shows a star, and whether it is filled. A hollow star only appears with
+    /// `worminal.unbookmarked_stars`; Ctrl+Shift+D and `worminal --bookmark` work either way.
     pub(super) fn bookmark_state(&self, id: u32) -> (bool, bool) {
         let Some(target) = self.bookmark_target(id) else {
             return (false, false);
@@ -78,7 +79,10 @@ impl App {
             .borrow()
             .iter()
             .any(|bookmark| bookmark.target == target);
-        (true, starred)
+        (
+            starred || worminal_config::get().unbookmarked_stars,
+            starred,
+        )
     }
     /// Read the shared list again and redraw the stars if another window changed it.
     pub(super) fn reload_bookmarks(&self) {
@@ -88,6 +92,24 @@ impl App {
             self.refresh_tabs();
             self.refresh_panel();
         }
+    }
+    /// `worminal --bookmark`: the launcher runs in a tab's shell, so its working directory is that tab's.
+    /// Adding (never toggling) keeps a repeated command harmless. Every window redraws its stars.
+    pub(super) fn bookmark_directory(directory: &Path) -> std::io::Result<()> {
+        let target = target_of(false, "", directory, false, None).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("{} cannot be bookmarked.", directory.display()),
+            )
+        })?;
+        store().add(Bookmark {
+            target,
+            title: None,
+        })?;
+        for app in super::WINDOWS.with(|windows| windows.borrow().clone()) {
+            app.reload_bookmarks();
+        }
+        Ok(())
     }
     /// Add the tab's bookmark or remove it.
     pub(super) fn toggle_bookmark(self: &Rc<Self>, id: u32) {

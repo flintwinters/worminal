@@ -445,6 +445,9 @@ class RustApplicationTest(unittest.TestCase):
             cwd.mkdir(parents=True)
             self.addCleanup(shutil.rmtree, root, ignore_errors=True)
             saved = root / 'config/worminal/bookmarks.yaml'
+            saved.parent.mkdir(parents=True)
+            # Unbookmarked tabs show no star by default; this window shows them so the star can be clicked.
+            (saved.parent / 'worminal.yaml').write_text('worminal: {unbookmarked_stars: true}\n')
             env.update(GDK_BACKEND='x11', XDG_CONFIG_HOME=str(root / 'config'))
             env.pop('WAYLAND_DISPLAY', None)
             sizes = root / 'sizes.txt'
@@ -498,6 +501,11 @@ class RustApplicationTest(unittest.TestCase):
             wait_for(lambda: str(cwd) not in bookmarked(), 'clicking the star again did not remove it')
             time.sleep(1.5)
             self.assertEqual(resizes(), quiet, 'clicking the star resized the terminal')
+            # `worminal --bookmark` from the tab's shell bookmarks its directory; repeating it never removes it.
+            for _ in range(2):
+                subprocess.run([str(runtime_binary('worminal-rust')), '--bookmark'], env=env, cwd=cwd,
+                               check=True, timeout=10)
+                wait_for(lambda: f'directory: {cwd}' in bookmarked(), 'worminal --bookmark did not bookmark')
             self.assertEqual(len(json.loads(api('list'))['tabs']), 1)
 
     def test_a_browser_tab_moves_into_a_split_keeping_its_page_and_the_terminal_painting(self):

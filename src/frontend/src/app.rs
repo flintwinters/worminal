@@ -949,7 +949,7 @@ pub(crate) fn run_with_listener(
     }
     worminal_workspace::browser_target::command(&arguments)?;
     let request = worminal_workspace::broker::Request::capture(arguments)?;
-    if worminal_workspace::broker::master_action(&request.args)?.is_some() {
+    if worminal_workspace::broker::owner_action(&request.args)?.is_some() {
         return match broker::forward(&request)? {
             None => Ok(()),
             Some(_) => Err(io::Error::new(

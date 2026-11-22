@@ -78,6 +78,7 @@ commands! {
         Line ["-l"] "LINE" => "Set the terminal line setting.";
         DetachMaster ["--detach-master"] "HOST" => "Detach this master connection; remote shells keep running.";
         CloseMaster ["--close-master"] "HOST" => "Close this master connection's tabs; terminates their programs.";
+        Bookmark ["--bookmark"] "" => "Bookmark the directory of the tab this command runs in.";
         NewBrowser ["--new-browser-tab"] "URL|FILE" => "Replace the calling terminal tab with a browser.";
         ReplaceOwner ["--replace-owner"] "TOKEN" => "Internal GUI ownership receiver; not a manual update trigger.";
     }

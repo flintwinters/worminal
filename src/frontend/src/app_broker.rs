@@ -91,10 +91,11 @@ pub(super) fn serve(listener: UnixListener, candidate: bool) -> io::Result<Rc<Se
                             result => {
                                 let result = result.and_then(|request| {
                                     let request = request.expect("complete launch");
-                                    if let Some((action, master)) = broker::master_action(&request.args)? {
+                                    if let Some(action) = broker::owner_action(&request.args)? {
                                         return match action {
-                                            broker::MasterAction::Detach => App::detach_master(master),
-                                            broker::MasterAction::Close => App::close_master(master),
+                                            broker::OwnerAction::DetachMaster(master) => App::detach_master(master),
+                                            broker::OwnerAction::CloseMaster(master) => App::close_master(master),
+                                            broker::OwnerAction::Bookmark => App::bookmark_directory(&request.directory),
                                         };
                                     }
                                     match Config::parse(&request, candidate)? {

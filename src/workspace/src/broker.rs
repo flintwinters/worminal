@@ -16,35 +16,49 @@ use std::{
 };
 use worminal_protocol::{Buffer, Decoder, Packet, Payload, WIRE_HELLO};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum MasterAction {
-    Detach,
-    Close,
+/// Commands only a running GUI owner can perform; they never open a window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OwnerAction<'a> {
+    DetachMaster(&'a std::ffi::OsStr),
+    CloseMaster(&'a std::ffi::OsStr),
+    /// Bookmark the caller's tab: its shell's directory is the request's directory.
+    Bookmark,
 }
 
-/// Frontend-only commands: exact host spelling and no launch options or shell command.
-pub fn master_action(
-    arguments: &[OsString],
-) -> io::Result<Option<(MasterAction, &std::ffi::OsStr)>> {
-    let action = match arguments
+/// Owner-only commands take no launch options or shell command; master commands take one exact host.
+pub fn owner_action(arguments: &[OsString]) -> io::Result<Option<OwnerAction<'_>>> {
+    let command = match arguments
         .get(1)
         .and_then(|arg| arg.to_str())
         .and_then(Launcher::parse)
     {
-        Some(Launcher::DetachMaster) => MasterAction::Detach,
-        Some(Launcher::CloseMaster) => MasterAction::Close,
+        Some(command @ (Launcher::DetachMaster | Launcher::CloseMaster | Launcher::Bookmark)) => {
+            command
+        }
         _ => return Ok(None),
     };
-    if arguments.len() != 3 || arguments[2].is_empty() || arguments[2].as_bytes()[0] == b'-' {
-        return Err(io::Error::new(
+    let usage = |operand: &str| {
+        io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!(
-                "usage: worminal {} user@host",
-                arguments[1].to_string_lossy()
-            ),
-        ));
+            format!("usage: worminal {}{operand}", command.name()),
+        )
+    };
+    if command == Launcher::Bookmark {
+        return if arguments.len() == 2 {
+            Ok(Some(OwnerAction::Bookmark))
+        } else {
+            Err(usage(""))
+        };
     }
-    Ok(Some((action, &arguments[2])))
+    if arguments.len() != 3 || arguments[2].is_empty() || arguments[2].as_bytes()[0] == b'-' {
+        return Err(usage(" user@host"));
+    }
+    let host = arguments[2].as_os_str();
+    Ok(Some(if command == Launcher::DetachMaster {
+        OwnerAction::DetachMaster(host)
+    } else {
+        OwnerAction::CloseMaster(host)
+    }))
 }
 
 /// Display/workspace identity shared by lightweight launchers and direct frontend entry.
@@ -242,6 +256,13 @@ mod tests {
 
     #[test]
     fn rejected_launches_carry_the_owners_error_text() {
+        let usage =
+            owner_action(&["worminal".into(), "--bookmark".into(), "x".into()]).unwrap_err();
+        assert_eq!(usage.to_string(), "usage: worminal --bookmark");
+        assert_eq!(
+            owner_action(&["worminal".into(), "--bookmark".into()]).unwrap(),
+            Some(OwnerAction::Bookmark)
+        );
         let reply = reply(&Err(io::Error::other("Master felix is not connected")));
         let Err(error) = verdict(&mut reply.as_slice()) else {
             panic!("failure reply accepted");

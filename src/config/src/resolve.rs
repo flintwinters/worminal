@@ -25,6 +25,8 @@ pub struct Settings {
     pub update_notifications: bool,
     /// The daemon moves a tab beside another with the same title when its title changes.
     pub group_tabs_by_title: bool,
+    /// Tabs that can be bookmarked but are not show a hollow star; bookmarked tabs always show a filled one.
+    pub unbookmarked_stars: bool,
     /// Under WSLg the Windows side draws each window's frame; the frontend restyles it to match the terminal.
     pub wsl_window_frame: bool,
     /// `#rrggbb` per palette slot. Unset indexed slots stay `None`: renderers synthesize them.
@@ -257,6 +259,11 @@ impl Settings {
                 true,
                 "worminal.group_tabs_by_title",
             )?,
+            unbookmarked_stars: boolean(
+                worminal.get("unbookmarked_stars"),
+                false,
+                "worminal.unbookmarked_stars",
+            )?,
             wsl_window_frame: boolean(
                 worminal.get("wsl_window_frame"),
                 true,
@@ -278,6 +285,7 @@ impl Settings {
             "bold_bright": self.bold_bright,
             "update_notifications": self.update_notifications,
             "group_tabs_by_title": self.group_tabs_by_title,
+            "unbookmarked_stars": self.unbookmarked_stars,
             "wsl_window_frame": self.wsl_window_frame,
             "colors": self.colors,
         })

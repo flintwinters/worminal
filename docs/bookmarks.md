@@ -7,10 +7,13 @@ only an SSH host or `user@host`, for quick access to a machine.
 
 ## Making and opening bookmarks
 
-- A tab with a known directory (or a web page with a URL) shows a star before its name. Click the star, or press
-  **Ctrl+Shift+D**, to bookmark the tab; do it again to remove the bookmark. A filled star is a bookmark.
-  Tabs that share a directory share its bookmark. A tab with an `ssh` client in its foreground has no star: the
-  directory Worminal knows for it is the local shell's, not the remote one, so it cannot be bookmarked. Bookmark
+- A tab with a known directory (or a web page with a URL) can be bookmarked. Press **Ctrl+Shift+D** to bookmark
+  the tab; do it again to remove the bookmark. Run `worminal --bookmark` in a tab's shell to bookmark that shell's
+  directory; running it again keeps the bookmark. A bookmarked tab shows a filled star before its name; click it
+  to remove the bookmark. With `worminal: {unbookmarked_stars: true}` in `worminal.yaml`, tabs that could be
+  bookmarked also show a hollow star that bookmarks on a click.
+  Tabs that share a directory share its bookmark. A tab with an `ssh` client in its foreground cannot be bookmarked:
+  the directory Worminal knows for it is the local shell's, not the remote one. Bookmark
   the remote place from a tab whose daemon runs there (`--master`).
 - **Ctrl+Shift+B** (or **Ctrl+Shift+P**, for keyboards that can send it) opens the side panel beside the panes. Pressed while the panel is open but the keyboard is
   elsewhere, it moves the keyboard to the panel; pressed with the keyboard already there, it closes the panel.
