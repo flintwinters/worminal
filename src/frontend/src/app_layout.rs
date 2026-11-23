@@ -7,7 +7,7 @@
 //! window restores once, when its first catalog lists its tabs; a link that was lost and comes back restores the
 //! last good layout again, because a restarted daemon hands out new tab ids and the panes would otherwise
 //! collapse. While the link is down nothing is saved, so a lost daemon never overwrites the layout it held.
-use super::{App, LINK_SHIFT, WINDOWS};
+use super::{App, WINDOWS};
 use crate::layout::Layout;
 use gtk::{gdk, glib, prelude::*};
 use std::{
@@ -106,7 +106,7 @@ impl App {
             glib::idle_add_local_once(move || {
                 for _ in 0..extra {
                     match App::open(config.clone()) {
-                        Ok(app) => app.join_connected_masters(),
+                        Ok(_) => {}
                         Err(error) => eprintln!("worminal: cannot reopen a window: {error}"),
                     }
                 }
@@ -115,8 +115,8 @@ impl App {
     }
 
     /// A window opened beside others (Ctrl+Shift+N, a launcher) starts with the split of the window it opened
-    /// from, holding the same tabs: windows are views of one set of tabs. The saved file is only for the
-    /// first window of a process. Call after the masters are joined, so their tabs can be translated.
+    /// from, holding the same tabs: windows are views of one daemon's tabs, master tabs included, so tab ids
+    /// mean the same in every window. The saved file is only for the first window of a process.
     pub(super) fn copy_split(self: &Rc<Self>) {
         if !worminal_config::get().restore_layout || self.panes.persist.pending.borrow().is_some() {
             return;
@@ -134,13 +134,7 @@ impl App {
                 .cloned()
         });
         let Some(source) = source else { return };
-        // The same daemon can sit behind different link numbers in the two windows.
-        let translate = |id: u32| {
-            let host = source.host_of(id >> LINK_SHIFT)?;
-            let index = self.link_of_host(&host)?;
-            Some(id & ((1 << LINK_SHIFT) - 1) | index << LINK_SHIFT)
-        };
-        match source.arrangement_as(&translate) {
+        match source.arrangement() {
             Ok(bytes) => *self.panes.persist.copied.borrow_mut() = bytes,
             Err(error) => eprintln!("worminal: cannot copy the split: {error}"),
         }
@@ -201,7 +195,7 @@ impl App {
             .pages
             .borrow()
             .iter()
-            .filter(|page| page.id >> LINK_SHIFT == 0)
+            .filter(|page| page.host.is_none())
             .map(|page| page.id)
             .collect();
         if local.is_empty() {
@@ -297,7 +291,7 @@ impl App {
             .pages
             .borrow()
             .iter()
-            .filter(|page| page.id >> LINK_SHIFT == 0)
+            .filter(|page| page.host.is_none())
             .map(|page| page.id)
             .collect();
         if local.is_empty() {

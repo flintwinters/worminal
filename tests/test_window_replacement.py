@@ -281,7 +281,8 @@ class ReplacementTest(unittest.TestCase):
                         pending = module.with_suffix('.pending')
                         shutil.copy2(module, pending)
                         pending.replace(module)
-                        wait(lambda: windows() and pid(windows()[0]) not in (previous, None),
+                        # Replacement can destroy the listed window between two listings; read it once.
+                        wait(lambda: (current := windows()) and pid(current[0]) not in (previous, None),
                              f'Replacement {attempt + 1} did not take over')
                         wait(sized, 'The replaced window did not resize')
                         wait(split_shown, lambda: f'Replacement {attempt + 1} lost the split browser: '
@@ -418,7 +419,7 @@ class ReplacementTest(unittest.TestCase):
         self.multihost_replacement(reconnect=True)
 
     def multihost_replacement(self, *, reconnect):
-        with isolated_display() as display, profile(display) as env, service(env), \
+        with isolated_display() as display, profile(display) as env, \
                 tempfile.TemporaryDirectory(prefix='replacement-links-', dir=CHECKS) as directory:
             executable = copy_runtime(directory, browser=True)
             base = Path(directory)
@@ -451,7 +452,9 @@ class ReplacementTest(unittest.TestCase):
                 if not windows: return None
                 result = subprocess.run(['xdotool','getwindowpid',windows[0]],env=env,capture_output=True,text=True)
                 return result.stdout.strip() if result.returncode == 0 else None
-            with service(remotea), service(remoteb), (base/'owner.log').open('wb') as log:
+            # The local daemon owns the master links, so it runs with this fake ssh on its PATH.
+            with service({**env, 'WORMINAL_GUI': str(executable)}), service(remotea), service(remoteb), \
+                    (base/'owner.log').open('wb') as log:
                 process = None
                 try:
                     for host in ('local', 'remotea', 'remoteb'):
@@ -466,8 +469,8 @@ class ReplacementTest(unittest.TestCase):
                     wait(lambda: len(visible())==1,'Remote hosts opened extra windows')
                     previous = owner()
                     identities = {host:(base/host).read_text().strip() for host in ('local','remotea','remoteb')}
-                    # Updating while a link reconnects must defer, then retry the same
-                    # installed files; no further file event should be necessary.
+                    # The local daemon owns master links: a window update while one reconnects neither
+                    # waits for it nor disturbs its tabs.
                     if reconnect:
                         gate = base/'pause-bridge'
                         bridge = base/'bridge-remotea'
@@ -478,18 +481,16 @@ class ReplacementTest(unittest.TestCase):
                     pending = module_path(RUST_FRONTEND_MODULE,prefix=base).with_suffix('.pending')
                     shutil.copy2(module_path(RUST_FRONTEND_MODULE,prefix=base),pending)
                     pending.replace(module_path(RUST_FRONTEND_MODULE,prefix=base))
-                    if reconnect:
-                        time.sleep(1.2)  # Let the 600 ms update debounce observe the blocked link.
-                        gate.unlink()
                     def replacement_owner():
                         current = owner()
                         return current if current and current != previous else None
                     wait(replacement_owner,'Multi-host window did not replace')
+                    if reconnect:
+                        gate.unlink()
                     self.assertEqual(len(visible()),1)
                     name = subprocess.check_output(['xdotool','getwindowname',visible()[0]],env=env,text=True).strip()
-                    # Reattaching a link currently selects its restored tab before handoff.
-                    self.assertEqual(name,'remotea' if reconnect else 'remoteb',
-                                     'Selected remote tab was not restored')
+                    # A master's tabs appearing or returning never move the selection.
+                    self.assertEqual(name,'remoteb','Selected remote tab was not restored')
                     for host, pid in identities.items():
                         os.kill(int(pid),0)
                         self.assertEqual((base/host).read_text().strip(),pid,'Update replayed remote launch')
@@ -573,7 +574,9 @@ class ReplacementTest(unittest.TestCase):
                     for process in processes:
                         process.wait(timeout=5)
 
-    def test_accepted_input_is_fenced_through_a_backpressured_master(self):
+    def test_input_held_by_a_master_link_survives_window_replacement(self):
+        """The local daemon, not the window, holds input bound for a master: replacing the window while
+        the master's transport holds it neither waits for nor loses nor repeats it."""
         with isolated_display() as display, profile(display) as env, \
                 tempfile.TemporaryDirectory(prefix='replacement-input-', dir=CHECKS) as directory:
             base = Path(directory)
@@ -606,51 +609,18 @@ class ReplacementTest(unittest.TestCase):
                     pending = module.with_suffix('.pending')
                     shutil.copy2(module, pending)
                     pending.replace(module)
-                    wait(lambda: '-> Draining' in log_path.read_text(errors='replace'),
-                         lambda: 'Donor did not wait for its input fence: '+log_path.read_text(errors='replace'))
-                    self.assertIsNone(owner.poll(), 'Donor retired while accepted input was still in transport')
+                    wait(lambda: owner.poll() is not None,
+                         lambda: 'Donor waited for the master transport: '+log_path.read_text(errors='replace'))
                     self.assertFalse(received.exists())
                     gate.touch()
-                    wait(lambda: owner.poll() is not None and received.exists(),
-                         lambda: 'Input fence did not complete the handoff: '+log_path.read_text(errors='replace'))
+                    wait(received.exists,
+                         lambda: 'Held input never reached the master: '+log_path.read_text(errors='replace'))
+                    time.sleep(.2)
                     self.assertEqual(received.read_bytes(), payload.encode())
                     os.kill(int(shell_pid), 0)
                     self.assertEqual(ready.read_text().strip(), shell_pid)
                 finally:
                     gate.touch()
-                    stop_fixture(env)
-                    owner.wait(timeout=5)
-                    stop_fixture(remote)
-
-    def test_drain_fence_survives_a_reconnected_master(self):
-        with isolated_display() as display, profile(display) as env, \
-                tempfile.TemporaryDirectory(prefix='replacement-reconnect-', dir=CHECKS) as directory:
-            base = Path(directory)
-            executable = copy_runtime(base, browser=True)
-            env, remote = gated_master(base, env)
-            dropped, ready = base/'fence-dropped', base/'shell-ready'
-            env['WORMINAL_TEST_DROP_FENCE'] = str(dropped)
-            log_path = CHECKS/'window-replacement-reconnect.log'
-            with service(remote), log_path.open('wb') as log:
-                owner = subprocess.Popen([str(executable), '--master', 'reconnect-master',
-                    '-c', 'ReconnectFixture', '-T', 'Reconnect', '-e', '/bin/sh', '-c',
-                    f'echo $$ > {shlex.quote(str(ready))}; exec cat'], env=env, stdout=log, stderr=log)
-                try:
-                    wait(lambda: ready.exists() and normal_windows(env, 'ReconnectFixture'),
-                         'Remote shell did not start')
-                    shell_pid = ready.read_text().strip()
-                    module = module_path(RUST_FRONTEND_MODULE, prefix=base)
-                    pending = module.with_suffix('.pending')
-                    shutil.copy2(module, pending)
-                    pending.replace(module)
-                    wait(dropped.exists, 'Fixture did not drop the donor fence')
-                    wait(lambda: owner.poll() is not None,
-                         lambda: 'Reconnected fence stalled handoff: '+log_path.read_text(errors='replace'))
-                    wait(lambda: normal_windows(env, 'ReconnectFixture'), 'Replacement window did not map')
-                    self.assertEqual(owner.returncode, 0)
-                    os.kill(int(shell_pid), 0)
-                    self.assertEqual(ready.read_text().strip(), shell_pid, 'Handoff replayed the shell launch')
-                finally:
                     stop_fixture(env)
                     owner.wait(timeout=5)
                     stop_fixture(remote)

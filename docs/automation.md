@@ -87,12 +87,13 @@ interrupt work. These commands do not detect whether the intended application st
 `worminald --list-masters` passively lists currently and previously connected master SSH routes as JSON. It is local
 per-user connection history, separate from enrolled devices; run `worminald --list-masters --help` for its contract.
 
-`worminal --close-master user@host` queues normal closure of that master's catalogued tabs through the existing
-GUI connections in this display/workspace. Terminal programs are terminated; browser records are removed.
-Use the exact SSH endpoint. Mirrored tabs close once, and other hosts are unaffected. Success means the closes
-were queued, not that every process has exited. No owner or no connected matching tabs is an error. A transport
-failure may leave partial closure; inspect the remaining tabs before retrying. No SSH connection or workspace is
-created by this command. `worminal --detach-master user@host` instead removes the views and keeps shells running.
+The local daemon owns attached masters: `api list` shows their tabs as kind `master` with their `host`.
+`worminal --close-master user@host` asks it to queue normal closure of that master's catalogued tabs over its
+existing link. Terminal programs are terminated; browser records are removed. Use the exact SSH endpoint; other
+hosts are unaffected. Success means the closes were queued, not that every process has exited. An unattached or
+disconnected master, or one without tabs, is an error. A transport failure may leave partial closure; inspect the
+remaining tabs before retrying. No SSH connection or workspace is created by this command.
+`worminal --detach-master user@host` instead forgets the master and its tab records and keeps its shells running.
 
 ## CLI presentation
 

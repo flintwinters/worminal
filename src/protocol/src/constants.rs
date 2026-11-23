@@ -130,6 +130,13 @@ pub const WIRE_PASTE: u32 = 41;
 pub const WIRE_WHEEL: u32 = 42;
 pub const WIRE_FEATURE_INPUT: u32 = 1 << 9;
 
+/// The daemon owns master connections: `MASTER` (u32 operation, string host) attaches (0, prompting for a
+/// password; 1, without prompting), detaches (2) or closes every tab of (3) a master, answered by
+/// `COMMAND_DONE` or `ERROR`. Catalog records then carry their master host, and views that negotiate the
+/// feature receive it; every other command and event names master tabs by their local ids.
+pub const WIRE_MASTER: u32 = 43;
+pub const WIRE_FEATURE_HOSTS: u32 = 1 << 10;
+
 // Extended unary agent operations; older operations keep their original payloads.
 pub const WORP_READ_MANY: u32 = 10;
 pub const WORP_KEYS: u32 = 11;

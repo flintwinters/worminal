@@ -165,6 +165,8 @@ pub(crate) struct Tab {
     /// Displayed by its controller; only Service::show changes it while controlled.
     pub shown: bool,
     pub frame_reply: bool,
+    /// A master daemon's tab shown here; it has no terminal of its own (see `masters`).
+    pub remote: Option<crate::masters::RemoteTab>,
 }
 
 pub(crate) enum Notice {
@@ -248,6 +250,7 @@ impl Tab {
             input_frame: false,
             shown: false,
             frame_reply: false,
+            remote: None,
         }
     }
 
@@ -381,6 +384,11 @@ impl Tab {
                 .iter()
                 .map(|color| color.clone().unwrap_or_default())
                 .collect(),
+            host: self
+                .remote
+                .as_ref()
+                .map(|remote| remote.host.clone())
+                .unwrap_or_default(),
         };
         let mut buffer = Buffer::with_limit(usize::MAX);
         v2_events::encode_tab_record(&record, &mut buffer)?;

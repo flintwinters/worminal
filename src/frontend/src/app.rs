@@ -8,7 +8,7 @@ use gtk::{gdk, prelude::*};
 use std::{
     cell::{Cell, RefCell},
     collections::VecDeque,
-    ffi::{OsStr, OsString},
+    ffi::OsString,
     io::{self, Read, Write},
     os::unix::net::UnixStream,
     path::PathBuf,
@@ -107,45 +107,22 @@ fn ensure() -> io::Result<()> {
 }
 struct Connection {
     socket: UnixStream,
-    _ssh: Option<worminal_workspace::ssh::Child>,
-    report: Option<io::PipeReader>,
     decoder: Decoder,
     output: VecDeque<Vec<u8>>,
     offset: usize,
     bytes: usize,
 }
 impl Connection {
-    fn new(master: Option<&OsStr>, existing: bool, interactive: bool) -> io::Result<Self> {
-        let (socket, ssh, report) = if let Some(master) = master {
-            let executable = std::env::current_exe()?;
-            let (socket, child, report) = worminal_workspace::ssh::connect_gui(
-                master,
-                existing,
-                executable.as_os_str(),
-                interactive,
-            )?;
-            (socket, Some(child), Some(report))
-        } else {
-            (connect()?, None, None)
-        };
+    fn new() -> io::Result<Self> {
+        let socket = connect()?;
         socket.set_nonblocking(true)?;
         Ok(Self {
             socket,
-            _ssh: ssh,
-            report,
             decoder: Decoder::default(),
             output: VecDeque::new(),
             offset: 0,
             bytes: 0,
         })
-    }
-    /// Why the master helper closed this link, when it said (e.g. a failed version sync).
-    /// The helper writes before exiting, so the report is complete once the stream has closed.
-    fn failure(&mut self) -> Option<String> {
-        let mut text = Vec::new();
-        let _ = self.report.as_mut()?.take(4096).read_to_end(&mut text);
-        let text = String::from_utf8_lossy(&text).trim().to_owned();
-        (!text.is_empty()).then_some(text)
     }
     fn queue(&mut self, packet: Packet) -> io::Result<()> {
         let bytes = packet.encode()?;
@@ -212,10 +189,8 @@ impl Connection {
         Ok(result)
     }
 }
-/// Tab ids are global to the window: the high byte names the link that owns the tab, so ids from
-/// different daemons never collide. Link 0 is the window's own connection; wire ids stay below `1 << LINK_SHIFT`.
-const LINK_SHIFT: u32 = 24;
-/// One daemon connection of a window plus the handshake state that belongs to it.
+/// A window's connection to this machine's daemon plus the handshake state that belongs to it. It is the
+/// window's only link: master tabs are the daemon's, named by its own tab ids.
 struct Link {
     connection: RefCell<Option<Connection>>,
     reader: RefCell<Option<glib::SourceId>>,
@@ -228,8 +203,6 @@ struct Link {
     pending_tabs: Cell<u32>,
     requested: Cell<u32>,
     features: Cell<u32>,
-    /// The last helper failure shown on the desktop; retries repeating it stay quiet.
-    alerted: RefCell<Option<String>>,
 }
 impl Link {
     fn new() -> Rc<Self> {
@@ -244,7 +217,6 @@ impl Link {
             catalog_tabs: RefCell::new(Vec::new()),
             pending_tabs: Cell::new(0),
             requested: Cell::new(0),
-            alerted: RefCell::new(None),
             features: Cell::new(0),
         })
     }
@@ -267,15 +239,6 @@ impl Link {
         self.update_fences.borrow_mut().disconnected();
     }
 }
-/// Another `--master` host whose tabs are shown in this window beside its own.
-struct Remote {
-    index: u32,
-    master: OsString,
-    config: Config,
-    link: Rc<Link>,
-    /// The first catalog selects this host's tab: an explicit launch, never a mirror of another window's.
-    follow: bool,
-}
 #[derive(Clone)]
 struct Page {
     id: u32,
@@ -287,6 +250,8 @@ struct Page {
     directory: PathBuf,
     /// Remote user while an SSH client is in the terminal's foreground.
     ssh_user: Option<String>,
+    /// The master daemon that owns the tab; `None` on this machine.
+    host: Option<String>,
     /// A task in the terminal reports progress (OSC 9;4), as an agent does while it works.
     busy: bool,
     background_job: bool,
@@ -303,6 +268,7 @@ struct Record {
     title: String,
     directory: PathBuf,
     ssh_user: Option<String>,
+    host: Option<String>,
     colors: Vec<String>,
 }
 fn text(bytes: &[u8]) -> String {
@@ -321,9 +287,9 @@ struct App {
     active: Cell<u32>,
     syncing: Cell<bool>,
     primary: Rc<Link>,
-    primary_detached: Cell<bool>,
-    remotes: RefCell<Vec<Rc<Remote>>>,
-    next_link: Cell<u32>,
+    /// A master attached without a terminal to open: its first listed tab is selected. Tabs arriving any
+    /// other way never move the selection.
+    awaited: RefCell<Option<String>>,
     closing: Cell<bool>,
     replacing: Cell<bool>,
     handoff_frozen: Cell<bool>,
@@ -343,9 +309,18 @@ impl App {
         output.write_all(bytes)?;
         output.flush()
     }
-    /// A forwarded `--master` launch joins the active window instead of opening another.
-    fn launch(config: Config) -> io::Result<Rc<Self>> {
-        if config.master.is_some() {
+    /// Masters belong to the daemon: a `--master` launch attaches the host there, and the active window,
+    /// or a new one when there is none, follows its tabs. Every window already shows every master's tabs.
+    fn launch(mut config: Config) -> io::Result<Rc<Self>> {
+        let master = config.master.take();
+        // `--master HOST` opens a terminal there, as `worminal` does here; `--attach` only shows its tabs.
+        let launch = match &master {
+            Some(_) if !config.attach => Some(Box::new(
+                worminal_protocol::worp::launch::Launch::decode(&config.launch()?)?,
+            )),
+            _ => None,
+        };
+        if let Some(master) = &master {
             let target = WINDOWS.with(|windows| {
                 let windows = windows.borrow();
                 windows
@@ -355,17 +330,22 @@ impl App {
                     .cloned()
             });
             if let Some(target) = target {
-                target.add_remote(config)?;
+                target.attach_master(master, launch);
+                target.window.present();
                 return Ok(target);
             }
+            // The window is for the master's tabs; it starts no local shell.
+            config.attach = true;
         }
         let app = Self::open(config)?;
-        app.join_connected_masters();
+        if let Some(master) = &master {
+            app.attach_master(master, launch);
+        }
         app.copy_split();
         Ok(app)
     }
     fn open(config: Config) -> io::Result<Rc<Self>> {
-        Self::open_mode(config, false, false)
+        Self::open_mode(config, false)
     }
     fn replacement_window(config: &Config) -> gtk::Window {
         if let Some(class) = &config.class {
@@ -380,14 +360,10 @@ impl App {
         window.set_resizable(!config.fixed);
         crate::wsl_frame::style(window)
     }
-    pub(super) fn open_mode(
-        config: Config,
-        staged: bool,
-        primary_detached: bool,
-    ) -> io::Result<Rc<Self>> {
+    pub(super) fn open_mode(config: Config, staged: bool) -> io::Result<Rc<Self>> {
         // New launches may arrive in an existing GTK owner after service loss. The shared
         // posix_spawn boundary can recover the service here without GUI-process fork hooks.
-        if config.master.is_none() && !staged {
+        if !staged {
             ensure()?;
         }
         let window = Self::replacement_window(&config);
@@ -417,9 +393,7 @@ impl App {
             active: Cell::new(0),
             syncing: Cell::new(false),
             primary: Link::new(),
-            primary_detached: Cell::new(primary_detached),
-            remotes: RefCell::new(Vec::new()),
-            next_link: Cell::new(1),
+            awaited: RefCell::new(None),
             closing: Cell::new(false),
             replacing: Cell::new(staged),
             handoff_frozen: Cell::new(false),
@@ -470,11 +444,9 @@ impl App {
                     if windows.len() != previous && windows.is_empty() { gtk::main_quit(); } });
                 window_state::changed();
             }));
-        if !primary_detached {
-            if let Err(error) = app.establish(0, !app.config.attach) {
-                app.window.close();
-                return Err(error);
-            }
+        if let Err(error) = app.establish(!app.config.attach) {
+            app.window.close();
+            return Err(error);
         }
         WINDOWS.with(|windows| windows.borrow_mut().push(app.clone()));
         window_state::changed();
@@ -525,7 +497,7 @@ impl App {
     /// Fade the tab here and, as it rises, in the daemon's other views until input answers it.
     fn alert(self: &Rc<Self>, id: u32, severity: u32) {
         if let Some(severity) = self.strip_of(id).alert(id, severity) {
-            if self.features(id) & WIRE_FEATURE_ATTENTION != 0 {
+            if self.features() & WIRE_FEATURE_ATTENTION != 0 {
                 self.send(id, CommandKind::Attention(severity));
             }
         }
@@ -541,7 +513,7 @@ impl App {
                 if matches!(encoded, Encoded::Input(_)) {
                     self.strip_of(id).answer(id);
                 }
-                let semantic = self.features(id) & WIRE_FEATURE_INPUT != 0;
+                let semantic = self.features() & WIRE_FEATURE_INPUT != 0;
                 self.send(id, if semantic { kind } else { encoded.command() })
             }
             Action::Claim => self.claim(id),
@@ -572,19 +544,11 @@ impl App {
             _ => {}
         }
     }
-    fn event(self: &Rc<Self>, index: u32, mut event: Event) -> io::Result<()> {
-        let Some(link) = self.link(index) else {
-            return Ok(());
-        };
-        if event.tab >= 1 << LINK_SHIFT {
-            return Err(io::Error::other("invalid tab id"));
-        }
-        if event.tab != 0 {
-            event.tab |= index << LINK_SHIFT;
-        }
+    fn event(self: &Rc<Self>, event: Event) -> io::Result<()> {
+        let link = &self.primary;
         match &event.kind {
             EventKind::Capabilities(bits) => link.features.set(*bits),
-            EventKind::Catalog(catalog) => self.catalog(index, catalog)?,
+            EventKind::Catalog(catalog) => self.catalog(catalog)?,
             EventKind::Created => {
                 link.requested.set(event.tab);
                 link.pending_tabs
@@ -593,7 +557,22 @@ impl App {
             EventKind::ServiceInfo(_) => {
                 link.update_fences.borrow_mut().acknowledge();
             }
-            EventKind::Error(bytes) => self.message(Some(&text(bytes))),
+            EventKind::Error(bytes) => {
+                // A refused request, such as an open on a disconnected master, will never be created.
+                link.pending_tabs
+                    .set(link.pending_tabs.get().saturating_sub(1));
+                self.message(Some(&text(bytes)));
+            }
+            // The daemon's own news, such as a master whose version sync failed, is for the desktop.
+            EventKind::Notification(bytes) if event.tab == 0 => {
+                self.message(Some(&text(bytes)));
+                if upgrade::windows()
+                    .first()
+                    .is_some_and(|first| Rc::ptr_eq(first, self))
+                {
+                    upgrade::alert(&text(bytes));
+                }
+            }
             EventKind::Released => {
                 if let Some(terminal) = self.terminal(event.tab) {
                     terminal.release();
@@ -714,6 +693,7 @@ impl App {
             title: String::new(),
             directory: PathBuf::new(),
             ssh_user: None,
+            host: None,
             busy: false,
             background_job: false,
             browser,
@@ -730,18 +710,14 @@ impl App {
         clippy::too_many_lines,
         reason = "catalog import applies tab, focus and title changes in one pass"
     )]
-    fn catalog(self: &Rc<Self>, index: u32, catalog: &Catalog) -> io::Result<()> {
-        let link = self
-            .link(index)
-            .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
+    fn catalog(self: &Rc<Self>, catalog: &Catalog) -> io::Result<()> {
+        let link = self.primary.clone();
         let closed = catalog.closed;
         let fallback = catalog.fallback;
         let mut records = Vec::new();
         for tab in &catalog.tabs {
-            if tab.id >= 1 << LINK_SHIFT {
-                return Err(io::Error::other("invalid catalog tab id"));
-            }
-            if index != 0 && tab.kind == TabKind::Browser {
+            // A master's browser tabs belong to the windows on that master's display.
+            if !tab.host.is_empty() && tab.kind == TabKind::Browser {
                 continue;
             }
             // Paths preserve raw filename bytes; painted labels alone use lossy Unicode.
@@ -750,7 +726,7 @@ impl App {
                 worminal_protocol::worp::events::split_directory_field(&tab.directory);
             let directory = directory.to_vec();
             records.push(Record {
-                id: tab.id | index << LINK_SHIFT,
+                id: tab.id,
                 browser: tab.kind == TabKind::Browser,
                 url: text(&tab.url),
                 mode: tab.mode,
@@ -758,6 +734,7 @@ impl App {
                 title: text(&tab.title),
                 directory: PathBuf::from(OsString::from_vec(directory)),
                 ssh_user: ssh_user.map(text),
+                host: (!tab.host.is_empty()).then(|| text(&tab.host)),
                 colors: tab.colors.iter().map(|color| text(color)).collect(),
             });
         }
@@ -772,10 +749,9 @@ impl App {
             .borrow()
             .iter()
             .filter(|page| {
-                page.id >> LINK_SHIFT == index
-                    && !records
-                        .iter()
-                        .any(|record| record.id == page.id && record.browser == page.browser)
+                !records
+                    .iter()
+                    .any(|record| record.id == page.id && record.browser == page.browser)
             })
             .cloned()
             .collect();
@@ -844,6 +820,7 @@ impl App {
                 }
                 page.directory = record.directory.clone();
                 page.ssh_user = record.ssh_user.clone();
+                page.host = record.host.clone();
                 page.busy = record.mode & MODE_BUSY != 0;
                 page.background_job =
                     record.mode & worminal_protocol::cell::MODE_BACKGROUND_JOB != 0;
@@ -851,14 +828,13 @@ impl App {
         }
         {
             let mut pages = self.pages.borrow_mut();
-            // Each daemon's catalog owns the order of its tabs; links stay grouped in connection order.
-            // Update the collection before painting or hit testing it.
+            // The daemon's catalog owns tab order. Update the collection before painting or hit testing it.
             let order: std::collections::HashMap<_, _> = records
                 .iter()
                 .enumerate()
                 .map(|(position, record)| (record.id, position))
                 .collect();
-            pages.sort_by_key(|page| (page.id >> LINK_SHIFT, order.get(&page.id).copied()));
+            pages.sort_by_key(|page| order.get(&page.id).copied());
         }
         self.reorder_panes();
         let collapsed = self.collapse();
@@ -868,25 +844,20 @@ impl App {
         self.syncing.set(false);
         let requested = link.requested.replace(0);
         let active = self.active.get();
-        let fallback = fallback | index << LINK_SHIFT;
+        // Tabs that appear never move the selection unless the user asked for their master.
+        let followed = self.follow_master(&records);
         let mut chosen = if requested != 0 {
             requested
+        } else if let Some(followed) = followed {
+            followed
         } else if records.iter().any(|record| record.id == active) {
             active
         } else if let Some(successor) = self.successor(home, fallback) {
             successor
-        } else if active >> LINK_SHIFT == index
-            || active == 0
-            || (initial_claim && self.follows(index))
-        {
-            // Only this link's own tab losing focus, or a newly opened host, moves the selection.
-            if records.iter().any(|record| record.id == fallback) {
-                fallback
-            } else {
-                records.first().map_or(0, |record| record.id)
-            }
+        } else if records.iter().any(|record| record.id == fallback) {
+            fallback
         } else {
-            active
+            records.first().map_or(0, |record| record.id)
         };
         if chosen == 0 {
             chosen = self.pages.borrow().first().map_or(0, |page| page.id);
@@ -904,9 +875,7 @@ impl App {
             let changed = self.active.get() != chosen
                 || requested != 0
                 || replaced_active
-                || (initial_claim
-                    && page.id >> LINK_SHIFT == index
-                    && (!page.browser || page.view.borrow().is_some()));
+                || (initial_claim && (!page.browser || page.view.borrow().is_some()));
             self.syncing.set(true);
             self.show_page(page.id);
             self.syncing.set(false);
@@ -915,21 +884,15 @@ impl App {
             } else {
                 self.window.set_title(&page.title);
             }
-        } else if closed != 0 && index == 0 {
+        } else if closed != 0 && self.awaited.borrow().is_none() && link.pending_tabs.get() == 0 {
+            // A window still waiting for a master's tabs keeps open while the other hosts' tabs close.
             self.window.close();
         } else {
             self.message(Some("No tabs. Ctrl+Shift+T opens a terminal."));
         }
-        if index == 0 {
-            self.restore_layout(reconnected, requested);
-        }
+        self.restore_layout(reconnected, requested);
         self.present(false);
         self.show_visible_browsers();
-        if index != 0 && records.is_empty() {
-            self.drop_remote(index);
-            // A master's last tabs can outlive the window's own: closing that daemon's tabs closes the window.
-            self.close_empty_window();
-        }
         let early: Vec<_> = self.early_keys.borrow_mut().drain(..).collect();
         for event in early {
             if self.closing.get() {
@@ -943,9 +906,6 @@ impl App {
         }
         self.refresh_tabs();
         window_state::changed();
-        if self.primary_detached.get() {
-            self.close_empty_window();
-        }
         Ok(())
     }
 }
@@ -966,7 +926,10 @@ pub(crate) fn run_with_listener(
     }
     worminal_workspace::browser_target::command(&arguments)?;
     let request = worminal_workspace::broker::Request::capture(arguments)?;
-    if worminal_workspace::broker::owner_action(&request.args)?.is_some() {
+    if let Some(action) = worminal_workspace::broker::owner_action(&request.args)? {
+        if worminal_workspace::broker::master_action(action)? {
+            return Ok(());
+        }
         return match broker::forward(&request)? {
             None => Ok(()),
             Some(_) => Err(io::Error::new(

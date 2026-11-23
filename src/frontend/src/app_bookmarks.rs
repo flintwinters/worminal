@@ -54,10 +54,7 @@ impl App {
     /// What bookmarking this tab would save: a terminal with a known directory (and its host, when the
     /// daemon is remote), or a web page with a real URL. Anything else cannot be bookmarked.
     pub(super) fn bookmark_target(&self, id: u32) -> Option<Target> {
-        let master = match self.master_of(id) {
-            Some(master) => Some(master.into_string().ok()?),
-            None => None,
-        };
+        let master = self.master_of(id);
         let pages = self.pages.borrow();
         let page = pages.iter().find(|page| page.id == id)?;
         target_of(

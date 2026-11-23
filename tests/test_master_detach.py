@@ -82,11 +82,10 @@ class MasterDetachTest(unittest.TestCase):
                     before = tabs()
                     cli('--master', 'wheel-test', '-e', '/bin/cat')
                     self.wait(lambda: windows()[0][4] == 'wheel-test', 'second master selected')
-                    # Masters belong to the frontend, not a window: a local window opened later views both.
+                    # Masters belong to the local daemon, not a window: a window opened later views both.
                     cli('--attach', '-c', 'DetachEmpty', '-T', 'DetachEmpty')
                     self.wait(lambda: len(windows()) == 2, 'second window')
-                    # Launches without a source window (a desktop shortcut running plain worminal) join
-                    # every connected master; this --attach window has no local tab of its own.
+                    # Every window lists the daemon's master tabs; this --attach window has no local tab.
                     self.wait(lambda: all(row[2] and row[4] for row in windows()),
                               'second window joins the connected masters')
                     cli('--detach-master', 'preview-test')
@@ -135,7 +134,9 @@ class MasterDetachTest(unittest.TestCase):
             executable = str(copy_runtime(base, browser=True))
             scope = env['WORMINAL_SHARED_SOCKET_SCOPE']+'-joined-master'
             ssh = base/'ssh'
+            connections = base/'connections'
             ssh.write_text('#!/usr/bin/python3\nimport os,sys,time\n'
+                           f'open({str(connections)!r}, "a").write("ssh\\n")\n'
                            # A real master answers about a second after the local daemon.
                            'time.sleep(1)\n'
                            f'os.environ["WORMINAL_SHARED_SOCKET_SCOPE"]={scope!r}\n'
@@ -186,6 +187,9 @@ class MasterDetachTest(unittest.TestCase):
                         self.wait(cycled_to_master, f'window {count} shows the connected master tabs')
                     self.assertEqual([tab['shell_pid'] for tab in remote_tabs()],
                                      [tab['shell_pid'] for tab in shared], 'Joining launched remote shells')
+                    # The daemon holds the one master link: windows once each connected their own, so a new
+                    # window's master tabs popped in about a second after its local tab and took typed keys.
+                    self.assertEqual(connections.read_text().count('ssh'), 1, 'A window opened its own master link')
                 finally:
                     from test_window_replacement import stop_fixture
                     stop_fixture(env)
@@ -254,7 +258,8 @@ class MasterDetachTest(unittest.TestCase):
                 return json.loads(result.stdout)
             def ready_tabs(host):
                 try:
-                    return api(host, 'list')['tabs']
+                    # The local daemon lists attached masters' tabs too; those are not its own.
+                    return [tab for tab in api(host, 'list')['tabs'] if tab['kind'] != 'master']
                 except subprocess.CalledProcessError:
                     return None  # The asynchronous SSH bootstrap has not created its private daemon yet.
             with (CHECKS/'master-close.log').open('wb') as log:
@@ -280,9 +285,11 @@ class MasterDetachTest(unittest.TestCase):
                     cli('--close-master', 'target-master')
                     self.wait(lambda: not api('target-master', 'list')['tabs'], 'target tabs closed')
                     self.wait(lambda: all(not Path(f'/proc/{pid}').exists() for pid in shells), 'target programs terminated')
+                    self.wait(lambda: all(tab['host'] != 'target-master' for tab in api('', 'list')['tabs']),
+                              'the local daemon drops the closed master tabs')
                     self.assertEqual([tab['shell_pid'] for tab in api('other-master', 'list')['tabs']],
                                      [tab['shell_pid'] for tab in other])
-                    self.assertEqual([tab['shell_pid'] for tab in api('', 'list')['tabs']],
+                    self.assertEqual([tab['shell_pid'] for tab in ready_tabs('')],
                                      [tab['shell_pid'] for tab in local])
                     self.assertIsNone(app.poll(), 'Unrelated master window closed')
                     cli('--close-master', 'target-master', success=False)

@@ -46,11 +46,9 @@ fn snapshot() -> Variant {
             .map(|app| {
                 let pages = app.pages.borrow();
                 let page = pages.iter().find(|page| page.id == app.active.get());
-                let link = page.and_then(|page| app.link(page.id >> super::LINK_SHIFT));
-                let available = link.as_ref().is_some_and(|link| {
-                    link.connection.borrow().is_some() && !link.initial_claim.get()
-                }) && page
-                    .is_some_and(|page| !page.browser && page.directory.is_absolute());
+                let link = &app.primary;
+                let available = (link.connection.borrow().is_some() && !link.initial_claim.get())
+                    && page.is_some_and(|page| !page.browser && page.directory.is_absolute());
                 let directory = if available {
                     page.unwrap().directory.as_os_str().as_bytes().to_vec()
                 } else {
@@ -61,11 +59,7 @@ fn snapshot() -> Variant {
                     app.window.is_active(),
                     available,
                     directory,
-                    page.and_then(|page| app.master_of(page.id))
-                        .or_else(|| app.config.master.clone())
-                        .as_ref()
-                        .map(|master| master.to_string_lossy().into_owned())
-                        .unwrap_or_default(),
+                    page.and_then(|page| page.host.clone()).unwrap_or_default(),
                 )
             })
             .collect()

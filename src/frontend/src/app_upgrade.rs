@@ -23,7 +23,7 @@ use std::{
 };
 use worminal_protocol::{Packet, WORKSPACE_CLIENT_QUEUE_BYTES};
 use worminal_workspace::{
-    gui_handoff::{self, Link, Window},
+    gui_handoff::{self, Window},
     socket, spawn,
 };
 
@@ -96,7 +96,7 @@ fn changed() -> bool {
             .any(|item| std::fs::metadata(&item.path).ok().map(identity) != Some(item.loaded))
     })
 }
-fn windows() -> Vec<Rc<App>> {
+pub(super) fn windows() -> Vec<Rc<App>> {
     WINDOWS.with(|slot| {
         slot.borrow()
             .iter()
@@ -134,15 +134,13 @@ pub(super) fn alert(text: &str) {
 }
 /// Every link has nothing more to wait for. The only link condition an update may wait on.
 pub(super) fn links_quiet() -> bool {
-    windows()
-        .iter()
-        .all(|app| app.links().iter().all(|link| link.quiet()))
+    windows().iter().all(|app| app.primary.quiet())
 }
 pub(super) type UpdateBarrier = (Rc<super::Link>, u64);
 fn barriers_complete(barriers: &[UpdateBarrier]) -> bool {
     let active = windows()
         .iter()
-        .flat_map(|app| app.links())
+        .map(|app| app.primary.clone())
         .collect::<Vec<_>>();
     barriers.iter().all(|(link, revision)| {
         // A lost link cannot acknowledge a fence until its peer returns; it must not hold the update.
@@ -165,23 +163,13 @@ fn snapshot() -> io::Result<Vec<Window>> {
             let flags = u32::from(app.window.is_maximized())
                 | (u32::from(state.contains(gtk::gdk::WindowState::FULLSCREEN)) << 1)
                 | (u32::from(app.window.is_active()) << 2)
-                | (u32::from(app.primary_detached.get()) * gui_handoff::PRIMARY_DETACHED)
                 | (u32::from(app.close_after_update.get()) * gui_handoff::CLOSE_REQUESTED);
             let zoom = app.fonts.borrow().zoom();
             Ok(Window {
                 id: app.state_id,
                 request: app.config.replacement_request()?,
-                links: app
-                    .remotes
-                    .borrow()
-                    .iter()
-                    .map(|remote| {
-                        Ok(Link {
-                            index: remote.index,
-                            request: remote.config.replacement_request()?,
-                        })
-                    })
-                    .collect::<io::Result<Vec<_>>>()?,
+                // Masters are the daemon's; windows carry none.
+                links: Vec::new(),
                 selected: app.active.get(),
                 geometry: [x, y, width, height],
                 flags,
@@ -246,8 +234,6 @@ fn channel(socket: UnixStream) -> io::Result<Connection> {
     socket.set_nonblocking(true)?;
     Ok(Connection {
         socket,
-        _ssh: None,
-        report: None,
         decoder: Default::default(),
         output: Default::default(),
         offset: 0,
@@ -362,22 +348,20 @@ impl Transaction {
     fn timeout_reason(&self) -> String {
         if matches!(self.phase, Phase::Draining) {
             for app in windows() {
-                for (index, link) in app.links().iter().enumerate() {
-                    let fence_pending = self.barriers.iter().any(|(pending, revision)| {
-                        Rc::ptr_eq(pending, link)
-                            && !link.update_fences.borrow().complete(*revision)
-                    });
-                    let connection = link.connection.borrow();
-                    trace(&format!(
-                        "GUI update drain: window={} link={index} connected={} catalog_pending={} \
-                         pending_tabs={} queued_bytes={} fence_pending={fence_pending}",
-                        app.state_id,
-                        connection.is_some(),
-                        link.initial_claim.get(),
-                        link.pending_tabs.get(),
-                        connection.as_ref().map_or(0, |connection| connection.bytes),
-                    ));
-                }
+                let link = &app.primary;
+                let fence_pending = self.barriers.iter().any(|(pending, revision)| {
+                    Rc::ptr_eq(pending, link) && !link.update_fences.borrow().complete(*revision)
+                });
+                let connection = link.connection.borrow();
+                trace(&format!(
+                    "GUI update drain: window={} connected={} catalog_pending={} \
+                     pending_tabs={} queued_bytes={} fence_pending={fence_pending}",
+                    app.state_id,
+                    connection.is_some(),
+                    link.initial_claim.get(),
+                    link.pending_tabs.get(),
+                    connection.as_ref().map_or(0, |connection| connection.bytes),
+                ));
             }
         }
         format!("timed out during {:?}", self.phase)

@@ -61,6 +61,46 @@ pub fn owner_action(arguments: &[OsString]) -> io::Result<Option<OwnerAction<'_>
     }))
 }
 
+/// Detach or close a master through the daemon that owns master links; no window needs to exist.
+/// Returns `Ok(false)` for actions that only a GUI owner performs.
+pub fn master_action(action: OwnerAction<'_>) -> io::Result<bool> {
+    use worminal_protocol::worp::{
+        commands::{Command, CommandKind, MasterOperation},
+        events::EventKind,
+        session::Session,
+    };
+    let (operation, host) = match action {
+        OwnerAction::DetachMaster(host) => (MasterOperation::Detach, host),
+        OwnerAction::CloseMaster(host) => (MasterOperation::Close, host),
+        OwnerAction::Bookmark => return Ok(false),
+    };
+    let scope = std::env::var_os("WORMINAL_SHARED_SOCKET_SCOPE").unwrap_or_default();
+    let socket = crate::socket::connect(unsafe { libc::getuid() }, scope.as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::NotFound, "No workspace service is running"))?;
+    socket.set_read_timeout(Some(std::time::Duration::from_secs(3)))?;
+    let mut session = Session::new(socket.try_clone()?, socket);
+    session.send(&Command {
+        tab: 0,
+        kind: CommandKind::Master {
+            operation,
+            host: host.as_bytes().to_vec(),
+            launch: None,
+        },
+    })?;
+    loop {
+        match session.receive()?.kind {
+            EventKind::CommandDone => return Ok(true),
+            EventKind::Error(text) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    String::from_utf8_lossy(&text).into_owned(),
+                ))
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Display/workspace identity shared by lightweight launchers and direct frontend entry.
 pub fn display_key(candidate: bool) -> Vec<u8> {
     let mut values = [

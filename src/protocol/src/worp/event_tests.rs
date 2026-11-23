@@ -16,16 +16,31 @@ fn every_event_roundtrips_and_catalog_keeps_filename_bytes() {
         EventKind::Catalog(Catalog {
             closed: 2,
             fallback: 7,
-            tabs: vec![TabRecord {
-                id: 7,
-                kind: TabKind::Terminal,
-                url: vec![],
-                mode: 99,
-                cursor: 2,
-                title: b"title\0suffix".to_vec(),
-                directory: vec![b'/', 0xff],
-                colors: vec![b"#112233".to_vec()],
-            }],
+            tabs: vec![
+                TabRecord {
+                    id: 7,
+                    kind: TabKind::Terminal,
+                    url: vec![],
+                    mode: 99,
+                    cursor: 2,
+                    title: b"title\0suffix".to_vec(),
+                    directory: vec![b'/', 0xff],
+                    colors: vec![b"#112233".to_vec()],
+                    host: vec![],
+                },
+                TabRecord {
+                    id: 8,
+                    kind: TabKind::Terminal,
+                    url: vec![],
+                    mode: 0,
+                    cursor: 0,
+                    title: b"remote".to_vec(),
+                    directory: vec![],
+                    colors: vec![],
+                    // The host trailer is written when any tab has one and must roundtrip.
+                    host: b"user@build".to_vec(),
+                },
+            ],
         }),
         EventKind::FrameStart(FrameState {
             columns: 80,

@@ -125,6 +125,9 @@ pub struct TabRecord {
     pub title: Vec<u8>,
     pub directory: Vec<u8>,
     pub colors: Vec<Vec<u8>>,
+    /// The master daemon that owns the tab, empty on this machine. Encoded as a catalog trailer that
+    /// only views negotiating `WIRE_FEATURE_HOSTS` receive.
+    pub host: Vec<u8>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

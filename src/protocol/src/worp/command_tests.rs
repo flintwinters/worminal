@@ -74,6 +74,17 @@ fn variants() -> Vec<CommandKind> {
         CommandKind::Subscribe,
         CommandKind::Capabilities(7),
         CommandKind::ServiceInfo,
+        CommandKind::Master {
+            operation: MasterOperation::Detach,
+            host: b"user@build".to_vec(),
+            launch: None,
+        },
+        // The launch trails the host: a terminal to open once the master is attached.
+        CommandKind::Master {
+            operation: MasterOperation::Attach,
+            host: b"build".to_vec(),
+            launch: Some(Box::new(Launch::restore(b"/srv".to_vec()))),
+        },
         CommandKind::Stop,
         CommandKind::Transfer {
             outbound: true,

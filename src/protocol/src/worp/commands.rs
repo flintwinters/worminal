@@ -32,6 +32,26 @@ pub enum OpenMode {
     ReuseRestored,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MasterOperation {
+    /// Connect (or retry now), letting SSH ask for a password.
+    Attach,
+    /// Connect without prompting: restored attachments and automatic retries.
+    AttachQuietly,
+    /// Stop showing the master; its tabs keep running there.
+    Detach,
+    /// Close every tab of the master.
+    Close,
+}
+
+/// An SSH destination: never empty, never an option, at most 255 bytes.
+pub fn valid_master(host: &[u8]) -> bool {
+    !host.is_empty()
+        && host.len() <= 255
+        && host[0] != b'-'
+        && host.iter().all(|byte| byte.is_ascii_graphic())
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Command {
     pub tab: u32,
@@ -43,6 +63,28 @@ impl Command {
         let invalid = || io::Error::new(io::ErrorKind::InvalidInput, "Invalid Worp command");
         match &self.kind {
             CommandKind::Call(request) => request.validate()?,
+            CommandKind::Master { host, .. } if !valid_master(host) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Invalid master: name one SSH destination without spaces, up to 255 bytes.",
+                ))
+            }
+            CommandKind::Master {
+                operation: MasterOperation::Detach | MasterOperation::Close,
+                launch: Some(_),
+                ..
+            } => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Only a master attachment opens a terminal.",
+                ))
+            }
+            CommandKind::Master {
+                launch: Some(launch),
+                ..
+            } => {
+                launch.encode()?;
+            }
             CommandKind::Open { launch, .. } => {
                 launch.encode()?;
             }
@@ -99,6 +141,13 @@ impl Command {
 pub enum CommandKind {
     /// A correlated query/mutation with a JSON receipt; available on persistent sessions too.
     Call(Request),
+    /// Attach, detach or close a master daemon by its SSH endpoint; see `WIRE_MASTER`. An attachment may
+    /// carry a terminal to open there, which is created as `Open` with `OpenMode::Subscribe` would be.
+    Master {
+        operation: MasterOperation,
+        host: Vec<u8>,
+        launch: Option<Box<Launch>>,
+    },
     Open {
         launch: Launch,
         mode: OpenMode,

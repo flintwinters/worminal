@@ -8,8 +8,8 @@ Worminal is a deliberately small terminal. Its long-term direction is a distribu
 present everywhere at once: machines are appendages and resources of one trusted system, not places the user goes.
 Tailscale provides host identity and reachability for now; resources may keep their own protocols. Favor low memory
 use over interface features; measure before adding complexity. Preserve established terminal behavior and
-application shortcuts. Plain Ctrl+N belongs to terminal applications; Ctrl+Shift+N opens a window. Every new
-window, including plain `worminal` launches, joins each master connected to the display without launching its shells. Ctrl+Shift+A
+application shortcuts. Plain Ctrl+N belongs to terminal applications; Ctrl+Shift+N opens a window. Every
+window, including plain `worminal` launches, shows every attached master's tabs without launching its shells. Ctrl+Shift+A
 selects screen and retained scrollback for Ctrl+Shift+C; Ctrl+A sends Control-A to applications. Plain middle click
 toggles browser-style autoscroll (pointer distance from the click sets speed; any press, key or focus loss ends it)
 through the same dispatch as the wheel, so mouse-reporting and alternate-screen applications scroll too;
@@ -46,13 +46,13 @@ crates under `src` contain the launcher, daemon, frontend, browser and wrappers.
 ## Workspaces and transport
 
 The per-user v2 daemon owns ordered tabs, PTYs and bounded scrollback. Views connect locally or through SSH
-`--master user@host`. A terminal has one live painting view and can outlive every window. The set of attached
-masters belongs to the frontend, not a window: each window holds its own link to every master the live windows
-view (the union is derived from them, never stored separately), a `--master` launch reaches every window and
-selects its tab only where launched, and a new window joins every viewed master without taking the selection.
-Until its own link is up, a new window shows the master tabs another window already has, so they never pop in,
-and it starts with the split of the window it opened from. A window launched with
-`--master` as its own primary does not view the local daemon. Frontend replicas import
+`--master user@host`. A terminal has one live painting view and can outlive every window. Windows are pure views
+with one link, to the local daemon, and own no tabs. The local daemon owns attached masters (`src/daemon/src/masters.rs`):
+it holds each master link, lists the master's tabs in its own catalog under local ids with their host, relays
+frames and input, shows on the master exactly what local views show, persists the set and the records beside the
+recovery recipes, and reconnects with backoff, prompting for a password only on an explicit attach. So a new window
+knows master tabs at once, and they never move the selection unless the user asked for that master. A new window
+starts with the split of the window it opened from. Frontend replicas import
 one viewport; they never parse terminal output or recompute history/reflow. Browser records have no PTY. `worminald
 api` is the headless agent interface over Worp; see `docs/automation.md` and `docs/worp.md`. The executable alone
 must teach an agent everything: `worminald --help` indexes `api help [schema|session]`, `config`,

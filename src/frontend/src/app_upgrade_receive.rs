@@ -189,11 +189,11 @@ pub(crate) fn receive(token: &OsStr, candidate: bool) -> io::Result<()> {
                     && windows().iter().all(|app| {
                         app.active.get() == 0
                             || app.replacement_frame.get()
-                            || app
-                                .pages
-                                .borrow()
-                                .iter()
-                                .any(|page| page.id == app.active.get() && page.browser)
+                            // A master's frame crosses its link, which a stalled peer could hold: the
+                            // window maps without it, as for a browser, and paints when it arrives.
+                            || app.pages.borrow().iter().any(|page| {
+                                page.id == app.active.get() && (page.browser || page.host.is_some())
+                            })
                     })
                 {
                     if windows().iter().any(|app| {

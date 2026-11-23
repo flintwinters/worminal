@@ -93,8 +93,8 @@ pub(super) fn serve(listener: UnixListener, candidate: bool) -> io::Result<Rc<Se
                                     let request = request.expect("complete launch");
                                     if let Some(action) = broker::owner_action(&request.args)? {
                                         return match action {
-                                            broker::OwnerAction::DetachMaster(master) => App::detach_master(master),
-                                            broker::OwnerAction::CloseMaster(master) => App::close_master(master),
+                                            broker::OwnerAction::DetachMaster(_) | broker::OwnerAction::CloseMaster(_) =>
+                                                broker::master_action(action).map(|_| ()),
                                             broker::OwnerAction::Bookmark => App::bookmark_directory(&request.directory),
                                         };
                                     }

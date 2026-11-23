@@ -55,10 +55,12 @@ fn record(tab: &mut Tab, now: i64, workspace: &str) -> String {
         .as_mut()
         .map_or(0, |terminal| terminal.pty.live_pid());
     format!(
-        "{{\"id\":{},\"kind\":{},\"title\":{},\"directory\":{},\"shell_pid\":{},\"url\":{},\"state\":{}}}",
+        "{{\"id\":{},\"kind\":{},\"title\":{},\"directory\":{},\"shell_pid\":{},\"url\":{},\"host\":{},\"state\":{}}}",
         tab.id,
         quote(if tab.terminal.is_some() {
             b"terminal"
+        } else if tab.remote.is_some() {
+            b"master"
         } else {
             b"browser"
         }),
@@ -66,6 +68,7 @@ fn record(tab: &mut Tab, now: i64, workspace: &str) -> String {
         quote(&tab.directory),
         pid,
         quote(tab.url.as_deref().unwrap_or_default()),
+        quote(tab.remote.as_ref().map_or(&[][..], |remote| &remote.host)),
         crate::api_observe::state(tab, workspace)
     )
 }

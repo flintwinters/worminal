@@ -49,6 +49,9 @@ pub(crate) struct Service {
     last_frame: i64,
     next_directory: i64,
     pub upgrade_watch: Option<crate::upgrade_io::Watch>,
+    pub masters: Vec<crate::masters::Master>,
+    pub next_master: u64,
+    pub masters_path: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy)]
@@ -59,6 +62,7 @@ enum Source {
     Terminal(u32),
     Handin(u64),
     Upgrade,
+    Master(u64),
 }
 
 impl Service {
@@ -76,7 +80,19 @@ impl Service {
         Ok(id)
     }
 
-    pub fn emit(&mut self, client: ClientId, event: worp::events::Event) {
+    pub fn emit(&mut self, client: ClientId, mut event: worp::events::Event) {
+        // Views that predate master hosts read only the records they know.
+        if let worp::events::EventKind::Catalog(catalog) = &mut event.kind {
+            if !self
+                .clients
+                .get(&client)
+                .is_some_and(|c| c.features & WIRE_FEATURE_HOSTS != 0)
+            {
+                for tab in &mut catalog.tabs {
+                    tab.host.clear();
+                }
+            }
+        }
         if matches!(event.kind, worp::events::EventKind::Notification(_))
             && !self
                 .clients
@@ -347,6 +363,7 @@ impl Service {
         let recipes: Vec<_> = self
             .tabs
             .iter()
+            .filter(|tab| tab.remote.is_none())
             .map(|tab| {
                 Recipe::for_tab(
                     &tab.directory,
@@ -495,8 +512,21 @@ impl Service {
             });
             sources.push(Source::Client(id));
         }
+        for master in &self.masters {
+            if let Some((fd, write)) = master.fd() {
+                interests.push(Interest {
+                    fd,
+                    read: true,
+                    write,
+                });
+                sources.push(Source::Master(master.serial));
+            }
+        }
         let now = self.now();
         let mut deadline = self.api_waits.values().map(|wait| wait.deadline).min();
+        if let Some(retry) = self.retry_masters(now) {
+            deadline = Some(deadline.map_or(retry, |old| old.min(retry)));
+        }
         if !self.api_waits.is_empty() {
             deadline = Some(deadline.unwrap().min(self.api_wait_check));
         }
@@ -576,6 +606,7 @@ impl Service {
         {
             self.publish(now)?;
         }
+        self.reconcile_masters(now)?;
         self.resync(now)
     }
 
@@ -611,6 +642,10 @@ impl Service {
                     Source::Terminal(id) => self.terminal_ready(id, ready.read, ready.write)?,
                     Source::Handin(id) => self.receive_handoff(id, &signals),
                     Source::Upgrade => {} // The next loop drains the watch before any state publication.
+                    Source::Master(serial) => {
+                        let now = self.now();
+                        self.master_ready(serial, ready.read, ready.write, now)?;
+                    }
                 }
                 if !self.running || signals.stopping() {
                     break;
@@ -630,7 +665,9 @@ fn create(scope: &[u8], listener: UnixListener) -> io::Result<(Service, io::Resu
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
         .unwrap_or_else(|| PathBuf::from(home).join(".local/state"));
-    let (recovery, recipes) = Recovery::open(recovery::path(&root, scope)?);
+    let recovery_path = recovery::path(&root, scope)?;
+    let masters_path = crate::masters::path(&recovery_path);
+    let (recovery, recipes) = Recovery::open(recovery_path);
     let service = Service {
         workspace_id: std::fs::read_to_string("/proc/sys/kernel/random/uuid")?
             .trim()
@@ -657,6 +694,9 @@ fn create(scope: &[u8], listener: UnixListener) -> io::Result<(Service, io::Resu
         last_frame: 0,
         next_directory: 0,
         upgrade_watch: None,
+        masters: Vec::new(),
+        next_master: 0,
+        masters_path: Some(masters_path),
     };
     Ok((service, recipes))
 }
@@ -685,6 +725,7 @@ pub fn serve(scope: &[u8]) -> io::Result<()> {
         }
         Err(error) => process::diagnostic(&format!("Workspace recovery read: {error}")),
     }
+    service.restore_masters(false);
     service.run(signals)
 }
 
@@ -720,6 +761,7 @@ pub(crate) fn receive_upgrade(scope: &[u8], legacy: bool) -> io::Result<()> {
     )?;
     drop(manifest);
     drop(receiving);
+    service.restore_masters(true);
     service.run(signals)
 }
 

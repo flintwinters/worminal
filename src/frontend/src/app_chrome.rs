@@ -1,5 +1,5 @@
 //! Application chrome shares terminal metrics, while labels keep filesystem bytes out of display text handling.
-use super::{App, LINK_SHIFT};
+use super::App;
 use crate::tabs::{Slot, Tab};
 use gtk::{gio, prelude::*};
 use std::rc::Rc;
@@ -104,19 +104,8 @@ impl App {
         }
     }
     /// The daemon owns tab order. Ask it to put `id` in `slot`; the catalog it publishes reorders the strip.
-    /// Tabs of different daemons keep their link grouping, so those drops are ignored.
     pub(super) fn move_tab(self: &Rc<Self>, id: u32, slot: Slot) {
-        let link = id >> LINK_SHIFT;
-        if slot.tab >> LINK_SHIFT != link {
-            return;
-        }
-        let index = |id| {
-            self.pages
-                .borrow()
-                .iter()
-                .filter(|page| page.id >> LINK_SHIFT == link)
-                .position(|page| page.id == id)
-        };
+        let index = |id| self.pages.borrow().iter().position(|page| page.id == id);
         // The daemon's position is the tab's index once moved, so a tab from before the slot leaves a gap there.
         if let (Some(from), Some(to)) = (index(id), index(slot.tab)) {
             let position = to + usize::from(slot.after) - usize::from(from < to);

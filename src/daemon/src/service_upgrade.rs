@@ -20,12 +20,12 @@ impl Service {
             let receiving = Listener::bind(token.as_bytes())?;
             let child =
                 ReceiverChild::spawn(&replacement.path, self.listener.as_fd(), receiving.as_fd())?;
-            match handoff::send(
-                token.as_bytes(),
-                &mut self.tabs,
-                &self.reaper,
-                Some(self.next_id),
-            ) {
+            // The receiver restores master records, with their ids and positions, from this list.
+            self.save_masters();
+            let (reaper, next_id) = (&self.reaper, self.next_id);
+            match crate::masters::without_remote(&mut self.tabs, |tabs| {
+                handoff::send(token.as_bytes(), tabs, reaper, Some(next_id))
+            }) {
                 Ok(commit) => {
                     process::diagnostic(&format!("Daemon upgrade committed to pid {}", child.pid));
                     child.committed(&commit);

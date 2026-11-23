@@ -11,23 +11,35 @@ use std::{
 };
 
 pub fn daemon(path: &Path) -> io::Result<Receiver<io::Result<i32>>> {
-    detached(&[
-        CString::new(path.as_os_str().as_bytes())?,
-        CString::new("--serve").unwrap(),
-    ])
+    let gui = std::env::current_exe()?;
+    detached(
+        &[
+            CString::new(path.as_os_str().as_bytes())?,
+            CString::new("--serve").unwrap(),
+        ],
+        &[(worminal_workspace::ssh::GUI_ENV, gui.as_os_str())],
+    )
 }
 pub fn open_url(url: &str) -> io::Result<()> {
-    detached(&[CString::new("xdg-open").unwrap(), CString::new(url)?]).map(drop)
+    detached(
+        &[CString::new("xdg-open").unwrap(), CString::new(url)?],
+        &[],
+    )
+    .map(drop)
 }
-fn detached(arguments: &[CString]) -> io::Result<Receiver<io::Result<i32>>> {
+fn detached(
+    arguments: &[CString],
+    environment: &[(&str, &std::ffi::OsStr)],
+) -> io::Result<Receiver<io::Result<i32>>> {
     let null = OpenOptions::new()
         .read(true)
         .write(true)
         .open("/dev/null")?;
-    let pid = worminal_workspace::spawn::start(
+    let pid = worminal_workspace::spawn::start_with_environment(
         arguments,
         &[(null.as_fd(), 0), (null.as_fd(), 1), (null.as_fd(), 2)],
         true,
+        environment,
     )?;
     let (sender, receiver) = mpsc::sync_channel(1);
     // Never kill a successful spawn if waiter setup fails: a daemon may already own restored shells.

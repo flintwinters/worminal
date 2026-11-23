@@ -45,7 +45,7 @@ impl App {
             .any(|page| page.id == self.active.get() && page.browser);
         if state == control_shift && value == key::a {
             if let Some(terminal) = self.terminal(self.active.get()) {
-                if self.features(self.active.get()) & WIRE_FEATURE_SELECT_ALL == 0 {
+                if self.features() & WIRE_FEATURE_SELECT_ALL == 0 {
                     self.message(Some("Select all requires an updated workspace service."));
                 } else {
                     terminal.select_all();

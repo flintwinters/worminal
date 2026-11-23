@@ -31,7 +31,13 @@ fn run(candidate: bool) -> io::Result<()> {
     native::timing("main");
     let args: Vec<_> = std::env::args_os().collect();
     worminal_workspace::browser_target::command(&args)?;
-    let owner_action = worminal_workspace::broker::owner_action(&args)?.is_some();
+    let owner_action = worminal_workspace::broker::owner_action(&args)?;
+    if let Some(action) = owner_action {
+        if worminal_workspace::broker::master_action(action)? {
+            return Ok(());
+        }
+    }
+    let owner_action = owner_action.is_some();
     let option = args
         .get(1)
         .and_then(|value| value.to_str())

@@ -7,10 +7,10 @@ owners before 1.0.4 send neither splits nor desktops, and 1.0.4 sends splits wit
 compositor controls placement; size and selected tabs are restored, but coordinates cannot be guaranteed.
 
 Preparation is provisional: windows remain usable while the candidate warms up. Window creation, closure,
-tab selection, zoom, geometry and master-link changes during this phase do not invalidate the transaction.
+tab selection, zoom, geometry and master attachments during this phase do not invalidate the transaction.
 At the commit boundary the donor pauses launch acceptance, gates edits, drains accepted input, and suspends
-its viewport readers. Ordered service replies on each existing link fence accepted input through remote
-backpressure before that suspension. A reconnected link reissues only its outstanding fence after the new
+its viewport readers. An ordered service reply on its daemon link fences accepted input before that suspension;
+input bound for a master is then the local daemon's, which outlives the window. A reconnected link reissues only its outstanding fence after the new
 catalog; terminal input is never replayed. Ordered fence identities prevent a late reply from satisfying a
 newer snapshot request. It then sends a fresh descriptor-backed snapshot. The candidate reconciles
 to that snapshot, reuses unchanged warm connections, and fences fresh catalogs before profile transfer.
@@ -21,14 +21,14 @@ input is never replayed and shell ownership remains in the daemon. A close reque
 is applied by the new owner, or by the retained donor if preparation fails. New launch connections remain
 queued on the continuously bound broker socket during cutover.
 
-Windows containing multiple daemon hosts transfer each link and retain their selected local or remote tab.
-The bounded handoff supports 16 additional hosts per window and 128 descriptors across all windows; exceeding
-these limits postpones replacement while existing windows and sessions remain available.
+Each window transfers its one daemon link and retains its selected local or master tab. Master links belong
+to the local daemon, so no master, reachable or not, takes part in replacement. Windows of earlier versions
+carried their own master links; the receiver hands those masters to the daemon without prompting, and their
+master tabs leave the transferred split. The bounded handoff supports 128 descriptors across all windows;
+exceeding it postpones replacement while existing windows and sessions remain available.
 
-An unreachable master never blocks replacement: a link that is lost and still backing off does not hold the
-candidate's readiness, and the candidate keeps retrying it. Its status stays in the status bar until the link
-recovers (a healthy link's catalog does not clear it). A peer that never answers SSH reports `Cannot reach HOST`
-and only a genuine version-sync failure raises a desktop notification. Remove a dead master with `worminald forget`.
+A peer that never answers SSH reports `Cannot reach HOST` only in the daemon log while it retries; a genuine
+version-sync failure is sent to the windows and raises one desktop notification.
 
 ## Updates must stay possible
 

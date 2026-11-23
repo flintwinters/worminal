@@ -12,14 +12,14 @@ works after a window is closed by accident, a frontend crash, a daemon restart a
   [architecture](architecture.md)); this only places them. Running commands and scrollback are not restored.
 - **Several windows:** each window comes back with its own layout, in the order they were opened. A running frontend
   that loses its daemon and reconnects rebuilds the last layout it had, because the recovered tabs have new ids.
-- **GUI update:** the update swaps each window for one in a new process. Splits, divider positions and remote
-  tabs travel in the window handoff ([window updates](window-updates.md)), not through this file, so they survive even
+- **GUI update:** the update swaps each window for one in a new process. Splits and divider positions
+  travel in the window handoff ([window updates](window-updates.md)), not through this file, so they survive even
   with `restore_layout: false`. The new windows save nothing until the update commits, so a failed update never
   writes over the file.
 - **A window opened beside others** (Ctrl+Shift+N, a launcher running `worminal`) starts with the split of the
   window it opened from, master tabs included; the file is only for the first window of a process. Its new shell
   joins the first pane and keeps the selection.
-- **Remote (SSH) tabs** are not part of the saved file; their panes collapse.
+- **Master tabs** are not part of the saved file; their panes collapse. The daemon restores the tabs themselves.
 
 ## How it is stored
 

@@ -26,7 +26,10 @@ impl Service {
                 self.handin = Some((id, Listener::bind(name)?));
             } else {
                 let last = self.tabs.last().map_or(0, |tab| tab.id);
-                handoff::send(name, &mut self.tabs, &self.reaper, None)?;
+                let reaper = &self.reaper;
+                crate::masters::without_remote(&mut self.tabs, |tabs| {
+                    handoff::send(name, tabs, reaper, None)
+                })?;
                 self.closed = last;
                 self.fallback = 0;
             }

@@ -68,6 +68,10 @@ pub const CONNECT_REPORT_ENV: &str = "WORMINAL_CONNECT_REPORT_FD";
 
 /// GUI connections supply their own prompt helper; headless callers keep normal SSH policy.
 /// The returned non-blocking pipe carries the helper's failure report (see CONNECT_REPORT_FD).
+/// The GUI executable a daemon started by a window uses as the SSH askpass of its master links. Windows
+/// run under several names (installed, preview, development builds), so the daemon cannot derive it.
+pub const GUI_ENV: &str = "WORMINAL_GUI";
+
 pub fn connect_gui(
     master: &OsStr,
     existing: bool,

@@ -65,9 +65,9 @@ predates `--version` counts as older. Equal versions change nothing.
 A portable daemon is a static musl executable, so it runs on any Linux of the same CPU regardless of either side's
 glibc. Default native builds (see development.md) and older daemons are dynamically linked and only run on
 peers whose glibc is at least as new as their build host's; the run check refuses them ("cannot run here") and nothing
-is installed. A failed sync keeps a view's master link closed: the
-connect helper reports the error to the view, which shows it in the window and once as a desktop notification
-(independent of `update_notifications`) while it retries. The daemon log records the receipt.
+is installed. A failed sync keeps the local daemon's master link closed: the
+connect helper reports the error to the daemon, which sends it to every window (shown in the window and once as a
+desktop notification, independent of `update_notifications`) while it retries. The daemon log records the receipt.
 
 The daemon and manual in `/usr/local` are replaced; on a graphics-capable target the sender's `worminal` command,
 modules, desktop entry and icon are installed or replaced too, unless the staged launcher cannot load them there,

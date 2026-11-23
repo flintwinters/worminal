@@ -56,7 +56,13 @@ fn catalog(bytes: &[u8]) -> io::Result<Catalog> {
             title,
             directory,
             colors,
+            host: Vec::new(),
         });
+    }
+    if !body.is_empty() {
+        for tab in &mut tabs {
+            tab.host = string(&mut body)?;
+        }
     }
     body.finish()?;
     Ok(Catalog {
@@ -79,6 +85,11 @@ fn encode_catalog(catalog: &Catalog, output: &mut Buffer) -> io::Result<()> {
             return Err(invalid());
         }
         encode_tab_record(tab, output)?;
+    }
+    if catalog.tabs.iter().any(|tab| !tab.host.is_empty()) {
+        for tab in &catalog.tabs {
+            output.put_string(&tab.host)?;
+        }
     }
     Ok(())
 }

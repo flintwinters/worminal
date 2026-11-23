@@ -71,8 +71,9 @@ shell_integration_unavailable, command_unavailable, wait_limit, unsupported_oper
 Uncertain mutations (open, close, type, key, enroll, forget) are never retried; list/read before repeating.
 
 list     {"ok":true,"api_version":1,"tabs":[TAB...]}   tabs are in strip order
-  TAB    {"id":N,"kind":"terminal"|"browser","title":S,"directory":S,"shell_pid":N,"url":S}
-         shell_pid is 0 for browsers and exited shells; url is "" for terminals.
+  TAB    {"id":N,"kind":"terminal"|"browser"|"master","title":S,"directory":S,"shell_pid":N,"url":S,"host":S}
+         shell_pid is 0 for browsers, master tabs and exited shells; url is "" for terminals. A master tab
+         is an attached master's (`host`, "" otherwise); address it with `--master HOST`.
 self     {"ok":true,"api_version":1,"id":N,"tab":TAB}   the tab whose shell is an ancestor of the caller;
          {"ok":false,"error":...} outside any tab. Local only: `--master` is refused (pids are local).
 read T   {"ok":true,"id":N,"columns":N,"rows":N,"cursor":{"x":N,"y":N},"scroll":N,"alternate":BOOL,
@@ -123,7 +124,7 @@ Keys: api help keys lists named keys and supported modifiers; several may follow
 /// Name, wire id, body layout.
 type Row = (&'static str, u32, &'static str);
 
-const COMMANDS: [Row; 25] = [
+const COMMANDS: [Row; 26] = [
     ("ATTACH", WIRE_ATTACH, "empty. Subscribe; the daemon answers CATALOG."),
     ("CAPABILITIES", WIRE_CAPABILITIES, "u32 feature bits. Send before ATTACH; unadvertised features keep the original encoding."),
     ("INPUT", WIRE_INPUT, "raw bytes for the PTY. Takes control of the tab (the unary `type` does not)."),
@@ -137,6 +138,7 @@ const COMMANDS: [Row; 25] = [
     ("BROWSER", WIRE_BROWSER, "string URL. Create a browser tab and subscribe."),
     ("BROWSER_NAVIGATE", WIRE_BROWSER_NAVIGATE, "string URL for an existing browser tab."),
     ("SELECT_ALL", WIRE_SELECT_ALL, "u32 generation, u32 operation (0 start, 1 next, 2 cancel). Selects screen plus scrollback."),
+    ("MASTER", WIRE_MASTER, "u32 operation (0 attach, 1 attach without password prompts, 2 detach, 3 close its tabs), string SSH host. The daemon owns master links; their tabs join the catalog with the host."),
     ("KEY", WIRE_KEY, "u32 X11 keysym, u32 modifiers, u32 character (Unicode scalar, 0 none), u32 Num Lock 0/1. The daemon encodes it with the tab's live modes; text without Ctrl/Alt belongs in INPUT (needs INPUT)."),
     ("MOUSE", WIRE_MOUSE, "u32 button (0 left, 1 middle, 2 right, 3 none), column, row, modifiers, action (0 press, 1 release, 2 motion); reported only as the application's mouse mode requests (needs INPUT)."),
     ("PASTE", WIRE_PASTE, "u32 flags (1 begin, 2 end), then at most 32768 raw bytes; filtered and bracketed for the live mode. Send one paste as begin..end chunks, never splitting CR LF (needs INPUT)."),
@@ -152,7 +154,7 @@ const COMMANDS: [Row; 25] = [
 ];
 
 const EVENTS: [Row; 19] = [
-    ("CATALOG", WIRE_CATALOG, "u32 count, u32 last closed id, u32 fallback id; per tab: u32 id, u32 kind (0 terminal, 1 browser), string url, u32 mode, u32 cursor, string title, string directory, u32 n, n strings (colors)."),
+    ("CATALOG", WIRE_CATALOG, "u32 count, u32 last closed id, u32 fallback id; per tab: u32 id, u32 kind (0 terminal, 1 browser), string url, u32 mode, u32 cursor, string title, string directory, u32 n, n strings (colors); with HOSTS, when any tab is a master's: per tab, string host (empty: local)."),
     ("FRAME", WIRE_FRAME, "starts a viewport update: u32 columns, rows, cursor_x, cursor_y, scroll, alternate (0/1)."),
     ("ROW", WIRE_ROW, "u32 row, then cells to the row end."),
     ("ROW_SPAN", WIRE_ROW_SPAN, "u32 row, u32 first column, then cells (needs the ROW_SPAN bit)."),
@@ -173,7 +175,7 @@ const EVENTS: [Row; 19] = [
     ("COMMAND_DONE", WIRE_COMMAND_DONE, "empty (end of a handoff or browser replacement)."),
 ];
 
-const FEATURES: [(&str, u32); 9] = [
+const FEATURES: [(&str, u32); 10] = [
     ("COPY_ROWS", WIRE_FEATURE_COPY_ROWS),
     ("SELECT_ALL", WIRE_FEATURE_SELECT_ALL),
     ("ROW_SPAN", WIRE_FEATURE_ROW_SPAN),
@@ -183,6 +185,7 @@ const FEATURES: [(&str, u32); 9] = [
     ("ATTENTION", WIRE_FEATURE_ATTENTION),
     ("PANES", WIRE_FEATURE_PANES),
     ("INPUT", WIRE_FEATURE_INPUT),
+    ("HOSTS", WIRE_FEATURE_HOSTS),
 ];
 
 const ATTRIBUTES: [(&str, u32); 11] = [

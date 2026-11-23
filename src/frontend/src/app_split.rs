@@ -1,7 +1,7 @@
 //! Split panes: every pane is a tab strip over a notebook of its own tabs, and a window with one pane is an
 //! ordinary window. The split is per window and remembered between runs (`app_layout.rs`); window replacement
 //! carries it too. The daemon only learns which tabs this view shows (`Pane`), never the geometry.
-use super::{App, LINK_SHIFT};
+use super::App;
 use crate::{
     layout::{neighbor, Direction, Layout, PaneRect, Target, Zone},
     paint,
@@ -323,7 +323,7 @@ impl App {
             .borrow()
             .iter()
             .any(|page| page.id == id && page.browser);
-        browser || (self.terminal(id).is_some() && self.features(id) & WIRE_FEATURE_PANES != 0)
+        browser || (self.terminal(id).is_some() && self.features() & WIRE_FEATURE_PANES != 0)
     }
     /// The one place pane focus changes, so only the focused strip highlights its selected tab.
     pub(super) fn focus_pane(&self, pane: &Pane) {
@@ -565,13 +565,6 @@ impl App {
     }
     /// The split window replacement carries, each pane's selected tab first; empty for a single pane.
     pub(super) fn arrangement(&self) -> std::io::Result<Vec<u8>> {
-        self.arrangement_as(&Some)
-    }
-    /// The split with each tab id translated for another window (`None` leaves the tab out).
-    pub(super) fn arrangement_as(
-        &self,
-        translate: &dyn Fn(u32) -> Option<u32>,
-    ) -> std::io::Result<Vec<u8>> {
         if self.panes().len() < 2 {
             return Ok(Vec::new());
         }
@@ -587,7 +580,6 @@ impl App {
                         .into_iter()
                         .filter(|tab| Some(*tab) != selected),
                 )
-                .filter_map(translate)
                 .collect()
         };
         let mut body = worminal_protocol::Buffer::default();
@@ -791,15 +783,14 @@ impl App {
         if shown.len() < 2 && self.terminal(active).is_some() {
             shown = vec![active];
         }
-        let mut focused = Vec::new();
+        let mut focused = false;
         for id in shown {
             let Some(terminal) = self.terminal(id) else {
                 continue;
             };
             let (columns, rows) = terminal.dimensions();
-            let link = id >> LINK_SHIFT;
-            let join = focused.contains(&link) && self.features(id) & WIRE_FEATURE_PANES != 0;
-            focused.push(link);
+            let join = focused && self.features() & WIRE_FEATURE_PANES != 0;
+            focused = true;
             self.send(
                 id,
                 if join {

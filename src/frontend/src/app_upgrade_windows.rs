@@ -63,10 +63,7 @@ impl Candidate {
         // An unreachable peer cannot settle; waiting for it would postpone every update until it
         // returns (a dead master timed out each GUI replacement). The candidate keeps retrying it.
         barriers_complete(&self.catalogs)
-            && self
-                .windows
-                .iter()
-                .all(|window| window.app.links().iter().all(|link| link.quiet()))
+            && self.windows.iter().all(|window| window.app.primary.quiet())
     }
     pub(super) fn select(&self) {
         for window in &self.windows {
@@ -141,19 +138,24 @@ fn open(state: &Window, candidate: bool) -> io::Result<Rc<App>> {
     config.command.clear();
     config.browser_url = None;
     config.zoom = state.zoom;
-    let app = App::open_mode(
-        config,
-        true,
-        state.flags & gui_handoff::PRIMARY_DETACHED != 0,
-    )?;
+    // Windows of earlier versions held their own master links: the window's own (`--master`) and those in
+    // `links`. Hand those masters to the daemon, which owns master links now, without prompting.
+    let mut masters: Vec<_> = config.master.take().into_iter().collect();
     for link in &state.links {
-        let Some(mut config) = Config::parse(&link.request, candidate)? else {
-            return Err(io::Error::other("Invalid remote update launch"));
-        };
-        config.attach = true;
-        config.command.clear();
-        config.browser_url = None;
-        app.restore_remote(link.index, config)?;
+        if let Some(master) = Config::parse(&link.request, candidate)?.and_then(|c| c.master) {
+            masters.push(master);
+        }
+    }
+    let app = App::open_mode(config, true)?;
+    for master in masters {
+        app.send(
+            0,
+            worminal_protocol::worp::commands::CommandKind::Master {
+                operation: worminal_protocol::worp::commands::MasterOperation::AttachQuietly,
+                host: master.into_encoded_bytes(),
+                launch: None,
+            },
+        );
     }
     Ok(app)
 }

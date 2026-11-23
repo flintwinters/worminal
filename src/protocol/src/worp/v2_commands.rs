@@ -204,6 +204,26 @@ pub fn decode(packet: Packet) -> io::Result<Option<Command>> {
             integer(&packet.body)?
         }),
         WIRE_CAPABILITIES => CommandKind::Capabilities(integer(&packet.body)?),
+        WIRE_MASTER => {
+            let mut fields = Payload::new(&packet.body);
+            let operation = match fields.u32()? {
+                0 => MasterOperation::Attach,
+                1 => MasterOperation::AttachQuietly,
+                2 => MasterOperation::Detach,
+                3 => MasterOperation::Close,
+                _ => return Err(invalid()),
+            };
+            let host = fields.string()?.to_vec();
+            // The rest, when present, is the launch of a terminal to open on an attached master.
+            let launch = (!fields.is_empty())
+                .then(|| Launch::decode(&packet.body[8 + host.len()..]).map(Box::new))
+                .transpose()?;
+            CommandKind::Master {
+                operation,
+                host,
+                launch,
+            }
+        }
         WIRE_SERVICE_INFO => CommandKind::ServiceInfo,
         WIRE_STOP => CommandKind::Stop,
         WIRE_HANDIN | WIRE_HANDOFF => CommandKind::Transfer {
@@ -228,6 +248,18 @@ pub fn encode(command: &Command) -> io::Result<Packet> {
     let mut body = Buffer::default();
     let kind = match &command.kind {
         CommandKind::Call(request) => return v2::encode_request(request),
+        CommandKind::Master {
+            operation,
+            host,
+            launch,
+        } => {
+            body.put_u32(*operation as u32)?;
+            body.put_string(host)?;
+            if let Some(launch) = launch {
+                body.put_bytes(&launch.encode()?)?;
+            }
+            WIRE_MASTER
+        }
         CommandKind::Input {
             bytes,
             control: Control::Preserve,

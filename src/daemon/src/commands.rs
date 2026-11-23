@@ -15,7 +15,7 @@ use worminal_protocol::{
 };
 
 impl Service {
-    fn error(&mut self, client: ClientId, message: &[u8]) -> io::Result<()> {
+    pub(crate) fn error(&mut self, client: ClientId, message: &[u8]) -> io::Result<()> {
         self.emit(
             client,
             Event {
@@ -151,7 +151,8 @@ impl Service {
                             | WIRE_FEATURE_FOCUSED_FRAMES
                             | WIRE_FEATURE_NOTIFICATIONS
                             | WIRE_FEATURE_ATTENTION
-                            | WIRE_FEATURE_ROW_LINKS);
+                            | WIRE_FEATURE_ROW_LINKS
+                            | WIRE_FEATURE_HOSTS);
                     self.emit(
                         client,
                         Event {
@@ -164,12 +165,20 @@ impl Service {
                                     | WIRE_FEATURE_ATTENTION
                                     | WIRE_FEATURE_PANES
                                     | WIRE_FEATURE_ROW_LINKS
-                                    | WIRE_FEATURE_INPUT,
+                                    | WIRE_FEATURE_INPUT
+                                    | WIRE_FEATURE_HOSTS,
                             ),
                         },
                     );
                 }
                 return Ok(());
+            }
+            CommandKind::Master {
+                operation,
+                host,
+                launch,
+            } => {
+                return self.master_command(client, operation, host, launch, now);
             }
             CommandKind::Stop => {
                 self.running = false;
@@ -239,6 +248,15 @@ impl Service {
                     return Ok(());
                 }
                 if let Some(index) = self.index(command.tab) {
+                    if ready && self.tabs[index].remote.is_some() {
+                        let kind = CommandKind::Navigate(url);
+                        return self.remote_command(
+                            index,
+                            client,
+                            Command { kind, ..command },
+                            now,
+                        );
+                    }
                     if !ready || self.tabs[index].url.is_none() {
                         return Ok(());
                     }
@@ -254,6 +272,13 @@ impl Service {
                     return Ok(());
                 }
                 self.clients.get_mut(&client).unwrap().ready = true;
+                // A view opens beside a master tab on that master.
+                if let Some(near) = self
+                    .index(command.tab)
+                    .filter(|index| self.tabs[*index].remote.is_some())
+                {
+                    return self.remote_open(near, client, launch, now);
+                }
                 let reused = self.restored_launch
                     && !self.tabs.is_empty()
                     && mode == OpenMode::ReuseRestored
@@ -301,6 +326,9 @@ impl Service {
                 Some(client),
             );
             return Ok(());
+        }
+        if self.tabs[index].remote.is_some() {
+            return self.remote_command(index, client, command, now);
         }
         if self.tabs[index].url.is_some() {
             if matches!(command.kind, CommandKind::Close { .. }) {
