@@ -1,5 +1,4 @@
-//! Plain left-click on an http(s) or file URL in visible text opens it with xdg-open; the pointer's
-//! link is underlined.
+//! Detect URLs and local paths in visible text for hover and plain left-click.
 //! Ported from the retired X11 frontend's url.c; detection reads only the imported viewport.
 use std::ops::RangeInclusive;
 use worminal_engine::Cell;
@@ -7,32 +6,38 @@ use worminal_protocol::cell::{ATTR_WDUMMY, ATTR_WRAP};
 
 const LIMIT: usize = 8192;
 
-fn url_char(rune: u32) -> bool {
-    rune > 32 && rune < 127 && !matches!(rune as u8, b'<' | b'>' | b'"' | b'\'' | b'`')
+fn link_char(rune: u32) -> Option<char> {
+    char::from_u32(rune).filter(|character| {
+        !character.is_whitespace()
+            && !character.is_control()
+            && !matches!(character, '<' | '>' | '"' | '\'' | '`')
+    })
 }
-fn url_prefix(text: &[u8]) -> bool {
-    [&b"http://"[..], b"https://", b"file://"]
-        .iter()
-        .any(|prefix| {
-            text.len() > prefix.len() && text.starts_with(prefix) && text[prefix.len()] != b' '
-        })
+fn url_prefix(text: &[char]) -> bool {
+    [
+        &['h', 't', 't', 'p', ':', '/', '/'][..],
+        &['h', 't', 't', 'p', 's', ':', '/', '/'],
+        &['f', 'i', 'l', 'e', ':', '/', '/'],
+    ]
+    .iter()
+    .any(|prefix| text.len() > prefix.len() && text.starts_with(prefix))
 }
-fn unmatched_closer(text: &[u8], open: u8, close: u8) -> bool {
-    text.iter().fold(0i32, |balance, byte| {
-        balance + i32::from(*byte == open) - i32::from(*byte == close)
+fn unmatched_closer(text: &[char], open: char, close: char) -> bool {
+    text.iter().fold(0i32, |balance, character| {
+        balance + i32::from(*character == open) - i32::from(*character == close)
     }) < 0
 }
 
 /// Length of a URL candidate after dropping sentence punctuation and unmatched closing brackets.
-fn without_trailing_punctuation(text: &[u8]) -> usize {
+fn without_trailing_punctuation(text: &[char]) -> usize {
     let mut end = text.len();
     while end > 0 {
         let span = &text[..end];
         let closes = match text[end - 1] {
-            b'.' | b',' | b';' | b':' | b'!' | b'?' => true,
-            b')' => unmatched_closer(span, b'(', b')'),
-            b']' => unmatched_closer(span, b'[', b']'),
-            b'}' => unmatched_closer(span, b'{', b'}'),
+            '.' | ',' | ';' | ':' | '!' | '?' => true,
+            ')' => unmatched_closer(span, '(', ')'),
+            ']' => unmatched_closer(span, '[', ']'),
+            '}' => unmatched_closer(span, '{', '}'),
             _ => false,
         };
         if !closes {
@@ -72,10 +77,10 @@ pub fn at(
         let edge = &line(index)[columns - 1];
         let next = line(index + 1);
         edge.attributes & ATTR_WDUMMY == 0
-            && url_char(edge.rune)
+            && link_char(edge.rune).is_some()
             && next
                 .get(indent(index + 1))
-                .is_some_and(|cell| url_char(cell.rune))
+                .is_some_and(|cell| link_char(cell.rune).is_some())
     };
     let continues = |index: usize| index + 1 < rows && (wrapped(index) || broken(index));
     let mut first = row;
@@ -106,47 +111,65 @@ pub fn at(
             return None;
         }
         for (position, cell) in cells[..width].iter().enumerate().skip(skip) {
+            let dummy = cell.attributes & ATTR_WDUMMY != 0;
             if index == row && position == column {
-                clicked = Some(text.len());
+                clicked = text.len().checked_sub(usize::from(dummy));
             }
-            if cell.attributes & ATTR_WDUMMY != 0 {
+            if dummy {
                 continue;
             }
             if text.len() == LIMIT - 1 {
                 return None;
             }
-            text.push(if url_char(cell.rune) {
-                cell.rune as u8
-            } else {
-                b' '
-            });
+            text.push(link_char(cell.rune).unwrap_or(' '));
             positions.push(index * columns + position);
         }
         if index == row && column >= width {
             return None;
         }
     }
-    let clicked = clicked.filter(|clicked| text.get(*clicked).is_some_and(|byte| *byte != b' '))?;
+    let clicked = clicked.filter(|clicked| text.get(*clicked).is_some_and(|c| *c != ' '))?;
     let mut start = clicked;
-    while start > 0 && text[start - 1] != b' ' {
+    while start > 0 && text[start - 1] != ' ' {
         start -= 1;
     }
     let mut end = clicked + 1;
-    while end < text.len() && text[end] != b' ' {
+    while end < text.len() && text[end] != ' ' {
         end += 1;
     }
-    // A URL may follow punctuation such as an opening parenthesis.
-    while start < end && !url_prefix(&text[start..end]) {
-        start += 1;
+    let mut path_start = start;
+    while path_start < end && matches!(text[path_start], '(' | '[' | '{') {
+        path_start += 1;
+    }
+    let path = matches!(&text[path_start..end], ['/', ..] | ['~', '/', ..]);
+    if path {
+        start = path_start;
+    } else {
+        // Explicit URLs can follow punctuation or labels. Paths must start the token.
+        while start < end && !url_prefix(&text[start..end]) {
+            start += 1;
+        }
     }
     if start == end || clicked < start {
         return None;
     }
     let end = without_trailing_punctuation(&text[start..end]) + start;
-    (clicked < end).then(|| {
-        let url = String::from_utf8_lossy(&text[start..end]).into_owned();
-        (url, positions[start]..=positions[end - 1])
-    })
+    if clicked >= end {
+        return None;
+    }
+    let target: String = text[start..end].iter().collect();
+    let uri = if path {
+        let path = match target.strip_prefix("~/") {
+            Some(relative) => glib::home_dir().join(relative.trim_start_matches('/')),
+            None => target.into(),
+        };
+        glib::filename_to_uri(path, None).ok()?.into()
+    } else {
+        target
+    };
+    let last = positions[end - 1];
+    let wide = last % columns + 1 < columns && cells[last + 1].attributes & ATTR_WDUMMY != 0;
+    Some((uri, positions[start]..=last + usize::from(wide)))
 }
 
 #[cfg(test)]
@@ -175,6 +198,29 @@ mod tests {
     }
     fn url(cells: &[Cell], columns: usize, column: usize, row: usize) -> Option<String> {
         at(cells, columns, column, row).map(|(url, _)| url)
+    }
+
+    #[test]
+    fn finds_absolute_and_home_relative_paths_at_token_starts() {
+        let cells = grid(
+            &["see (/var/é#?%.txt), ~/notes relative/not-a-link /"],
+            60,
+            &[],
+        );
+        assert_eq!(
+            at(&cells, 60, 10, 0),
+            Some(("file:///var/%C3%A9%23%3F%25.txt".into(), 5..=17))
+        );
+        let home_notes = glib::filename_to_uri(glib::home_dir().join("notes"), None).unwrap();
+        assert_eq!(url(&cells, 60, 24, 0).as_deref(), Some(home_notes.as_str()));
+        assert_eq!(url(&cells, 60, 34, 0), None);
+        assert_eq!(url(&cells, 60, 49, 0).as_deref(), Some("file:///"));
+
+        let wrapped = grid(&["/var/long", "-name"], 9, &[0]);
+        assert_eq!(
+            at(&wrapped, 9, 2, 1),
+            Some(("file:///var/long-name".into(), 0..=13))
+        );
     }
     #[test]
     fn finds_urls_trims_punctuation_and_follows_wrapped_rows() {
