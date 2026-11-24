@@ -23,7 +23,8 @@ pub fn command(arguments: &[OsString]) -> io::Result<()> {
     } else {
         return Ok(());
     };
-    if arguments.len() != 3 {
+    // Only the browser target is optional; resolve() supplies the shared browser home.
+    if arguments.len() != 3 && !(command == Daemon::NewBrowser && arguments.len() == 2) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(
@@ -38,7 +39,7 @@ pub fn command(arguments: &[OsString]) -> io::Result<()> {
     let daemon = std::env::current_exe()?.with_file_name(OsStr::from_bytes(daemon.to_bytes()));
     Err(Command::new(daemon)
         .arg(command.name())
-        .arg(&arguments[2])
+        .args(&arguments[2..])
         .exec())
 }
 

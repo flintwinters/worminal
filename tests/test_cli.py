@@ -99,7 +99,7 @@ class CommandLineTest(unittest.TestCase):
 
     def test_redirected_output_is_plain_without_agent_markers(self):
         for binary in ('worminal', 'worminald'):
-            for arguments in [('--help',), ('--version',), ('--new-browser-tab',)]:
+            for arguments in [('--help',), ('--version',), ('--new-browser-tab', 'one', 'two')]:
                 result = subprocess.run([str(runtime_binary(binary)), *arguments],
                                         env=human_environment(), capture_output=True, timeout=5)
                 self.assertNotIn(b'\x1b[', result.stdout + result.stderr)
@@ -133,7 +133,7 @@ class CommandLineTest(unittest.TestCase):
         self.assertEqual(json.loads(agent)['masters'], [])
 
     def test_terminal_errors_use_stderr_policy_and_data_outputs_stay_plain(self):
-        for binary, arguments in [('worminal', ('--new-browser-tab',)),
+        for binary, arguments in [('worminal', ('--new-browser-tab', 'one', 'two')),
                                   ('worminald', ('api', 'help', 'unknown-color-test'))]:
             status, colored = self.terminal_output(binary, *arguments, stderr=True)
             self.assertEqual(status, 2)
@@ -164,10 +164,11 @@ class CommandLineTest(unittest.TestCase):
             self.assertEqual(invalid.returncode, 2)
             self.assertIn("usage:", invalid.stderr)
             for name in ("worminal", "worminald"):
-                missing = subprocess.run([str(path / name), "--new-browser-tab"],
+                # Without a target the command proceeds to the service with the blank browser home.
+                default = subprocess.run([str(path / name), "--new-browser-tab"],
                                          env=env, capture_output=True, text=True, timeout=5)
-                self.assertEqual(missing.returncode, 2)
-                self.assertIn("URL|FILE", missing.stderr)
+                self.assertEqual(default.returncode, 1)
+                self.assertIn("No preview workspace service is running", default.stderr)
 
 
     def test_launcher_does_not_link_graphics_libraries(self):

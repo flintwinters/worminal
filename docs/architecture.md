@@ -153,7 +153,7 @@ star and Ctrl+Shift+D toggle through `app_bookmarks.rs`.
 ## Browser capabilities
 
 Browser URL resolution preserves explicit URLs, prefers existing paths and otherwise defaults bare hosts to HTTPS.
-`--new-browser-tab URL|FILE` requires a target; `./` and `../` disambiguate missing local files. Selected local
+`--new-browser-tab [URL|FILE]` opens a blank page without a target; `./` and `../` disambiguate missing local files. Selected local
 documents have bounded, read-only file/directory APIs through a private per-view credential held by a top-frame-only
 script. Subframes and other navigated documents have no capability. Native error/find chrome is Rust; its shared
 scripts/templates remain under `src/gtk`. Renderer recovery retains the last valid URI because WebKit can clear it

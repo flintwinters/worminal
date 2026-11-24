@@ -330,30 +330,21 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
         process::ignore_hangup();
         return request(scope, CommandKind::ReplaceBrowser(recipe.into_bytes()));
     }
+    if arguments.len() <= 3 && command == Some(Daemon::NewBrowser) {
+        process::ignore_hangup();
+        let target = browser_target::resolve(arguments.get(2).map(OsString::as_os_str))?;
+        return request(scope, CommandKind::ReplaceBrowser(target));
+    }
     if arguments.len() == 3 {
-        let kind = match command {
-            Some(Daemon::Handin) => Some(WIRE_HANDIN),
-            Some(Daemon::Handoff) => Some(WIRE_HANDOFF),
-            Some(Daemon::NewBrowser) => Some(WIRE_BROWSER_REPLACE),
+        let outbound = match command {
+            Some(Daemon::Handin) => Some(false),
+            Some(Daemon::Handoff) => Some(true),
             _ => None,
         };
-        if let Some(kind) = kind {
-            let value = if kind == WIRE_BROWSER_REPLACE {
-                process::ignore_hangup();
-                browser_target::resolve(Some(&arguments[2]))?
-            } else {
-                arguments[2].as_os_str().as_bytes().to_vec()
-            };
-            let command = if kind == WIRE_BROWSER_REPLACE {
-                CommandKind::ReplaceBrowser(value)
-            } else {
-                CommandKind::Transfer {
-                    outbound: kind == WIRE_HANDOFF,
-                    token: value,
-                }
-            };
-            let result = request(scope, command);
-            if kind != WIRE_BROWSER_REPLACE && !matches!(&result, Ok(0)) {
+        if let Some(outbound) = outbound {
+            let token = arguments[2].as_os_str().as_bytes().to_vec();
+            let result = request(scope, CommandKind::Transfer { outbound, token });
+            if !matches!(&result, Ok(0)) {
                 eprintln!(
                     "{}", cli_output::error("Handoff unavailable or rejected; no automatic daemon restart was attempted.")
                 );
@@ -376,7 +367,7 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
                worminald attach [--master HOST] [--existing]\n       \
                worminald --serve|--bridge|--stop\n\
                worminald --handin NAME | --handoff NAME\n       \
-               worminald --new-browser-tab URL|FILE"
+               worminald --new-browser-tab [URL|FILE]"
         )
     );
     Ok(2)

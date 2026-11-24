@@ -203,6 +203,11 @@ class PreviewWorkspaceTest(unittest.TestCase):
                                                "worminal-ssh-proxy:user@192.0.2.1/about:blank",
                                                option="--ssh-web-proxy")
 
+    def test_browser_command_without_a_target_opens_the_browser_home(self):
+        for executable in (DAEMON, runtime_binary("worminal")):
+            with self.subTest(executable=executable.name):
+                self.assert_browser_conversion(executable, None, "about:blank")
+
     def assert_browser_conversion(self, executable, target, expected, directory=ROOT, option="--new-browser-tab"):
         command = "cd " + shlex.quote(str(directory)) + " && " + shlex.join([str(executable), option])
         if target is not None: command += " " + shlex.quote(target)
