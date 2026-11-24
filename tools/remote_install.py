@@ -99,6 +99,12 @@ def refuse_existing(layout):
         raise ValueError('An existing Worminal workspace is active. Nothing was replaced or stopped.')
 
 
+def legacy_workspace():
+    # A v1 workspace must never be disturbed; its prefix lacks the v2 marker.
+    prefix = f'@worminal-workspace-{os.getuid()}-'
+    return any(prefix in line for line in Path('/proc/net/unix').read_text().splitlines())
+
+
 def installed_version(layout):
     """Version reported by the managed daemon; None when it predates `--version` or cannot run."""
     daemon = next(path for item, path in destinations(layout) if item['role'] == 'daemon')
@@ -265,6 +271,8 @@ def bootstrap(layout, source, replace=False):
             return {'ok': True, 'installed': False, 'current': True}
         if first.get('send'):
             return send(layout)
+        if legacy_workspace():
+            raise ValueError('A v1 Worminal workspace is active; it is never upgraded implicitly. Nothing was replaced.')
     first = first or header(sys.stdin.buffer)
     base, layout = layout, widen(layout, first)
     records = payload(layout, sys.stdin.buffer, first)
