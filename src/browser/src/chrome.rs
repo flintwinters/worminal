@@ -103,24 +103,50 @@ pub(crate) fn connect(browser: &Rc<Browser>) {
             && !error.matches(PluginError::WillHandleLoad) { error_page(view, url, error.message()); }
         true
     }));
-    browser
-        .view
-        .connect_load_failed_with_tls_errors(|view, url, _, errors| {
-            error_page(
-                view,
-                url,
-                &format!(
-                    "Certificate validation failed ({errors:?}) for {url}. Connection blocked."
-                ),
-            );
-            true
-        });
+    connect_certificate_exception(browser);
     browser
         .view
         .connect_web_process_terminated(glib::clone!(@weak browser => move |_, reason| {
             browser.notice(Some("The page renderer stopped. Press Ctrl+R to reopen this page."));
             eprintln!("worminal: renderer stopped in owner {} ({reason:?})", std::process::id());
         }));
+}
+fn connect_certificate_exception(browser: &Rc<Browser>) {
+    browser
+        .trust_certificate
+        .connect_clicked(glib::clone!(@weak browser => move |_| {
+            let failure = browser.failed_certificate.borrow_mut().take();
+            browser.trust_certificate.hide();
+            let Some((url, certificate)) = failure else { return; };
+            if browser.view.uri().as_deref() != Some(url.as_str()) { return; }
+            let Ok(uri) = glib::Uri::parse(&url, glib::UriFlags::NONE) else { return; };
+            if let (Some(host), Some(context)) = (uri.host(), browser.view.context()) {
+                context.allow_tls_certificate_for_host(&certificate, &host);
+                browser.view.load_uri(&url);
+                browser.view.grab_focus();
+            }
+        }));
+    browser
+        .view
+        .connect_uri_notify(glib::clone!(@weak browser => move |view| {
+            let current = view.uri();
+            let mut failure = browser.failed_certificate.borrow_mut();
+            if failure.as_ref().is_some_and(|(url, _)| current.as_deref() != Some(url.as_str())) {
+                failure.take();
+                drop(failure);
+                browser.trust_certificate.hide();
+            }
+        }));
+    browser.view.connect_load_failed_with_tls_errors(glib::clone!(
+        @weak browser => @default-return true, move |view, url, certificate, errors| {
+            error_page(view, url, &format!(
+                "Certificate validation failed ({errors:?}) for {url}. Connection blocked."
+            ));
+            *browser.failed_certificate.borrow_mut() = Some((url.to_owned(), certificate.clone()));
+            browser.trust_certificate.show();
+            true
+        }
+    ));
 }
 fn error_page(view: &WebView, url: &str, message: &str) {
     let html = include_str!("../../../src/gtk/browser-error.html")

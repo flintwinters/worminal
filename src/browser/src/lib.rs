@@ -26,6 +26,8 @@ pub(crate) struct Browser {
     location: gtk::Entry,
     find: gtk::SearchEntry,
     notice: gtk::Label,
+    trust_certificate: gtk::Button,
+    failed_certificate: RefCell<Option<(String, gio::TlsCertificate)>>,
     select_find: Cell<bool>,
     url: RefCell<String>,
     callback: boundary::Callback,
@@ -84,10 +86,13 @@ impl Browser {
         find.set_placeholder_text(Some("Find in page"));
         let notice = gtk::Label::new(None);
         notice.set_line_wrap(true);
+        let trust_certificate =
+            gtk::Button::with_mnemonic("_Trust this certificate for this session");
         for widget in [
             location.clone().upcast::<gtk::Widget>(),
             find.clone().upcast(),
             notice.clone().upcast(),
+            trust_certificate.clone().upcast(),
         ] {
             widget.set_no_show_all(true);
             container.pack_start(&widget, false, false, 0);
@@ -99,6 +104,8 @@ impl Browser {
             location,
             find,
             notice,
+            trust_certificate,
+            failed_certificate: RefCell::new(None),
             select_find: Cell::new(false),
             url: RefCell::new(url.to_string()),
             callback,

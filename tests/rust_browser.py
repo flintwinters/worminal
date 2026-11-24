@@ -174,7 +174,7 @@ class RustBrowserTest(unittest.TestCase):
                         env=env, check=True)
                     title(env, 'Permission:' + expected, app)
 
-    def test_invalid_tls_never_delivers_the_document(self):
+    def test_invalid_tls_requires_a_certificate_exception(self):
         delivered = threading.Event()
         class TLSFixture(Fixture):
             def do_GET(self):
@@ -194,6 +194,9 @@ class RustBrowserTest(unittest.TestCase):
                     self.assertLess(time.monotonic(), deadline, 'TLS failure did not paint the native error document')
                     time.sleep(.02)
                 self.assertFalse(delivered.is_set(), 'invalid TLS document reached HTTP handling')
+                subprocess.run(['xdotool', 'key', '--clearmodifiers', 'alt+t'], env=env, check=True)
+                title(env, 'Fixture', app)
+                self.assertTrue(delivered.is_set())
 
     def test_renderer_failure_recovers_on_explicit_reload(self):
         from perf_metrics import descendants
