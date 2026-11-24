@@ -56,12 +56,20 @@ fn search(browser: &Browser) {
     }
 }
 pub(crate) fn connect(browser: &Rc<Browser>) {
-    browser.location.connect_activate(glib::clone!(@weak browser => move |entry| {
-        let text = entry.text();
-        if text.is_empty() { return; }
-        let url = if glib::Uri::parse_scheme(&text).is_some() { text.to_string() } else { format!("https://{text}") };
-        browser.view.load_uri(&url); entry.hide(); browser.view.grab_focus();
-    }));
+    browser
+        .location
+        .connect_activate(glib::clone!(@weak browser => move |entry| {
+            let input = entry.text();
+            let text = input.trim();
+            if text.is_empty() { return; }
+            if glib::Uri::parse_scheme(text).is_some() {
+                browser.view.load_uri(text);
+            } else {
+                browser.view.load_uri(&format!("https://{text}"));
+            }
+            entry.hide();
+            browser.view.grab_focus();
+        }));
     browser
         .find
         .connect_changed(glib::clone!(@weak browser => move |_| search(&browser)));

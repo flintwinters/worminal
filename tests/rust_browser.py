@@ -247,9 +247,10 @@ class RustBrowserTest(unittest.TestCase):
                 wait_for(lambda: list(runtime.glob('worminal-web-*/socks')))
                 # The socket is ready before entering the first URL, independently of GTK publication.
                 title(env, 'about:blank', app)
-                for path in ('/first', '/next'):
+                for address, path in (('http://proxy-test.invalid/first', '/first'),
+                                      ('  http://proxy-test.invalid/next  ', '/next')):
                     subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+k'], env=env, check=True)
-                    subprocess.run(['xdotool', 'type', '--clearmodifiers', 'http://proxy-test.invalid' + path],
+                    subprocess.run(['xdotool', 'type', '--clearmodifiers', address],
                                    env=env, check=True)
                     subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Return'], env=env, check=True)
                     self.assertEqual(title(env, 'Via SSH ' + path, app), window)
