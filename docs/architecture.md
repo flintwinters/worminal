@@ -162,6 +162,7 @@ browser CLI; their changes take effect only on explicit reload/reopen, and nativ
 
 Run `worminal --ssh-web-proxy USER@HOST` in a local Worminal terminal to replace it with an orange-titled
 browser tab. Press Ctrl+K to enter a URL, such as `http://localhost:8080` for a service on the SSH host.
+F12 toggles WebKit's docked inspector in any browser tab, for example to watch a device UI's API requests.
 The frontend owns the OpenSSH SOCKS tunnel for the live view. Its ephemeral WebKit context keeps HTTP and
 HTTPS requests and their hostname resolution on that tunnel, including navigation that would open a popup.
 The browser recipe retains the endpoint and the latest URL so the local owner can reopen the tunnel on restore.

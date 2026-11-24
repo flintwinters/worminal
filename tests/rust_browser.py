@@ -198,6 +198,36 @@ class RustBrowserTest(unittest.TestCase):
                 title(env, 'Fixture', app)
                 self.assertTrue(delivered.is_set())
 
+    def test_f12_toggles_the_web_inspector(self):
+        from Xlib import X, XK, display
+        from visible_latency import image_bytes
+        from x11 import keypress
+        with isolated_display() as private, profile(private) as env, fixture() as url:
+            env.update(GDK_BACKEND='x11'); env.pop('WAYLAND_DISPLAY', None)
+            with application(env, '--browser', url) as app:
+                wid = title(env, 'Fixture', app)
+                connection = display.Display(env['DISPLAY'])
+                window = connection.create_resource_object('window', int(wid))
+                def docked():
+                    # WebKit docks the inspector's light panels below the dark page.
+                    geometry = window.get_geometry()
+                    pixel = image_bytes(window.get_image(geometry.width // 3, geometry.height * 3 // 4, 1, 1,
+                                                         X.ZPixmap, 0xffffffff))
+                    return min(pixel[:3]) > 128
+                def toggle(expected):
+                    subprocess.run(['xdotool', 'windowfocus', '--sync', wid], env=env, check=True)
+                    # xdotool adds Alt to F12 on this keymap; XTEST sends the bare key a user types.
+                    keypress(connection, XK.XK_F12)
+                    deadline = time.monotonic() + 10
+                    while docked() != expected:
+                        self.assertLess(time.monotonic(), deadline, f'F12 did not set the inspector to {expected}')
+                        time.sleep(.05)
+                try:
+                    self.assertFalse(docked())
+                    toggle(True); toggle(False)
+                finally:
+                    connection.close()
+
     def test_renderer_failure_recovers_on_explicit_reload(self):
         from perf_metrics import descendants
         from visible_latency import wait_for

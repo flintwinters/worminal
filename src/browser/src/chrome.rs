@@ -204,6 +204,14 @@ pub(crate) fn shortcut(browser: &Browser, value: u32, modifiers: u32) -> bool {
         } else {
             browser.view.reload();
         }
+    } else if mods.is_empty() && value == key::F12 {
+        if let Some(inspector) = browser.view.inspector() {
+            if inspector.web_view().is_some() {
+                inspector.close();
+            } else {
+                inspector.show();
+            }
+        }
     } else if mods.is_empty()
         && value == key::Escape
         && (gtk::prelude::WidgetExt::is_visible(&browser.find)

@@ -71,7 +71,7 @@ impl Browser {
                 .enable_javascript(true)
                 .auto_load_images(true)
                 .default_charset("UTF-8")
-                .enable_developer_extras(false)
+                .enable_developer_extras(true)
                 .enable_dns_prefetching(false)
                 .media_playback_requires_user_gesture(true)
                 .enable_smooth_scrolling(false)
