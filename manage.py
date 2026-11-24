@@ -380,7 +380,7 @@ def inventory():
 
 @app.command("running")
 def running(prefix: Path = typer.Option("/usr/local", help="Installation prefix whose live processes to classify.")):
-    """Report which live Worminal processes run the installed files; v1 daemons are listed, never changed."""
+    """Report which live Worminal processes run the installed files."""
     from tools import running as live
     live.report(str(prefix))
 

@@ -30,7 +30,6 @@ queueing. Device membership is explicit, persisted independently of tabs and sco
 Live ownership transfers validate sealed snapshots and descriptors before commit, preserve shell identities and
 establish independent receiver sessions. Failure retains a healthy owner; rollback never restarts live shells.
 Restart recovery restores directory/URL recipes into fresh shells, never commands, processes or scrollback.
-Existing v1 processes must never be stopped or migrated implicitly.
 
 The lightweight GLib launcher forwards before loading graphics. Frontend/browser modules have distinct versioned
 C ABIs; Rust containers never cross them. Browser generations retain their callbacks and share profile ownership.

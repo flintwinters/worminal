@@ -74,7 +74,7 @@ update bootstrap immediately after SSH authentication, before config sync or any
 The same authenticated stream becomes the bridge only after synchronization succeeds; failures disconnect the view.
 It updates whichever side has the older Cargo version, pushing or pulling the
 daemon with atomic replacement so the running daemon's watch hands live shells to the new file. It needs the same
-CPU, sudo and /usr/local on both sides, and never touches a v1 workspace. It compares only the Cargo version, so
+CPU, sudo and /usr/local on both sides. It compares only the Cargo version, so
 bump it with any change remote daemons must receive; equal versions never upgrade.
 `worminald --list-masters` passively lists successful outbound view routes and their live kernel leases, independently
 of explicit device enrollment. History starts at a valid catalog and survives disconnects; it never drives probes.
@@ -104,8 +104,7 @@ identity; automatic and explicit X11 join the same owner when no Wayland display
 Ownership transfers stage and validate sealed native snapshots and SCM_RIGHTS before commit. Receivers establish an
 independent session before accepting PTYs. Track local children separately from transferred processes and pin
 identities before signalling. After commit, donors close descriptors without destroying transferred shells or saving
-empty recovery recipes. Failed upgrades retain healthy owners; never restart live shells for rollback. Existing v1
-processes must never be stopped or migrated implicitly.
+empty recovery recipes. Failed upgrades retain healthy owners; never restart live shells for rollback.
 
 ## GUI and browser lifetime
 

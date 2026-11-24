@@ -61,8 +61,8 @@ cache. It shares the checkout update pipeline and needs passwordless sudo for th
 The active installation is `/usr/local/bin/worminal`, with modules in `/usr/local/lib/worminal`. Install a tested
 regular-user build with `sudo -n python3 manage.py install --prefix /usr/local --skip-build`; do not install fixes
 into ~/.local. `check-install` validates a staged installation; `check-install --installed` checks installed files,
-modes, SSH/browser operation and actual module paths on private displays. Running owners retain mapped code; v2
-owners hand off by themselves, v1 daemons are never touched. `manage.py running` classifies live processes against
+modes, SSH/browser operation and actual module paths on private displays. Running owners retain mapped code and
+hand off by themselves. `manage.py running` classifies live processes against
 the installed files (`update` prints it); run it before claiming a change is active. `manage.py update` is the
 one-command flow and needs no manual preparation: it takes a per-checkout lock, releases tmpfs left by aborted runs,
 and `setup-check-runtime` prepares audio and Weston under

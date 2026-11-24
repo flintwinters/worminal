@@ -26,7 +26,7 @@ Make this node and an installed peer run the same worminald, whichever is older.
 Compares Cargo versions; a newer local daemon is pushed to the peer, a newer peer daemon is pulled here.\n\
 Both sides must be Linux on the same CPU, with Python 3 and non-interactive sudo, installed in /usr/local.\n\
 Files are replaced atomically; a running daemon hands its shells to the new file without restarting them.\n\
-Active v1 workspaces are never touched. Views update immediately after SSH authentication, before opening the bridge.\n";
+Views update immediately after SSH authentication, before opening the bridge.\n";
 pub(crate) const HELP: &str = "Usage: worminald install-on-remote SSH_ENDPOINT\n\
 Install this daemon and its manual on a new compatible Linux node over SSH.\n\
 A target with GTK/WebKit also gets the worminal command, modules, desktop entry and icon.\n\

@@ -76,7 +76,7 @@ install. Replacement is a same-directory
 atomic rename after the same staging, checksum, run check and non-interactive sudo steps as installation, and both
 sides must be Linux on the same CPU. The running daemon sees its executable change and hands its shells to the new
 file without restarting them; connected views reconnect. A daemon too old to watch its executable keeps running
-until its next restart. An active v1 workspace, a missing installation or failed sudo leaves everything unchanged.
+until its next restart. A missing installation or failed sudo leaves everything unchanged.
 Outcomes other than "already current" are logged to syslog.
 
 Run `python3 manage.py check-remote-install` for private mock-SSH/bootstrap and no-overwrite publication checks.

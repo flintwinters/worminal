@@ -69,7 +69,7 @@ def publish(cwd=ROOT, prefix=PREFIX, installed=INSTALLED, checked=True):
                 return code
     if prefix == PREFIX:
         from tools import running
-        print("Update: live processes (v2 owners hand off by themselves; v1 daemons are never touched)", flush=True)
+        print("Update: live processes (owners hand off by themselves)", flush=True)
         running.report(prefix)
         installed.parent.mkdir(parents=True, exist_ok=True)
         installed.write_text(git("rev-parse", "HEAD", cwd=cwd) + "\n")

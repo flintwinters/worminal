@@ -50,7 +50,7 @@ is a GTK terminal emulator with WebKitGTK browser tabs on Wayland and X11.
 Use --surf URL to open a browser tab or --attach to open existing tabs without a new shell.
 The geometry option accepts COLSxROWS; X11 position offsets and embedding (-w) are unsupported.
 The Rust application uses a shared C terminal engine and the v2 workspace.
-Legacy C application implementations are available in Git history; existing v1 processes are not stopped or migrated.
+Legacy C application implementations are available in Git history.
 Each launch opens a window and tab in the local per-user workspace service.
 The service owns the PTYs and ordered tabs and persists after all windows close.
 Use
@@ -131,7 +131,7 @@ also supplies version sync for every --master view connection, immediately after
 Version sync completes before configuration sync, bridge startup or workspace restoration; failure disconnects
 the view. All phases share the authenticated SSH connection. Whichever of this node and the host has the older
 daemon version is updated from the newer one (pushed or pulled), with the same CPU, Python 3, sudo and /usr/local
-requirements. Running shells are handed to the new file, not restarted. Active v1 workspaces are never touched.
+requirements. Running shells are handed to the new file, not restarted.
 .SH MASTER CONNECTION HISTORY
 .B worminald --list-masters
 prints JSON listing this user's successful master SSH routes, sorted by exact endpoint.
@@ -148,7 +148,6 @@ The listening socket stays bound, and tab IDs, shell PIDs, PTYs, terminal state,
 Windows reconnect to the replacement. Client stdout streams have the same limitation as manual session transfer.
 No empty donor catalog or recovery file is published during the switch.
 If preparation fails, the existing daemon retains its tabs; another executable replacement retries the upgrade.
-The original v1 service remains available for explicit rollback and never upgrades automatically.
 Daemons that were already running before automatic upgrades need a one-time explicit handoff.
 .SH RESTART RECOVERY
 The service automatically saves ordered terminal working directories and browser URLs in
@@ -182,7 +181,6 @@ Attach a destination view to interact with the transferred tabs; existing views 
 Failures before commit leave the source intact. Committed transfers never automatically fall back.
 Both running daemons must already implement this protocol; installation cannot upgrade an older running process.
 Transfers are local, same-user Linux operations, limited to 100 tabs and a 512 MiB native snapshot.
-A v1 receiver rejects workspaces containing browser records.
 .SH OPTIONS
 .TP
 .BI --new-browser-tab " URL|FILE"
