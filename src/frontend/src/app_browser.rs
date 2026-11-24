@@ -5,6 +5,7 @@ use gtk::prelude::*;
 use std::{ffi::OsString, rc::Rc};
 use worminal_browser_api::*;
 use worminal_protocol::worp::commands::CommandKind;
+use worminal_workspace::browser_target::{navigate, split_ssh_proxy};
 
 /// Browser tabs are the only reason to keep the profile's network process.
 pub(super) fn release_unused_profile() {
@@ -123,6 +124,12 @@ impl App {
             .iter()
             .find(|page| page.id == id && page.browser)
             .cloned()?;
+        if split_ssh_proxy(&page.url).is_some()
+            && (self.config.master.is_some() || page.host.is_some())
+        {
+            self.message(Some("Open SSH proxy tabs from a local Worminal terminal."));
+            return None;
+        }
         let container = page
             .widget
             .clone()
@@ -268,8 +275,11 @@ fn event(master: &Option<OsString>, id: u32, kind: u32, value: &str) {
                     .iter_mut()
                     .find(|page| page.id == id && page.browser)
                 {
-                    changed |= page.url != value;
-                    page.url = value.to_string();
+                    if let Some(recipe) = navigate(page.url.as_bytes(), value.as_bytes().to_vec()) {
+                        let recipe = String::from_utf8(recipe).expect("browser URI remains UTF-8");
+                        changed |= page.url != recipe;
+                        page.url = recipe;
+                    }
                 }
             }
             if changed {

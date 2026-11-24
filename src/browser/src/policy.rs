@@ -16,10 +16,16 @@ pub(crate) fn connect(browser: &Rc<Browser>) {
                 if let Some(action) = navigation.navigation_action() {
                     let uri = action.request().and_then(|request| request.uri()).unwrap_or_default();
                     if kind == PolicyDecisionType::NewWindowAction {
-                        if action.is_user_gesture() { browser.emit(WORMINAL_BROWSER_OPEN, &uri); }
+                        if action.is_user_gesture() {
+                            if browser.proxied { browser.view.load_uri(&uri); }
+                            else { browser.emit(WORMINAL_BROWSER_OPEN, &uri); }
+                        }
                         decision.ignore(); return true;
                     }
                     let scheme = glib::Uri::parse_scheme(&uri).map(|scheme| scheme.to_ascii_lowercase());
+                    if browser.proxied && !matches!(scheme.as_deref(), Some("http" | "https" | "about" | "data" | "blob")) {
+                        decision.ignore(); browser.notice(Some("This URL scheme is unsupported in an SSH proxy tab.")); return true;
+                    }
                     let local = worminal_workspace::WORKSPACE_BROWSER_SCHEME;
                     if !matches!(scheme.as_deref(), Some("http" | "https" | "about" | "file" | "data" | "blob"))
                         && scheme.as_deref() != Some(local) {
@@ -34,7 +40,11 @@ pub(crate) fn connect(browser: &Rc<Browser>) {
         glib::clone!(@weak browser => @default-return None, move |_, action| {
             if action.is_user_gesture() {
                 if let Some(uri) = action.request().and_then(|request| request.uri()) {
-                    browser.emit(WORMINAL_BROWSER_OPEN, &uri);
+                    if browser.proxied {
+                        browser.view.load_uri(&uri);
+                    } else {
+                        browser.emit(WORMINAL_BROWSER_OPEN, &uri);
+                    }
                 }
             }
             None

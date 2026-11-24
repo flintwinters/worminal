@@ -16,6 +16,7 @@ mod startup;
 pub mod tabs;
 pub mod terminal;
 pub mod viewport;
+mod web_proxy;
 mod wsl_frame;
 
 pub(crate) fn timing(event: &str) {

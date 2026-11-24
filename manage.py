@@ -286,10 +286,13 @@ def check_notifications():
 
 
 @app.command("check-rust-browser")
-def check_rust_browser():
+def check_rust_browser(match: str = typer.Option(None, help="Run browser tests matching this unittest pattern.")):
     """Check real Rust browser views, lazy loading, owner forwarding and local-document security privately."""
     native_build.build_targets("worminal-rust")
-    raise typer.Exit(run([sys.executable, "tests/rust_browser.py"]))
+    arguments = ["tests/rust_browser.py"]
+    if match:
+        arguments.extend(["-k", match])
+    raise typer.Exit(run([sys.executable, *arguments]))
 
 
 @app.command("build-rust-daemon")

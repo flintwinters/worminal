@@ -12,25 +12,77 @@ pub const WORKSPACE_BROWSER_HOME: &str = "about:blank";
 
 /// Native CLI conversion replaces this process with the service client before GUI initialization.
 pub fn command(arguments: &[OsString]) -> io::Result<()> {
-    if arguments
-        .get(1)
-        .is_none_or(|argument| !crate::cli_schema::Launcher::NewBrowser.matches(argument))
-    {
+    use crate::cli_schema::{Daemon, Launcher};
+    let Some(argument) = arguments.get(1) else {
         return Ok(());
-    }
+    };
+    let command = if Launcher::NewBrowser.matches(argument) {
+        Daemon::NewBrowser
+    } else if Launcher::SshWebProxy.matches(argument) {
+        Daemon::SshWebProxy
+    } else {
+        return Ok(());
+    };
     if arguments.len() != 3 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "usage: worminal --new-browser-tab URL|FILE",
+            format!(
+                "usage: worminal {} {}",
+                command.name(),
+                command.entry().arguments
+            ),
         ));
     }
     use std::{os::unix::process::CommandExt, process::Command};
     let daemon = worminal_protocol::WORKSPACE_DAEMON;
     let daemon = std::env::current_exe()?.with_file_name(OsStr::from_bytes(daemon.to_bytes()));
     Err(Command::new(daemon)
-        .arg(crate::cli_schema::Daemon::NewBrowser.name())
+        .arg(command.name())
         .arg(&arguments[2])
         .exec())
+}
+
+// Browser recipes already travel through the catalog, restore and live handoff as one URL.
+const SSH_PROXY_PREFIX: &str = "worminal-ssh-proxy:";
+
+pub fn ssh_proxy(endpoint: &str, url: &str) -> io::Result<String> {
+    worminal_protocol::worp::devices::validate_endpoint(endpoint)?;
+    let recipe = format!("{SSH_PROXY_PREFIX}{endpoint}/{url}");
+    if url.is_empty() || recipe.len() > 65536 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid SSH browser URL",
+        ));
+    }
+    Ok(recipe)
+}
+
+pub fn split_ssh_proxy(recipe: &str) -> Option<(&str, &str)> {
+    let (endpoint, url) = recipe.strip_prefix(SSH_PROXY_PREFIX)?.split_once('/')?;
+    worminal_protocol::worp::devices::validate_endpoint(endpoint).ok()?;
+    (!url.is_empty()).then_some((endpoint, url))
+}
+
+pub fn display_url(recipe: &str) -> &str {
+    split_ssh_proxy(recipe).map_or(recipe, |(_, url)| url)
+}
+
+/// A page can update its URL, but cannot add, remove or switch its tunnel.
+pub fn navigate(recipe: &[u8], url: Vec<u8>) -> Option<Vec<u8>> {
+    if url.starts_with(SSH_PROXY_PREFIX.as_bytes()) {
+        return None;
+    }
+    let endpoint = std::str::from_utf8(recipe)
+        .ok()
+        .and_then(split_ssh_proxy)
+        .map(|(endpoint, _)| endpoint);
+    if let Some(endpoint) = endpoint {
+        ssh_proxy(endpoint, std::str::from_utf8(&url).ok()?)
+            .ok()
+            .map(String::into_bytes)
+    } else {
+        Some(url)
+    }
 }
 
 fn authority(bytes: &[u8]) -> bool {

@@ -260,6 +260,11 @@ impl Service {
                     if !ready || self.tabs[index].url.is_none() {
                         return Ok(());
                     }
+                    let current = self.tabs[index].url.as_deref().unwrap_or_default();
+                    let Some(url) = worminal_workspace::browser_target::navigate(current, url)
+                    else {
+                        return Ok(());
+                    };
                     self.tabs[index].url = Some(url);
                     self.tabs[index].catalog_dirty = true;
                 }

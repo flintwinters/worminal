@@ -7,14 +7,14 @@
  * Widget/profile pointers are framework GObjects, never Rust allocations.
  * A view owns its callback until destroy returns; no callback follows destroy.
  * Code stays resident for WebKit's asynchronous callbacks after retirement. */
-#define WORMINAL_RUST_BROWSER_ABI 2
-#define WORMINAL_RUST_BROWSER_FILE "browser-rust-v2.so"
+#define WORMINAL_RUST_BROWSER_ABI 3
+#define WORMINAL_RUST_BROWSER_FILE "browser-rust-v3.so"
 enum { WORMINAL_BROWSER_TITLE = 1, WORMINAL_BROWSER_NAVIGATE,
        WORMINAL_BROWSER_OPEN, WORMINAL_BROWSER_CLOSE };
 typedef void (*WorminalBrowserEvent)(void *, uint32_t, const char *);
 typedef struct {
     void *(*profile)(const char *, const char *); /* returns a full GObject reference */
-    void *(*create)(void *, const char *, WorminalBrowserEvent, void *);
+    void *(*create)(void *, const char *, const char *, WorminalBrowserEvent, void *); /* nullable SOCKS URI */
     void *(*widget)(void *); /* borrowed GtkWidget reference */
     void (*focus)(void *);
     void (*navigate)(void *, const char *);

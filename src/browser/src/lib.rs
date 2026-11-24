@@ -29,29 +29,40 @@ pub(crate) struct Browser {
     select_find: Cell<bool>,
     url: RefCell<String>,
     callback: boundary::Callback,
+    proxied: bool,
 }
 impl Browser {
-    fn new(profile: &WebsiteDataManager, url: &str, callback: boundary::Callback) -> Rc<Self> {
-        let context = CONTEXT.with(|slot| {
-            slot.borrow_mut()
-                .get_or_insert_with(|| {
-                    let context = WebContext::with_website_data_manager(profile);
-                    local::register(&context);
-                    context.set_spell_checking_enabled(false);
-                    policy::downloads(&context);
-                    context
-                })
-                .clone()
-        });
+    fn new(
+        profile: &WebsiteDataManager,
+        proxied: bool,
+        url: &str,
+        callback: boundary::Callback,
+    ) -> Rc<Self> {
+        let create_context = || {
+            let context = WebContext::with_website_data_manager(profile);
+            if !proxied {
+                local::register(&context);
+            }
+            context.set_spell_checking_enabled(false);
+            policy::downloads(&context);
+            context
+        };
+        let context = if proxied {
+            create_context()
+        } else {
+            CONTEXT.with(|slot| slot.borrow_mut().get_or_insert_with(create_context).clone())
+        };
         let content = UserContentManager::new();
         let mut builder = WebView::builder().user_content_manager(&content);
-        if let Some(related) = related(url) {
+        if let Some(related) = (!proxied).then(|| related(url)).flatten() {
             builder = builder.related_view(&related);
         } else {
             builder = builder.web_context(&context);
         }
         let view = builder.build();
-        local::authorize(&view, &content, url);
+        if !proxied {
+            local::authorize(&view, &content, url);
+        }
         view.set_background_color(&gtk::gdk::RGBA::new(0.094, 0.094, 0.094, 1.0));
         view.set_settings(
             &Settings::builder()
@@ -91,6 +102,7 @@ impl Browser {
             select_find: Cell::new(false),
             url: RefCell::new(url.to_string()),
             callback,
+            proxied,
         });
         chrome::connect(&browser);
         policy::connect(&browser);
@@ -138,6 +150,9 @@ fn related(url: &str) -> Option<WebView> {
             .iter()
             .filter_map(Weak::upgrade)
             .find_map(|browser| {
+                if browser.proxied {
+                    return None;
+                }
                 let uri = browser.view.uri()?;
                 let same = if let Some(document) = &document {
                     local::document(&uri).is_some_and(|other| {

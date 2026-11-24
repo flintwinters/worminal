@@ -80,6 +80,7 @@ commands! {
         CloseMaster ["--close-master"] "HOST" => "Close this master connection's tabs; terminates their programs.";
         Bookmark ["--bookmark"] "" => "Bookmark the directory of the tab this command runs in.";
         NewBrowser ["--new-browser-tab"] "URL|FILE" => "Replace the calling terminal tab with a browser.";
+        SshWebProxy ["--ssh-web-proxy"] "SSH_ENDPOINT" => "Replace the calling terminal tab with an SSH-proxied browser. Use Ctrl+K to enter a URL.";
         ReplaceOwner ["--replace-owner"] "TOKEN" => "Internal GUI ownership receiver; not a manual update trigger.";
     }
     Daemon("worminald --help", "worminald") {
@@ -98,6 +99,7 @@ commands! {
         Handin ["--handin"] "NAME" => "Prepare to receive transferred live terminal ownership.";
         Handoff ["--handoff"] "NAME" => "Transfer live terminal ownership to a prepared receiver.";
         NewBrowser ["--new-browser-tab"] "URL|FILE" => "Replace the calling terminal tab with a browser.";
+        SshWebProxy ["--ssh-web-proxy"] "SSH_ENDPOINT" => "Replace the calling terminal tab with an SSH-proxied browser. Use Ctrl+K to enter a URL.";
         UpgradeReceiver ["--upgrade-receiver"] "" => "Internal automatic daemon upgrade receiver.";
         HandoffReceiver ["--handoff-receiver"] "" => "Internal daemon ownership transfer receiver.";
         SshChild ["--ssh-child"] "OWNER_PID PROGRAM ARG..." => "Internal lifetime-guarded SSH child.";

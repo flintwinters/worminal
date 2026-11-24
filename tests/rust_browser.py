@@ -14,6 +14,7 @@ from pathlib import Path
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -224,6 +225,35 @@ class RustBrowserTest(unittest.TestCase):
                 title(env, 'Renderer 2', app)
                 subprocess.run(['xdotool', 'type', '--clearmodifiers', 'recovered'], env=env, check=True)
                 title(env, 'Edited:recovered', app)
+
+    def test_ssh_web_proxy_uses_socks_for_initial_and_later_navigation(self):
+        from test_keys import read_bytes
+        from visible_latency import wait_for
+        with (isolated_display() as private, profile(private) as env,
+              tempfile.TemporaryDirectory(prefix='rust-browser-ssh-', dir=CHECKS) as directory):
+            env.update(GDK_BACKEND='x11'); env.pop('WAYLAND_DISPLAY', None)
+            ssh = Path(directory) / 'ssh'
+            fixture_script = ROOT / 'tests/fixtures/ssh_web_proxy.py'
+            ssh.write_text('#!/bin/sh\nexec ' + shlex.join([sys.executable, str(fixture_script)]) + ' "$@"\n')
+            ssh.chmod(0o700)
+            env['PATH'] = directory + os.pathsep + env['PATH']
+            command = 'printf READY; read ignored; exec ' + shlex.join(
+                [APP, '--ssh-web-proxy', 'tester@proxy-host'])
+            with application(env, '-T', 'SSH terminal', '-o', '-', '-e', '/bin/sh', '-c', command) as app:
+                self.assertEqual(read_bytes(app.stdout, 5), b'READY')
+                window = title(env, 'SSH terminal', app)
+                subprocess.run(['xdotool', 'windowfocus', '--sync', window, 'key', 'Return'], env=env, check=True)
+                runtime = Path(env['XDG_RUNTIME_DIR'])
+                wait_for(lambda: list(runtime.glob('worminal-web-*/socks')))
+                # The socket is ready before entering the first URL, independently of GTK publication.
+                title(env, 'about:blank', app)
+                for path in ('/first', '/next'):
+                    subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+k'], env=env, check=True)
+                    subprocess.run(['xdotool', 'type', '--clearmodifiers', 'http://proxy-test.invalid' + path],
+                                   env=env, check=True)
+                    subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Return'], env=env, check=True)
+                    self.assertEqual(title(env, 'Via SSH ' + path, app), window)
+                self.assertEqual(len(list(runtime.glob('worminal-web-*/socks'))), 1)
 
     def test_browser_conversion_preserves_terminal_background(self):
         from Xlib import X, display

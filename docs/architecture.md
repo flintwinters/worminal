@@ -159,3 +159,9 @@ script. Subframes and other navigated documents have no capability. Native error
 scripts/templates remain under `src/gtk`. Renderer recovery retains the last valid URI because WebKit can clear it
 after termination. Release Rust borrows before entering reentrant GTK/WebKit operations. Local HTML tools open through the native
 browser CLI; their changes take effect only on explicit reload/reopen, and native builds embed none of them.
+
+Run `worminal --ssh-web-proxy USER@HOST` in a local Worminal terminal to replace it with an orange-titled
+browser tab. Press Ctrl+K to enter a URL, such as `http://localhost:8080` for a service on the SSH host.
+The frontend owns the OpenSSH SOCKS tunnel for the live view. Its ephemeral WebKit context keeps HTTP and
+HTTPS requests and their hostname resolution on that tunnel, including navigation that would open a popup.
+The browser recipe retains the endpoint and the latest URL so the local owner can reopen the tunnel on restore.

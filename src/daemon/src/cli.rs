@@ -321,6 +321,15 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
             return Ok(status);
         }
     }
+    if arguments.len() == 3 && command == Some(Daemon::SshWebProxy) {
+        let endpoint = arguments[2].to_str().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "SSH endpoint must be UTF-8")
+        })?;
+        let recipe =
+            browser_target::ssh_proxy(endpoint, worminal_workspace::WORKSPACE_BROWSER_HOME)?;
+        process::ignore_hangup();
+        return request(scope, CommandKind::ReplaceBrowser(recipe.into_bytes()));
+    }
     if arguments.len() == 3 {
         let kind = match command {
             Some(Daemon::Handin) => Some(WIRE_HANDIN),

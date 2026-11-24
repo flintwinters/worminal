@@ -73,6 +73,7 @@ struct Inner {
     handle: *mut c_void,
     widget: gtk::Widget,
     _callback: Box<Callback>,
+    _proxy: Option<crate::web_proxy::WebProxy>,
 }
 impl Drop for Inner {
     fn drop(&mut self) {
@@ -271,14 +272,26 @@ unsafe extern "C" fn event(context: *mut c_void, kind: u32, value: *const libc::
 }
 impl Browser {
     pub fn new(url: &str, callback: impl Fn(u32, &str) + 'static) -> io::Result<Self> {
+        use worminal_workspace::browser_target::{display_url, split_ssh_proxy};
         let module = module()?;
-        let profile = profile(&module)?;
+        let proxy = split_ssh_proxy(url)
+            .map(|(endpoint, _)| crate::web_proxy::WebProxy::start(endpoint))
+            .transpose()?;
+        let profile = if proxy.is_none() {
+            Some(profile(&module)?)
+        } else {
+            None
+        };
+        let url = display_url(url);
         let mut callback: Box<Callback> = Box::new(Rc::new(callback));
         let url = CString::new(url)?;
         let handle = unsafe {
             module.api.create.unwrap()(
-                profile.as_ptr().cast(),
+                profile
+                    .as_ref()
+                    .map_or(std::ptr::null_mut(), |p| p.as_ptr().cast()),
                 url.as_ptr(),
+                proxy.as_ref().map_or(std::ptr::null(), |p| p.uri.as_ptr()),
                 Some(event),
                 (&mut *callback as *mut Callback).cast(),
             )
@@ -299,6 +312,7 @@ impl Browser {
             handle,
             widget,
             _callback: callback,
+            _proxy: proxy,
         });
         LIVE.with(|live| live.borrow_mut().push(Rc::downgrade(&inner)));
         Ok(Self(inner))
@@ -312,7 +326,7 @@ impl Browser {
         }
     }
     pub fn navigate(&self, url: &str) {
-        if let Ok(url) = CString::new(url) {
+        if let Ok(url) = CString::new(worminal_workspace::browser_target::display_url(url)) {
             unsafe {
                 self.0.module.api.navigate.unwrap()(self.0.handle, url.as_ptr());
             }

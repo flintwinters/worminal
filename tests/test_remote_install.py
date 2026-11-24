@@ -18,7 +18,7 @@ from unittest.mock import patch
 from runtime import ROOT, CHECKS
 from tools import build, remote_install
 
-MODULES = ('frontend-rust-v2.so', 'browser-rust-v2.so')
+MODULES = (build.RUST_FRONTEND_MODULE, build.RUST_BROWSER_MODULE)
 DAEMON = Path(os.environ.get('WORMINAL_TEST_PREVIEW_DAEMON', str(ROOT / 'build/cargo/release/worminal-daemon')))
 
 

@@ -18,6 +18,7 @@ pub struct Tab {
     pub id: u32,
     pub label: String,
     pub browser: bool,
+    pub proxy: bool,
     /// Shown by a daemon on another host.
     pub remote: bool,
     /// An SSH client is in the terminal's foreground.
@@ -231,10 +232,15 @@ fn colors(
     selected: bool,
     severity: u32,
 ) -> (Option<gdk::RGBA>, gdk::RGBA) {
+    let orange = palette.color(worminal_protocol::cell::COLOR_TRUECOLOR | 0xfe8019);
     if selected {
         return (
             Some(palette.color(FG)),
-            palette.color(if entry.ssh { SSH } else { BG }),
+            if entry.proxy {
+                orange
+            } else {
+                palette.color(if entry.ssh { SSH } else { BG })
+            },
         );
     }
     if severity > 0 {
@@ -259,7 +265,7 @@ fn colors(
     } else {
         7
     });
-    (fill, text)
+    (fill, if entry.proxy { orange } else { text })
 }
 /// Palette color of an alert: green when finished, yellow when the user is needed, red on failure.
 fn severity_color(severity: u32) -> u32 {
@@ -724,6 +730,7 @@ mod tests {
             id: 1,
             label: String::new(),
             browser: false,
+            proxy: false,
             remote: false,
             ssh: false,
             busy,

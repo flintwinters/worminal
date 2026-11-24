@@ -805,7 +805,7 @@ impl App {
                 self.browser_metadata(record);
             }
             page.widget.set_tooltip_text(if record.browser {
-                Some(&record.url)
+                Some(worminal_workspace::browser_target::display_url(&record.url))
             } else {
                 None
             });

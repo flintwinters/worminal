@@ -61,14 +61,25 @@ unsafe extern "C" fn profile(data: *const c_char, cache: *const c_char) -> *mut 
 unsafe extern "C" fn create(
     profile: *mut c_void,
     url: *const c_char,
+    proxy: *const c_char,
     event: WorminalBrowserEvent,
     context: *mut c_void,
 ) -> *mut c_void {
     guard(|| {
         gtk::init().expect("GTK browser initialization");
-        let profile: WebsiteDataManager = unsafe { from_glib_none(profile.cast()) };
+        let profile = if proxy.is_null() {
+            unsafe { from_glib_none(profile.cast()) }
+        } else {
+            let profile = WebsiteDataManager::new_ephemeral();
+            let uri = unsafe { text(proxy) };
+            profile.set_tls_errors_policy(TLSErrorsPolicy::Fail);
+            let mut settings = NetworkProxySettings::new(Some(uri), &[]);
+            profile.set_network_proxy_settings(NetworkProxyMode::Custom, Some(&mut settings));
+            profile
+        };
         Box::into_raw(Box::new(Browser::new(
             &profile,
+            !proxy.is_null(),
             unsafe { text(url) },
             Callback { event, context },
         )))

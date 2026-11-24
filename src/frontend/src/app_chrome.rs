@@ -4,6 +4,7 @@ use crate::tabs::{Slot, Tab};
 use gtk::{gio, prelude::*};
 use std::rc::Rc;
 use worminal_protocol::worp::commands::CommandKind;
+use worminal_workspace::{browser_target::split_ssh_proxy, WORKSPACE_BROWSER_HOME};
 
 fn browser_label(url: &str, title: &str) -> String {
     if let Ok(uri) = glib::Uri::parse(url, glib::UriFlags::ENCODED) {
@@ -50,7 +51,14 @@ impl App {
         let entries: Vec<_> = pages
             .iter()
             .map(|page| {
-                let label = if page.browser {
+                let proxy = page.browser.then(|| split_ssh_proxy(&page.url)).flatten();
+                let label = if let Some((endpoint, url)) = proxy {
+                    if url == WORKSPACE_BROWSER_HOME || page.title.is_empty() {
+                        endpoint.to_owned()
+                    } else {
+                        browser_label(url, &page.title)
+                    }
+                } else if page.browser {
                     browser_label(&page.url, &page.title)
                 } else {
                     use std::os::unix::ffi::OsStrExt;
@@ -66,6 +74,7 @@ impl App {
                     id: page.id,
                     label,
                     browser: page.browser,
+                    proxy: proxy.is_some(),
                     remote: self.master_of(page.id).is_some(),
                     ssh: page.ssh_user.is_some(),
                     busy: page.busy,

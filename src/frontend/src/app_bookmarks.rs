@@ -57,6 +57,9 @@ impl App {
         let master = self.master_of(id);
         let pages = self.pages.borrow();
         let page = pages.iter().find(|page| page.id == id)?;
+        if worminal_workspace::browser_target::split_ssh_proxy(&page.url).is_some() {
+            return None;
+        }
         target_of(
             page.browser,
             &page.url,

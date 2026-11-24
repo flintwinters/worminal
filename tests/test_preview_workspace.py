@@ -196,8 +196,15 @@ class PreviewWorkspaceTest(unittest.TestCase):
             with self.subTest(executable=executable.name, url=url):
                 self.assert_browser_conversion(executable, url, expected)
 
-    def assert_browser_conversion(self, executable, target, expected, directory=ROOT):
-        command = "cd " + shlex.quote(str(directory)) + " && " + shlex.quote(str(executable)) + " --new-browser-tab"
+    def test_browser_command_converts_to_ssh_proxy_recipe(self):
+        for executable in (DAEMON, runtime_binary("worminal")):
+            with self.subTest(executable=executable.name):
+                self.assert_browser_conversion(executable, "user@192.0.2.1",
+                                               "worminal-ssh-proxy:user@192.0.2.1/about:blank",
+                                               option="--ssh-web-proxy")
+
+    def assert_browser_conversion(self, executable, target, expected, directory=ROOT, option="--new-browser-tab"):
+        command = "cd " + shlex.quote(str(directory)) + " && " + shlex.join([str(executable), option])
         if target is not None: command += " " + shlex.quote(target)
         tab = self.launch("stty raw -echo; printf READY; dd bs=1 count=1 >/dev/null 2>&1; "
                           + command + "; sleep 30")

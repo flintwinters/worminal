@@ -121,6 +121,46 @@ pub fn connect_gui(
     ))
 }
 
+/// Start an owned SOCKS listener without running a shell on the SSH host.
+pub fn dynamic_proxy(
+    endpoint: &str,
+    socket: &std::path::Path,
+    gui: &std::path::Path,
+) -> io::Result<Child> {
+    worminal_protocol::worp::devices::validate_endpoint(endpoint)?;
+    let daemon = gui.with_file_name(OsStr::from_bytes(WORKSPACE_DAEMON.to_bytes()));
+    let owner = std::process::id().to_string();
+    let args = [
+        daemon.as_os_str().as_bytes(),
+        crate::cli_schema::Daemon::SshChild.name().as_bytes(),
+        owner.as_bytes(),
+        b"ssh",
+        b"-NT",
+        b"-Snone",
+        b"-oForkAfterAuthentication=no",
+        b"-oExitOnForwardFailure=yes",
+        b"-oConnectTimeout=10",
+        b"-D",
+        socket.as_os_str().as_bytes(),
+        b"--",
+        endpoint.as_bytes(),
+    ]
+    .into_iter()
+    .map(CString::new)
+    .collect::<Result<Vec<_>, _>>()?;
+    let pid = crate::spawn::start_with_environment(
+        &args,
+        &[],
+        true,
+        &[
+            ("SSH_ASKPASS", gui.as_os_str()),
+            ("SSH_ASKPASS_REQUIRE", OsStr::new("force")),
+            ("WORMINAL_SSH_ASKPASS", OsStr::new("1")),
+        ],
+    )?;
+    crate::spawn::own(pid, "worminal-web-ssh-reap")
+}
+
 /// OpenSSH invokes the helper with a single prompt argument, outside the GUI broker.
 pub fn is_askpass(arguments: &[std::ffi::OsString]) -> bool {
     arguments.len() == 2
