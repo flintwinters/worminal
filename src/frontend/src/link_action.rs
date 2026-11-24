@@ -1,8 +1,8 @@
 //! What a clicked link does. Ordinary links (http, https, file, mailto, ...) open with xdg-open like in
 //! any other terminal. Only `worminal://` links are restricted: they act inside Worminal, so terminal
 //! output may use them to do exactly what typed input to the same tab can do, and nothing else. The user
-//! chose that a newline in `worminal://input` text executes on a plain click; other `worminal://`
-//! actions are ignored.
+//! chose that a newline in `worminal://input` text executes on Ctrl+click; other `worminal://` actions
+//! are ignored.
 use crate::{link, viewport::Viewport};
 use std::ops::RangeInclusive;
 

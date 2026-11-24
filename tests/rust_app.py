@@ -239,7 +239,7 @@ class RustApplicationTest(unittest.TestCase):
                 self.assertEqual(read_bytes(attached.stdout, 8), b'survives')
                 self.assertEqual(os.readlink(f'/proc/{shell}/fd/0'), tty)
 
-    def test_a_worminal_input_link_types_its_text_once(self):
+    def test_ctrl_click_types_a_worminal_input_link_once(self):
         for connection in ([], ['--master', 'key-test']):
             with self.subTest(connection=connection), isolated_display() as env:
                 root = CHECKS / f'input-link-{os.getpid()}'
@@ -264,6 +264,12 @@ class RustApplicationTest(unittest.TestCase):
                     subprocess.run(['xdotool', 'windowfocus', '--sync', wid], env=env, check=True)
                     time.sleep(2)
                     subprocess.run(['xdotool', 'mousemove', '--window', wid, '30', '250', 'click', '1'],
+                                   env=env, check=True)
+                    subprocess.run(['xdotool', 'keydown', 'ctrl', 'mousedown', '1', 'keyup', 'ctrl',
+                                    'mouseup', '1'], env=env, check=True)
+                    time.sleep(.25)
+                    self.assertEqual(typed.read_text(), '', 'clicks without Ctrl held throughout must not type')
+                    subprocess.run(['xdotool', 'keydown', 'ctrl', 'click', '1', 'keyup', 'ctrl'],
                                    env=env, check=True)
                     deadline = time.monotonic() + 5
                     while 'echo once' not in (typed.read_text() if typed.exists() else ''):

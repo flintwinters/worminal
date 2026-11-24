@@ -729,14 +729,15 @@ impl Inner {
             }
             return;
         }
-        // Links take button 1 before mouse reporting, as in the retired X11 frontend; Shift
-        // bypasses them to select or report. Both press and release stay local.
-        if event.button() == 1 && !shift {
+        let link_modifier = event.state().contains(gdk::ModifierType::CONTROL_MASK) && !shift;
+        // A Ctrl+press on a link claims the whole click. If the modifiers change before release,
+        // consume the release as well so selection and mouse reporting see a matched pair.
+        if event.button() == 1 && (release || link_modifier) {
             let mut state = self.state.borrow_mut();
             if release {
                 if let Some((url, column, row)) = state.link.take() {
                     drop(state);
-                    if (column, row) == (x, y) {
+                    if link_modifier && (column, row) == (x, y) {
                         match link_action::resolve(&url) {
                             Some(link_action::Action::Open(url)) => {
                                 if let Err(error) = crate::startup::open_url(&url) {

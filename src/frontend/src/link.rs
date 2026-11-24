@@ -1,4 +1,4 @@
-//! Detect URLs and local paths in visible text for hover and plain left-click.
+//! Detect URLs and local paths in visible text for hover and Ctrl+click.
 //! Ported from the retired X11 frontend's url.c; detection reads only the imported viewport.
 use std::ops::RangeInclusive;
 use worminal_engine::Cell;

@@ -28,7 +28,7 @@ native Wayland and X11. `src/terminal/engine.h` defines the C API; Rust bindings
 its own C instance. C handles parsing, cells, UTF-8, modes, scrollback/reflow, selection, redraw deadlines and
 serialization. It does not manage processes, descriptors, GUI objects or application policy. OSC 8 links are 16-bit
 cell ids into a bounded per-terminal URI table; ids never leave the daemon: ROW_LINKS packets carry each row's URIs
-inline, and snapshots drop them. Clicks open ordinary links (http(s), file, ...) with xdg-open.
+inline, and snapshots drop them. Ctrl+click activates terminal links and opens ordinary URLs with xdg-open.
 Visible path tokens beginning with `/` or `~/` become file URLs on the frontend machine, where `~` expands to
 the local user's home directory. Only `worminal://`
 links are restricted, to typing `worminal://input` text (newline executes) into the same tab. The Rust wrapper manages C handles and screen buffers, and normalizes clipboard paste in place. OSC 99
