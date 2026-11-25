@@ -630,7 +630,9 @@ class RustApplicationTest(unittest.TestCase):
             cleanup.callback(server.close)
             window_object = server.create_resource_object('window', int(wid))
             xdo('windowfocus', '--sync', wid)
-            xdo('windowsize', wid, '900', '500')
+            # XGetImage requires the sampled rectangle to fit on the display.
+            xdo('windowmove', wid, '0', '0')
+            xdo('windowsize', '--sync', wid, '900', '500')
             time.sleep(1.5)
 
             panel_edge = lambda: panel_shown(window_object)
