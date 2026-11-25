@@ -217,6 +217,7 @@ fn detail(command: Daemon) -> Option<String> {
             crate::api_help::index()
         )),
         Daemon::Attach => Some(format!("{ATTACH_HELP}{}", AttachOption::GROUP.reference())),
+        Daemon::Terminal => Some(crate::terminal_view::HELP.to_owned()),
         Daemon::Config => Some(crate::config_cli::reference()),
         Daemon::ListMasters => Some(crate::master_history::HELP.to_owned()),
         Daemon::InstallRemote => Some(crate::remote_install::HELP.to_owned()),
@@ -269,6 +270,9 @@ fn service_command(scope: &[u8], command: Option<Daemon>) -> io::Result<Option<i
         }
         Some(Daemon::Bridge | Daemon::BridgeExisting) => {
             bridge(scope, command == Some(Daemon::BridgeExisting))?;
+        }
+        Some(Daemon::Terminal) => {
+            crate::terminal_view::run(|| ensure(scope).map(|(socket, _)| socket))?;
         }
         Some(Daemon::Stop) => {
             let socket = connect(scope)?;
@@ -365,7 +369,7 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
         cli_output::error(
             "usage: worminald api COMMAND (run 'worminald api help' for commands)\n\
                worminald attach [--master HOST] [--existing]\n       \
-               worminald --serve|--bridge|--stop\n\
+               worminald terminal | --serve | --bridge | --stop\n\
                worminald --handin NAME | --handoff NAME\n       \
                worminald --new-browser-tab [URL|FILE]"
         )

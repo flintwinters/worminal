@@ -44,6 +44,8 @@ worminal \- simple terminal based on st
 .IR title ]
 .RB \-l
 .IR line
+.PP
+.B worminald terminal
 .SH DESCRIPTION
 .B worminal
 is a GTK terminal emulator with WebKitGTK browser tabs on Wayland and X11.
@@ -53,6 +55,14 @@ The Rust application uses a shared C terminal engine and the v2 workspace.
 Legacy C application implementations are available in Git history.
 Each launch opens a window and tab in the local per-user workspace service.
 The service owns the PTYs and ordered tabs and persists after all windows close.
+Use
+.B worminald terminal
+for a terminal-only view or
+.B ssh -t user@host worminald terminal
+from another machine. Type Ctrl+] then q to detach and leave the shells running.
+Run
+.B worminald terminal --help
+for view shortcuts.
 Use
 .B worminald --stop
 to stop it and end its tabs.

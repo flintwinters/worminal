@@ -126,7 +126,7 @@ def run_headless_checks():
         return code
     patterns = ("test_build.py", "test_perf_metrics.py", "test_perf_check.py", "test_cli.py", "test_workspace.py",
                 "test_preview_workspace.py", "test_agent_api.py", "test_remote_install.py", "test_remote_upgrade.py", "test_theme.py", "test_config_sync.py", "test_running.py", "test_update_flow.py",
-                "test_handoff.py", "test_restore.py", "test_upgrade.py")
+                "test_handoff.py", "test_restore.py", "test_upgrade.py", "test_terminal_view.py")
     for pattern in patterns:
         code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                     "-p", pattern, "-q"])
@@ -361,7 +361,7 @@ def check_rust_daemon():
     native_build.build_targets("worminald")
     candidate = build_rust_daemon()
     code = run_rust_process_checks()
-    for pattern in ("test_preview_workspace.py", "test_restore.py", "test_workspace.py"):
+    for pattern in ("test_preview_workspace.py", "test_restore.py", "test_workspace.py", "test_terminal_view.py"):
         if code:
             break
         code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", pattern, "-q"],

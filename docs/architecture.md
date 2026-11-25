@@ -47,6 +47,9 @@ crates under `src` contain the launcher, daemon, frontend, browser and wrappers.
 
 ## Workspaces and transport
 
+The [terminal-only view](terminal-view.md) runs in `worminald` and uses the same Worp command and
+viewport contracts over a local socket. An SSH PTY carries its VT presentation to any SSH client.
+
 The per-user v2 daemon owns ordered tabs, PTYs and bounded scrollback. Views connect locally or through SSH
 `--master user@host`. A terminal has one live painting view and can outlive every window. Windows are pure views
 with one link, to the local daemon, and own no tabs. The local daemon owns attached masters (`src/daemon/src/masters.rs`):

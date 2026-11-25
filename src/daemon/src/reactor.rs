@@ -69,11 +69,18 @@ pub(crate) struct Signals {
 
 impl Signals {
     pub(crate) fn new() -> io::Result<Self> {
+        Self::with_extra(&[])
+    }
+
+    pub(crate) fn with_extra(extra: &[libc::c_int]) -> io::Result<Self> {
         unsafe {
             let mut mask: libc::sigset_t = mem::zeroed();
             let mut original: libc::sigset_t = mem::zeroed();
             libc::sigemptyset(&mut mask);
-            for signal in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP, libc::SIGCHLD] {
+            for signal in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP, libc::SIGCHLD]
+                .into_iter()
+                .chain(extra.iter().copied())
+            {
                 libc::sigaddset(&mut mask, signal);
             }
             if libc::sigprocmask(libc::SIG_BLOCK, &mask, &mut original) < 0 {

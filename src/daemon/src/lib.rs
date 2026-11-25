@@ -27,6 +27,7 @@ mod service_io;
 mod service_upgrade;
 mod ssh;
 mod state;
+mod terminal_view;
 mod upgrade_io;
 pub use cli::run;
 pub use service::serve;

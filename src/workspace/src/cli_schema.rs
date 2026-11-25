@@ -88,6 +88,7 @@ commands! {
         Version ["--version"] "" => "Print the installed version.";
         Api ["api"] "COMMAND" => "Headless workspace commands; use api help for reference topics.";
         Attach ["attach"] "[--master HOST] [--existing]" => "Frontend Worp session on stdin/stdout; see attach --help.";
+        Terminal ["terminal"] "" => "Open a terminal-only workspace view; see terminal --help.";
         Config ["config"] "[OPTIONS]|sync SSH_ENDPOINT" => "Inspect, validate or synchronize runtime configuration.";
         InstallRemote ["install-on-remote"] "SSH_ENDPOINT" => "Bootstrap a new headless node over SSH.";
         UpgradeRemote ["upgrade-remote"] "SSH_ENDPOINT" => "Sync an older node with a newer peer.";

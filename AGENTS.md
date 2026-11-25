@@ -19,8 +19,9 @@ scrollback/reflow, selection and serialization; it never owns processes, descrip
 The frontend imports daemon viewports; it never parses output or recomputes history. Windows are pure views
 with one link to the local daemon; that daemon owns master links and lists their tabs, so every window shows them. `src/protocol` owns the
 screen and input vocabulary, so alternative frontends need no engine; the daemon encodes semantic input with
-live modes, and `worminald attach [--master HOST]` is their one entry point. GTK 3, Pango/Cairo and
-WebKitGTK 4.1 support native Wayland and X11.
+live modes. `worminald attach [--master HOST]` exposes the Worp stream.
+[`worminald terminal`](docs/terminal-view.md) presents the workspace in a local or SSH terminal.
+GTK 3, Pango/Cairo and WebKitGTK 4.1 support native Wayland and X11.
 
 The per-user v2 daemon owns ordered tabs and PTYs independently of windows. Local sockets and SSH bind the same
 Worp commands/events from `src/protocol::worp`. Rust owns bounded queues, controller checks and process identities.

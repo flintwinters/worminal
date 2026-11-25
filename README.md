@@ -16,7 +16,9 @@ and come back without starting over.
 - **Use Alacritty configs.** Reuse settings from an Alacritty config. Worminal settings sync when connecting to peers, merging independent edits and reporting conflicts.
   Compatible peers also sync daemon versions automatically. [Configuration](docs/config.md)
 
-- **Keep the terminal small.** Native Wayland and X11, with Windows support through WSL.
+- **Use any terminal.** Run `worminald terminal` on Linux or `ssh -t USER@HOST worminald terminal`
+  from an SSH client such as Windows Terminal. The graphical app runs on Wayland, X11, and WSLg.
+  [Terminal-only view](docs/terminal-view.md)
 
 - **Built-in browser** worminal is also a WebKit based browser forked from [surf](https://surf.suckless.org/).  Which means you can *actually* browse the web in your terminal.
 
