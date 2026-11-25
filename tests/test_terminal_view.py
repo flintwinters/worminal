@@ -5,6 +5,7 @@ import fcntl
 import os
 from pathlib import Path
 import select
+import shlex
 import socket
 import struct
 import subprocess
@@ -34,7 +35,9 @@ class TerminalViewTest(unittest.TestCase):
         CHECKS.mkdir(parents=True, exist_ok=True)
         work = tempfile.TemporaryDirectory(prefix="terminal-view-", dir=CHECKS)
         self.addCleanup(work.cleanup)
-        root = Path(work.name)
+        root = self.root = Path(work.name)
+        for name in ("alpha", "beta"):
+            (root / name).mkdir()
         self.env = {
             **os.environ, "HOME": str(root), "SHELL": "/bin/sh", "TERM": "xterm-256color",
             "XDG_STATE_HOME": str(root / "state"), "XDG_CONFIG_HOME": str(root / "config"),
@@ -93,10 +96,10 @@ class TerminalViewTest(unittest.TestCase):
         self.send(b"retained=first; printf 'ready-%s\\n' \"$retained\"\r")
         self.wait_for(b"ready-first")
         self.resize(67, 19)
-        # A full 19-row frame confirms the daemon applied the forwarded resize.
+        # The bar occupies row 1 and the 18-row PTY ends at row 19.
         self.wait_for(b"\x1b[19;1H")
         self.send(b"stty size\r")
-        self.wait_for(b"19 67")
+        self.wait_for(b"18 67")
 
         self.send(b"\x1dt")
         self.wait_for(b"\x1b[19;1H")
@@ -111,6 +114,28 @@ class TerminalViewTest(unittest.TestCase):
         view = self.open_view()
         self.send(b"printf 'reattach-%s\\n' \"$retained\"\r")
         self.wait_for(b"reattach-first")
+        self.detach(view)
+
+    def test_tab_bar_order_selection_and_narrow_view(self):
+        view = self.open_view()
+        self.send(f"cd {shlex.quote(str(self.root / 'alpha'))}; printf '\\n'\r".encode())
+        self.wait_for(b"\x1b[7m1 alpha \x1b[0m")
+        self.send(b"\x1dt")
+        self.wait_for(b"\x1b[7m2 ")
+        self.send(f"cd {shlex.quote(str(self.root / 'beta'))}; printf '\\n'\r".encode())
+        bar = self.wait_for(b"\x1b[7m2 beta \x1b[0m")
+        self.assertIn(b"1 alpha \x1b[0m \x1b[7m2 beta ", bar)
+        self.send(b"\x1dp")
+        bar = self.wait_for(b"\x1b[7m1 alpha \x1b[0m")
+        self.assertIn(b"\x1b[7m1 alpha \x1b[0m 2 beta ", bar)
+        self.send(b"\x1dn")
+        self.wait_for(b"\x1b[7m2 beta \x1b[0m")
+        self.resize(8, 1)
+        narrow_bar = b"\x1b[1;1H\x1b[0m\x1b[2K\x1b[7m2 beta "
+        bar = self.wait_for(narrow_bar)
+        self.assertNotIn(b"\x1b[2;1H", bar.split(narrow_bar, 1)[1])
+        self.resize(8, 2)
+        self.wait_for(b"\x1b[2;1H")
         self.detach(view)
 
     def test_bracketed_paste_keeps_command_prefix_literal(self):

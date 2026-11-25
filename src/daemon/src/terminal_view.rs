@@ -1,6 +1,7 @@
 //! Interactive VT presentation of a Worp session, including over an ordinary SSH PTY.
 mod input;
 mod screen;
+mod tabs;
 mod tty;
 
 use crate::reactor::{self, Interest};
@@ -22,7 +23,7 @@ use worminal_protocol::{
 
 pub(crate) const HELP: &str = "worminald terminal
 Open the workspace in a VT-compatible terminal, or run ssh -t USER@HOST worminald terminal.
-The Linux host runs the daemon and shells. Browser tabs are skipped.
+The Linux host renders the tab bar and shell pane over the terminal. Browser tabs are skipped.
 Type Ctrl+] then n/p to switch tabs, t to open a shell, k/j to scroll, or q to detach.
 Type Ctrl+] twice to send it to the shell. Detaching keeps the workspace running.
 ";
@@ -35,6 +36,7 @@ struct View {
     size: Size,
     active: u32,
     tabs: Vec<TabRecord>,
+    tab_bar: Vec<u8>,
     screen: screen::Screen,
     input: input::Input,
     opening: bool,
@@ -42,6 +44,50 @@ struct View {
 }
 
 impl View {
+    fn body_size(&self) -> Size {
+        (self.size.0, self.size.1 - tabs::ROWS)
+    }
+
+    fn pty_size(&self) -> Size {
+        let (columns, rows) = self.body_size();
+        (columns, rows.max(1))
+    }
+
+    fn draw_tabs(&mut self, output: &mut impl Write) -> io::Result<()> {
+        let bar = tabs::draw(&self.tabs, self.active, self.size.0)?;
+        if self.tab_bar != bar {
+            output.write_all(&bar)?;
+            self.tab_bar = bar;
+            self.screen.position_cursor(self.body_size(), output)?;
+        }
+        Ok(())
+    }
+
+    fn resize(&mut self, size: Size, output: &mut impl Write) -> io::Result<()> {
+        if size == self.size {
+            return Ok(());
+        }
+        let was_hidden = self.body_size().1 == 0;
+        self.size = size;
+        self.tab_bar.clear();
+        self.draw_tabs(output)?;
+        output.flush()?;
+        if was_hidden && self.body_size().1 > 0 && self.active != 0 {
+            // A one-line terminal displayed no cells. Reclaim to request a full frame even at 1 PTY row.
+            self.send(self.active, CommandKind::Release)?;
+        }
+        self.focus()
+    }
+
+    fn message(&mut self, message: &str, output: &mut impl Write) -> io::Result<()> {
+        let size = self.body_size();
+        self.screen.reset(size, output)?;
+        if size.1 != 0 {
+            output.write_all(message.as_bytes())?;
+        }
+        Ok(())
+    }
+
     fn send(&mut self, tab: u32, kind: CommandKind) -> io::Result<()> {
         self.sender.send(&Command::new(tab, kind))
     }
@@ -49,7 +95,7 @@ impl View {
     fn open(&mut self) -> io::Result<()> {
         if !self.opening {
             let mut launch = Launch::restore(Vec::new());
-            (launch.columns, launch.rows) = self.size;
+            (launch.columns, launch.rows) = self.pty_size();
             self.send(
                 self.active,
                 CommandKind::Open {
@@ -67,22 +113,24 @@ impl View {
             self.send(self.active, CommandKind::Release)?;
         }
         self.active = tab;
-        self.screen.reset(output)?;
+        let size = self.body_size();
+        self.screen.reset(size, output)?;
         if let Some(tab) = self.tabs.iter().find(|record| record.id == tab) {
-            self.screen.modes(tab.mode, output)?;
+            self.screen.modes(tab.mode, size, output)?;
         }
         self.focus()
     }
 
     fn focus(&mut self) -> io::Result<()> {
         if self.active != 0 {
-            let (columns, rows) = self.size;
+            let (columns, rows) = self.pty_size();
             self.send(self.active, CommandKind::Focus { columns, rows })?;
         }
         Ok(())
     }
 
     fn event(&mut self, event: Event, output: &mut impl Write) -> io::Result<()> {
+        let size = self.body_size();
         match event.kind {
             EventKind::Catalog(catalog) => {
                 let first = !std::mem::replace(&mut self.received_catalog, true);
@@ -92,36 +140,33 @@ impl View {
                     .filter(|tab| tab.kind == TabKind::Terminal)
                     .collect();
                 if let Some(tab) = self.tabs.iter().find(|tab| tab.id == self.active) {
-                    self.screen.modes(tab.mode, output)?;
+                    self.screen.modes(tab.mode, size, output)?;
                 } else if let Some(tab) = self.tabs.first() {
                     self.select(tab.id, output)?;
                 } else if first {
                     self.open()?;
                 } else {
                     self.active = 0;
-                    self.screen.reset(output)?;
-                    write!(
-                        output,
-                        "No terminal tabs. Ctrl+] t opens a shell. Ctrl+] q detaches."
-                    )?;
+                    self.message("Ctrl+] t opens a shell. Ctrl+] q detaches.", output)?;
                 }
+                self.draw_tabs(output)?;
             }
             EventKind::Created => {
                 self.opening = false;
                 self.select(event.tab, output)?;
+                self.draw_tabs(output)?;
             }
             EventKind::Error(message) => {
                 return Err(io::Error::other(screen::safe_text(&message)));
             }
             EventKind::Released if event.tab == self.active => {
-                self.screen.reset(output)?;
-                write!(
+                self.message(
+                    "Tab attached elsewhere. Press a key to take control.",
                     output,
-                    "Tab attached elsewhere. Press a key to take control."
                 )?;
             }
             EventKind::Bell if event.tab == self.active => output.write_all(b"\x07")?,
-            kind if event.tab == self.active => self.screen.event(kind, self.size, output)?,
+            kind if event.tab == self.active => self.screen.event(kind, size, output)?,
             _ => {}
         }
         output.flush()
@@ -147,6 +192,7 @@ impl View {
                 let tab = self.tabs[(index + step) % count].id;
                 if tab != self.active {
                     self.select(tab, output)?;
+                    self.draw_tabs(output)?;
                     output.flush()?;
                 }
             }
@@ -173,6 +219,8 @@ impl View {
 
 pub(crate) fn run(connect: impl FnOnce() -> io::Result<UnixStream>) -> io::Result<()> {
     let size = tty::size()?;
+    // Use the host locale for the widths of Unicode catalog labels.
+    unsafe { libc::setlocale(libc::LC_CTYPE, c"".as_ptr()) };
     let socket = connect()?;
     socket.set_write_timeout(Some(Duration::from_secs(3)))?;
     let signals = reactor::Signals::with_extra(&[libc::SIGWINCH])?;
@@ -182,6 +230,7 @@ pub(crate) fn run(connect: impl FnOnce() -> io::Result<UnixStream>) -> io::Resul
         size,
         active: 0,
         tabs: Vec::new(),
+        tab_bar: Vec::new(),
         screen: screen::Screen::default(),
         input: input::Input::default(),
         opening: false,
@@ -236,11 +285,7 @@ fn drive(
                     if signals.shutdown_requested()? {
                         return Ok(());
                     }
-                    let size = tty::size()?;
-                    if size != view.size {
-                        view.size = size;
-                        view.focus()?;
-                    }
+                    view.resize(tty::size()?, output)?;
                 }
             }
         }

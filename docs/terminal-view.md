@@ -13,10 +13,11 @@ ssh -t USER@HOST worminald terminal
 ```
 
 Use the Linux host that owns the workspace as `HOST`. The SSH client allocates a terminal on that host, where
-the view and shells run. The headless Worminal install includes this command. The client machine needs an SSH
-client and a VT-compatible terminal.
+Worminal draws the entire view, including the tab bar. The headless Worminal install includes this command.
+On any client operating system, all you need is SSH and a VT-compatible terminal.
 
-The view starts the daemon if needed and displays the first terminal tab. On startup it opens a shell if the
+The view starts the daemon if needed and displays an ordered tab bar above the first terminal pane.
+The active tab is highlighted and stays visible when the terminal is narrow. On startup it opens a shell if the
 workspace has no terminal tabs. It borrows the active tab's viewport and releases it when switching or detaching.
 The daemon keeps the shells and their scrollback alive between connections.
 

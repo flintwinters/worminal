@@ -1,5 +1,5 @@
 //! Paint complete Worp frames as VT rows. Only full row updates are negotiated.
-use super::Size;
+use super::{tabs, Size};
 use std::io::{self, Write};
 use worminal_protocol::{
     cell::*,
@@ -35,13 +35,14 @@ impl Screen {
         self.geometry.is_some()
     }
 
-    pub fn reset(&mut self, output: &mut impl Write) -> io::Result<()> {
-        self.modes(0, output)?;
+    pub fn reset(&mut self, size: Size, output: &mut impl Write) -> io::Result<()> {
+        self.modes(0, size, output)?;
         *self = Self::default();
-        output.write_all(b"\x1b[?25l\x1b[0m\x1b[2J\x1b[H")
+        output.write_all(b"\x1b[?25l")?;
+        clear_body(size, output)
     }
 
-    pub fn modes(&mut self, mode: u32, output: &mut impl Write) -> io::Result<()> {
+    pub fn modes(&mut self, mode: u32, size: Size, output: &mut impl Write) -> io::Result<()> {
         for (bit, on, off) in [
             (MODE_APPCURSOR, "\x1b[?1h", "\x1b[?1l"),
             (MODE_APPKEYPAD, "\x1b=", "\x1b>"),
@@ -55,20 +56,22 @@ impl Screen {
         let cursor_changed = (self.mode ^ mode) & MODE_HIDE != 0;
         self.mode = mode;
         if cursor_changed {
-            self.position_cursor(output)?;
+            self.position_cursor(size, output)?;
         }
         Ok(())
     }
 
-    fn position_cursor(&self, output: &mut impl Write) -> io::Result<()> {
-        if let Some(frame) = self
-            .cursor
-            .filter(|frame| frame.scroll == 0 && self.mode & MODE_HIDE == 0)
-        {
+    pub fn position_cursor(&self, size: Size, output: &mut impl Write) -> io::Result<()> {
+        if let Some(frame) = self.cursor.filter(|frame| {
+            frame.scroll == 0
+                && self.mode & MODE_HIDE == 0
+                && frame.cursor_x < size.0
+                && frame.cursor_y < size.1
+        }) {
             write!(
                 output,
                 "\x1b[{};{}H\x1b[?25h",
-                frame.cursor_y + 1,
+                frame.cursor_y + tabs::ROWS + 1,
                 frame.cursor_x + 1
             )
         } else {
@@ -120,19 +123,25 @@ impl Screen {
     fn paint(&mut self, frame: Frame, size: Size, output: &mut impl Write) -> io::Result<()> {
         let geometry = (frame.state.columns, frame.state.rows);
         if self.geometry != Some(geometry) {
-            output.write_all(b"\x1b[0m\x1b[2J")?;
+            clear_body(size, output)?;
             self.geometry = Some(geometry);
         }
         for (index, row) in frame.rows.into_iter().take(size.1 as usize).enumerate() {
             if let Some(cells) = row {
-                write!(output, "\x1b[{};1H", index + 1)?;
+                write!(output, "\x1b[{};1H", index + tabs::ROWS as usize + 1)?;
                 paint_row(cells.iter(), size.0 as usize, output)?;
             }
         }
-        self.cursor =
-            (frame.state.cursor_x < size.0 && frame.state.cursor_y < size.1).then_some(frame.state);
-        self.position_cursor(output)
+        self.cursor = Some(frame.state);
+        self.position_cursor(size, output)
     }
+}
+
+fn clear_body((_, rows): Size, output: &mut impl Write) -> io::Result<()> {
+    if rows != 0 {
+        write!(output, "\x1b[0m\x1b[{};1H\x1b[J", tabs::ROWS + 1)?;
+    }
+    Ok(())
 }
 
 fn paint_row(
