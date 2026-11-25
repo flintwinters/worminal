@@ -369,9 +369,7 @@ impl App {
         }
         let window = Self::replacement_window(&config);
         let fonts = Rc::new(RefCell::new(Fonts::new(config.font.clone(), config.zoom)));
-        let status = gtk::Label::new(None);
-        status.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        status.set_no_show_all(true);
+        let status = crate::status_strip::label();
         let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let panes = split::Panes::new();
         let panel = crate::panel::SidePanel::new();

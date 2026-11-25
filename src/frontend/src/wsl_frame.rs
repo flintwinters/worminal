@@ -3,11 +3,10 @@
 //! makes the frame client-side: Weston then leaves the window undecorated, and the bar is styled with the
 //! terminal colors. Moving and resizing go through `_NET_WM_MOVERESIZE`, which Weston's XWM supports.
 //! Anywhere else this does nothing.
+use crate::theme;
 use gtk::prelude::*;
-use std::{cell::Cell, ffi::OsStr};
+use std::ffi::OsStr;
 
-const BACKGROUND: usize = 259;
-const FOREGROUND: usize = 258;
 const CLASS: &str = "worminal-wsl-frame";
 
 fn is_wsl(distro: Option<&OsStr>, osrelease: &str) -> bool {
@@ -31,35 +30,13 @@ window.{CLASS} headerbar button.close:hover {{ background: #c42b1c; color: #ffff
     )
 }
 
-thread_local! { static STYLED_SCREEN: Cell<bool> = const { Cell::new(false) }; }
-
 /// Returns the window so construction can end with the call.
 pub(crate) fn style(window: gtk::Window) -> gtk::Window {
-    let settings = worminal_config::get();
-    if !settings.wsl_window_frame || !detected() {
+    if !worminal_config::get().wsl_window_frame || !detected() {
         return window;
     }
-    let (Some(background), Some(foreground)) = (
-        settings.colors[BACKGROUND].as_deref(),
-        settings.colors[FOREGROUND].as_deref(),
-    ) else {
-        return window;
-    };
-    if !STYLED_SCREEN.with(|done| done.replace(true)) {
-        let provider = gtk::CssProvider::new();
-        if provider
-            .load_from_data(css(background, foreground).as_bytes())
-            .is_ok()
-        {
-            if let Some(screen) = gtk::gdk::Screen::default() {
-                gtk::StyleContext::add_provider_for_screen(
-                    &screen,
-                    &provider,
-                    gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-                );
-            }
-        }
-    }
+    let (background, foreground) = theme::colors();
+    theme::install(CLASS, &css(&background, &foreground));
     window.style_context().add_class(CLASS);
     let bar = gtk::HeaderBar::new();
     bar.set_show_close_button(true);
