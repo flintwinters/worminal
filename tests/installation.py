@@ -58,7 +58,7 @@ def main(installed=False):
     for name in ("worminald",):
         result = subprocess.run([str(prefix / "bin" / name), "--invalid"],
                                 capture_output=True, text=True, timeout=5)
-        if result.returncode != 2 or "--serve|--bridge|--stop" not in result.stderr:
+        if result.returncode != 2 or "--serve | --bridge | --stop" not in result.stderr:
             raise AssertionError(f"Staged {name} CLI validation failed: {result.stderr}")
     env = {**os.environ, "WORMINAL_TEST_EXECUTABLE": str(executable),
            "WORMINAL_TEST_DAEMON": str(prefix / "bin/worminald")}
