@@ -37,23 +37,5 @@ Scroll over the bar or use Ctrl+wheel to cycle. Ctrl+T and Ctrl+W open and close
 Mouse reporting uses SGR mouse mode. In terminals that reserve Shift+drag for local selection, use that gesture
 to select text in the outer terminal.
 
-Ctrl+Tab and Ctrl+Shift+Tab cycle when the outer terminal sends distinct key sequences. The view requests
-the Kitty keyboard protocol and also accepts xterm-style modified Tab sequences. Some terminals bind these keys
-to their own tabs. On Windows Terminal, you can replace those bindings with actions that send the sequences
-to Worminal. Add these to the `actions` array in `settings.json` and bind their IDs in `keybindings`:
-
-```json
-{
-  "actions": [
-    { "id": "Worminal.NextTab", "command": { "action": "sendInput", "input": "\u001b[9;5u" } },
-    { "id": "Worminal.PreviousTab", "command": { "action": "sendInput", "input": "\u001b[9;6u" } }
-  ],
-  "keybindings": [
-    { "keys": "ctrl+tab", "id": "Worminal.NextTab" },
-    { "keys": "ctrl+shift+tab", "id": "Worminal.PreviousTab" }
-  ]
-}
-```
-
-These Windows Terminal bindings apply to its other sessions too. The Ctrl+] shortcuts work without changing
-the client's bindings.
+Ctrl+Tab and Ctrl+Shift+Tab cycle when the client forwards them. Use the tab bar or Ctrl+] then n/p
+when the client handles those keys itself.
