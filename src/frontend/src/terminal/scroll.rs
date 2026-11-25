@@ -15,7 +15,7 @@ impl Inner {
         if smooth && event.delta().1 == 0.0 {
             return;
         }
-        if event.state().contains(gdk::ModifierType::CONTROL_MASK) {
+        if worminal_workspace::tab_controls::wheel_cycles(event.state().bits(), false) {
             let steps = match event.direction() {
                 gdk::ScrollDirection::Up => -1.0,
                 gdk::ScrollDirection::Down => 1.0,

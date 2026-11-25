@@ -27,6 +27,7 @@ ROOT = Path(__file__).resolve().parent
 app = typer.Typer(no_args_is_help=True, help="Build and test Worminal.")
 MAX_FILE_LINES = 1000
 MAX_LINE_LENGTH = 120
+TERMINAL_VIEW_TEST = "test_terminal_view.py"
 # Checks own private virtual displays; none may draw on or inject into the developer's desktop.
 DESKTOP_VARIABLES = ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY")
 
@@ -126,7 +127,7 @@ def run_headless_checks():
         return code
     patterns = ("test_build.py", "test_perf_metrics.py", "test_perf_check.py", "test_cli.py", "test_workspace.py",
                 "test_preview_workspace.py", "test_agent_api.py", "test_remote_install.py", "test_remote_upgrade.py", "test_theme.py", "test_config_sync.py", "test_running.py", "test_update_flow.py",
-                "test_handoff.py", "test_restore.py", "test_upgrade.py", "test_terminal_view.py")
+                "test_handoff.py", "test_restore.py", "test_upgrade.py", TERMINAL_VIEW_TEST)
     for pattern in patterns:
         code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
                     "-p", pattern, "-q"])
@@ -361,7 +362,7 @@ def check_rust_daemon():
     native_build.build_targets("worminald")
     candidate = build_rust_daemon()
     code = run_rust_process_checks()
-    for pattern in ("test_preview_workspace.py", "test_restore.py", "test_workspace.py", "test_terminal_view.py"):
+    for pattern in (TERMINAL_VIEW_TEST, "test_preview_workspace.py", "test_restore.py", "test_workspace.py"):
         if code:
             break
         code = run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", pattern, "-q"],
@@ -369,6 +370,14 @@ def check_rust_daemon():
                         "WORMINAL_TEST_WORKSPACE_DAEMON": str(candidate),
                         "WORMINAL_TEST_BRIDGE_VERSION": "2"})
     raise typer.Exit(code)
+
+
+@app.command("check-terminal-view")
+def check_terminal_view():
+    """Check the terminal-only view through a private pseudo-terminal and daemon."""
+    native_build.build_targets("worminald")
+    raise typer.Exit(run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                         "-p", TERMINAL_VIEW_TEST, "-q"]))
 
 
 @app.command("inventory")

@@ -18,5 +18,6 @@ pub mod socket;
 pub mod spawn;
 pub mod ssh;
 mod statefile;
+pub mod tab_controls;
 mod yamlfile;
 pub use browser_target::{WORKSPACE_BROWSER_HOME, WORKSPACE_BROWSER_SCHEME};

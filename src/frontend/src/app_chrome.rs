@@ -117,13 +117,8 @@ impl App {
         let index = |id| self.pages.borrow().iter().position(|page| page.id == id);
         // The daemon's position is the tab's index once moved, so a tab from before the slot leaves a gap there.
         if let (Some(from), Some(to)) = (index(id), index(slot.tab)) {
-            let position = to + usize::from(slot.after) - usize::from(from < to);
-            self.send(
-                id,
-                CommandKind::Move {
-                    position: position as u32,
-                },
-            );
+            let position = worminal_workspace::tab_controls::move_position(from, to, slot.after);
+            self.send(id, CommandKind::Move { position });
         }
     }
     pub(super) fn select_id(self: &Rc<Self>, id: u32) {

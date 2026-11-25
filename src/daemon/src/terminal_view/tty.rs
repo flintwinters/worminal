@@ -42,9 +42,9 @@ impl Terminal {
             output: io::stdout().lock(),
             original,
         };
-        terminal
-            .output
-            .write_all(b"\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[0m\x1b[2J")?;
+        terminal.output.write_all(
+            b"\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[0m\x1b[2J\x1b[?1002h\x1b[?1006h\x1b[>1u",
+        )?;
         terminal.output.flush()?;
         Ok(terminal)
     }
@@ -55,7 +55,7 @@ impl Drop for Terminal {
         unsafe { libc::tcsetattr(0, libc::TCSANOW, &self.original) };
         let _ = self
             .output
-            .write_all(b"\x1b[0m\x1b[?1l\x1b>\x1b[?2004l\x1b[?5l\x1b[?7h\x1b[?1049l\x1b[?25h");
+            .write_all(b"\x1b[<u\x1b[?1002l\x1b[?1006l\x1b[0m\x1b[?1l\x1b>\x1b[?2004l\x1b[?5l\x1b[?7h\x1b[?1049l\x1b[?25h");
         let _ = self.output.flush();
     }
 }

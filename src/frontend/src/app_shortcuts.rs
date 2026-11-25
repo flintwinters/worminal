@@ -7,6 +7,7 @@ use gtk::{
 use std::rc::Rc;
 use worminal_protocol::worp::commands::CommandKind;
 use worminal_protocol::WIRE_FEATURE_SELECT_ALL;
+use worminal_workspace::tab_controls::{self, Action};
 
 impl App {
     #[expect(clippy::too_many_lines, reason = "one arm per keyboard shortcut")]
@@ -53,47 +54,33 @@ impl App {
                 return true;
             }
         }
-        if state == Mod::CONTROL_MASK
-            && ([key::t, key::w].contains(&value) || (browser && [key::d, key::q].contains(&value)))
-        {
-            if value == key::t {
-                if self
-                    .pages
-                    .borrow()
-                    .iter()
-                    .any(|page| page.id == self.active.get() && page.browser)
-                {
-                    self.open_browser(worminal_workspace::WORKSPACE_BROWSER_HOME);
-                } else {
-                    self.new_tab();
+        let tab_key = if [key::Tab, key::ISO_Left_Tab].contains(&value) {
+            Some('\t')
+        } else {
+            value.to_unicode()
+        };
+        if let Some(action) = tab_key.and_then(|key| tab_controls::shortcut(key, state.bits())) {
+            match action {
+                Action::New if browser => {
+                    self.open_browser(worminal_workspace::WORKSPACE_BROWSER_HOME)
                 }
-            } else {
-                let closing = self.active.get();
-                if value == key::q {
-                    // Quitting a browser returns to a shell, as exiting a program does. The shell that ran
-                    // `--new-browser-tab` ended when the browser replaced it, so a fresh one takes its slot:
-                    // the daemon places the new tab after the browser, which then closes beside it.
-                    self.new_tab();
+                Action::New => self.new_tab(),
+                Action::Close => {
+                    self.send(self.active.get(), CommandKind::Close { receipt: false })
                 }
-                self.send(closing, CommandKind::Close { receipt: false });
+                Action::Cycle {
+                    previous,
+                    tinted_only,
+                } => self.cycle_tab(previous, tinted_only),
             }
             return true;
         }
-        // Alt+Tab cycles like Ctrl+Tab but only through tabs that have a colored background (alerts, busy
-        // tasks, background jobs).
-        if [
-            Mod::CONTROL_MASK,
-            control_shift,
-            Mod::MOD1_MASK,
-            Mod::MOD1_MASK | Mod::SHIFT_MASK,
-        ]
-        .contains(&state)
-            && [key::Tab, key::ISO_Left_Tab].contains(&value)
-        {
-            self.cycle_tab(
-                state.contains(Mod::SHIFT_MASK),
-                state.contains(Mod::MOD1_MASK),
-            );
+        if state == Mod::CONTROL_MASK && browser && [key::d, key::q].contains(&value) {
+            let closing = self.active.get();
+            if value == key::q {
+                self.new_tab();
+            }
+            self.send(closing, CommandKind::Close { receipt: false });
             return true;
         }
         // Ctrl+Alt+arrow or Ctrl+Shift+arrow focuses the pane that way; Alt+Shift+arrow moves the tab there like
@@ -239,16 +226,9 @@ impl App {
     pub(super) fn cycle_tab(self: &Rc<Self>, previous: bool, tinted_only: bool) {
         let count = self.notebook().n_pages();
         let current = self.notebook().current_page().unwrap_or(0);
-        let candidates = (1..count).map(|step| {
-            if previous {
-                (current + count - step) % count
-            } else {
-                (current + step) % count
-            }
-        });
-        let target = candidates.into_iter().find(|index| {
+        let target = tab_controls::cycle(current as usize, count as usize, previous, |index| {
             !tinted_only || {
-                let widget = self.notebook().nth_page(Some(*index));
+                let widget = self.notebook().nth_page(Some(index as u32));
                 let id = self
                     .pages
                     .borrow()
@@ -259,7 +239,7 @@ impl App {
             }
         });
         if let Some(index) = target {
-            self.select_index(index);
+            self.select_index(index as u32);
         }
     }
 }

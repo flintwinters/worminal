@@ -8,11 +8,12 @@ use crate::reactor::{self, Interest};
 use std::{
     io::{self, Read, Write},
     os::{fd::AsRawFd, unix::net::UnixStream},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use worminal_protocol::{
+    input::{MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOUSE_WHEEL_DOWN, MOUSE_WHEEL_UP},
     worp::{
-        commands::{Command, CommandKind, Control, OpenMode},
+        commands::{Command, CommandKind, Control, MouseAction, OpenMode},
         events::{Event, EventKind, TabKind, TabRecord},
         launch::Launch,
         session::Session,
@@ -20,10 +21,13 @@ use worminal_protocol::{
     },
     Decoder,
 };
+use worminal_workspace::tab_controls::{self, Action as TabAction};
 
 pub(crate) const HELP: &str = "worminald terminal
 Open the workspace in a VT-compatible terminal, or run ssh -t USER@HOST worminald terminal.
 The Linux host renders the tab bar and shell pane over the terminal. Browser tabs are skipped.
+Click to select, drag to reorder, middle-click to close, and scroll the tab bar to cycle.
+Ctrl+Tab and Ctrl+Shift+Tab cycle when the outer terminal forwards them.
 Type Ctrl+] then n/p to switch tabs, t to open a shell, k/j to scroll, or q to detach.
 Type Ctrl+] twice to send it to the shell. Detaching keeps the workspace running.
 ";
@@ -36,7 +40,9 @@ struct View {
     size: Size,
     active: u32,
     tabs: Vec<TabRecord>,
-    tab_bar: Vec<u8>,
+    tab_bar: tabs::Bar,
+    order: Vec<u32>,
+    pressed_tab: Option<u32>,
     screen: screen::Screen,
     input: input::Input,
     opening: bool,
@@ -55,11 +61,11 @@ impl View {
 
     fn draw_tabs(&mut self, output: &mut impl Write) -> io::Result<()> {
         let bar = tabs::draw(&self.tabs, self.active, self.size.0)?;
-        if self.tab_bar != bar {
-            output.write_all(&bar)?;
-            self.tab_bar = bar;
+        if self.tab_bar.bytes != bar.bytes {
+            output.write_all(&bar.bytes)?;
             self.screen.position_cursor(self.body_size(), output)?;
         }
+        self.tab_bar = bar;
         Ok(())
     }
 
@@ -69,7 +75,7 @@ impl View {
         }
         let was_hidden = self.body_size().1 == 0;
         self.size = size;
-        self.tab_bar.clear();
+        self.tab_bar.bytes.clear();
         self.draw_tabs(output)?;
         output.flush()?;
         if was_hidden && self.body_size().1 > 0 && self.active != 0 {
@@ -134,6 +140,7 @@ impl View {
         match event.kind {
             EventKind::Catalog(catalog) => {
                 let first = !std::mem::replace(&mut self.received_catalog, true);
+                self.order = catalog.tabs.iter().map(|tab| tab.id).collect();
                 self.tabs = catalog
                     .tabs
                     .into_iter()
@@ -172,29 +179,142 @@ impl View {
         output.flush()
     }
 
-    fn input(&mut self, action: input::Action, output: &mut impl Write) -> io::Result<bool> {
-        use input::Action;
+    fn tab_action(&mut self, action: TabAction, output: &mut impl Write) -> io::Result<()> {
         match action {
-            Action::Detach => return Ok(false),
-            Action::New => self.open()?,
-            Action::Next | Action::Previous if !self.tabs.is_empty() => {
-                let index = self
+            TabAction::New => self.open(),
+            TabAction::Close if self.active != 0 => self.close(self.active),
+            TabAction::Cycle {
+                previous,
+                tinted_only,
+            } => {
+                let current = self
                     .tabs
                     .iter()
                     .position(|tab| tab.id == self.active)
                     .unwrap_or(0);
-                let count = self.tabs.len();
-                let step = if matches!(action, Action::Next) {
-                    1
-                } else {
-                    count - 1
-                };
-                let tab = self.tabs[(index + step) % count].id;
-                if tab != self.active {
-                    self.select(tab, output)?;
-                    self.draw_tabs(output)?;
-                    output.flush()?;
+                use worminal_protocol::cell::{MODE_BACKGROUND_JOB, MODE_BUSY};
+                let target = tab_controls::cycle(current, self.tabs.len(), previous, |index| {
+                    !tinted_only || self.tabs[index].mode & (MODE_BUSY | MODE_BACKGROUND_JOB) != 0
+                });
+                if let Some(index) = target {
+                    self.select_tab(self.tabs[index].id, output)?;
                 }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn select_tab(&mut self, id: u32, output: &mut impl Write) -> io::Result<()> {
+        if id != self.active {
+            self.select(id, output)?;
+            self.draw_tabs(output)?;
+            output.flush()?;
+        }
+        Ok(())
+    }
+
+    fn close(&mut self, id: u32) -> io::Result<()> {
+        self.send(id, CommandKind::Close { receipt: false })
+    }
+
+    fn pointer(&mut self, pointer: input::Pointer, output: &mut impl Write) -> io::Result<()> {
+        let input::Pointer {
+            code,
+            column,
+            row,
+            release,
+        } = pointer;
+        let button = code & !0x3c;
+        let modifiers = (((code >> 2) & 1) * MOD_SHIFT)
+            | (((code >> 3) & 1) * MOD_ALT)
+            | (((code >> 4) & 1) * MOD_CONTROL);
+        let motion = code & 32 != 0;
+        let wheel = matches!(button, MOUSE_WHEEL_UP | MOUSE_WHEEL_DOWN);
+        if wheel && !release && tab_controls::wheel_cycles(modifiers, row < tabs::ROWS) {
+            return self.tab_action(
+                TabAction::Cycle {
+                    previous: button == MOUSE_WHEEL_UP,
+                    tinted_only: false,
+                },
+                output,
+            );
+        }
+        let hit = (row < tabs::ROWS)
+            .then(|| self.tab_bar.hit(column))
+            .flatten();
+        if release && button == 0 {
+            if let Some(id) = self.pressed_tab.take() {
+                if let Some(target) = hit.filter(|target| *target != id) {
+                    let index = |id| self.order.iter().position(|entry| *entry == id);
+                    if let (Some(from), Some(to)) = (index(id), index(target)) {
+                        let position = tab_controls::move_position(from, to, from < to);
+                        self.send(id, CommandKind::Move { position })?;
+                    }
+                }
+                if hit.is_some() && self.tabs.iter().any(|tab| tab.id == id) {
+                    self.select_tab(id, output)?;
+                }
+                return Ok(());
+            }
+        }
+        if row < tabs::ROWS {
+            if !release && !motion {
+                match (button, hit) {
+                    (0, hit) => self.pressed_tab = hit,
+                    (1, Some(id)) => self.close(id)?,
+                    _ => {}
+                }
+            }
+            return Ok(());
+        }
+        if self.pressed_tab.is_some()
+            || self.active == 0
+            || column >= self.size.0
+            || row >= self.size.1
+        {
+            return Ok(());
+        }
+        let row = row - tabs::ROWS;
+        let kind = if wheel {
+            CommandKind::Wheel {
+                up: button == MOUSE_WHEEL_UP,
+                notches: 1,
+                lines: worminal_config::get().scroll_multiplier as u32,
+                column,
+                row,
+                modifiers,
+            }
+        } else {
+            let action = if release {
+                MouseAction::Release
+            } else if motion {
+                MouseAction::Motion
+            } else {
+                MouseAction::Press
+            };
+            CommandKind::Mouse {
+                button,
+                column,
+                row,
+                modifiers,
+                action,
+            }
+        };
+        self.send(self.active, kind)
+    }
+
+    fn input(&mut self, action: input::Action, output: &mut impl Write) -> io::Result<bool> {
+        use input::Action;
+        match action {
+            Action::Detach => return Ok(false),
+            Action::Tab(action) => self.tab_action(action, output)?,
+            Action::Pointer(pointer) => self.pointer(pointer, output)?,
+            Action::Key(kind) if self.active != 0 => {
+                if !self.screen.live() {
+                    self.focus()?;
+                }
+                self.send(self.active, kind)?;
             }
             Action::Scroll(up) if self.active != 0 => {
                 self.send(self.active, CommandKind::Scroll { up, amount: 3 })?;
@@ -230,7 +350,9 @@ pub(crate) fn run(connect: impl FnOnce() -> io::Result<UnixStream>) -> io::Resul
         size,
         active: 0,
         tabs: Vec::new(),
-        tab_bar: Vec::new(),
+        tab_bar: tabs::Bar::default(),
+        order: Vec::new(),
+        pressed_tab: None,
         screen: screen::Screen::default(),
         input: input::Input::default(),
         opening: false,
@@ -253,15 +375,28 @@ fn drive(
     });
     let mut decoder = Decoder::default();
     let mut buffer = [0; 16384];
+    let mut escape_deadline: Option<Instant> = None;
     loop {
-        for ready in reactor::wait(&interests, None)? {
+        let now = Instant::now();
+        if escape_deadline.is_some_and(|deadline| deadline <= now) {
+            let action = view.input.flush_escape();
+            view.input(action, output)?;
+            escape_deadline = None;
+        }
+        let timeout = escape_deadline.map(|deadline| (deadline - now).as_nanos() as i64);
+        for ready in reactor::wait(&interests, timeout)? {
             match ready.index {
                 0 => {
                     let count = io::stdin().read(&mut buffer)?;
                     if count == 0 {
                         return Ok(());
                     }
-                    for action in view.input.feed(&buffer[..count]) {
+                    let actions = view.input.feed(&buffer[..count]);
+                    escape_deadline = view
+                        .input
+                        .pending()
+                        .then(|| Instant::now() + Duration::from_millis(40));
+                    for action in actions {
                         if !view.input(action, output)? {
                             return Ok(());
                         }
