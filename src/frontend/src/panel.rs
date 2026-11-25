@@ -160,6 +160,8 @@ struct View {
     layout: pango::Layout,
     tabs: RefCell<Vec<Box<dyn PanelTab>>>,
     rows: RefCell<Vec<String>>,
+    /// The labelled line above the row that starts a second group (`PanelTab::separator`).
+    separator: RefCell<Option<(usize, String)>>,
     active: Cell<usize>,
     cursor: RefCell<Cursor>,
     callbacks: Rc<Callbacks>,
@@ -186,12 +188,37 @@ fn visible_rows(height: i32, metrics: Metrics) -> usize {
     usize::try_from((height - rows_top(metrics) - metrics.height).max(0) / metrics.height.max(1))
         .unwrap_or(0)
 }
-/// The row under a press `y` pixels from the top, among `count` rows starting at `top`.
-fn row_at(y: i32, metrics: Metrics, top: usize, count: usize) -> Option<usize> {
+/// A separator is a line of its own above row `split`, so lines and rows differ by one after it.
+fn line_of(row: usize, split: Option<usize>) -> usize {
+    row + usize::from(split.is_some_and(|split| row >= split))
+}
+/// The row on a line, or `None` for the separator's own line.
+fn row_on(line: usize, split: Option<usize>) -> Option<usize> {
+    match split {
+        Some(split) if line == split => None,
+        Some(split) if line > split => Some(line - 1),
+        _ => Some(line),
+    }
+}
+/// The line drawn first when row `top` is the first one scrolled to: the separator shows above its row.
+fn first_line(top: usize, split: Option<usize>) -> usize {
+    line_of(top, split) - usize::from(split == Some(top))
+}
+/// The row under a press `y` pixels from the top, among `count` rows starting at `top`; none on the separator.
+fn row_at(
+    y: i32,
+    metrics: Metrics,
+    top: usize,
+    count: usize,
+    split: Option<usize>,
+) -> Option<usize> {
     let offset = y - rows_top(metrics);
-    (offset >= 0)
-        .then(|| top + usize::try_from(offset / metrics.height.max(1)).unwrap_or(0))
-        .filter(|row| *row < count)
+    if offset < 0 {
+        return None;
+    }
+    let line =
+        first_line(top, split) + usize::try_from(offset / metrics.height.max(1)).unwrap_or(0);
+    row_on(line, split).filter(|row| *row < count)
 }
 
 impl View {
@@ -203,8 +230,14 @@ impl View {
         self.layout.set_ellipsize(pango::EllipsizeMode::None);
         self.layout.set_wrap(pango::WrapMode::Word);
     }
+    /// Rows that stay fully on screen; a separator may take one of the lines.
     fn visible(&self) -> usize {
-        visible_rows(self.widget.allocated_height(), self.metrics())
+        let lines = visible_rows(self.widget.allocated_height(), self.metrics());
+        if self.separator.borrow().is_some() {
+            lines.saturating_sub(1).max(1)
+        } else {
+            lines
+        }
     }
     /// Draw `text` with its top-left at `(x, top)`, centered in a line of the font's height.
     fn show(&self, cr: &cairo::Context, text: &str, x: i32, top: i32, metrics: Metrics) {
@@ -261,14 +294,33 @@ impl View {
         }
         let cursor = self.cursor.borrow();
         let focused = self.widget.has_focus();
-        for (n, row) in rows
-            .iter()
-            .enumerate()
-            .skip(cursor.top)
-            .take(visible_rows(height, metrics))
-        {
-            let top =
-                rows_top(metrics) + i32::try_from(n - cursor.top).unwrap_or(0) * metrics.height;
+        let split = self.separator.borrow().as_ref().map(|(row, _)| *row);
+        let start = first_line(cursor.top, split);
+        for line in start..start + visible_rows(height, metrics) {
+            let top = rows_top(metrics) + i32::try_from(line - start).unwrap_or(0) * metrics.height;
+            let Some(n) = row_on(line, split) else {
+                // The separator: its label, then a faint rule to the panel's edge.
+                let label = self
+                    .separator
+                    .borrow()
+                    .as_ref()
+                    .map(|(_, label)| label.clone());
+                let label = label.unwrap_or_default();
+                paint::source(cr, &mix(&background, &foreground, 0.6));
+                self.show(cr, &label, metrics.width, top, metrics);
+                self.layout.set_text(&label);
+                let after = metrics.width + self.layout.pixel_size().0 + metrics.width / 2;
+                paint::source(cr, &mix(&background, &foreground, 0.3));
+                cr.rectangle(
+                    f64::from(after),
+                    f64::from(top + metrics.height / 2),
+                    f64::from((width - 1 - after - metrics.width).max(0)),
+                    1.0,
+                );
+                cr.fill()?;
+                continue;
+            };
+            let Some(row) = rows.get(n) else { break };
             if n == cursor.selected {
                 paint::source(
                     cr,
@@ -354,6 +406,12 @@ impl View {
             .map(|tab| tab.rows())
             .unwrap_or_default();
         let count = rows.len();
+        *self.separator.borrow_mut() = self
+            .tabs
+            .borrow()
+            .get(self.active.get())
+            .and_then(|tab| tab.separator())
+            .map(|(row, label)| (row, label.to_owned()));
         *self.rows.borrow_mut() = rows;
         let visible = self.visible();
         self.cursor.borrow_mut().clamp(count, visible);
@@ -561,7 +619,14 @@ impl View {
         }
         let row = {
             let cursor = self.cursor.borrow();
-            row_at(y as i32, metrics, cursor.top, self.rows.borrow().len())
+            let split = self.separator.borrow().as_ref().map(|(row, _)| *row);
+            row_at(
+                y as i32,
+                metrics,
+                cursor.top,
+                self.rows.borrow().len(),
+                split,
+            )
         };
         if let Some(row) = row {
             self.cursor.borrow_mut().selected = row;
@@ -634,6 +699,7 @@ impl SidePanel {
             layout,
             tabs: RefCell::new(tabs),
             rows: RefCell::new(Vec::new()),
+            separator: RefCell::new(None),
             active: Cell::new(0),
             cursor: RefCell::new(Cursor::default()),
             callbacks: Rc::new(callbacks),
@@ -792,14 +858,45 @@ mod tests {
     fn presses_map_to_header_and_rows_by_the_same_geometry_as_drawing() {
         // Header 18 px, then a 2 px gap: rows start at 20 and are 16 px tall.
         assert_eq!(rows_top(METRICS), 20);
-        assert_eq!(row_at(19, METRICS, 0, 5), None);
-        assert_eq!(row_at(20, METRICS, 0, 5), Some(0));
-        assert_eq!(row_at(36, METRICS, 0, 5), Some(1));
-        assert_eq!(row_at(36, METRICS, 3, 5), Some(4));
-        assert_eq!(row_at(36 + 16, METRICS, 3, 5), None);
+        assert_eq!(row_at(19, METRICS, 0, 5, None), None);
+        assert_eq!(row_at(20, METRICS, 0, 5, None), Some(0));
+        assert_eq!(row_at(36, METRICS, 0, 5, None), Some(1));
+        assert_eq!(row_at(36, METRICS, 3, 5, None), Some(4));
+        assert_eq!(row_at(36 + 16, METRICS, 3, 5, None), None);
         // A 100 px panel holds header, rows and the footer line: (100 - 20 - 16) / 16 rows.
         assert_eq!(visible_rows(100, METRICS), 4);
         assert_eq!(visible_rows(10, METRICS), 0);
+    }
+
+    #[test]
+    fn a_separator_is_a_line_of_its_own_that_no_press_can_select() {
+        // Rows 0 and 1, the separator line, then rows 2 and 3 (lines 0, 1, 2, 3, 4).
+        let split = Some(2);
+        let at = |line: i32, top| row_at(20 + 16 * line, METRICS, top, 4, split);
+        assert_eq!(
+            [at(0, 0), at(1, 0), at(2, 0), at(3, 0), at(4, 0)],
+            [Some(0), Some(1), None, Some(2), Some(3)]
+        );
+        // Scrolled so the first remote row is first: its separator shows above it.
+        assert_eq!([at(0, 2), at(1, 2), at(2, 2)], [None, Some(2), Some(3)]);
+        // Scrolled past it: plain rows again.
+        assert_eq!([at(0, 3), at(1, 3)], [Some(3), None]);
+        assert_eq!(
+            [line_of(1, split), line_of(2, split), line_of(3, split)],
+            [1, 3, 4]
+        );
+        assert_eq!(
+            [row_on(1, split), row_on(2, split), row_on(3, split)],
+            [Some(1), None, Some(2)]
+        );
+        assert_eq!(
+            (
+                first_line(2, split),
+                first_line(1, split),
+                first_line(0, None)
+            ),
+            (2, 1, 0)
+        );
     }
 
     #[test]

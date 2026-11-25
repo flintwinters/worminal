@@ -659,6 +659,51 @@ class RustApplicationTest(unittest.TestCase):
             wait_for(lambda: str(other) not in saved.read_text(), 'Delete did not remove the bookmark')
             self.assertEqual(len(tabs()), 2)
 
+    def test_the_panel_lists_this_machine_first_and_selects_rows_across_the_remote_separator(self):
+        from Xlib import X, display
+        with isolated_display() as env, ExitStack() as cleanup:
+            root = CHECKS / f'panel-split-{os.getpid()}'
+            shutil.rmtree(root, ignore_errors=True)
+            first, second = root / 'first', root / 'second'
+            first.mkdir(parents=True)
+            second.mkdir()
+            self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+            saved = root / 'config/worminal/bookmarks.yaml'
+            saved.parent.mkdir(parents=True)
+            # The server is listed first in the file but shown after this machine's directories.
+            saved.write_text(f'bookmarks:\n  - host: me@build\n  - directory: "{first}"\n  - directory: "{second}"\n')
+            env.update(GDK_BACKEND='x11', XDG_CONFIG_HOME=str(root / 'config'), SHELL='/bin/sh')
+            env.pop('WAYLAND_DISPLAY', None)
+            app = subprocess.Popen([str(runtime_binary('worminal-rust')), '-T', 'Rust panel split', '-o', '-',
+                                    '-e', '/bin/sh', '-c', 'while :; do sleep 1; done'],
+                                   env=env, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.addCleanup(lambda: self.stop(app))
+            wid = window(env, app)
+            xdo = lambda *args: subprocess.run(['xdotool', *args], env=env, check=True)
+            api = lambda *args: subprocess.check_output([str(runtime_binary('worminald')), 'api', *args],
+                                                        env=env, text=True)
+            server = display.Display(env['DISPLAY'])
+            cleanup.callback(server.close)
+            window_object = server.create_resource_object('window', int(wid))
+            xdo('windowfocus', '--sync', wid)
+            xdo('windowsize', wid, '900', '500')
+            time.sleep(1.5)
+            tabs = lambda: json.loads(api('list'))['tabs']
+
+            def wait_for(condition, message):
+                deadline = time.monotonic() + 8
+                while not condition():
+                    self.assertIsNone(app.poll())
+                    self.assertLess(time.monotonic(), deadline, message)
+                    time.sleep(.05)
+            wait_for(lambda: tabs()[0].get('directory') == str(root), 'the tab never reported its directory')
+            xdo('key', '--clearmodifiers', 'ctrl+shift+b')
+            wait_for(lambda: panel_shown(window_object), 'the panel did not open')
+            # Row 1 is the second directory: the server did not take row 0 of the file's order.
+            xdo('key', '--clearmodifiers', 'Down', 'Return')
+            wait_for(lambda: len(tabs()) == 2 and tabs()[1].get('directory') == str(second),
+                     'the second row did not open the second directory')
+
     @staticmethod
     def stop(process):
         stop_application(process)

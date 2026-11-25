@@ -34,6 +34,10 @@ pub trait PanelTab {
     fn rows(&self) -> Vec<String>;
     /// Shown instead of rows when there are none.
     fn empty(&self) -> &str;
+    /// A labelled line drawn above row `.0`, the first row of a second group; `None` for one group.
+    fn separator(&self) -> Option<(usize, &str)> {
+        None
+    }
     fn press(&self, key: PanelKey, row: usize) -> Option<PanelAction>;
     /// What pressing `a` asks the user to type, or `None` when this tab has nothing to add.
     fn add_prompt(&self) -> Option<&str> {
@@ -58,8 +62,20 @@ pub struct BookmarksTab {
     items: Vec<Bookmark>,
     home: Option<String>,
 }
+/// Where a bookmark leads: a place on another machine (a remote directory or an ssh host) or anything on this one.
+fn is_remote(bookmark: &Bookmark) -> bool {
+    matches!(
+        bookmark.target,
+        Target::Terminal {
+            master: Some(_),
+            ..
+        } | Target::Host { .. }
+    )
+}
 impl BookmarksTab {
-    pub fn new(items: Vec<Bookmark>, home: Option<String>) -> Self {
+    /// Rows list this machine's bookmarks first and the remote ones after them, each group in the file's order.
+    pub fn new(mut items: Vec<Bookmark>, home: Option<String>) -> Self {
+        items.sort_by_key(is_remote);
         Self { items, home }
     }
 }
@@ -105,6 +121,14 @@ impl PanelTab for BookmarksTab {
             .iter()
             .map(|bookmark| row_label(bookmark, self.home.as_deref()))
             .collect()
+    }
+    fn separator(&self) -> Option<(usize, &str)> {
+        let local = self
+            .items
+            .iter()
+            .take_while(|item| !is_remote(item))
+            .count();
+        (local > 0 && local < self.items.len()).then_some((local, "Remote"))
     }
     fn empty(&self) -> &str {
         "No bookmarks yet. Ctrl+Shift+D bookmarks the current tab; a adds a server."
@@ -198,9 +222,9 @@ mod tests {
                 "~",
                 "~/work",
                 "/home/mellow",
-                "me@build:/srv/app",
                 "Example",
-                "https://example.org/x"
+                "https://example.org/x",
+                "me@build:/srv/app"
             ]
         );
     }
@@ -214,19 +238,20 @@ mod tests {
             ],
             None,
         );
+        // The page is this machine's, so it is listed first.
         assert_eq!(
-            tab.press(PanelKey::Open, 0),
+            tab.press(PanelKey::Open, 1),
             Some(PanelAction::OpenTerminal {
                 directory: "/srv/app".into(),
                 master: Some("me@build".into())
             })
         );
         assert_eq!(
-            tab.press(PanelKey::Open, 1),
+            tab.press(PanelKey::Open, 0),
             Some(PanelAction::OpenUrl("https://example.org".into()))
         );
         assert_eq!(
-            tab.press(PanelKey::Remove, 1),
+            tab.press(PanelKey::Remove, 0),
             Some(PanelAction::RemoveBookmark(Target::Web {
                 url: "https://example.org".into()
             }))
@@ -265,6 +290,37 @@ mod tests {
                 port: None
             }))
         );
+    }
+
+    #[test]
+    fn this_machines_bookmarks_come_first_and_a_separator_marks_where_the_remote_ones_start() {
+        let tab = BookmarksTab::new(
+            vec![
+                host("me@build", None),
+                terminal("/srv/app", Some("me@build")),
+                terminal("/home/me", None),
+                web("https://example.org", None),
+                host("me@other", None),
+            ],
+            None,
+        );
+        assert_eq!(
+            tab.rows(),
+            [
+                "/home/me",
+                "https://example.org",
+                "ssh me@build",
+                "me@build:/srv/app",
+                "ssh me@other"
+            ]
+        );
+        assert_eq!(tab.separator(), Some((2, "Remote")));
+        // Only one kind: nothing to separate.
+        let local = BookmarksTab::new(vec![terminal("/a", None), web("https://a.org", None)], None);
+        assert_eq!(local.separator(), None);
+        let remote = BookmarksTab::new(vec![host("me@build", None)], None);
+        assert_eq!(remote.separator(), None);
+        assert_eq!(BookmarksTab::new(Vec::new(), None).separator(), None);
     }
 
     #[test]
