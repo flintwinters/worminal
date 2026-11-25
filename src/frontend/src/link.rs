@@ -48,87 +48,106 @@ fn without_trailing_punctuation(text: &[char]) -> usize {
     end
 }
 
-/// The URL under (column, row) in a row-major cell grid, following wrapped rows, and the
-/// row-major cell indices it covers.
-///
-/// Full-screen applications (Ink, curses) break long URLs with their own newlines, so those rows
-/// carry no ATTR_WRAP. A row whose last column holds a URL character continues into a following
-/// row that starts, after any indentation, with a URL character. The continuation's indentation
-/// is skipped.
-pub fn at(
-    cells: &[Cell],
+/// The logical line around a click: wrapped and application-broken rows joined into one text.
+struct Grid<'a> {
+    cells: &'a [Cell],
     columns: usize,
-    column: usize,
-    row: usize,
-) -> Option<(String, RangeInclusive<usize>)> {
-    let rows = cells.len().checked_div(columns).unwrap_or(0);
-    if column >= columns || row >= rows {
-        return None;
+    rows: usize,
+}
+/// Link-character text of a logical line, the row-major cell index of each character, and the
+/// character index under the click.
+struct Span {
+    text: Vec<char>,
+    positions: Vec<usize>,
+    clicked: usize,
+}
+impl Grid<'_> {
+    fn line(&self, index: usize) -> &[Cell] {
+        &self.cells[index * self.columns..(index + 1) * self.columns]
     }
-    let line = |index: usize| &cells[index * columns..(index + 1) * columns];
-    let wrapped = |index: usize| line(index)[columns - 1].attributes & ATTR_WRAP != 0;
-    let indent = |index: usize| {
-        line(index)
+    fn wrapped(&self, index: usize) -> bool {
+        self.line(index)[self.columns - 1].attributes & ATTR_WRAP != 0
+    }
+    fn indent(&self, index: usize) -> usize {
+        self.line(index)
             .iter()
             .take_while(|cell| cell.rune == u32::from(b' '))
             .count()
-    };
-    let broken = |index: usize| {
-        let edge = &line(index)[columns - 1];
-        let next = line(index + 1);
+    }
+    fn broken(&self, index: usize) -> bool {
+        let edge = &self.line(index)[self.columns - 1];
         edge.attributes & ATTR_WDUMMY == 0
             && link_char(edge.rune).is_some()
-            && next
-                .get(indent(index + 1))
+            && self
+                .line(index + 1)
+                .get(self.indent(index + 1))
                 .is_some_and(|cell| link_char(cell.rune).is_some())
-    };
-    let continues = |index: usize| index + 1 < rows && (wrapped(index) || broken(index));
-    let mut first = row;
-    while first > 0 && continues(first - 1) {
-        first -= 1;
     }
-    let mut last = row;
-    while continues(last) {
-        last += 1;
+    fn continues(&self, index: usize) -> bool {
+        index + 1 < self.rows && (self.wrapped(index) || self.broken(index))
     }
-    let mut text = Vec::new();
-    let mut positions = Vec::new();
-    let mut clicked = None;
-    for index in first..=last {
-        let cells = line(index);
-        let mut width = columns;
-        if !continues(index) {
-            while width > 0 && cells[width - 1].rune == u32::from(b' ') {
-                width -= 1;
-            }
+    /// Rows of the logical line containing `row`.
+    fn extent(&self, row: usize) -> RangeInclusive<usize> {
+        let mut first = row;
+        while first > 0 && self.continues(first - 1) {
+            first -= 1;
         }
-        let skip = if index > first && !wrapped(index - 1) {
-            indent(index)
-        } else {
-            0
+        let mut last = row;
+        while self.continues(last) {
+            last += 1;
+        }
+        first..=last
+    }
+    fn span(&self, column: usize, row: usize) -> Option<Span> {
+        let rows = self.extent(row);
+        let mut span = Span {
+            text: Vec::new(),
+            positions: Vec::new(),
+            clicked: 0,
         };
-        if index == row && column < skip {
-            return None;
-        }
-        for (position, cell) in cells[..width].iter().enumerate().skip(skip) {
-            let dummy = cell.attributes & ATTR_WDUMMY != 0;
-            if index == row && position == column {
-                clicked = text.len().checked_sub(usize::from(dummy));
+        let mut clicked = None;
+        for index in rows.clone() {
+            let cells = self.line(index);
+            let mut width = self.columns;
+            if !self.continues(index) {
+                while width > 0 && cells[width - 1].rune == u32::from(b' ') {
+                    width -= 1;
+                }
             }
-            if dummy {
-                continue;
-            }
-            if text.len() == LIMIT - 1 {
+            let skip = if index > *rows.start() && !self.wrapped(index - 1) {
+                self.indent(index)
+            } else {
+                0
+            };
+            if index == row && column < skip {
                 return None;
             }
-            text.push(link_char(cell.rune).unwrap_or(' '));
-            positions.push(index * columns + position);
+            for (position, cell) in cells[..width].iter().enumerate().skip(skip) {
+                let dummy = cell.attributes & ATTR_WDUMMY != 0;
+                if index == row && position == column {
+                    clicked = span.text.len().checked_sub(usize::from(dummy));
+                }
+                if dummy {
+                    continue;
+                }
+                if span.text.len() == LIMIT - 1 {
+                    return None;
+                }
+                span.text.push(link_char(cell.rune).unwrap_or(' '));
+                span.positions.push(index * self.columns + position);
+            }
+            if index == row && column >= width {
+                return None;
+            }
         }
-        if index == row && column >= width {
-            return None;
-        }
+        span.clicked =
+            clicked.filter(|clicked| span.text.get(*clicked).is_some_and(|c| *c != ' '))?;
+        Some(span)
     }
-    let clicked = clicked.filter(|clicked| text.get(*clicked).is_some_and(|c| *c != ' '))?;
+}
+
+/// The path or URL token containing `clicked`: its character range and whether it is a path.
+fn token(text: &[char], clicked: usize) -> Option<(std::ops::Range<usize>, bool)> {
     let mut start = clicked;
     while start > 0 && text[start - 1] != ' ' {
         start -= 1;
@@ -154,22 +173,49 @@ pub fn at(
         return None;
     }
     let end = without_trailing_punctuation(&text[start..end]) + start;
-    if clicked >= end {
+    (clicked < end).then_some((start..end, path))
+}
+
+fn uri(target: String, path: bool) -> Option<String> {
+    if !path {
+        return Some(target);
+    }
+    let path = match target.strip_prefix("~/") {
+        Some(relative) => glib::home_dir().join(relative.trim_start_matches('/')),
+        None => target.into(),
+    };
+    Some(glib::filename_to_uri(path, None).ok()?.into())
+}
+
+/// The URL under (column, row) in a row-major cell grid, following wrapped rows, and the
+/// row-major cell indices it covers.
+///
+/// Full-screen applications (Ink, curses) break long URLs with their own newlines, so those rows
+/// carry no ATTR_WRAP. A row whose last column holds a URL character continues into a following
+/// row that starts, after any indentation, with a URL character. The continuation's indentation
+/// is skipped.
+pub fn at(
+    cells: &[Cell],
+    columns: usize,
+    column: usize,
+    row: usize,
+) -> Option<(String, RangeInclusive<usize>)> {
+    let rows = cells.len().checked_div(columns).unwrap_or(0);
+    if column >= columns || row >= rows {
         return None;
     }
-    let target: String = text[start..end].iter().collect();
-    let uri = if path {
-        let path = match target.strip_prefix("~/") {
-            Some(relative) => glib::home_dir().join(relative.trim_start_matches('/')),
-            None => target.into(),
-        };
-        glib::filename_to_uri(path, None).ok()?.into()
-    } else {
-        target
-    };
-    let last = positions[end - 1];
+    let span = Grid {
+        cells,
+        columns,
+        rows,
+    }
+    .span(column, row)?;
+    let (range, path) = token(&span.text, span.clicked)?;
+    let last = span.positions[range.end - 1];
     let wide = last % columns + 1 < columns && cells[last + 1].attributes & ATTR_WDUMMY != 0;
-    Some((uri, positions[start]..=last + usize::from(wide)))
+    let first = span.positions[range.start];
+    let target = span.text[range].iter().collect();
+    Some((uri(target, path)?, first..=last + usize::from(wide)))
 }
 
 #[cfg(test)]
