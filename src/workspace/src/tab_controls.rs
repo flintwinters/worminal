@@ -5,6 +5,7 @@ use worminal_protocol::input::{MOD_ALT, MOD_CONTROL, MOD_SHIFT};
 pub enum Action {
     New,
     Close,
+    Bookmark,
     Cycle { previous: bool, tinted_only: bool },
 }
 
@@ -13,6 +14,7 @@ pub fn shortcut(key: char, modifiers: u32) -> Option<Action> {
     match (key.to_ascii_lowercase(), modifiers & !MOD_SHIFT) {
         ('t', MOD_CONTROL) if !shift => Some(Action::New),
         ('w', MOD_CONTROL) if !shift => Some(Action::Close),
+        ('d', MOD_CONTROL) if shift => Some(Action::Bookmark),
         ('\t', MOD_CONTROL | MOD_ALT) => Some(Action::Cycle {
             previous: shift,
             tinted_only: modifiers & MOD_ALT != 0,

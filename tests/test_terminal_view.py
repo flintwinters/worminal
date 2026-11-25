@@ -18,6 +18,10 @@ import uuid
 
 DAEMON = runtime_binary(os.environ.get("WORMINAL_TEST_WORKSPACE_DAEMON", "worminald"))
 
+ACTIVE_TAB = b"\x1b[0;1;38;2;24;24;24;48;2;216;216;216m"
+IDLE_TAB = b"\x1b[0;38;2;216;216;216;48;2;24;24;24m"
+RESET = b"\x1b[0m"
+
 
 def controlling_tty():
     os.setsid()
@@ -119,19 +123,20 @@ class TerminalViewTest(unittest.TestCase):
     def test_tab_bar_order_selection_and_narrow_view(self):
         view = self.open_view()
         self.send(f"cd {shlex.quote(str(self.root / 'alpha'))}; printf '\\n'\r".encode())
-        self.wait_for(b"\x1b[7malpha \x1b[0m")
+        self.wait_for(ACTIVE_TAB + b" alpha " + RESET)
         self.send(b"\x1dt")
-        self.wait_for(b"alpha \x1b[0m \x1b[7m")
+        self.wait_for(b" alpha " + RESET + b"\x1b[1;8H" + ACTIVE_TAB)
         self.send(f"cd {shlex.quote(str(self.root / 'beta'))}; printf '\\n'\r".encode())
-        bar = self.wait_for(b"\x1b[7mbeta \x1b[0m")
-        self.assertIn(b"alpha \x1b[0m \x1b[7mbeta ", bar)
+        bar = self.wait_for(ACTIVE_TAB + b" beta " + RESET)
+        self.assertIn(b" alpha " + RESET + b"\x1b[1;8H" + ACTIVE_TAB + b" beta ", bar)
         self.send(b"\x1dp")
-        bar = self.wait_for(b"\x1b[7malpha \x1b[0m")
-        self.assertIn(b"\x1b[7malpha \x1b[0m beta ", bar)
+        self.wait_for(ACTIVE_TAB + b" alpha " + RESET + b"\x1b[1;8H" + IDLE_TAB + b" beta ")
         self.send(b"\x1dn")
-        self.wait_for(b"\x1b[7mbeta \x1b[0m")
+        self.wait_for(ACTIVE_TAB + b" beta " + RESET)
+        self.resize(8, 19)
+        self.wait_for(b"\x1b[2;1H" + ACTIVE_TAB + b" beta ")
         self.resize(8, 1)
-        narrow_bar = b"\x1b[1;1H\x1b[0m\x1b[2K\x1b[7mbeta "
+        narrow_bar = b"\x1b[1;1H" + ACTIVE_TAB + b" beta "
         bar = self.wait_for(narrow_bar)
         self.assertNotIn(b"\x1b[2;1H", bar.split(narrow_bar, 1)[1])
         self.resize(8, 2)
@@ -141,30 +146,42 @@ class TerminalViewTest(unittest.TestCase):
     def test_tab_mouse_and_modified_keys(self):
         view = self.open_view()
         self.send(f"cd {shlex.quote(str(self.root / 'alpha'))}; printf '\\n'\r".encode())
-        self.wait_for(b"\x1b[7malpha ")
+        self.wait_for(ACTIVE_TAB + b" alpha ")
         self.send(b"\x14")
-        self.wait_for(b"alpha \x1b[0m \x1b[7m")
+        self.wait_for(b" alpha " + RESET + b"\x1b[1;8H" + ACTIVE_TAB)
         self.send(f"cd {shlex.quote(str(self.root / 'beta'))}; printf '\\n'\r".encode())
-        self.wait_for(b"\x1b[7mbeta ")
+        self.wait_for(ACTIVE_TAB + b" beta ")
         self.send(b"\x1b[<0;2;1M\x1b[<0;2;1m")
-        self.wait_for(b"\x1b[7malpha ")
+        self.wait_for(ACTIVE_TAB + b" alpha ")
         self.send(b"\x1b[9;5u")
-        self.wait_for(b"\x1b[7mbeta ")
+        self.wait_for(ACTIVE_TAB + b" beta ")
         self.send(b"\x1b[27;6;9~")
-        self.wait_for(b"\x1b[7malpha ")
+        self.wait_for(ACTIVE_TAB + b" alpha ")
         self.send(b"\x1b[<65;2;1M")
-        self.wait_for(b"\x1b[7mbeta ")
+        self.wait_for(ACTIVE_TAB + b" beta ")
         self.send(b"\x1b[<0;9;1M\x1b[<32;2;1M\x1b[<0;2;1m")
-        bar = self.wait_for(b"\x1b[7mbeta \x1b[0m")
-        self.assertIn(b"alpha ", bar)
+        self.wait_for(ACTIVE_TAB + b" beta " + RESET + b"\x1b[1;7H" + IDLE_TAB + b" alpha ")
         self.send(b"\x1b[<1;9;1M")
-        bar = self.wait_for(b"\x1b[7mbeta \x1b[0m \x1b[")
+        bar = self.wait_for(ACTIVE_TAB + b" beta " + RESET + b"\x1b[")
         self.assertNotIn(b"alpha ", bar.split(b"\x1b[1;1H")[-1])
         self.send(b"printf 'KEY-%s\\n' OK\x1b[13u")
         self.wait_for(b"KEY-OK")
         self.send(b"\x1b[93;5uq")
         self.wait_for(b"\x1b[?1049l")
         self.assertEqual(view.wait(timeout=5), 0)
+
+    def test_shared_bookmark_star_and_hit_region(self):
+        view = self.open_view()
+        self.send(f"cd {shlex.quote(str(self.root / 'alpha'))}; printf '\\n'\r".encode())
+        self.wait_for(ACTIVE_TAB + b" alpha ")
+        self.send(b"\x1b[100;6u")
+        self.wait_for(ACTIVE_TAB + " ★ alpha ".encode())
+        bookmarks = self.root / "config" / "worminal" / "bookmarks.yaml"
+        self.assertIn(str(self.root / "alpha"), bookmarks.read_text())
+        self.send(b"\x1b[<0;2;1M\x1b[<0;2;1m")
+        self.wait_for(ACTIVE_TAB + b" alpha ")
+        self.assertNotIn(str(self.root / "alpha"), bookmarks.read_text())
+        self.detach(view)
 
     def test_bracketed_paste_keeps_command_prefix_literal(self):
         view = self.open_view()

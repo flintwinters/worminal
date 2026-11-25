@@ -10,27 +10,11 @@ use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
-use worminal_protocol::cell::{COLOR_DEFAULT_BACKGROUND as BG, COLOR_DEFAULT_FOREGROUND as FG};
-use worminal_protocol::{ATTENTION_DONE, ATTENTION_FAILED, ATTENTION_HELP};
+use worminal_protocol::cell::COLOR_DEFAULT_BACKGROUND as BG;
+use worminal_protocol::{ATTENTION_DONE, ATTENTION_FAILED};
+pub use worminal_workspace::tab_view::Tab;
+use worminal_workspace::tab_view::{self, Placement};
 
-#[derive(Clone)]
-pub struct Tab {
-    pub id: u32,
-    pub label: String,
-    pub browser: bool,
-    pub proxy: bool,
-    /// Shown by a daemon on another host.
-    pub remote: bool,
-    /// An SSH client is in the terminal's foreground.
-    pub ssh: bool,
-    /// A task in the terminal is reporting progress.
-    pub busy: bool,
-    pub background_job: bool,
-    /// A bookmark can be made of this tab: a terminal with a known directory, or a web page.
-    pub starrable: bool,
-    /// The tab is bookmarked.
-    pub starred: bool,
-}
 /// What the strip asks of the window. A tab is selected when its button is released, so a drag that
 /// starts on it leaves the panes it is dragged over on screen.
 pub struct Actions {
@@ -103,71 +87,27 @@ struct State {
 #[derive(Clone)]
 pub struct Tabs(Rc<State>);
 
-/// Greedy wrap in tab order: `(row, x)` per tab. A tab wider than a row sits alone and is clipped.
-fn place(widths: &[i32], right: i32) -> Vec<(i32, i32)> {
-    let (mut row, mut x) = (0, 2);
-    widths
-        .iter()
-        .map(|&width| {
-            if x > 2 && x + width > right {
-                row += 1;
-                x = 2;
-            }
-            let at = (row, x);
-            x += width;
-            at
-        })
-        .collect()
-}
-/// ANSI magenta: tabs whose foreground is an SSH session.
-const SSH: u32 = 5;
-/// ANSI bright black: dark gray behind tabs whose task is busy.
-const BUSY: u32 = 8;
-/// Cells between a starrable tab's left padding and its label: the star and a gap.
-const STAR_CELLS: i32 = 2;
-fn star_width(entry: &Tab, metrics: Metrics) -> i32 {
-    if entry.starrable {
-        STAR_CELLS * metrics.width
-    } else {
-        0
-    }
-}
-/// Whether a press `offset` pixels into a tab lands on its star; the padding before it counts, so the target
-/// is not one thin glyph. Drawing and hit testing both place the label by `star_width`.
-fn on_star(starrable: bool, offset: i32, cell: i32) -> bool {
-    starrable && offset < (1 + STAR_CELLS) * cell
-}
 /// Load the tab's label; the selected tab's is bold, which widens it.
-fn label(layout: &pango::Layout, entry: &Tab, selected: bool) {
+fn label(layout: &pango::Layout, selected: bool) {
     let attributes = pango::AttrList::new();
     if selected {
         attributes.insert(pango::AttrInt::new_weight(pango::Weight::Bold));
     }
     layout.set_attributes(Some(&attributes));
-    layout.set_text(&entry.label);
 }
-fn width(layout: &pango::Layout, entry: &Tab, selected: bool, metrics: Metrics) -> i32 {
-    label(layout, entry, selected);
-    layout.pixel_size().0 + 2 * metrics.width + star_width(entry, metrics)
+fn placed(entries: &[Tab], active: u32, metrics: Metrics, right: i32) -> tab_view::Strip {
+    let columns = ((right - 2) / metrics.width).max(1) as usize;
+    tab_view::layout(entries, active, columns, usize::MAX)
 }
-/// Each tab's `(x, top, width)` in strip coordinates; drawing, hit testing and drag images share it.
-fn placed(
-    layout: &pango::Layout,
-    entries: &[Tab],
-    active: u32,
-    metrics: Metrics,
-    right: i32,
-) -> Vec<(i32, i32, i32)> {
-    let widths: Vec<i32> = entries
-        .iter()
-        .map(|entry| width(layout, entry, entry.id == active, metrics))
-        .collect();
-    place(&widths, right)
-        .into_iter()
-        .zip(widths)
-        .map(|((row, x), width)| (x, 2 + row * metrics.height, width))
-        .collect()
+
+fn pixels(place: Placement, metrics: Metrics) -> (i32, i32, i32) {
+    (
+        2 + place.column as i32 * metrics.width,
+        2 + place.row as i32 * metrics.height,
+        place.width as i32 * metrics.width,
+    )
 }
+
 /// One tab's fill and label, bold when selected, clipped at `right`.
 #[expect(clippy::too_many_arguments, reason = "one tab's geometry and colors")]
 fn paint_tab(
@@ -179,8 +119,10 @@ fn paint_tab(
     (x, top, width): (i32, i32, i32),
     right: i32,
     selected: bool,
+    label_bytes: usize,
 ) -> Result<(), cairo::Error> {
-    label(layout, entry, selected);
+    label(layout, selected);
+    layout.set_text(&entry.caption()[..label_bytes]);
     let baseline = top + (metrics.height - metrics.ink_height) / 2 + metrics.ascent;
     if let Some(fill) = fill {
         paint::source(cr, &fill);
@@ -193,16 +135,16 @@ fn paint_tab(
         cr.fill()?;
     }
     paint::source(cr, &text);
-    if entry.starrable {
-        layout.set_text(if entry.starred { "★" } else { "☆" });
+    if let Some(star) = entry.star() {
+        layout.set_text(star.encode_utf8(&mut [0; 4]));
         cr.move_to(
             f64::from(x + metrics.width),
             f64::from(baseline) - f64::from(layout.baseline()) / f64::from(pango::SCALE),
         );
         graphics_ffi::show_layout(cr, layout);
-        label(layout, entry, selected);
+        layout.set_text(&entry.caption()[..label_bytes]);
     }
-    let label = x + metrics.width + star_width(entry, metrics);
+    let label = x + entry.label_column() as i32 * metrics.width;
     cr.move_to(
         f64::from(label),
         f64::from(baseline) - f64::from(layout.baseline()) / f64::from(pango::SCALE),
@@ -219,61 +161,17 @@ pub(super) fn mix(from: &gdk::RGBA, to: &gdk::RGBA, amount: f64) -> gdk::RGBA {
         1.0,
     )
 }
-/// Whether a tab that is not selected has a background fill: an alert, a background job or a busy task.
-/// Must agree with `colors`.
-fn tinted(entry: &Tab, severity: u32) -> bool {
-    severity > 0 || entry.background_job || entry.busy
-}
-/// Background fill (none for resting tabs) and text color; attention stays solid until input. The selected tab
-/// is always the foreground color, its text magenta for SSH: any other fill would hide which tab is selected.
 fn colors(
     palette: &Palette,
     entry: &Tab,
     selected: bool,
     severity: u32,
 ) -> (Option<gdk::RGBA>, gdk::RGBA) {
-    let orange = palette.color(worminal_protocol::cell::COLOR_TRUECOLOR | 0xfe8019);
-    if selected {
-        return (
-            Some(palette.color(FG)),
-            if entry.proxy {
-                orange
-            } else {
-                palette.color(if entry.ssh { SSH } else { BG })
-            },
-        );
-    }
-    if severity > 0 {
-        return (
-            Some(palette.color(severity_color(severity))),
-            palette.color(BG),
-        );
-    }
-    let fill = if entry.background_job {
-        Some(palette.color(6))
-    } else {
-        entry.busy.then(|| palette.color(BUSY))
-    };
-    let text = palette.color(if entry.background_job {
-        BG
-    } else if entry.ssh {
-        SSH
-    } else if entry.browser {
-        1
-    } else if entry.remote {
-        2
-    } else {
-        7
-    });
-    (fill, if entry.proxy { orange } else { text })
-}
-/// Palette color of an alert: green when finished, yellow when the user is needed, red on failure.
-fn severity_color(severity: u32) -> u32 {
-    match severity {
-        ATTENTION_DONE => 2,
-        ATTENTION_HELP => 3,
-        _ => 1,
-    }
+    let style = entry.style(selected, severity);
+    (
+        style.background.map(|color| palette.color(color)),
+        palette.color(style.foreground),
+    )
 }
 /// Bells closer together than this belong to one burst, whose length is the alert's severity.
 const BELL_BURST: std::time::Duration = std::time::Duration::from_millis(1500);
@@ -301,8 +199,10 @@ impl State {
             .filter(|drag| drag.active)
             .and_then(|drag| drag.over)
             .or(self.hint.get());
-        let placed = placed(layout, &entries, self.active.get(), metrics, right);
-        for (entry, &(x, top, width)) in entries.iter().zip(&placed) {
+        let strip = placed(&entries, self.active.get(), metrics, right);
+        for place in strip.tabs {
+            let entry = &entries[place.index];
+            let (x, top, width) = pixels(place, metrics);
             cr.save()?;
             cr.rectangle(
                 2.0,
@@ -327,6 +227,7 @@ impl State {
                 (x, top, width),
                 right,
                 selected,
+                place.label_bytes,
             )?;
             if let Some(Slot { after, .. }) = marker.filter(|slot| slot.tab == entry.id) {
                 paint::source(cr, &palette.color(3));
@@ -346,58 +247,40 @@ impl State {
     /// The tab under the pointer and whether the pointer is on its star.
     fn hit(&self, x: f64, y: f64) -> Option<(u32, bool)> {
         let metrics = self.metrics.get()?;
-        let layout = self.layout.borrow();
-        let layout = layout.as_ref()?;
         let entries = self.entries.borrow();
         let right = self.widget.allocated_width() - 2;
-        entries
-            .iter()
-            .zip(placed(layout, &entries, self.active.get(), metrics, right))
-            .find(|(_, (left, top, width))| {
-                y >= f64::from(*top)
-                    && y < f64::from(top + metrics.height)
-                    && x >= f64::from(*left)
-                    && x < f64::from((left + width).min(right))
-            })
-            .map(|(entry, (left, _, _))| {
-                let offset = (x - f64::from(left)) as i32;
-                (entry.id, on_star(entry.starrable, offset, metrics.width))
-            })
+        if x < 2.0 || x >= f64::from(right) || y < 2.0 {
+            return None;
+        }
+        let strip = placed(&entries, self.active.get(), metrics, right);
+        let column = ((x - 2.0) / f64::from(metrics.width)) as usize;
+        let row = ((y - 2.0) / f64::from(metrics.height)) as usize;
+        strip.hit(column, row, &entries)
     }
-    /// The slot a tab arriving at `(x, y)` takes: beside the nearer half of the tab there, or at the end of
-    /// the row (or of the last row) it is past.
+    /// The slot a tab arriving at this point takes, including space past the end of a row.
     fn slot(&self, x: f64, y: f64) -> Option<Slot> {
         let metrics = self.metrics.get()?;
-        let layout = self.layout.borrow();
-        let layout = layout.as_ref()?;
         let entries = self.entries.borrow();
-        let placed = placed(
-            layout,
+        let strip = placed(
             &entries,
             self.active.get(),
             metrics,
             self.widget.allocated_width() - 2,
         );
-        let last = placed.last()?.1;
-        let top = placed
-            .iter()
-            .map(|(_, top, _)| *top)
-            .find(|top| y < f64::from(top + metrics.height))
-            .unwrap_or(last);
-        let row = || {
-            entries
-                .iter()
-                .zip(&placed)
-                .filter(|(_, place)| place.1 == top)
-        };
-        let slot = |(entry, _): (&Tab, _), after| Slot {
-            tab: entry.id,
+        let target_row =
+            (((y - 2.0) / f64::from(metrics.height)).max(0.0) as usize).min(strip.rows - 1);
+        let row = || strip.tabs.iter().filter(|place| place.row == target_row);
+        let slot = |place: &Placement, after| Slot {
+            tab: entries[place.index].id,
             after,
         };
         row()
-            .find(|(_, (left, _, width))| x < f64::from(*left) + f64::from(*width) / 2.0)
-            .map(|found| slot(found, false))
-            .or_else(|| row().next_back().map(|found| slot(found, true)))
+            .find(|place| {
+                let (left, _, width) = pixels(**place, metrics);
+                x < f64::from(left) + f64::from(width) / 2.0
+            })
+            .map(|place| slot(place, false))
+            .or_else(|| row().next_back().map(|place| slot(place, true)))
     }
     fn severity(&self, id: u32) -> u32 {
         self.attention
@@ -415,10 +298,12 @@ impl State {
         let palette = palette.as_ref()?.borrow();
         let entries = self.entries.borrow();
         let right = self.widget.allocated_width() - 2;
-        let (entry, &(left, top, width)) = entries
-            .iter()
-            .zip(&placed(layout, &entries, self.active.get(), metrics, right))
-            .find(|(entry, _)| entry.id == id)?;
+        let place = placed(&entries, self.active.get(), metrics, right)
+            .tabs
+            .into_iter()
+            .find(|place| entries[place.index].id == id)?;
+        let entry = &entries[place.index];
+        let (left, top, width) = pixels(place, metrics);
         let width = width.min(right - left).max(1);
         let scale = self.widget.scale_factor();
         let image = cairo::ImageSurface::create(
@@ -440,6 +325,7 @@ impl State {
             (left, top, width),
             left + width,
             true,
+            place.label_bytes,
         )
         .ok()?;
         drop(cr);
@@ -516,19 +402,16 @@ impl State {
     }
     /// Height follows the row count, which depends on the allocated width.
     fn fit(&self) {
-        let (Some(metrics), Some(layout)) = (self.metrics.get(), self.layout.borrow().clone())
-        else {
+        let Some(metrics) = self.metrics.get() else {
             return;
         };
         let rows = placed(
-            &layout,
             &self.entries.borrow(),
             self.active.get(),
             metrics,
             self.widget.allocated_width() - 2,
         )
-        .last()
-        .map_or(1, |(_, top, _)| (top - 2) / metrics.height + 1);
+        .rows as i32;
         let height = rows * metrics.height + 2;
         if self.widget.size_request().1 != height {
             self.widget.set_size_request(-1, height);
@@ -678,7 +561,7 @@ impl Tabs {
             .entries
             .borrow()
             .iter()
-            .any(|entry| entry.id == id && tinted(entry, self.0.severity(id)))
+            .any(|entry| entry.id == id && entry.tinted(self.0.severity(id)))
     }
     /// The slot a tab dragged in from another strip at this strip position would take.
     pub fn slot(&self, x: f64, y: f64) -> Option<Slot> {
@@ -720,11 +603,10 @@ impl Tabs {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        colors, on_star, place, severity_color, star_width, Tab, ATTENTION_DONE, ATTENTION_HELP,
-        BUSY, FG,
-    };
-    use crate::paint::{Metrics, Palette};
+    use super::{colors, Tab, ATTENTION_DONE};
+    use crate::paint::Palette;
+    use worminal_protocol::{cell::COLOR_DEFAULT_FOREGROUND as FG, ATTENTION_HELP};
+    use worminal_workspace::tab_view::{severity_color, BUSY, SSH};
     fn tab(busy: bool) -> Tab {
         Tab {
             id: 1,
@@ -741,21 +623,10 @@ mod tests {
     }
     #[test]
     fn the_star_is_the_padding_and_its_own_cells_before_the_label() {
-        // 8 px cells: padding 0-8, star 8-16, gap 16-24; the label starts at 24.
-        assert!(on_star(true, 0, 8));
-        assert!(on_star(true, 23, 8));
-        assert!(!on_star(true, 24, 8));
-        assert!(!on_star(false, 0, 8));
-        let metrics = Metrics {
-            width: 8,
-            height: 16,
-            ink_height: 12,
-            ascent: 12,
-        };
         let mut entry = tab(false);
-        assert_eq!(star_width(&entry, metrics), 0);
+        assert_eq!(entry.label_column(), 1);
         entry.starrable = true;
-        assert_eq!(star_width(&entry, metrics), 16);
+        assert_eq!(entry.label_column(), 3);
     }
     #[test]
     fn a_busy_tab_is_gray_unless_selected_or_alerting() {
@@ -802,14 +673,7 @@ mod tests {
         entry.ssh = true;
         assert_eq!(
             colors(&palette, &entry, true, ATTENTION_DONE),
-            (Some(palette.color(FG)), palette.color(super::SSH))
+            (Some(palette.color(FG)), palette.color(SSH))
         );
-    }
-    #[test]
-    fn tabs_wrap_in_order_and_oversized_tab_sits_alone() {
-        assert_eq!(place(&[], 100), vec![]);
-        assert_eq!(place(&[30, 30, 30], 100), vec![(0, 2), (0, 32), (0, 62)]);
-        assert_eq!(place(&[40, 40, 40], 100), vec![(0, 2), (0, 42), (1, 2)]);
-        assert_eq!(place(&[500, 20, 20], 100), vec![(0, 2), (1, 2), (1, 22)]);
     }
 }

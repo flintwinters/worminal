@@ -68,6 +68,7 @@ impl App {
                 Action::Close => {
                     self.send(self.active.get(), CommandKind::Close { receipt: false })
                 }
+                Action::Bookmark => self.toggle_bookmark(self.active.get()),
                 Action::Cycle {
                     previous,
                     tinted_only,
@@ -151,10 +152,6 @@ impl App {
                 // B for bookmarks; P also works for keyboards that can send it (a membrane keyboard may not).
                 key::b | key::p => {
                     self.toggle_panel();
-                    return true;
-                }
-                key::d => {
-                    self.toggle_bookmark(self.active.get());
                     return true;
                 }
                 key::c | key::v | key::y => {

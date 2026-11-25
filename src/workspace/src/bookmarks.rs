@@ -44,6 +44,28 @@ pub enum Target {
     },
 }
 
+impl Target {
+    /// A foreground SSH session reports a local directory that does not describe the remote shell.
+    pub fn terminal(
+        directory: &std::path::Path,
+        ssh: bool,
+        master: Option<String>,
+    ) -> Option<Self> {
+        if ssh {
+            return None;
+        }
+        let bookmark = Bookmark {
+            target: Self::Terminal {
+                directory: directory.to_str()?.to_owned(),
+                master,
+            },
+            title: None,
+        };
+        bookmark.validate().ok()?;
+        Some(bookmark.target)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Bookmark {
     pub target: Target,

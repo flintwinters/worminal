@@ -2,7 +2,7 @@ use std::{
     io::{self, IsTerminal, Write},
     mem::MaybeUninit,
 };
-use worminal_protocol::{WORKSPACE_MAX_COLS, WORKSPACE_MAX_ROWS};
+use worminal_protocol::WORKSPACE_MAX_COLS;
 
 pub(super) fn size() -> io::Result<(u32, u32)> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
@@ -17,7 +17,7 @@ pub(super) fn size() -> io::Result<(u32, u32)> {
     let size = unsafe { size.assume_init() };
     Ok((
         u32::from(size.ws_col).clamp(1, WORKSPACE_MAX_COLS),
-        u32::from(size.ws_row).clamp(1, WORKSPACE_MAX_ROWS + super::tabs::ROWS),
+        u32::from(size.ws_row).clamp(1, u32::from(u16::MAX)),
     ))
 }
 

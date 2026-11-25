@@ -4,6 +4,7 @@ use gtk::gdk::RGBA;
 use worminal_config as theme;
 use worminal_engine::Cell;
 use worminal_protocol::cell::*;
+use worminal_workspace::screen_view;
 
 pub struct Palette {
     colors: Vec<RGBA>,
@@ -26,44 +27,15 @@ impl Palette {
         };
         let color = value
             .and_then(|value| RGBA::parse(value).ok())
-            .unwrap_or_else(|| {
-                if (16..232).contains(&index) {
-                    let n = index - 16;
-                    let component = |x: usize| {
-                        if x == 0 {
-                            0.0
-                        } else {
-                            (55 + 40 * x) as f64 / 255.0
-                        }
-                    };
-                    RGBA::new(
-                        component(n / 36),
-                        component(n / 6 % 6),
-                        component(n % 6),
-                        1.0,
-                    )
-                } else if (232..256).contains(&index) {
-                    let gray = (8 + 10 * (index - 232)) as f64 / 255.0;
-                    RGBA::new(gray, gray, gray, 1.0)
-                } else {
-                    theme::get().colors[index]
-                        .as_deref()
-                        .and_then(|name| RGBA::parse(name).ok())
-                        .unwrap_or(*current)
-                }
-            });
+            .or_else(|| theme::palette_rgb(theme::get(), index).map(rgba))
+            .unwrap_or(*current);
         let changed = *current != color;
         self.colors[index] = color;
         changed
     }
     pub fn color(&self, value: u32) -> RGBA {
         if value & COLOR_TRUECOLOR != 0 {
-            RGBA::new(
-                ((value >> 16) & 255) as f64 / 255.0,
-                ((value >> 8) & 255) as f64 / 255.0,
-                (value & 255) as f64 / 255.0,
-                1.0,
-            )
+            rgba(value)
         } else {
             self.colors
                 .get(value as usize)
@@ -71,6 +43,15 @@ impl Palette {
                 .unwrap_or(self.colors[COLOR_DEFAULT_FOREGROUND as usize])
         }
     }
+}
+
+fn rgba(value: u32) -> RGBA {
+    RGBA::new(
+        ((value >> 16) & 255) as f64 / 255.0,
+        ((value >> 8) & 255) as f64 / 255.0,
+        (value & 255) as f64 / 255.0,
+        1.0,
+    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -213,25 +194,24 @@ impl Painter {
         &self,
         viewport: &Viewport,
         style: &Style<'_>,
-        mut cell: Cell,
+        cell: Cell,
         x: usize,
         y: usize,
     ) -> (RGBA, RGBA, bool) {
-        if theme::get().bold_bright && cell.attributes & ATTR_BOLD != 0 && cell.foreground < 8 {
-            cell.foreground += 8;
-        }
-        let mut fg = style.palette.color(cell.foreground);
-        let mut bg = style.palette.color(cell.background);
-        let reverse = (cell.attributes & ATTR_REVERSE != 0)
-            ^ (style.mode & MODE_REVERSE != 0)
-            ^ viewport.selected(x, y);
-        if reverse {
-            std::mem::swap(&mut fg, &mut bg);
-        }
+        let (foreground, background) = screen_view::colors(
+            cell.foreground,
+            cell.background,
+            cell.attributes,
+            style.mode,
+            viewport.selected(x, y),
+            theme::get().bold_bright,
+        );
+        let mut fg = style.palette.color(foreground);
+        let mut bg = style.palette.color(background);
         if cell.attributes & ATTR_FAINT != 0 {
-            fg.set_red(fg.red() * 0.66);
-            fg.set_green(fg.green() * 0.66);
-            fg.set_blue(fg.blue() * 0.66);
+            fg.set_red(fg.red() * screen_view::FAINT_BRIGHTNESS);
+            fg.set_green(fg.green() * screen_view::FAINT_BRIGHTNESS);
+            fg.set_blue(fg.blue() * screen_view::FAINT_BRIGHTNESS);
         }
         if cell.attributes & ATTR_INVISIBLE != 0 || cell.attributes & ATTR_BLINK != 0 && style.blink
         {

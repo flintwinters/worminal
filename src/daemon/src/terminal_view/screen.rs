@@ -1,13 +1,15 @@
 //! Paint complete Worp frames as VT rows. Only full row updates are negotiated.
-use super::{tabs, Size};
+use super::{Body, Size};
 use std::io::{self, Write};
 use worminal_protocol::{
     cell::*,
     worp::events::{Cell, CellBuffer, EventKind, FrameState},
 };
+use worminal_workspace::screen_view;
 
 #[derive(Default)]
 pub(super) struct Screen {
+    palette: Vec<Option<u32>>,
     mode: u32,
     geometry: Option<Size>,
     cursor: Option<FrameState>,
@@ -30,48 +32,68 @@ pub(super) fn safe_text(bytes: &[u8]) -> String {
         .collect()
 }
 
+pub(super) fn palette(overrides: &[Vec<u8>]) -> Vec<Option<u32>> {
+    let config = worminal_config::get();
+    (0..COLOR_COUNT as usize)
+        .map(|index| {
+            overrides
+                .get(index)
+                .and_then(|value| std::str::from_utf8(value).ok())
+                .and_then(worminal_config::rgb_hex)
+                .or_else(|| worminal_config::palette_rgb(config, index))
+        })
+        .collect()
+}
+
 impl Screen {
+    pub fn palette(&mut self, palette: Vec<Option<u32>>) {
+        self.palette = palette;
+    }
+
     pub fn live(&self) -> bool {
         self.geometry.is_some()
     }
 
-    pub fn reset(&mut self, size: Size, output: &mut impl Write) -> io::Result<()> {
+    pub fn reset(&mut self, size: Body, output: &mut impl Write) -> io::Result<()> {
         self.modes(0, size, output)?;
-        *self = Self::default();
+        let palette = std::mem::take(&mut self.palette);
+        *self = Self {
+            palette,
+            ..Self::default()
+        };
         output.write_all(b"\x1b[?25l")?;
         clear_body(size, output)
     }
 
-    pub fn modes(&mut self, mode: u32, size: Size, output: &mut impl Write) -> io::Result<()> {
+    pub fn modes(&mut self, mode: u32, size: Body, output: &mut impl Write) -> io::Result<bool> {
         for (bit, on, off) in [
             (MODE_APPCURSOR, "\x1b[?1h", "\x1b[?1l"),
             (MODE_APPKEYPAD, "\x1b=", "\x1b>"),
             (MODE_BRCKTPASTE, "\x1b[?2004h", "\x1b[?2004l"),
-            (MODE_REVERSE, "\x1b[?5h", "\x1b[?5l"),
         ] {
             if (self.mode ^ mode) & bit != 0 {
                 output.write_all(if mode & bit != 0 { on } else { off }.as_bytes())?;
             }
         }
-        let cursor_changed = (self.mode ^ mode) & MODE_HIDE != 0;
+        let changed = self.mode ^ mode;
         self.mode = mode;
-        if cursor_changed {
+        if changed & MODE_HIDE != 0 {
             self.position_cursor(size, output)?;
         }
-        Ok(())
+        Ok(changed & MODE_REVERSE != 0)
     }
 
-    pub fn position_cursor(&self, size: Size, output: &mut impl Write) -> io::Result<()> {
+    pub fn position_cursor(&self, size: Body, output: &mut impl Write) -> io::Result<()> {
         if let Some(frame) = self.cursor.filter(|frame| {
             frame.scroll == 0
                 && self.mode & MODE_HIDE == 0
-                && frame.cursor_x < size.0
-                && frame.cursor_y < size.1
+                && frame.cursor_x < size.columns
+                && frame.cursor_y < size.rows
         }) {
             write!(
                 output,
                 "\x1b[{};{}H\x1b[?25h",
-                frame.cursor_y + tabs::ROWS + 1,
+                frame.cursor_y + size.top + 1,
                 frame.cursor_x + 1
             )
         } else {
@@ -82,7 +104,7 @@ impl Screen {
     pub fn event(
         &mut self,
         kind: EventKind,
-        size: Size,
+        size: Body,
         output: &mut impl Write,
     ) -> io::Result<()> {
         match kind {
@@ -120,16 +142,22 @@ impl Screen {
         Ok(())
     }
 
-    fn paint(&mut self, frame: Frame, size: Size, output: &mut impl Write) -> io::Result<()> {
+    fn paint(&mut self, frame: Frame, size: Body, output: &mut impl Write) -> io::Result<()> {
         let geometry = (frame.state.columns, frame.state.rows);
         if self.geometry != Some(geometry) {
             clear_body(size, output)?;
             self.geometry = Some(geometry);
         }
-        for (index, row) in frame.rows.into_iter().take(size.1 as usize).enumerate() {
+        for (index, row) in frame.rows.into_iter().take(size.rows as usize).enumerate() {
             if let Some(cells) = row {
-                write!(output, "\x1b[{};1H", index + tabs::ROWS as usize + 1)?;
-                paint_row(cells.iter(), size.0 as usize, output)?;
+                write!(output, "\x1b[{};1H", index + size.top as usize + 1)?;
+                paint_row(
+                    cells.iter(),
+                    size.columns as usize,
+                    &self.palette,
+                    self.mode,
+                    output,
+                )?;
             }
         }
         self.cursor = Some(frame.state);
@@ -137,9 +165,9 @@ impl Screen {
     }
 }
 
-fn clear_body((_, rows): Size, output: &mut impl Write) -> io::Result<()> {
-    if rows != 0 {
-        write!(output, "\x1b[0m\x1b[{};1H\x1b[J", tabs::ROWS + 1)?;
+fn clear_body(size: Body, output: &mut impl Write) -> io::Result<()> {
+    if size.rows != 0 {
+        write!(output, "\x1b[0m\x1b[{};1H\x1b[J", size.top + 1)?;
     }
     Ok(())
 }
@@ -147,16 +175,40 @@ fn clear_body((_, rows): Size, output: &mut impl Write) -> io::Result<()> {
 fn paint_row(
     cells: impl Iterator<Item = Cell>,
     width: usize,
+    palette: &[Option<u32>],
+    mode: u32,
     output: &mut impl Write,
 ) -> io::Result<()> {
+    let bold_bright = worminal_config::get().bold_bright;
     let mut previous = None;
     for (column, cell) in cells.take(width).enumerate() {
         if cell.attributes & ATTR_WDUMMY != 0 {
             continue;
         }
-        let style = (cell.attributes & 0xff, cell.foreground, cell.background);
+        let (foreground, background) = screen_view::colors(
+            cell.foreground,
+            cell.background,
+            cell.attributes,
+            mode,
+            false,
+            bold_bright,
+        );
+        let mut flags = cell.attributes & 0xff & !(ATTR_REVERSE | ATTR_INVISIBLE);
+        let mut foreground = foreground;
+        if cell.attributes & ATTR_INVISIBLE != 0 {
+            flags &= !ATTR_FAINT;
+        } else if flags & ATTR_FAINT != 0 {
+            if let Some(rgb) = resolve_color(foreground, palette) {
+                let [_, red, green, blue] = rgb.to_be_bytes();
+                let dim =
+                    |component: u8| (f64::from(component) * screen_view::FAINT_BRIGHTNESS) as u8;
+                foreground = u32::from_be_bytes([1, dim(red), dim(green), dim(blue)]);
+                flags &= !ATTR_FAINT;
+            }
+        }
+        let style = (flags, foreground, background);
         if previous != Some(style) {
-            attributes(style, output)?;
+            attributes(style, palette, output)?;
             previous = Some(style);
         }
         let mut character = char::from_u32(cell.rune)
@@ -172,6 +224,7 @@ fn paint_row(
 
 fn attributes(
     (flags, foreground, background): (u32, u32, u32),
+    palette: &[Option<u32>],
     output: &mut impl Write,
 ) -> io::Result<()> {
     output.write_all(b"\x1b[0")?;
@@ -181,26 +234,37 @@ fn attributes(
         (ATTR_ITALIC, 3),
         (ATTR_UNDERLINE, 4),
         (ATTR_BLINK, 5),
-        (ATTR_REVERSE, 7),
-        (ATTR_INVISIBLE, 8),
         (ATTR_STRUCK, 9),
     ] {
         if flags & flag != 0 {
             write!(output, ";{code}")?;
         }
     }
-    color(foreground, 38, output)?;
-    color(background, 48, output)?;
+    color(foreground, 38, palette, output)?;
+    color(background, 48, palette, output)?;
     output.write_all(b"m")
 }
 
-fn color(value: u32, channel: u8, output: &mut impl Write) -> io::Result<()> {
-    if value & COLOR_TRUECOLOR != 0 {
-        let [_, red, green, blue] = value.to_be_bytes();
+pub(super) fn color(
+    value: u32,
+    channel: u8,
+    palette: &[Option<u32>],
+    output: &mut impl Write,
+) -> io::Result<()> {
+    if let Some(rgb) = resolve_color(value, palette) {
+        let [_, red, green, blue] = rgb.to_be_bytes();
         write!(output, ";{channel};2;{red};{green};{blue}")
     } else if value < 256 {
         write!(output, ";{channel};5;{value}")
     } else {
         Ok(())
+    }
+}
+
+fn resolve_color(value: u32, palette: &[Option<u32>]) -> Option<u32> {
+    if value & COLOR_TRUECOLOR != 0 {
+        Some(value)
+    } else {
+        palette.get(value as usize).copied().flatten()
     }
 }

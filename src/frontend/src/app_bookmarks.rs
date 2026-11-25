@@ -34,13 +34,7 @@ fn target_of(
             url: url.to_owned(),
         }
     } else {
-        if ssh {
-            return None;
-        }
-        Target::Terminal {
-            directory: directory.to_str()?.to_owned(),
-            master,
-        }
+        return Target::terminal(directory, ssh, master);
     };
     let bookmark = Bookmark {
         target,

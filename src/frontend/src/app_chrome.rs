@@ -62,11 +62,10 @@ impl App {
                     browser_label(&page.url, &page.title)
                 } else {
                     use std::os::unix::ffi::OsStrExt;
-                    String::from_utf8_lossy(&worminal_protocol::worp::events::tab_label(
+                    worminal_workspace::tab_view::terminal_label(
                         page.directory.as_os_str().as_bytes(),
                         page.ssh_user.as_deref().map(str::as_bytes),
-                    ))
-                    .into_owned()
+                    )
                 };
                 page.label.set_text(&label);
                 let (starrable, starred) = self.bookmark_state(page.id);

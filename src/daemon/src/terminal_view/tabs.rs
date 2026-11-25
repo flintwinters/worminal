@@ -1,104 +1,70 @@
-//! The tab bar consumes the same ordered catalog and directory labels as the desktop view.
-use super::screen::safe_text;
-use std::{
-    io::{self, Write},
-    ops::Range,
-};
-use worminal_protocol::worp::events::{split_directory_field, tab_label, TabRecord};
-
-pub(super) const ROWS: u32 = 1;
-const MAX_TAB_COLUMNS: usize = 24;
-
-extern "C" {
-    fn wcwidth(character: libc::wchar_t) -> libc::c_int;
-}
-
-fn width(character: char) -> usize {
-    // The view initializes LC_CTYPE before rendering. A conservative fallback also works in C locale.
-    let width = unsafe { wcwidth(character as libc::wchar_t) };
-    usize::try_from(width).unwrap_or(character.len_utf8())
-}
-
-fn fit(text: &str, columns: usize) -> (&str, usize) {
-    let mut used = 0;
-    for (index, character) in text.char_indices() {
-        let next = used + width(character);
-        if next > columns {
-            return (&text[..index], used);
-        }
-        used = next;
-    }
-    (text, used)
-}
+//! Encode the shared tab cells and hit regions as a VT strip.
+use std::io::{self, Write};
+use worminal_protocol::cell::COLOR_DEFAULT_BACKGROUND as BG;
+use worminal_workspace::tab_view::{self, Strip, Tab};
 
 #[derive(Default)]
 pub(super) struct Bar {
     pub bytes: Vec<u8>,
-    hits: Vec<(Range<u32>, u32)>,
+    pub rows: u32,
+    strip: Option<Strip>,
 }
 
 impl Bar {
-    pub fn hit(&self, column: u32) -> Option<u32> {
-        self.hits
-            .iter()
-            .find(|(range, _)| range.contains(&column))
-            .map(|(_, id)| *id)
+    pub fn hit(&self, column: u32, row: u32, tabs: &[Tab]) -> Option<(u32, bool)> {
+        self.strip
+            .as_ref()?
+            .hit(column as usize, row as usize, tabs)
     }
 }
 
-pub(super) fn draw(tabs: &[TabRecord], active: u32, columns: u32) -> io::Result<Bar> {
-    let columns = columns as usize;
-    let mut output = b"\x1b[1;1H\x1b[0m\x1b[2K".to_vec();
-    let mut hits = Vec::new();
+pub(super) fn draw(
+    tabs: &[Tab],
+    active: u32,
+    columns: u32,
+    max_rows: u32,
+    severity: impl Fn(u32) -> u32,
+    palette: &[Option<u32>],
+) -> io::Result<Bar> {
+    let strip = tab_view::layout(tabs, active, columns as usize, max_rows as usize);
+    let mut bytes = Vec::new();
+    for row in 1..=strip.rows {
+        write!(bytes, "\x1b[{row};1H\x1b[0")?;
+        super::screen::color(BG, 48, palette, &mut bytes)?;
+        bytes.write_all(b"m\x1b[2K\x1b[0m")?;
+    }
+    for place in &strip.tabs {
+        let tab = &tabs[place.index];
+        let style = tab.style(tab.id == active, severity(tab.id));
+        write!(bytes, "\x1b[{};{}H", place.row + 1, place.column + 1)?;
+        bytes.write_all(b"\x1b[0")?;
+        if tab.id == active {
+            bytes.write_all(b";1")?;
+        }
+        super::screen::color(style.foreground, 38, palette, &mut bytes)?;
+        super::screen::color(style.background.unwrap_or(BG), 48, palette, &mut bytes)?;
+        bytes.write_all(b"m")?;
+        let padding = place.width.min(tab.label_column());
+        for offset in 0..padding {
+            let glyph = if offset == 1 {
+                tab.star().unwrap_or(' ')
+            } else {
+                ' '
+            };
+            write!(bytes, "{glyph}")?;
+        }
+        bytes.write_all(&tab.caption().as_bytes()[..place.label_bytes])?;
+        if padding < place.width {
+            bytes.write_all(b" ")?;
+        }
+        bytes.write_all(b"\x1b[0m")?;
+    }
     if tabs.is_empty() {
-        output.write_all(fit("No terminal tabs", columns).0.as_bytes())?;
-        return Ok(Bar {
-            bytes: output,
-            hits,
-        });
-    }
-    let active = tabs.iter().position(|tab| tab.id == active);
-    let label = |index: usize| {
-        let (directory, user) = split_directory_field(&tabs[index].directory);
-        let name = safe_text(&tab_label(directory, user));
-        let name = if name.is_empty() { "Shell" } else { &name };
-        format!("{name} ")
-    };
-    // Make room for the selected tab before adding its neighbors.
-    let mut start = 0;
-    if let Some(active) = active {
-        start = active;
-        let (_, mut used) = fit(&label(active), MAX_TAB_COLUMNS.min(columns));
-        while start > 0 {
-            let (_, previous) = fit(&label(start - 1), MAX_TAB_COLUMNS);
-            if used + previous + 1 > columns {
-                break;
-            }
-            used += previous + 1;
-            start -= 1;
-        }
-    }
-    let mut remaining = columns;
-    for (index, tab) in tabs.iter().enumerate().skip(start) {
-        if remaining == 0 {
-            break;
-        }
-        let label = label(index);
-        let (text, used) = fit(&label, MAX_TAB_COLUMNS.min(remaining));
-        let first = (columns - remaining) as u32;
-        hits.push((first..first + used as u32, tab.id));
-        if Some(index) == active {
-            output.write_all(b"\x1b[7m")?;
-        }
-        output.write_all(text.as_bytes())?;
-        output.write_all(b"\x1b[0m")?;
-        if used < remaining {
-            output.write_all(b" ")?;
-        }
-        remaining = remaining.saturating_sub(used + 1);
+        bytes.extend("No terminal tabs".bytes().take(columns as usize));
     }
     Ok(Bar {
-        bytes: output,
-        hits,
+        bytes,
+        rows: strip.rows as u32,
+        strip: Some(strip),
     })
 }

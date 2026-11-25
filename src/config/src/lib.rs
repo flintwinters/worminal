@@ -38,3 +38,6 @@ pub fn load() -> Result<Settings, String> {
 
 #[cfg(test)]
 mod tests;
+
+mod palette;
+pub use palette::{palette_rgb, rgb_hex};
