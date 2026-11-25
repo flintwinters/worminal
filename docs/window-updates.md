@@ -21,6 +21,10 @@ input is never replayed and shell ownership remains in the daemon. A close reque
 is applied by the new owner, or by the retained donor if preparation fails. New launch connections remain
 queued on the continuously bound broker socket during cutover.
 
+Progress appears in the existing windows. After commit, the replacement windows show an update completion
+message for five seconds. With `worminal.update_notifications` enabled, the replacement also requests a
+five-second desktop notification. The desktop controls its actual display time.
+
 Each window transfers its one daemon link and retains its selected local or master tab. Master links belong
 to the local daemon, so no master, reachable or not, takes part in replacement. Windows of earlier versions
 carried their own master links; the receiver hands those masters to the daemon without prompting, and their

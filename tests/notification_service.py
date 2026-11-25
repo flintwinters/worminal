@@ -19,11 +19,16 @@ def main():
                   GLib.Variant("(su)", (NAME, 0)), None, Gio.DBusCallFlags.NONE, 5000, None)
     identity = 0
 
-    def notify(_bus, _sender, _path, _interface, _method, parameters, invocation):
+    def notify(_bus, sender, _path, _interface, _method, parameters, invocation):
         nonlocal identity
         identity += 1
+        result = bus.call_sync("org.freedesktop.DBus", "/org/freedesktop/DBus",
+                               "org.freedesktop.DBus", "GetConnectionUnixProcessID",
+                               GLib.Variant("(s)", (sender,)), None, Gio.DBusCallFlags.NONE, 5000, None)
+        _, _, _, title, body, actions, _, expiry = parameters.unpack()
         invocation.return_value(GLib.Variant("(u)", (identity,)))
-        print(json.dumps({"id": identity, "actions": parameters.unpack()[5]}), flush=True)
+        print(json.dumps({"id": identity, "actions": actions, "title": title, "body": body,
+                          "expiry": expiry, "sender_pid": result.unpack()[0]}), flush=True)
 
     registration = bus.register_object(PATH, Gio.DBusNodeInfo.new_for_xml(XML).interfaces[0], notify, None, None)
     loop = GLib.MainLoop()

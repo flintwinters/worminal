@@ -281,6 +281,7 @@ struct App {
     notifications: RefCell<notifications::Notifications>,
     notification_desktop: Rc<notifications::Desktop>,
     status: gtk::Label,
+    status_deadline: Cell<Option<Instant>>,
     config: Config,
     fonts: Rc<RefCell<Fonts>>,
     pages: RefCell<Vec<Page>>,
@@ -389,6 +390,7 @@ impl App {
             window,
             panes,
             status,
+            status_deadline: Cell::new(None),
             pages: RefCell::new(Vec::new()),
             active: Cell::new(0),
             syncing: Cell::new(false),
@@ -456,8 +458,23 @@ impl App {
         Ok(app)
     }
     fn message(&self, message: Option<&str>) {
+        self.status_deadline.set(None);
         self.status.set_text(message.unwrap_or(""));
         self.status.set_visible(message.is_some());
+    }
+    fn timed_message(self: &Rc<Self>, message: &str, duration: Duration) {
+        self.message(Some(message));
+        let deadline = Instant::now() + duration;
+        self.status_deadline.set(Some(deadline));
+        let app = Rc::downgrade(self);
+        glib::timeout_add_local_once(duration, move || {
+            if let Some(app) = app
+                .upgrade()
+                .filter(|app| app.status_deadline.get() == Some(deadline))
+            {
+                app.message(None);
+            }
+        });
     }
     fn terminal(&self, id: u32) -> Option<Terminal> {
         self.pages

@@ -1,12 +1,14 @@
 //! Bounded OSC 99 title/body assembly. Desktop delivery belongs to the view, including over SSH.
 use gtk::glib;
 use std::collections::HashMap;
+use std::time::Duration;
 #[path = "notification_desktop.rs"]
 mod desktop;
 pub(super) use desktop::Desktop;
 
 const MAX_TEXT: usize = 16 * 1024;
 const MAX_PENDING: usize = 32;
+pub(super) const UPDATE_DURATION: Duration = Duration::from_secs(5);
 
 #[derive(Default)]
 pub(super) struct Notifications {
@@ -17,6 +19,7 @@ pub(super) struct Message {
     title: String,
     body: String,
     focus: bool,
+    expiry_ms: i32,
 }
 impl Default for Message {
     fn default() -> Self {
@@ -24,6 +27,7 @@ impl Default for Message {
             title: String::new(),
             body: String::new(),
             focus: true,
+            expiry_ms: -1,
         }
     }
 }
@@ -34,6 +38,7 @@ impl Message {
             title: "Worminal update".into(),
             body: body.into(),
             focus: false,
+            expiry_ms: UPDATE_DURATION.as_millis() as i32,
         }
     }
 }
@@ -186,7 +191,8 @@ mod tests {
             Some(Outcome::Show(Message {
                 title: "title".into(),
                 body: "body".into(),
-                focus: false
+                focus: false,
+                ..Message::default()
             }))
         );
         assert_eq!(

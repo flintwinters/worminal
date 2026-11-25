@@ -13,6 +13,20 @@ enum Stage {
     Committing,
 }
 
+fn complete(prepared: &candidate_windows::Candidate) {
+    prepared.close_requested();
+    const COMPLETE: &str = "Worminal updated.";
+    for app in windows() {
+        let message = if crate::graphics_ffi::x11(&app.window) {
+            COMPLETE
+        } else {
+            "Updated; window placement is controlled by the compositor."
+        };
+        app.timed_message(message, super::super::notifications::UPDATE_DURATION);
+    }
+    desktop_notice(COMPLETE);
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "candidate handshake and GTK event loop form one ordered transaction"
@@ -55,7 +69,7 @@ pub(crate) fn receive(token: &OsStr, candidate: bool) -> io::Result<()> {
                 connection.borrow_mut().flush()?;
                 if phase.get() == Stage::Committing && connection.borrow().output.is_empty() {
                     finished.set(true);
-                    prepared.close_requested();
+                    complete(&prepared);
                     return Ok(true);
                 }
                 let packets = connection.borrow_mut().read()?;
@@ -112,9 +126,6 @@ pub(crate) fn receive(token: &OsStr, candidate: bool) -> io::Result<()> {
                                     app.activate(app.active.get());
                                     app.window.present();
                                 }
-                                if !crate::graphics_ffi::x11(&app.window) {
-                                    app.message(Some("Updated; window placement is controlled by the compositor."));
-                                }
                             }
                             let broker =
                                 broker::serve(listener.borrow_mut().take().unwrap(), candidate)?;
@@ -125,7 +136,7 @@ pub(crate) fn receive(token: &OsStr, candidate: bool) -> io::Result<()> {
                                 phase.set(Stage::Committing);
                             } else {
                                 finished.set(true);
-                                prepared.close_requested();
+                                complete(&prepared);
                                 return Ok(true);
                             }
                         }

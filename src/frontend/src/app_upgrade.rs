@@ -105,24 +105,24 @@ pub(super) fn windows() -> Vec<Rc<App>> {
             .collect()
     })
 }
-/// Update status appears in every window and, when configured, once on the desktop.
 fn trace(message: &str) {
     worminal_workspace::diagnostics::log(libc::LOG_INFO, message);
     eprintln!("worminal: {message}");
 }
-fn notice(text: &str) {
+fn update_status(text: &str) {
     worminal_workspace::diagnostics::log(libc::LOG_NOTICE, text);
-    let apps = windows();
-    if let Some(app) = apps
-        .first()
-        .filter(|_| worminal_config::get().update_notifications)
-    {
-        app.notification_desktop
-            .show(super::notifications::Message::update(text), |_| {});
-    }
-    for app in apps {
+    for app in windows() {
         app.message(Some(text));
     }
+}
+fn desktop_notice(text: &str) {
+    if worminal_config::get().update_notifications {
+        alert(text);
+    }
+}
+fn notice(text: &str) {
+    update_status(text);
+    desktop_notice(text);
 }
 /// Version sync failures need the user's action (e.g. a peer's release cannot run here), so they reach
 /// the desktop regardless of update_notifications, which covers local window-update progress.
@@ -499,7 +499,9 @@ impl Watcher {
             }
             self.deferred.set(false);
             *self.attempted.borrow_mut() = current;
-            notice("Update started: replacement owner is being prepared.");
+            // Desktop shells can remove a notification when its sender exits at cutover.
+            // The replacement sends the desktop notice once it owns the windows.
+            update_status("Update started: replacement owner is being prepared.");
         }
         let mut slot = self.transaction.borrow_mut();
         let transaction = slot.as_mut().unwrap();

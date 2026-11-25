@@ -173,7 +173,7 @@ impl Desktop {
             glib::markup_escape_text(&message.body).to_string(),
             actions,
             HashMap::<String, glib::Variant>::new(),
-            -1i32,
+            message.expiry_ms,
         )
             .to_variant();
         let desktop = self.clone();

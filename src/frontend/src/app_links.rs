@@ -195,7 +195,7 @@ impl App {
         self.primary.clear();
     }
     pub(super) fn clear_message(&self) {
-        if !self.primary.down() {
+        if !self.primary.down() && self.status_deadline.get().is_none() {
             self.message(None);
         }
     }

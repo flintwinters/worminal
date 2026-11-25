@@ -14,7 +14,8 @@ import unittest
 import sys
 from contextlib import contextmanager, ExitStack
 from preview import profile, service, fixture, Fixture
-from runtime import ROOT, CHECKS, copy_runtime, module_path, runtime_binary, RUST_FRONTEND_MODULE, RUST_BROWSER_MODULE
+from runtime import ROOT, CHECKS, copy_runtime, module_path, runtime_binary, stop_application, RUST_FRONTEND_MODULE, RUST_BROWSER_MODULE
+from test_window_state import private_bus
 from x11 import isolated_display, close_window, normal_windows, window_manager
 
 
@@ -632,11 +633,14 @@ class ReplacementTest(unittest.TestCase):
         self.terminal_replacement(retile=True)
 
     def terminal_replacement(self, *, retile):
-        with isolated_display() as display, profile(display) as env, service(env) as daemon, \
-                tempfile.TemporaryDirectory(prefix='replacement-', dir=CHECKS) as directory:
+        with isolated_display() as display, private_bus(display) as session, profile(session) as env, \
+                service(env) as daemon, tempfile.TemporaryDirectory(prefix='replacement-', dir=CHECKS) as directory, \
+                ExitStack() as cleanup:
             executable = copy_runtime(directory, browser=True)
             env = {**env, 'GDK_BACKEND': 'x11', 'GIO_USE_VFS': 'local'}
-            env.pop('DBUS_SESSION_BUS_ADDRESS', None)
+            config = Path(directory) / 'worminal.yaml'
+            config.write_text('worminal: {update_notifications: true}\n')
+            env['WORMINAL_CONFIG'] = str(config)
             log_path = Path(directory) / 'owner.log'
             processes = []
             tiler = ExitStack()
@@ -675,6 +679,13 @@ class ReplacementTest(unittest.TestCase):
                     self.assertEqual({pid(window) for window in windows()}, {owner}, 'Failed candidate closed old windows')
                     if retile:
                         resized = tiler.enter_context(retile_on_map(env, windows()))
+                    else:
+                        notifications = subprocess.Popen(
+                            ['/usr/bin/python3', str(ROOT / 'tests/notification_service.py')],
+                            env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log)
+                        cleanup.callback(stop_application, notifications)
+                        self.assertTrue(select.select([notifications.stdout], [], [], 5)[0])
+                        self.assertEqual(json.loads(notifications.stdout.readline()), {'ready': True})
                     bad.write_bytes(original)
                     bad.chmod(0o755)
                     bad.replace(executable)
@@ -695,6 +706,13 @@ class ReplacementTest(unittest.TestCase):
                     else:
                         # A replacement owner must itself remain able to drain and replace again.
                         second_owner = pid(windows()[0])
+                        self.assertTrue(select.select([notifications.stdout], [], [], 5)[0],
+                                        'Committed replacement did not send an update notice')
+                        notice = json.loads(notifications.stdout.readline())
+                        self.assertEqual(notice['title'], 'Worminal update')
+                        self.assertEqual(notice['body'], 'Worminal updated.')
+                        self.assertEqual(notice['expiry'], 5000)
+                        self.assertEqual(notice['sender_pid'], int(second_owner))
                         shutil.copy2(module, replacement)
                         replacement.replace(module)
                         wait(lambda: len(windows()) == 2 and all(
