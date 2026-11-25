@@ -85,8 +85,7 @@ impl Screen {
 
     pub fn position_cursor(&self, size: Body, output: &mut impl Write) -> io::Result<()> {
         if let Some(frame) = self.cursor.filter(|frame| {
-            frame.scroll == 0
-                && self.mode & MODE_HIDE == 0
+            screen_view::cursor_visible(self.mode, frame.scroll)
                 && frame.cursor_x < size.columns
                 && frame.cursor_y < size.rows
         }) {
@@ -182,9 +181,9 @@ fn paint_row(
     let bold_bright = worminal_config::get().bold_bright;
     let mut previous = None;
     for (column, cell) in cells.take(width).enumerate() {
-        if cell.attributes & ATTR_WDUMMY != 0 {
+        let Some(character) = screen_view::glyph(cell.rune, cell.attributes, width - column) else {
             continue;
-        }
+        };
         let (foreground, background) = screen_view::colors(
             cell.foreground,
             cell.background,
@@ -197,7 +196,7 @@ fn paint_row(
         let mut foreground = foreground;
         if cell.attributes & ATTR_INVISIBLE != 0 {
             flags &= !ATTR_FAINT;
-        } else if flags & ATTR_FAINT != 0 {
+        } else if screen_view::faint(cell.attributes) {
             if let Some(rgb) = resolve_color(foreground, palette) {
                 let [_, red, green, blue] = rgb.to_be_bytes();
                 let dim =
@@ -210,12 +209,6 @@ fn paint_row(
         if previous != Some(style) {
             attributes(style, palette, output)?;
             previous = Some(style);
-        }
-        let mut character = char::from_u32(cell.rune)
-            .filter(|c| !c.is_control())
-            .unwrap_or(' ');
-        if cell.attributes & ATTR_WIDE != 0 && column + 1 == width {
-            character = ' ';
         }
         write!(output, "{character}")?;
     }

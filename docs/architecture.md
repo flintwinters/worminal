@@ -133,8 +133,9 @@ remembered between runs by tab position in the daemon's order, never by tab id (
 ordinary case. The daemon only learns the shown set (each pane's selected tab): `Focus` shows one tab, `Pane`
 (feature `PANES`) adds one, and `Resize` never hides neighbours. A browser tab has no frames, so it splits freely, but the daemon's `Focus` is exclusive: while terminals are visible beside it, claiming the browser presents those terminals instead of focusing the browser. Ctrl+Shift+X gathers all tabs into the focused
 pane. GTK and the SSH view draw the same character-cell tab model from `src/workspace/src/tab_view.rs` using
-the tab order reported by the daemon, including wrapping, colors, and hit regions. The palette comes from
-`src/config`. Browser file labels
+the tab order reported by the daemon. The model owns wrapping, text runs, colors, and hit regions.
+`src/workspace/src/screen_view.rs` interprets terminal glyphs and shared color and cursor-visibility rules.
+The palette comes from `src/config`. Browser file labels
 decode the filename; web tabs retain document titles. D-Bus directory arrays retain original filesystem bytes.
 `docs/window-state.md` defines that read-only public contract. X11 activation uses fresh server timestamps; Wayland
 activation remains compositor policy.

@@ -119,10 +119,9 @@ fn paint_tab(
     (x, top, width): (i32, i32, i32),
     right: i32,
     selected: bool,
-    label_bytes: usize,
+    place: Placement,
 ) -> Result<(), cairo::Error> {
     label(layout, selected);
-    layout.set_text(&entry.caption()[..label_bytes]);
     let baseline = top + (metrics.height - metrics.ink_height) / 2 + metrics.ascent;
     if let Some(fill) = fill {
         paint::source(cr, &fill);
@@ -135,21 +134,14 @@ fn paint_tab(
         cr.fill()?;
     }
     paint::source(cr, &text);
-    if let Some(star) = entry.star() {
-        layout.set_text(star.encode_utf8(&mut [0; 4]));
+    for (column, text) in place.text(entry) {
+        layout.set_text(text);
         cr.move_to(
-            f64::from(x + metrics.width),
+            f64::from(x + column as i32 * metrics.width),
             f64::from(baseline) - f64::from(layout.baseline()) / f64::from(pango::SCALE),
         );
         graphics_ffi::show_layout(cr, layout);
-        layout.set_text(&entry.caption()[..label_bytes]);
     }
-    let label = x + entry.label_column() as i32 * metrics.width;
-    cr.move_to(
-        f64::from(label),
-        f64::from(baseline) - f64::from(layout.baseline()) / f64::from(pango::SCALE),
-    );
-    graphics_ffi::show_layout(cr, layout);
     Ok(())
 }
 pub(super) fn mix(from: &gdk::RGBA, to: &gdk::RGBA, amount: f64) -> gdk::RGBA {
@@ -227,7 +219,7 @@ impl State {
                 (x, top, width),
                 right,
                 selected,
-                place.label_bytes,
+                place,
             )?;
             if let Some(Slot { after, .. }) = marker.filter(|slot| slot.tab == entry.id) {
                 paint::source(cr, &palette.color(3));
@@ -325,7 +317,7 @@ impl State {
             (left, top, width),
             left + width,
             true,
-            place.label_bytes,
+            place,
         )
         .ok()?;
         drop(cr);

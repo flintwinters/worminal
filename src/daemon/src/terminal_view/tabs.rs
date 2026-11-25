@@ -44,18 +44,18 @@ pub(super) fn draw(
         super::screen::color(style.foreground, 38, palette, &mut bytes)?;
         super::screen::color(style.background.unwrap_or(BG), 48, palette, &mut bytes)?;
         bytes.write_all(b"m")?;
-        let padding = place.width.min(tab.label_column());
-        for offset in 0..padding {
-            let glyph = if offset == 1 {
-                tab.star().unwrap_or(' ')
-            } else {
-                ' '
-            };
-            write!(bytes, "{glyph}")?;
-        }
-        bytes.write_all(&tab.caption().as_bytes()[..place.label_bytes])?;
-        if padding < place.width {
+        // Fill the entire tab before positioning text. A client can assign a
+        // different width to the star, while the caption still starts at its cell.
+        for _ in 0..place.width {
             bytes.write_all(b" ")?;
+        }
+        for (column, text) in place.text(tab) {
+            write!(
+                bytes,
+                "\x1b[{};{}H{text}",
+                place.row + 1,
+                place.column + column + 1
+            )?;
         }
         bytes.write_all(b"\x1b[0m")?;
     }

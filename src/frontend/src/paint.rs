@@ -208,7 +208,7 @@ impl Painter {
         );
         let mut fg = style.palette.color(foreground);
         let mut bg = style.palette.color(background);
-        if cell.attributes & ATTR_FAINT != 0 {
+        if screen_view::faint(cell.attributes) {
             fg.set_red(fg.red() * screen_view::FAINT_BRIGHTNESS);
             fg.set_green(fg.green() * screen_view::FAINT_BRIGHTNESS);
             fg.set_blue(fg.blue() * screen_view::FAINT_BRIGHTNESS);
@@ -224,10 +224,9 @@ impl Painter {
                 && viewport
                     .row(y)
                     .is_some_and(|row| row[cursor_x].attributes & ATTR_WIDE != 0);
-        let cursor = frame.scroll == 0
+        let cursor = screen_view::cursor_visible(style.mode, frame.scroll as u32)
             && cursor_cell
             && y == frame.cursor_y as usize
-            && style.mode & MODE_HIDE == 0
             && (!style.blink || style.cursor & 1 == 0)
             && viewport.live();
         let block = cursor && style.cursor <= 2 && style.focused;
@@ -365,11 +364,12 @@ impl Painter {
                 continue;
             };
             for (x, cell) in row.iter().enumerate() {
-                if cell.attributes & ATTR_WDUMMY != 0 {
+                let Some(character) = screen_view::glyph(cell.rune, cell.attributes, row.len() - x)
+                else {
                     continue;
-                }
-                let blank = cell.rune == u32::from(' ')
-                    && cell.attributes & (ATTR_UNDERLINE | ATTR_STRUCK) == 0;
+                };
+                let blank =
+                    character == ' ' && cell.attributes & (ATTR_UNDERLINE | ATTR_STRUCK) == 0;
                 if blank && y != viewport.frame().cursor_y as usize {
                     continue;
                 }
@@ -378,19 +378,17 @@ impl Painter {
                     continue;
                 }
                 source(cr, &fg);
-                if cell.rune != u32::from(' ') {
+                if character != ' ' {
                     self.text(
                         cr,
-                        char::from_u32(cell.rune)
-                            .unwrap_or('\u{fffd}')
-                            .encode_utf8(&mut [0; 4]),
+                        character.encode_utf8(&mut [0; 4]),
                         x,
                         y,
                         cell.attributes,
                     );
                 }
                 let width = metrics.width
-                    * if cell.attributes & ATTR_WIDE != 0 {
+                    * if cell.attributes & ATTR_WIDE != 0 && x + 1 < row.len() {
                         2
                     } else {
                         1

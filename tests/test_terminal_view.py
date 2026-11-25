@@ -23,6 +23,14 @@ IDLE_TAB = b"\x1b[0;38;2;216;216;216;48;2;24;24;24m"
 RESET = b"\x1b[0m"
 
 
+def tab_text(label, column=1, row=1, star=None):
+    prefix = 3 if star else 1
+    foreground = f"\x1b[{row};{column + prefix}H".encode() + label
+    if star:
+        foreground = f"\x1b[{row};{column + 1}H{star}".encode() + foreground
+    return b" " * (prefix + len(label) + 1) + foreground
+
+
 def controlling_tty():
     os.setsid()
     fcntl.ioctl(0, termios.TIOCSCTTY, 0)
@@ -123,20 +131,20 @@ class TerminalViewTest(unittest.TestCase):
     def test_tab_bar_order_selection_and_narrow_view(self):
         view = self.open_view()
         self.send(f"cd {shlex.quote(str(self.root / 'alpha'))}; printf '\\n'\r".encode())
-        self.wait_for(ACTIVE_TAB + b" alpha " + RESET)
+        self.wait_for(ACTIVE_TAB + tab_text(b"alpha") + RESET)
         self.send(b"\x1dt")
-        self.wait_for(b" alpha " + RESET + b"\x1b[1;8H" + ACTIVE_TAB)
+        self.wait_for(tab_text(b"alpha") + RESET + b"\x1b[1;8H" + ACTIVE_TAB)
         self.send(f"cd {shlex.quote(str(self.root / 'beta'))}; printf '\\n'\r".encode())
-        bar = self.wait_for(ACTIVE_TAB + b" beta " + RESET)
-        self.assertIn(b" alpha " + RESET + b"\x1b[1;8H" + ACTIVE_TAB + b" beta ", bar)
+        bar = self.wait_for(ACTIVE_TAB + tab_text(b"beta", column=8) + RESET)
+        self.assertIn(tab_text(b"alpha") + RESET + b"\x1b[1;8H" + ACTIVE_TAB + tab_text(b"beta", column=8), bar)
         self.send(b"\x1dp")
-        self.wait_for(ACTIVE_TAB + b" alpha " + RESET + b"\x1b[1;8H" + IDLE_TAB + b" beta ")
+        self.wait_for(ACTIVE_TAB + tab_text(b"alpha") + RESET + b"\x1b[1;8H" + IDLE_TAB + tab_text(b"beta", column=8))
         self.send(b"\x1dn")
-        self.wait_for(ACTIVE_TAB + b" beta " + RESET)
+        self.wait_for(ACTIVE_TAB + tab_text(b"beta", column=8) + RESET)
         self.resize(8, 19)
-        self.wait_for(b"\x1b[2;1H" + ACTIVE_TAB + b" beta ")
+        self.wait_for(b"\x1b[2;1H" + ACTIVE_TAB + tab_text(b"beta", row=2))
         self.resize(8, 1)
-        narrow_bar = b"\x1b[1;1H" + ACTIVE_TAB + b" beta "
+        narrow_bar = b"\x1b[1;1H" + ACTIVE_TAB + tab_text(b"beta")
         bar = self.wait_for(narrow_bar)
         self.assertNotIn(b"\x1b[2;1H", bar.split(narrow_bar, 1)[1])
         self.resize(8, 2)
@@ -146,23 +154,23 @@ class TerminalViewTest(unittest.TestCase):
     def test_tab_mouse_and_modified_keys(self):
         view = self.open_view()
         self.send(f"cd {shlex.quote(str(self.root / 'alpha'))}; printf '\\n'\r".encode())
-        self.wait_for(ACTIVE_TAB + b" alpha ")
+        self.wait_for(ACTIVE_TAB + tab_text(b"alpha"))
         self.send(b"\x14")
-        self.wait_for(b" alpha " + RESET + b"\x1b[1;8H" + ACTIVE_TAB)
+        self.wait_for(tab_text(b"alpha") + RESET + b"\x1b[1;8H" + ACTIVE_TAB)
         self.send(f"cd {shlex.quote(str(self.root / 'beta'))}; printf '\\n'\r".encode())
-        self.wait_for(ACTIVE_TAB + b" beta ")
+        self.wait_for(ACTIVE_TAB + tab_text(b"beta", column=8))
         self.send(b"\x1b[<0;2;1M\x1b[<0;2;1m")
-        self.wait_for(ACTIVE_TAB + b" alpha ")
+        self.wait_for(ACTIVE_TAB + tab_text(b"alpha"))
         self.send(b"\x1b[9;5u")
-        self.wait_for(ACTIVE_TAB + b" beta ")
+        self.wait_for(ACTIVE_TAB + tab_text(b"beta", column=8))
         self.send(b"\x1b[27;6;9~")
-        self.wait_for(ACTIVE_TAB + b" alpha ")
+        self.wait_for(ACTIVE_TAB + tab_text(b"alpha"))
         self.send(b"\x1b[<65;2;1M")
-        self.wait_for(ACTIVE_TAB + b" beta ")
+        self.wait_for(ACTIVE_TAB + tab_text(b"beta", column=8))
         self.send(b"\x1b[<0;9;1M\x1b[<32;2;1M\x1b[<0;2;1m")
-        self.wait_for(ACTIVE_TAB + b" beta " + RESET + b"\x1b[1;7H" + IDLE_TAB + b" alpha ")
+        self.wait_for(ACTIVE_TAB + tab_text(b"beta") + RESET + b"\x1b[1;7H" + IDLE_TAB + tab_text(b"alpha", column=7))
         self.send(b"\x1b[<1;9;1M")
-        bar = self.wait_for(ACTIVE_TAB + b" beta " + RESET + b"\x1b[")
+        bar = self.wait_for(ACTIVE_TAB + tab_text(b"beta") + RESET + b"\x1b[")
         self.assertNotIn(b"alpha ", bar.split(b"\x1b[1;1H")[-1])
         self.send(b"printf 'KEY-%s\\n' OK\x1b[13u")
         self.wait_for(b"KEY-OK")
@@ -173,13 +181,17 @@ class TerminalViewTest(unittest.TestCase):
     def test_shared_bookmark_star_and_hit_region(self):
         view = self.open_view()
         self.send(f"cd {shlex.quote(str(self.root / 'alpha'))}; printf '\\n'\r".encode())
-        self.wait_for(ACTIVE_TAB + b" alpha ")
+        self.wait_for(ACTIVE_TAB + tab_text(b"alpha"))
         self.send(b"\x1b[100;6u")
-        self.wait_for(ACTIVE_TAB + " ★ alpha ".encode())
+        self.wait_for(ACTIVE_TAB + tab_text(b"alpha", star="★"))
         bookmarks = self.root / "config" / "worminal" / "bookmarks.yaml"
         self.assertIn(str(self.root / "alpha"), bookmarks.read_text())
+        self.resize(2, 24)
+        self.wait_for(b"\x1b[1;1H" + ACTIVE_TAB + b"  " + RESET)
+        self.resize(80, 24)
+        self.wait_for(ACTIVE_TAB + tab_text(b"alpha", star="★"))
         self.send(b"\x1b[<0;2;1M\x1b[<0;2;1m")
-        self.wait_for(ACTIVE_TAB + b" alpha ")
+        self.wait_for(ACTIVE_TAB + tab_text(b"alpha"))
         self.assertNotIn(str(self.root / "alpha"), bookmarks.read_text())
         self.detach(view)
 

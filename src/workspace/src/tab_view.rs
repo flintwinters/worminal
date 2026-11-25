@@ -117,17 +117,12 @@ fn cell_width(character: char) -> usize {
 pub const STAR_CELLS: usize = 2;
 
 impl Tab {
-    pub fn caption(&self) -> &str {
+    fn caption(&self) -> &str {
         if self.label.is_empty() {
             "Shell"
         } else {
             &self.label
         }
-    }
-
-    pub fn star(&self) -> Option<char> {
-        self.starrable
-            .then_some(if self.starred { '★' } else { '☆' })
     }
 
     pub fn label_column(&self) -> usize {
@@ -141,7 +136,25 @@ pub struct Placement {
     pub row: usize,
     pub column: usize,
     pub width: usize,
-    pub label_bytes: usize,
+    label_bytes: usize,
+}
+
+impl Placement {
+    fn shows_star(self, tab: &Tab) -> bool {
+        tab.starrable && self.width > STAR_CELLS
+    }
+
+    /// Text runs in character-cell coordinates relative to the tab.
+    pub fn text(self, tab: &Tab) -> impl Iterator<Item = (usize, &str)> {
+        let star = if tab.starred { "★" } else { "☆" };
+        [
+            self.shows_star(tab).then_some((1, star)),
+            (self.label_bytes != 0)
+                .then_some((tab.label_column(), &tab.caption()[..self.label_bytes])),
+        ]
+        .into_iter()
+        .flatten()
+    }
 }
 
 pub struct Strip {
@@ -157,7 +170,7 @@ impl Strip {
         let tab = &entries[place.index];
         Some((
             tab.id,
-            tab.starrable && column - place.column < tab.label_column(),
+            place.shows_star(tab) && column - place.column < tab.label_column(),
         ))
     }
 }
