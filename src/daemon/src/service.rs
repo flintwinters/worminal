@@ -14,7 +14,7 @@ use std::{
         unix::{ffi::OsStringExt, net::UnixListener},
     },
     path::PathBuf,
-    time::Instant,
+    time::{Duration, Instant},
 };
 use worminal_protocol::worp::events::{Catalog, Event, EventKind};
 use worminal_protocol::*;
@@ -24,6 +24,8 @@ use worminal_workspace::{
     recovery::{self, Recipe, Recovery},
     socket,
 };
+
+const PTY_EXIT_RECOVERY_GRACE: Duration = Duration::from_secs(1);
 
 pub(crate) struct Service {
     pub workspace_id: String,
@@ -41,6 +43,7 @@ pub(crate) struct Service {
     pub handin: Option<(u64, crate::handoff_io::Listener)>,
     pub next_handin: u64,
     recovery: Recovery,
+    recovery_deferred_until: Option<i64>,
     pub devices: Registry,
     published: Option<Catalog>,
     pub closed: u32,
@@ -357,6 +360,9 @@ impl Service {
     }
 
     fn save(&mut self) {
+        if self.recovery_deferred_until.is_some() {
+            return;
+        }
         let home = std::env::var_os("HOME")
             .unwrap_or_else(|| "/".into())
             .into_vec();
@@ -524,6 +530,9 @@ impl Service {
         }
         let now = self.now();
         let mut deadline = self.api_waits.values().map(|wait| wait.deadline).min();
+        if let Some(recovery) = self.recovery_deferred_until {
+            deadline = Some(deadline.map_or(recovery, |old| old.min(recovery)));
+        }
         if let Some(retry) = self.retry_masters(now) {
             deadline = Some(deadline.map_or(retry, |old| old.min(retry)));
         }
@@ -578,6 +587,10 @@ impl Service {
                 .as_ref()
                 .is_some_and(|t| t.pty.fd().is_none())
             {
+                // Session teardown can close PTYs before the daemon receives its stop signal.
+                // Publish the exit immediately, but keep the previous recipes during that race.
+                self.recovery_deferred_until =
+                    Some(now + PTY_EXIT_RECOVERY_GRACE.as_nanos() as i64);
                 self.close(index);
             } else {
                 index += 1;
@@ -605,6 +618,10 @@ impl Service {
             || self.published.is_none()
         {
             self.publish(now)?;
+        }
+        if self.recovery_deferred_until.is_some_and(|due| now >= due) {
+            self.recovery_deferred_until = None;
+            self.save();
         }
         self.reconcile_masters(now)?;
         self.resync(now)
@@ -686,6 +703,7 @@ fn create(scope: &[u8], listener: UnixListener) -> io::Result<(Service, io::Resu
         handin: None,
         next_handin: 1,
         recovery,
+        recovery_deferred_until: None,
         devices: Registry::new(worminal_config::devices_path()),
         published: None,
         closed: 0,

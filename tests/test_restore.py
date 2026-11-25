@@ -210,6 +210,32 @@ class RestoreTest(unittest.TestCase):
         self.wait_directories([self.default])
         self.assertNotIn('|1\n', self.wait_startup('|unset\n'))
 
+    def test_shell_exits_before_daemon_shutdown_keep_recovery(self):
+        first, second = self.root / 'first', self.root / 'second'
+        first.mkdir()
+        second.mkdir()
+        one = self.launch(('/bin/zsh', '-d'))
+        two = self.launch(('/bin/zsh', '-d'))
+        for tab, directory in ((one, first), (two, second)):
+            self.send(3, tab, f'cd -- {shlex.quote(str(directory))}\n'.encode())
+        self.wait_directories([first, second])
+        self.wait_saved(lambda data: str(first).encode() in data and str(second).encode() in data)
+        for tab in (one, two):
+            self.send(3, tab, b"exec /bin/sh -c 'kill -TERM $$'\n")
+        self.wait_directories([])
+        self.restart()
+        self.wait_directories([first, second])
+
+    def test_shell_exit_is_checkpointed_when_daemon_keeps_running(self):
+        tab = self.launch(('/bin/zsh', '-d'))
+        self.wait_directories([self.default])
+        self.wait_saved(lambda data: data[4:8] == number(1))
+        self.send(3, tab, b'exit\n')
+        self.wait_directories([])
+        self.wait_saved(lambda data: data == number(1) + number(0))
+        self.restart()
+        self.wait_directories([])
+
     def test_corrupt_recovery_is_preserved_without_partial_restore(self):
         self.process.terminate(); self.process.communicate(timeout=4)
         invalid = number(1) + number(2) + string(str(self.default)) + string('') + b'broken'
