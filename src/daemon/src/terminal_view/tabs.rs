@@ -62,7 +62,7 @@ pub(super) fn draw(tabs: &[TabRecord], active: u32, columns: u32) -> io::Result<
         let (directory, user) = split_directory_field(&tabs[index].directory);
         let name = safe_text(&tab_label(directory, user));
         let name = if name.is_empty() { "Shell" } else { &name };
-        format!("{} {name} ", index + 1)
+        format!("{name} ")
     };
     // Make room for the selected tab before adding its neighbors.
     let mut start = 0;

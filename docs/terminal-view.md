@@ -17,6 +17,7 @@ Worminal draws the entire view, including the tab bar. The headless Worminal ins
 On any client operating system, all you need is SSH and a VT-compatible terminal.
 
 The view starts the daemon if needed and displays an ordered tab bar above the first terminal pane.
+Terminal tabs use the same directory or SSH-user names as the graphical tab bar.
 The active tab is highlighted and stays visible when the terminal is narrow. On startup it opens a shell if the
 workspace has no terminal tabs. It borrows the active tab's viewport and releases it when switching or detaching.
 The daemon keeps the shells and their scrollback alive between connections.
