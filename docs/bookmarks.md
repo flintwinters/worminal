@@ -15,8 +15,9 @@ only an SSH host or `user@host`, for quick access to a machine.
   Tabs that share a directory share its bookmark. A tab with an `ssh` client in its foreground cannot be bookmarked:
   the directory Worminal knows for it is the local shell's, not the remote one. Bookmark
   the remote place from a tab whose daemon runs there (`--master`).
-- **Ctrl+Shift+B** (or **Ctrl+Shift+P**, for keyboards that can send it) opens the side panel beside the panes. Pressed while the panel is open but the keyboard is
-  elsewhere, it moves the keyboard to the panel; pressed with the keyboard already there, it closes the panel.
+- **Ctrl+Shift+B** (or **Ctrl+Shift+P**, for keyboards that can send it) opens the side panel over the left edge
+  of the panes without resizing them. If the panel is already open, the shortcut moves focus to it or closes it
+  when it already has focus.
 - In the panel: **Up/Down** (or `k`/`j`) move, **Enter** (or a click) opens the bookmark in a new tab and closes the
   panel, **Delete** removes it, **Left/Right** (or `h`/`l`, Tab) switch panel tabs, **Escape** closes the panel. The
   new tab takes the keyboard. Home/End and Page Up/Down jump.

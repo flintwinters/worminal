@@ -136,11 +136,11 @@ activation remains compositor policy.
 
 ## Side panel and bookmarks
 
-Ctrl+Shift+B (or P) opens a collapsible side panel beside the panes (`panel.rs`, glue in `app_panel.rs`). It is a Cairo list
-in the terminal's font and palette with its own tabs; a tab implements `PanelTab` (`panel_tabs.rs`: title, rows, press,
-and optionally an add prompt), and Bookmarks is the first, so further lists add an implementation. The panel is a sibling of the pane area, never an overlay
-child (GTK drag hit testing would hide drop targets), and its widget exists only while open. Bookmarks are the
-user's `$XDG_CONFIG_HOME/worminal/bookmarks.yaml` (`workspace/src/bookmarks.rs`; `docs/bookmarks.md`): terminal
+Ctrl+Shift+B (or P) opens a collapsible side panel over the left edge of the panes (`panel.rs`, glue in `app_panel.rs`).
+It is a Cairo list in the terminal's font and palette. Bookmarks is the first tab, and further lists implement
+`PanelTab` (`panel_tabs.rs`). The overlay keeps the pane allocation fixed and receives pointer events in the area
+it covers. The list widget exists only while open. Bookmarks are stored in the user's
+`$XDG_CONFIG_HOME/worminal/bookmarks.yaml` (`workspace/src/bookmarks.rs`; `docs/bookmarks.md`): terminal
 directories with an optional SSH master, URLs, and servers (`host:`, validated SSH endpoints), never commands. Opening a
 server starts `sh -ic 'trap : INT; ssh "$1"; exec "$SHELL"'` in a new local tab with the endpoint as `$1`: ssh gets
 its own foreground process group (so the daemon labels the tab and does not bookmark it as a local directory), and an

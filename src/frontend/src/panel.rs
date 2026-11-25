@@ -636,7 +636,7 @@ impl View {
     }
 }
 
-/// The panel's place in the window: an empty slot beside the panes, filled while the panel is open.
+/// The panel's left-aligned overlay slot, filled while the panel is open.
 pub struct SidePanel {
     slot: gtk::Box,
     view: RefCell<Option<Rc<View>>>,
@@ -649,6 +649,7 @@ impl Default for SidePanel {
 impl SidePanel {
     pub fn new() -> Self {
         let slot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        slot.set_halign(gtk::Align::Start);
         slot.set_no_show_all(true);
         Self {
             slot,

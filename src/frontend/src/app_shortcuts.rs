@@ -120,7 +120,7 @@ impl App {
         }
         let mut zoom = self.fonts.borrow().zoom();
         if state == control_shift {
-            // A paste while the panel is asking for a host goes to that question, not to the terminal beside it.
+            // While the panel is asking for a host, paste goes to its prompt.
             if value == key::v && self.panel.paste() {
                 return true;
             }

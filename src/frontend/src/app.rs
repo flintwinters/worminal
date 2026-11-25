@@ -298,7 +298,7 @@ struct App {
     defer_navigation: Cell<bool>,
     geometry_pending: Cell<bool>,
     early_keys: RefCell<VecDeque<gdk::EventKey>>,
-    /// The side panel beside the panes; empty until it is opened.
+    /// The side panel over the panes; hidden until it is opened.
     panel: crate::panel::SidePanel,
     /// The saved bookmarks as last read, for the stars on the tab strip.
     bookmarks: RefCell<Vec<worminal_workspace::bookmarks::Bookmark>>,
@@ -374,9 +374,9 @@ impl App {
         let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let panes = split::Panes::new();
         let panel = crate::panel::SidePanel::new();
-        let body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        body.pack_start(panel.widget(), false, false, 0);
-        body.pack_start(panes.widget(), true, true, 0);
+        let body = gtk::Overlay::new();
+        body.add(panes.widget());
+        body.add_overlay(panel.widget());
         container.pack_start(&body, true, true, 0);
         container.pack_end(&status, false, false, 0);
         chrome::outline(&window, &container);

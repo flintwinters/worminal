@@ -616,8 +616,10 @@ class RustApplicationTest(unittest.TestCase):
             saved.write_text(f'bookmarks:\n  - directory: "{other}"\n')
             env.update(GDK_BACKEND='x11', XDG_CONFIG_HOME=str(root / 'config'), SHELL='/bin/sh')
             env.pop('WAYLAND_DISPLAY', None)
+            sizes = root / 'sizes.txt'
+            record = f"trap 'stty size >> {shlex.quote(str(sizes))}' WINCH; while :; do sleep 0.2; done"
             app = subprocess.Popen([str(runtime_binary('worminal-rust')), '-T', 'Rust panel', '-o', '-',
-                                    '-e', '/bin/sh', '-c', 'while :; do sleep 1; done'],
+                                    '-e', '/bin/sh', '-c', record],
                                    env=env, cwd=start, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             self.addCleanup(lambda: self.stop(app))
             wid = window(env, app)
@@ -642,6 +644,7 @@ class RustApplicationTest(unittest.TestCase):
             tabs = lambda: json.loads(api('list'))['tabs']
             wait_for(lambda: tabs()[0].get('directory') == str(start), 'the tab never reported its directory')
             self.assertFalse(panel_edge(), 'the panel is open before it was asked for')
+            quiet = sizes.read_text() if sizes.exists() else ''
             # Ctrl+Shift+B opens the panel (P is an alias for keyboards that can send it); Enter opens the selected bookmark in a new tab and closes it.
             xdo('key', '--clearmodifiers', 'ctrl+shift+b')
             wait_for(panel_edge, 'ctrl+shift+b did not open the panel')
@@ -654,6 +657,8 @@ class RustApplicationTest(unittest.TestCase):
             xdo('key', '--clearmodifiers', 'Return')
             wait_for(lambda: (other / 'marker.txt').exists() and (other / 'marker.txt').read_text().strip() == str(other),
                      'the opened tab did not take the keyboard in the bookmarked directory')
+            self.assertEqual(sizes.read_text() if sizes.exists() else '', quiet,
+                             'opening and closing the bookmarks panel resized the original terminal')
             # Escape closes the panel and gives the keyboard back; Delete removes the selected bookmark.
             xdo('key', '--clearmodifiers', 'ctrl+shift+b')
             wait_for(panel_edge, 'ctrl+shift+b did not reopen the panel')
