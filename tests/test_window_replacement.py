@@ -713,6 +713,9 @@ class ReplacementTest(unittest.TestCase):
                         self.assertEqual(notice['body'], 'Worminal updated.')
                         self.assertEqual(notice['expiry'], 5000)
                         self.assertEqual(notice['sender_pid'], int(second_owner))
+                        # One update, one desktop notice: the retiring owner must not announce it as well.
+                        self.assertFalse(select.select([notifications.stdout], [], [], 2)[0],
+                                         'Update produced more than one desktop notification')
                         shutil.copy2(module, replacement)
                         replacement.replace(module)
                         wait(lambda: len(windows()) == 2 and all(
