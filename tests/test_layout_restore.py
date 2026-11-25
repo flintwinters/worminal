@@ -393,3 +393,69 @@ class LayoutRestoreTest(unittest.TestCase):
             wait(lambda: self.saved(state)['windows'][0]['geometry'][2:] == [810, 470],
                  'the replacement window does not save its layout: ')
             self.assertTrue(self.saved(state)['windows'][0]['tree'].get('split'))
+
+    def test_a_daemon_restart_right_after_a_window_update_keeps_the_split(self):
+        """A real update restarts the daemon as the new window opens, before that window has saved anything: the
+        window must still rebuild its layout when the daemon is back, not stay one pane."""
+        from Xlib import X, display
+        with (isolated_display() as shown, profile(shown) as env, service(env),
+              tempfile.TemporaryDirectory(prefix='layout-update-', dir=CHECKS) as directory,
+              ExitStack() as stack):
+            self.exit = stack
+            base = Path(directory)
+            executable = copy_runtime(base, browser=True)
+            script = base / 'blue-shell.sh'
+            script.write_text(f'#!/bin/sh\n{fill(BLUE, "blue")}\n')
+            script.chmod(0o755)
+            env = {**env, 'GDK_BACKEND': 'x11', 'GIO_USE_VFS': 'local', 'SHELL': str(script)}
+            env.pop('DBUS_SESSION_BUS_ADDRESS', None)
+            env.pop('WAYLAND_DISPLAY', None)
+            state = Path(env['XDG_STATE_HOME']) / 'worminal'
+            xdo = lambda *args: subprocess.run(['xdotool', *args], env=env, check=True)
+            log = stack.enter_context((base / 'owner.log').open('wb'))
+            owner = subprocess.Popen([str(executable), '-c', 'LayoutFixture', '-T', 'Layout update', '-e', '/bin/sh', '-c', fill(RED, 'red')],
+                                     env=env, stdout=log, stderr=log)
+            stack.callback(lambda: owner.poll() is None and owner.terminate())
+
+            def windows():
+                found = subprocess.run(['xdotool', 'search', '--onlyvisible', '--class', 'LayoutFixture'],
+                                       env=env, capture_output=True, text=True)
+                return found.stdout.split() if found.returncode == 0 else []
+
+            def pid(wid):
+                return subprocess.run(['xdotool', 'getwindowpid', wid], env=env, capture_output=True,
+                                      text=True).stdout.strip()
+
+            def wait(check, message, seconds=15):
+                deadline = time.monotonic() + seconds
+                while not check():
+                    self.assertLess(time.monotonic(), deadline, message + (base / 'owner.log').read_text(errors='replace'))
+                    time.sleep(.05)
+
+            def split():
+                return (self.saved(state) or {}).get('windows', [{}])[0].get('tree', {}).get('split')
+
+            wait(windows, 'no window: ')
+            wid = windows()[0]
+            donor = pid(wid)
+            xdo('windowfocus', '--sync', wid)
+            time.sleep(1)
+            xdo('key', '--clearmodifiers', 'ctrl+shift+t')
+            time.sleep(1)
+            xdo('key', '--clearmodifiers', 'alt+shift+Right')
+            wait(split, 'the split was not saved: ')
+            with socket.socket(socket.AF_UNIX) as observer:
+                observer.settimeout(3)
+                observer.connect(f"\0worminal-workspace-v2-{os.getuid()}-{env['WORMINAL_SHARED_SOCKET_SCOPE']}")
+                send(observer, 19, version=2)
+                daemon = service_pid(observer)
+            module = module_path(RUST_FRONTEND_MODULE, prefix=base)
+            pending = module.with_suffix('.pending')
+            shutil.copy2(module, pending)
+            pending.replace(module)
+            wait(lambda: windows() and pid(windows()[0]) != donor, 'the owner did not replace itself: ')
+            os.kill(daemon, signal.SIGKILL)
+            # Give the new window time to reconnect and to save (the settle time is half a second).
+            time.sleep(4)
+            self.assertTrue(split(), 'the window came back from the daemon restart as one pane and saved that')
+
