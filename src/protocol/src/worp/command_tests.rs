@@ -86,6 +86,7 @@ fn variants() -> Vec<CommandKind> {
             launch: Some(Box::new(Launch::restore(b"/srv".to_vec()))),
         },
         CommandKind::Stop,
+        CommandKind::RecoverTabs(1 << 35),
         CommandKind::Transfer {
             outbound: true,
             token: b"x".to_vec(),

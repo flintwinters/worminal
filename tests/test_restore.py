@@ -1,6 +1,7 @@
 """Durable tab recipes through real daemon and zsh restarts, on isolated workspaces."""
 from runtime import CHECKS, runtime_binary
 
+import json
 import os
 from pathlib import Path
 import shlex
@@ -235,6 +236,42 @@ class RestoreTest(unittest.TestCase):
         self.wait_saved(lambda data: data == number(1) + number(0))
         self.restart()
         self.wait_directories([])
+
+    def test_history_recovers_lost_tabs_alongside_a_rebuilt_workspace(self):
+        first = self.root / 'lost directory'
+        first.mkdir()
+        terminal = self.launch(('/bin/zsh', '-d'))
+        self.send(3, terminal, f'cd -- {shlex.quote(str(first))}\n'.encode())
+        self.wait_directories([first])
+        url = 'https://example.invalid/lost'
+        self.send(17, payload=string(url))
+        browser, _ = wait_kind(self.peer, 20, version=2)
+        self.wait_saved(lambda data: url.encode() in data and str(first).encode() in data)
+        self.send(5, terminal)
+        self.wait_saved(lambda data: data[4:8] == number(1))
+        self.send(5, browser)
+        self.wait_saved(lambda data: data == number(1) + number(0))
+        self.restart()
+        live = self.launch(('/bin/zsh', '-d'))
+        self.wait_directories([self.default])
+
+        executable = os.environ.get('WORMINAL_TEST_PREVIEW_DAEMON', 'worminald')
+        recover = [str(runtime_binary(executable)), 'recover']
+        listed = subprocess.check_output([*recover, 'list'], env=self.env, timeout=4)
+        checkpoints = json.loads(listed)['checkpoints']
+        self.assertEqual([point['tabs'] for point in checkpoints], [2])
+        archived, = self.state.parent.glob(f'{self.state.name}.history-*')
+        self.assertEqual(archived.stat().st_mode & 0o777, 0o600)
+        checkpoint = str(checkpoints[0]['id'])
+        subprocess.run([*recover, 'restore', checkpoint], env=self.env, timeout=4,
+                       check=True, capture_output=True)
+        rows = self.wait_directories([self.default, first, ''])
+        self.assertEqual(rows[0][0], live)
+        self.assertEqual(rows[2][2], url)
+        self.assertIn(f'{first}|1\n', self.wait_startup(f'{first}|1\n'))
+        self.wait_saved(lambda data: data[4:8] == number(3))
+        self.restart()
+        self.wait_directories([self.default, first, ''])
 
     def test_corrupt_recovery_is_preserved_without_partial_restore(self):
         self.process.terminate(); self.process.communicate(timeout=4)

@@ -207,6 +207,47 @@ impl Service {
         Ok(id)
     }
 
+    fn restored_tabs(&mut self, recipes: Vec<Recipe>) -> io::Result<Vec<Tab>> {
+        recipes
+            .into_iter()
+            .map(|recipe| {
+                let id = self.new_id()?;
+                if recipe.url.is_empty() {
+                    Tab::shell(
+                        id,
+                        &Launch::restore(process::restore_directory(&recipe.directory)),
+                        true,
+                        None,
+                        self.reaper.clone(),
+                    )
+                } else {
+                    Ok(Tab::browser(id, recipe.url))
+                }
+            })
+            .collect()
+    }
+
+    pub fn recover_tabs(&mut self, checkpoint: u64, now: i64) -> io::Result<()> {
+        let recipes = self.recovery.history().load(checkpoint)?;
+        let local_count = self.tabs.iter().filter(|tab| tab.remote.is_none()).count();
+        if local_count + recipes.len() > recovery::RESTORE_TABS as usize {
+            return Err(io::Error::other(
+                "Recovered tabs would exceed the workspace recovery limit.",
+            ));
+        }
+        let tabs = self.restored_tabs(recipes)?;
+        if tabs.iter().any(|tab| {
+            tab.terminal
+                .as_ref()
+                .is_some_and(|term| !term.pty.launch_succeeded())
+        }) {
+            return Err(io::Error::other("A recovered shell could not start."));
+        }
+        self.tabs.extend(tabs);
+        self.restored_launch = false;
+        self.publish(now)
+    }
+
     pub fn close(&mut self, index: usize) {
         self.closed = self.tabs[index].id;
         self.pending_replace.retain(|_, (id, _)| *id != self.closed);
@@ -675,14 +716,17 @@ impl Service {
     }
 }
 
-fn create(scope: &[u8], listener: UnixListener) -> io::Result<(Service, io::Result<Vec<Recipe>>)> {
-    listener.set_nonblocking(true)?;
+pub(crate) fn recovery_root() -> PathBuf {
     let home = std::env::var_os("HOME").unwrap_or_else(|| "/".into());
-    let root = std::env::var_os("XDG_STATE_HOME")
+    std::env::var_os("XDG_STATE_HOME")
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
-        .unwrap_or_else(|| PathBuf::from(home).join(".local/state"));
-    let recovery_path = recovery::path(&root, scope)?;
+        .unwrap_or_else(|| PathBuf::from(home).join(".local/state"))
+}
+
+fn create(scope: &[u8], listener: UnixListener) -> io::Result<(Service, io::Result<Vec<Recipe>>)> {
+    listener.set_nonblocking(true)?;
+    let recovery_path = recovery::path(&recovery_root(), scope)?;
     let masters_path = crate::masters::path(&recovery_path);
     let (recovery, recipes) = Recovery::open(recovery_path);
     let service = Service {
@@ -724,21 +768,7 @@ pub fn serve(scope: &[u8]) -> io::Result<()> {
     let (mut service, recipes) = create(scope, socket::listen(process::uid(), scope)?)?;
     match recipes {
         Ok(recipes) => {
-            for recipe in recipes {
-                let id = service.new_id()?;
-                let tab = if recipe.url.is_empty() {
-                    Tab::shell(
-                        id,
-                        &Launch::restore(process::restore_directory(&recipe.directory)),
-                        true,
-                        None,
-                        service.reaper.clone(),
-                    )?
-                } else {
-                    Tab::browser(id, recipe.url)
-                };
-                service.tabs.push(tab);
-            }
+            service.tabs = service.restored_tabs(recipes)?;
             service.restored_launch = !service.tabs.is_empty();
         }
         Err(error) => process::diagnostic(&format!("Workspace recovery read: {error}")),

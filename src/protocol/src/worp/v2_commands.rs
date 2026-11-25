@@ -225,6 +225,9 @@ pub fn decode(packet: Packet) -> io::Result<Option<Command>> {
             }
         }
         WIRE_SERVICE_INFO => CommandKind::ServiceInfo,
+        WIRE_RECOVER_TABS => CommandKind::RecoverTabs(u64::from_be_bytes(
+            packet.body.as_slice().try_into().map_err(|_| invalid())?,
+        )),
         WIRE_STOP => CommandKind::Stop,
         WIRE_HANDIN | WIRE_HANDOFF => CommandKind::Transfer {
             outbound: packet.kind == WIRE_HANDOFF,
@@ -423,6 +426,10 @@ pub fn encode(command: &Command) -> io::Result<Packet> {
             WIRE_CAPABILITIES
         }
         CommandKind::ServiceInfo => WIRE_SERVICE_INFO,
+        CommandKind::RecoverTabs(id) => {
+            body.put_bytes(&id.to_be_bytes())?;
+            WIRE_RECOVER_TABS
+        }
         CommandKind::Stop => WIRE_STOP,
         CommandKind::Transfer { outbound, token } => {
             body.put_string(token)?;

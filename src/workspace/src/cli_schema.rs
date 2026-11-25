@@ -93,6 +93,7 @@ commands! {
         InstallRemote ["install-on-remote"] "SSH_ENDPOINT" => "Bootstrap a new headless node over SSH.";
         UpgradeRemote ["upgrade-remote"] "SSH_ENDPOINT" => "Sync an older node with a newer peer.";
         ListMasters ["--list-masters"] "" => "List current and previous master connections as JSON.";
+        Recover ["recover"] "list | restore ID" => "List saved tab checkpoints or reopen one alongside live tabs.";
         Serve ["--serve"] "" => "Run the persistent workspace service.";
         Bridge ["--bridge"] "" => "Bridge stdin/stdout to a workspace, starting it if absent.";
         BridgeExisting ["--bridge-existing"] "" => "Bridge to an existing workspace without starting it.";

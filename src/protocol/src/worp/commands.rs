@@ -235,6 +235,7 @@ pub enum CommandKind {
     Subscribe,
     Capabilities(u32),
     ServiceInfo,
+    RecoverTabs(u64),
     Stop,
     Transfer {
         outbound: bool,

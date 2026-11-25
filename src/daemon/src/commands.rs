@@ -184,6 +184,19 @@ impl Service {
                 self.running = false;
                 return Ok(());
             }
+            CommandKind::RecoverTabs(checkpoint) => {
+                if let Err(error) = self.recover_tabs(checkpoint, now) {
+                    return self.error(client, error.to_string().as_bytes());
+                }
+                self.emit(
+                    client,
+                    Event {
+                        tab: 0,
+                        kind: EventKind::CommandDone,
+                    },
+                );
+                return Ok(());
+            }
             CommandKind::Transfer { outbound, token } => {
                 return self.handoff_command(client, outbound, &token);
             }

@@ -135,6 +135,8 @@ pub const WIRE_FEATURE_INPUT: u32 = 1 << 9;
 /// `COMMAND_DONE` or `ERROR`. Catalog records then carry their master host, and views that negotiate the
 /// feature receive it; every other command and event names master tabs by their local ids.
 pub const WIRE_MASTER: u32 = 43;
+/// Append fresh tabs from a recovery checkpoint identified by a big-endian u64.
+pub const WIRE_RECOVER_TABS: u32 = 44;
 pub const WIRE_FEATURE_HOSTS: u32 = 1 << 10;
 
 // Extended unary agent operations; older operations keep their original payloads.

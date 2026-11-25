@@ -6,10 +6,13 @@ use std::{
 };
 use worminal_protocol::{Buffer, Payload, WIRE_VERSION};
 
+mod history;
+pub use history::{Checkpoint, History};
+
 // Recovery recipe format. Saved recipes outlive the binaries that wrote them.
 const RESTORE_VERSION: u32 = 1;
 const RESTORE_LIMIT: u32 = 8 * 1024 * 1024;
-const RESTORE_TABS: u32 = 4096;
+pub const RESTORE_TABS: u32 = 4096;
 const RESTORE_URL_LIMIT: u32 = 65536;
 const RESTORE_DIRECTORY_LIMIT: usize = libc::PATH_MAX as usize;
 /// One-shot marker telling a recovered shell that it replaces a saved terminal.
@@ -125,6 +128,10 @@ pub struct Recovery {
 }
 
 impl Recovery {
+    pub fn history(&self) -> History {
+        History::new(&self.path)
+    }
+
     /// The object always survives a read failure, with writes disabled. A caller cannot accidentally
     /// replace damaged or unrecognized recipes with the empty workspace used after recovery fails.
     pub fn open(path: PathBuf) -> (Self, io::Result<Vec<Recipe>>) {
@@ -178,11 +185,22 @@ impl Recovery {
             return Ok(false);
         }
         let bytes = encode(recipes)?;
-        if matches!(&self.cache, Cache::Valid(saved) if *saved == bytes) {
-            return Ok(false);
+        if let Cache::Valid(saved) = &self.cache {
+            if *saved == bytes {
+                return Ok(false);
+            }
+            if saved[4..8] > bytes[4..8] {
+                self.history().archive(saved)?;
+            }
         }
         crate::statefile::atomic_write(&self.path, &bytes)?;
         self.cache = Cache::Valid(bytes);
         Ok(true)
+    }
+}
+
+impl History {
+    pub fn for_scope(state_home: &Path, scope: &[u8]) -> io::Result<Self> {
+        path(state_home, scope).map(|path| Self::new(&path))
     }
 }

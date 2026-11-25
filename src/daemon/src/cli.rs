@@ -182,9 +182,55 @@ as `api --session`; alternative frontends need only worminal_protocol or `wormin
 Under the INPUT feature send KEY/MOUSE/PASTE/WHEEL and the daemon encodes them with live modes.
 ";
 
+const RECOVER_HELP: &str = "\
+worminald recover list
+  List recovery checkpoints for this workspace as JSON, newest first.
+  IDs are based on the Unix time when the checkpoint was archived.
+worminald recover restore ID
+  Append fresh terminal and browser tabs from a checkpoint to the running workspace.
+  Open Worminal first. Existing tabs and processes stay open. A restore opens every
+  recipe in the checkpoint, so repeating it can create duplicate tabs.
+";
+
+fn recover(scope: &[u8], arguments: &[OsString]) -> io::Result<i32> {
+    use worminal_workspace::recovery::History;
+    match arguments {
+        [list] if list == "list" => {
+            let history = History::for_scope(&crate::service::recovery_root(), scope)?;
+            let checkpoints: Vec<_> = history
+                .list()?
+                .into_iter()
+                .map(|point| serde_json::json!({"id": point.id, "tabs": point.tabs}))
+                .collect();
+            println!("{}", serde_json::json!({"checkpoints": checkpoints}));
+            Ok(0)
+        }
+        [restore, id] if restore == "restore" => {
+            let id = id.to_str().and_then(|id| id.parse().ok()).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Use an ID from worminald recover list.",
+                )
+            })?;
+            let status = request(scope, CommandKind::RecoverTabs(id))?;
+            if status == 0 {
+                println!(
+                    "{}",
+                    cli_output::text(format!("Opened tabs from recovery checkpoint {id}."))
+                );
+            }
+            Ok(status)
+        }
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Run worminald recover --help.",
+        )),
+    }
+}
+
 fn request(scope: &[u8], kind: CommandKind) -> io::Result<i32> {
-    let socket =
-        connect(scope).map_err(|_| io::Error::other("No preview workspace service is running."))?;
+    let socket = connect(scope)
+        .map_err(|_| io::Error::other("No workspace service is running in this scope."))?;
     let handoff = matches!(kind, CommandKind::Transfer { .. });
     let timeout = if handoff {
         u64::from(worminal_workspace::handoff::HANDOFF_TIMEOUT_SECONDS)
@@ -201,7 +247,7 @@ fn request(scope: &[u8], kind: CommandKind) -> io::Result<i32> {
     }
     let error = match event.kind {
         EventKind::Error(bytes) => bytes,
-        _ => b"Preview service rejected the command.".to_vec(),
+        _ => b"Workspace service rejected the command.".to_vec(),
     };
     eprintln!("{}", cli_output::error(String::from_utf8_lossy(&error)));
     Ok(1)
@@ -220,6 +266,7 @@ fn detail(command: Daemon) -> Option<String> {
         Daemon::Terminal => Some(crate::terminal_view::HELP.to_owned()),
         Daemon::Config => Some(crate::config_cli::reference()),
         Daemon::ListMasters => Some(crate::master_history::HELP.to_owned()),
+        Daemon::Recover => Some(RECOVER_HELP.to_owned()),
         Daemon::InstallRemote => Some(crate::remote_install::HELP.to_owned()),
         Daemon::UpgradeRemote => Some(crate::remote_install::UPGRADE_HELP.to_owned()),
         _ => None,
@@ -304,6 +351,7 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
         Some(Daemon::Attach) => return attach(scope, &arguments[2..]),
         Some(Daemon::Config) => return crate::config_cli::run(&arguments[2..]),
         Some(Daemon::ListMasters) => return crate::master_history::run(&arguments[2..]),
+        Some(Daemon::Recover) => return recover(scope, &arguments[2..]),
         _ => {}
     }
     if arguments.len() == 2 && command == Some(Daemon::Version) {

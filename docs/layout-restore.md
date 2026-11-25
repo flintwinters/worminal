@@ -21,6 +21,20 @@ works after a window is closed by accident, a frontend crash, a daemon restart a
   joins the first pane and keeps the selection.
 - **Master tabs** are not part of the saved file; their panes collapse. The daemon restores the tabs themselves.
 
+## Recovering an older tab list
+
+Before replacing the recovery file with fewer tabs, the daemon archives the previous tab list. It keeps up to
+eight checkpoints, retaining the largest list from each hour in which tabs were removed. Ordinary startup
+continues to use the latest tab list, so closed tabs stay closed until you explicitly recover them.
+
+1. Open Worminal, then run `worminald recover list` to see the available checkpoint IDs and tab counts.
+2. Run `worminald recover restore ID` with the ID you want. The daemon appends fresh shells in the saved
+   directories and browser tabs at the saved URLs. Existing tabs stay open. Recovering the same list again
+   creates another set of tabs.
+
+Checkpoints are private and scoped to the daemon that owns the tabs. A master keeps its own checkpoints.
+They contain tab recipes. Window layouts, running programs, and scrollback are outside this recovery history.
+
 ## How it is stored
 
 `$XDG_STATE_HOME/worminal/layout-v<wire>-<scope>.json`, one file per workspace scope, beside the recovery file. It is
