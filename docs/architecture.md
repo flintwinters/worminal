@@ -164,6 +164,8 @@ script. Subframes and other navigated documents have no capability. Native error
 scripts/templates remain under `src/gtk`. Renderer recovery retains the last valid URI because WebKit can clear it
 after termination. Release Rust borrows before entering reentrant GTK/WebKit operations. Local HTML tools open through the native
 browser CLI; their changes take effect only on explicit reload/reopen, and native builds embed none of them.
+Invalid TLS certificates are blocked until the user chooses Trust (Alt+T); that exception is permanent, saved per
+host in the profile's `trusted-certificates` and replayed into every new context. Proxied views stay ephemeral.
 
 Run `worminal --ssh-web-proxy USER@HOST` in a local Worminal terminal to replace it with an orange-titled
 browser tab. Press Ctrl+K to enter a URL, such as `http://localhost:8080` for a service on the SSH host.

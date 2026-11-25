@@ -121,7 +121,7 @@ fn connect_certificate_exception(browser: &Rc<Browser>) {
             if browser.view.uri().as_deref() != Some(url.as_str()) { return; }
             let Ok(uri) = glib::Uri::parse(&url, glib::UriFlags::NONE) else { return; };
             if let (Some(host), Some(context)) = (uri.host(), browser.view.context()) {
-                context.allow_tls_certificate_for_host(&certificate, &host);
+                crate::trust::allow(&browser.profile, &context, &certificate, &host);
                 browser.view.load_uri(&url);
                 browser.view.grab_focus();
             }

@@ -197,6 +197,9 @@ class RustBrowserTest(unittest.TestCase):
                 subprocess.run(['xdotool', 'key', '--clearmodifiers', 'alt+t'], env=env, check=True)
                 title(env, 'Fixture', app)
                 self.assertTrue(delivered.is_set())
+            # The exception is permanent: a later session in the same profile needs no confirmation.
+            with application(env, '--browser', url) as app:
+                title(env, 'Fixture', app)
 
     def test_f12_toggles_the_web_inspector(self):
         from Xlib import X, XK, display

@@ -4,6 +4,7 @@ mod chrome;
 mod local;
 mod policy;
 mod profile_transfer;
+mod trust;
 
 use gtk::{gio, prelude::*};
 use std::{
@@ -32,6 +33,7 @@ pub(crate) struct Browser {
     url: RefCell<String>,
     callback: boundary::Callback,
     proxied: bool,
+    profile: WebsiteDataManager,
 }
 impl Browser {
     fn new(
@@ -47,6 +49,7 @@ impl Browser {
             }
             context.set_spell_checking_enabled(false);
             policy::downloads(&context);
+            trust::load(profile, &context);
             context
         };
         let context = if proxied {
@@ -86,8 +89,7 @@ impl Browser {
         find.set_placeholder_text(Some("Find in page"));
         let notice = gtk::Label::new(None);
         notice.set_line_wrap(true);
-        let trust_certificate =
-            gtk::Button::with_mnemonic("_Trust this certificate for this session");
+        let trust_certificate = gtk::Button::with_mnemonic("_Trust this certificate");
         for widget in [
             location.clone().upcast::<gtk::Widget>(),
             find.clone().upcast(),
@@ -110,6 +112,7 @@ impl Browser {
             url: RefCell::new(url.to_string()),
             callback,
             proxied,
+            profile: profile.clone(),
         });
         chrome::connect(&browser);
         policy::connect(&browser);
