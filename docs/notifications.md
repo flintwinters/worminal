@@ -34,7 +34,7 @@ service restarts clear old targets so reused desktop ids cannot activate unrelat
 Pending notifications are transient and are not saved during recovery or owner transfer.
 Older views that do not negotiate notification support receive no notification packets.
 
-`python3 manage.py check-notifications` exercises delivery and click activation on a private X11
+`./manage.py check-notifications` exercises delivery and click activation on a private X11
 desktop with a mock notification service (system Python needs PyGObject). The same test runs in
 `check-rust-app`; `check-rust-frontend --unit-only` also checks private D-Bus action/token routing,
 close events, service restarts, sender filtering and resource bounds.

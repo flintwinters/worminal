@@ -203,7 +203,7 @@ def measure(host, daemon, compress):
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        raise SystemExit("Usage: python3 manage.py master-perf HOST")
+        raise SystemExit("Usage: ./manage.py master-perf HOST")
     daemon = os.environ.get("WORMINAL_MASTER_DAEMON", "worminald")
     ordinary_echo(sys.argv[1])
     ordinary_echo(sys.argv[1], scroll=True)

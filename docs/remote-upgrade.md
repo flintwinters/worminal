@@ -1,7 +1,7 @@
 # Upgrade an existing device
 
 ```sh
-python3 manage.py upgrade felix@disciple
+./manage.py upgrade felix@disciple
 ```
 
 This internal maintenance command copies **this device's installed `/usr/local` Worminal release** to the existing
@@ -58,7 +58,7 @@ concurrently.
 Run the isolated checks with:
 
 ```sh
-python3 manage.py check-remote-upgrade
+./manage.py check-remote-upgrade
 ```
 
 They use mock SSH/sudo and project-owned prefixes, including a real private daemon with a live shell. They never

@@ -73,7 +73,7 @@ is protected. Candidates never navigate restored browser URLs until commit.
 Run the targeted private-display checks after building the native application:
 
 ```sh
-python3 manage.py check-window-updates
+./manage.py check-window-updates
 ```
 
 Use `--match PATTERN` to select a regression. These checks modify copied binaries on private displays under

@@ -89,7 +89,7 @@ expected glyph images outside measured keystrokes: the earlier any-pixel-change
 test could mistake a late resize for an echo, particularly with large catalogs.
 X11 discovery also tolerates windows destroyed after its root-tree snapshot.
 
-Command: python3 manage.py latency-visible --compare build/checks/launch-focus-baseline
+Command: ./manage.py latency-visible --compare build/checks/launch-focus-baseline
          --saved-tabs 100 --trials 20 --keys 10
 Candidate includes lazy strip layouts and lazy cells; baseline is f5761db.
 Fresh visible readiness median: 93.06 vs 103.91 ms, paired median -8.79 ms.

@@ -1,11 +1,11 @@
 # Testing
 
 Build, test, install and runtime preparation are indexed in [development.md](development.md) and
-`python3 manage.py --help`. Tests exercise the current application; historical records live under [history](history/).
+`./manage.py --help`. Tests exercise the current application; historical records live under [history](history/).
 
 ## Performance ceilings
 
-`python3 manage.py check-perf` runs the existing warmed release daemon CPU and deterministic network workloads,
+`./manage.py check-perf` runs the existing warmed release daemon CPU and deterministic network workloads,
 then fails if any median exceeds its fixed maximum in `tools/perf_limits.json`. It also runs in the native
 phase of full `check` and `check-headless`, and before every `check-python` run, including filtered selections.
 Each entrypoint runs the gate once before Python workers start. Reports and raw samples remain in
@@ -28,7 +28,7 @@ hash or unit changes, missing/invalid samples and new metrics without a budget d
 
 ## Atomic GUI updates
 
-`python3 manage.py check-window-updates` owns the private-display handoff regressions; `--match PATTERN` selects
+`./manage.py check-window-updates` owns the private-display handoff regressions; `--match PATTERN` selects
 one case. It uses the same ownership-correct verification runtime and worker retirement as master startup checks.
 A gated native candidate deterministically exercises edits after the provisional snapshot; a private browser ABI
 shim exercises close/geometry requests while the cookie/profile commit is in progress. Logs remain in the check
@@ -36,13 +36,13 @@ runtime and all private owners are awaited before that runtime is released.
 
 ## Master tab commands
 
-`python3 manage.py check-master-tabs` checks native master close/detach commands on private displays. It covers
+`./manage.py check-master-tabs` checks native master close/detach commands on private displays. It covers
 multiple windows and hosts, terminal termination, browser records, preserved detached shells and invalid requests.
 Closes use fixture daemons and never target real SSH hosts or desktop windows.
 
 ## Master connection history
 
-`python3 manage.py check-master-history` runs kernel lease/storage checks and private native bootstrap/bridge
+`./manage.py check-master-history` runs kernel lease/storage checks and private native bootstrap/bridge
 regressions for `worminald --list-masters`. It covers catalog confirmation, multiple simultaneous views, crash
 cleanup, history persistence, scope isolation and passive empty/error/help replies. It uses project-local
 verification storage and mock SSH, without a desktop or live remote device.
@@ -52,7 +52,7 @@ verification storage and mock SSH, without a desktop or live remote device.
 The full check command builds shared artifacts and runs native checks first:
 
 ```sh
-python3 manage.py check
+./manage.py check
 ```
 
 Only reviewed independent Python modules overlap. Each module runs in its own process; cases within a module
@@ -64,12 +64,12 @@ make it parallel. Resource ownership must be reviewed before adding it to `tools
 For iteration against existing build artifacts:
 
 ```sh
-python3 manage.py check-python --jobs 2 --module test_upgrade --module test_window_replacement
-python3 manage.py check-python --jobs 2 --module test_theme --module test_http_fixture
-python3 manage.py check-python --jobs 2 --match retained
+./manage.py check-python --jobs 2 --module test_upgrade --module test_window_replacement
+./manage.py check-python --jobs 2 --module test_theme --module test_http_fixture
+./manage.py check-python --jobs 2 --match retained
 ```
 
-Use `python3 manage.py check-rust-app --match external_file_drop` for the real cross-application file-drop
+Use `./manage.py check-rust-app --match external_file_drop` for the real cross-application file-drop
 regression on a private X11 display. `--match` accepts a unittest name pattern for other application checks too.
 
 `--module` can be repeated and takes a top-level module name without `.py`. `--match` retains unittest's `-k`

@@ -1,5 +1,17 @@
-#!/usr/bin/env python3
-"""Build, check, measure, and prove Worminal: run `python3 manage.py --help`."""
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#   "typer==0.15.2",
+#   # Typer 0.15 uses Click's pre-8.2 metavar signature for positional-argument help.
+#   "click==8.1.8",
+#   "rich>=13,<15",
+#   "pillow",
+#   "python-xlib",
+#   "websocket-client",
+# ]
+# ///
+"""Build, check, measure, and prove Worminal: run `./manage.py --help`; uv supplies the Python and dependencies."""
 
 from contextlib import chdir
 from enum import Enum
@@ -12,10 +24,7 @@ import sys
 sys.dont_write_bytecode = True
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
-try:
-    import typer
-except ModuleNotFoundError as error:
-    raise SystemExit("Install Typer to use manage.py: python3 -m pip install typer") from error
+import typer
 
 from tools import timing
 from tools.paths import CHECKS, runtime_binary
@@ -38,6 +47,10 @@ def root():
     (CHECKS).mkdir(parents=True, exist_ok=True)
     for name in DESKTOP_VARIABLES:
         os.environ.pop(name, None)
+    # A snap-packaged uv leaks its SNAP* confinement markers into every child; WebKit and GIO then
+    # behave as if sandboxed and the browser checks fail. The checks run unconfined.
+    for name in [name for name in os.environ if name.startswith("SNAP")]:
+        os.environ.pop(name)
 
 
 def run(args, *, env=None):

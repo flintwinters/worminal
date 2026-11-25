@@ -658,7 +658,7 @@ frames into empty queues without another copy. Failed queue publication still
 preserves engine damage and the last delivered baseline.
 
 Reproduce release comparisons through:
-  python3 manage.py daemon-perf --label paired --trials 9 --compare 1261c03
+  ./manage.py daemon-perf --label paired --trials 9 --compare 1261c03
 The immutable baseline comes from Git and runs the identical current workload.
 Builds warm before alternating owner order. Thread CPU time excludes scheduling
 waits; these measurements exclude GUI, SSH and physical display presentation.
@@ -693,7 +693,7 @@ both a deep stream of old screens and unnecessary full snapshots on recovery.
 An admitted frame can exceed the watermark; it is not a strict queue-size cap.
 
 Reproduce the retained deterministic service model with:
-  python3 manage.py network-perf --label coalescing --trials 3 --compare 46e682e
+  ./manage.py network-perf --label coalescing --trials 3 --compare 46e682e
 Both revisions execute the same workload through actual service capability and
 frame handlers. The model produces 250 dense 120x40 updates at virtual 16 ms
 intervals and drains 4096 raw protocol bytes per interval (2.048 Mbps). Frame age
@@ -765,7 +765,7 @@ while preserving malformed-packet and bounded-timeout failures. It does not
 signal unrelated processes or depend on the copied executable's path. GUI,
 display/service and runtime contexts now unwind in that order in affected tests.
 
-Reproduce through python3 manage.py check-test-runtime --prove. The actual v1
+Reproduce through ./manage.py check-test-runtime --prove. The actual v1
 and v2 owners must exit before directory deletion on both normal and exceptional
 paths. A stopped owner verifies timeout reporting and concurrent-shutdown
 handling. The counterfactual deliberately omits owner retirement and requires

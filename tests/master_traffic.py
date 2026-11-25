@@ -68,7 +68,7 @@ def measure(host, daemon, label, features):
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        raise SystemExit("Usage: python3 manage.py master-traffic HOST")
+        raise SystemExit("Usage: ./manage.py master-traffic HOST")
     daemon = os.environ.get("WORMINAL_MASTER_DAEMON", "worminald")
     for label, features in FEATURES.items():
         measure(sys.argv[1], daemon, label, features)

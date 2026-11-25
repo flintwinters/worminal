@@ -32,7 +32,7 @@ through the tab being parsed.
 
 ## Verified proofs
 
-The former `python3 manage.py proof` ran local checks and private Xvfb proofs. The
+The former `./manage.py proof` ran local checks and private Xvfb proofs. The
 historical tree passed on 2026-09-24, including local KWin X11 and Cinnamon X11
 started remotely over SSH against a private local Xvfb display:
 

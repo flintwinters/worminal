@@ -25,7 +25,7 @@ def setup():
     subprocess.run(["glib-compile-schemas", "--strict", str(schemas)], check=True)
     environment = os.environ.copy()
     subprocess.run([*command(environment), "--version"], env=environment, check=True)
-    print("Project-local Muffin ready. Run: python3 manage.py check-window-activation")
+    print("Project-local Muffin ready. Run: ./manage.py check-window-activation")
 
 
 def available():

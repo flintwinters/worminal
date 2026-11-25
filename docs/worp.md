@@ -74,7 +74,7 @@ Neither Worp nor its adapters automatically retry uncertain mutation delivery (o
 for the PTY, not processed by an application. These semantics stay the same across delivery methods.
 
 See [the agent interface](automation.md) for commands and the v2 stream binding.
-Run `python3 manage.py check-agent-api` for retained Worp, daemon and private-workspace checks, including identical
+Run `./manage.py check-agent-api` for retained Worp, daemon and private-workspace checks, including identical
 in-process/Unix/TCP operation results and SSH-stdio forwarding through an isolated transport fixture.
 
 Unary extensions retain existing operation payloads: 15 atomically pastes text followed by named keys;

@@ -185,7 +185,7 @@ def measure(host, remote_command, remote):
 
 def main():
     if len(sys.argv) != 2:
-        raise SystemExit('Usage: python3 manage.py codex-perf HOST; WORMINAL_MASTER_CWD selects remote project')
+        raise SystemExit('Usage: ./manage.py codex-perf HOST; WORMINAL_MASTER_CWD selects remote project')
     CHECKS.mkdir(exist_ok=True)
     directory = os.environ.get('WORMINAL_MASTER_CWD')
     command = (f'cd {shlex.quote(directory)} && ' if directory else '') + 'exec codex'

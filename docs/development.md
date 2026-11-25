@@ -7,6 +7,10 @@ Rust bindings require libclang plus the matching Clang compiler and builtin head
 `check-rust-lint` (part of `check`) enforces rustfmt, a Rust file-length cap and warning-free Clippy (rustup
 component `clippy`). Lint policy lives once in the workspace `Cargo.toml`; long-function exceptions use `#[expect]`.
 
+`manage.py` is a uv script: run `./manage.py <command>` and uv provisions Python and the Python dependencies,
+declared once in its inline metadata, so no system Python packages are needed. Subprocesses inherit that
+interpreter. Only the GTK helper scripts that tests start with `/usr/bin/python3` need the system `python3-gi`.
+
 ## Runtime configuration
 
 Configuration is runtime, never compiled in: `src/config` is the only resolver (`worminald config --json` for
@@ -59,7 +63,7 @@ cache. It shares the checkout update pipeline and needs passwordless sudo for th
 ## Installation and live processes
 
 The active installation is `/usr/local/bin/worminal`, with modules in `/usr/local/lib/worminal`. Install a tested
-regular-user build with `sudo -n python3 manage.py install --prefix /usr/local --skip-build`; do not install fixes
+regular-user build with `sudo -n ./manage.py install --prefix /usr/local --skip-build`; do not install fixes
 into ~/.local. `check-install` validates a staged installation; `check-install --installed` checks installed files,
 modes, SSH/browser operation and actual module paths on private displays. Running owners retain mapped code and
 hand off by themselves. `manage.py running` classifies live processes against
@@ -88,7 +92,7 @@ canonical URLs and accurate schema take priority over keyword repetition. No fab
 The project site cannot control `robots.txt` at the account domain root. Submit the generated `sitemap.xml` in a
 verified Search Console URL-prefix property to monitor indexing; account verification remains a separate owner action.
 
-Use `python3 manage.py --help` as the command index. The main routes are:
+Use `./manage.py --help` as the command index. The main routes are:
 
 | Command | Purpose |
 | --- | --- |

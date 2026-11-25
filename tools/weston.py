@@ -28,7 +28,7 @@ def setup():
     active = LOCAL / "active-library.pending"
     active.write_text(library[1] + "\n")
     active.replace(LOCAL / "active-library")
-    print("Project-local Weston ready. Run: python3 manage.py check-rust-app")
+    print("Project-local Weston ready. Run: ./manage.py check-rust-app")
 
 
 def command(env):

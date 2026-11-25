@@ -55,4 +55,4 @@ preserved, never reset. Unlike `worminal.yaml` it is never layered or synced: th
 point clients at the same authority to share membership. The former binary `$XDG_STATE_HOME/worminal/devices-v1`
 is no longer read; re-enroll its devices.
 
-Run `python3 manage.py check-agent-api` for registry, Worp and private-workspace CLI regression checks.
+Run `./manage.py check-agent-api` for registry, Worp and private-workspace CLI regression checks.
